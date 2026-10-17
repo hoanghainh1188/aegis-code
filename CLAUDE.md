@@ -11,8 +11,9 @@ Mọi việc đều đi qua một GitHub issue.
 - **Label:** mỗi issue có ít nhất một `area/*` theo crate hoặc mảng việc:
   - Crate: `area/provider`, `area/orchestrator`, `area/router`, `area/aci`, `area/gate`, `area/ledger`, `area/pr`, `area/sonar`
   - Mảng việc: `area/infra` (Docker, CI, policies, prompts), `area/eval` (bộ thử, KPI)
+  - Platform (Phase 2): `area/server`, `area/connectors`, `area/web`, `area/security`, `area/deploy`
   - Thêm `research` cho việc cần đo/kiểm tra trước khi quyết, `tech-debt` cho việc còn nợ từ review.
-- **Milestone:** `Phase 0 – Chuẩn bị` hoặc `Phase 1 – PoC` theo lộ trình ở Proposal §9. Việc chưa xếp lịch thì để trống.
+- **Milestone:** `Phase 0 – Chuẩn bị`, `Phase 1 – MVP / PoC`, `Phase 2 – Platform` hoặc `Phase 3 – Mở rộng` theo lộ trình ở Proposal §9 và [ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md). Việc chưa xếp lịch thì để trống.
 - **Phụ thuộc:** ghi ở cuối thân issue dạng `**Phụ thuộc:** #7, #9`. Không bắt đầu issue khi phụ thuộc chưa đóng.
 - Việc mới phát sinh trong lúc làm → tạo issue mới, không gộp vào PR đang mở.
 
