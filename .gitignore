@@ -1,0 +1,8 @@
+.workspace/
+runs/
+*.sqlite
+lcov.info
+.env
+.env.*
+.DS_Store
+.claude/settings.local.json
