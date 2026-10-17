@@ -1,0 +1,16 @@
+# PoC on the internal repo: Claude API directly, no region constraint (design §1).
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Model per tier (design §5.1). Read by aegis-router.
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"

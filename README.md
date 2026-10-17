@@ -12,6 +12,8 @@ Platform viết bằng Rust (Cargo workspace), tự làm vòng lặp agent — x
 
 ```bash
 cargo build
+cargo test --workspace
+cargo test -p aegis-provider --features bedrock   # kèm backend Bedrock
 cargo run -p aegis-cli
 ```
 
