@@ -1,0 +1,8 @@
+[package]
+name = "aegis-orchestrator"
+description = "Agent loop for one issue: state, steps, history collapsing (design §2, §3.3)."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]

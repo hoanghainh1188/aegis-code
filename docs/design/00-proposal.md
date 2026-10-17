@@ -2,7 +2,7 @@
 
 Oct 17, 2026 · @Nguyen Han Hoang Hai
 
-Đề xuất: bắt đầu bằng một PoC 6–8 tuần trên một repo bảo trì thật. Dùng agent harness có sẵn, chỉ tự làm phần còn thiếu. Chỉ mở rộng khi PoC đạt KPI ở mục 8.
+Đề xuất: bắt đầu bằng một PoC 6–8 tuần trên một repo bảo trì thật. Platform viết bằng Rust, tự làm vòng lặp agent (xem [ADR 0001](../adr/0001-platform-in-rust.md)). Chỉ mở rộng khi PoC đạt KPI ở mục 8.
 
 Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 
@@ -18,16 +18,19 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 
 **Vì sao chưa nên build cả 4 tầng:**
 
-- Caching, nén context, sandbox, công cụ đọc/sửa file đã có sẵn trong Claude Code / Agent SDK. Tự làm lại tốn công mà không hơn.
+- Các kỹ thuật nén context nâng cao (SWEzze, SaraCoder…) còn ở mức nghiên cứu, chưa đáng làm trước khi có số liệu thật.
+- Platform viết bằng Rust, tự làm vòng lặp agent (ADR 0001), nên phải làm theo thứ tự và qua cổng PoC trước khi làm phần Pilot.
 - Rủi ro lớn nhất không nằm ở kỹ thuật. Nó nằm ở 2 câu hỏi: agent có sửa được bug thật của khách không, và khách có cho code ra API không.
 
 **Nên tự làm phần nào:**
 
-| Dùng sẵn | Tự làm |
+| Dùng sẵn | Tự làm (Rust) |
 | --- | --- |
-| Vòng lặp agent, đọc/sửa file, chạy lệnh | Luật leo thang model + trần $4 / 20 bước |
-| Prompt caching, thu gọn context | Cổng kiểm chứng: test Docker + Sonar + người duyệt |
-| Sandbox | Kết nối luồng ticket/PR của khách |
+| Claude API / Bedrock (AWS SDK for Rust) | Vòng lặp agent, đặt điểm ngắt cache, thu gọn lịch sử |
+| Codebase-Memory MCP, rust-analyzer, tree-sitter | Bộ công cụ ACI (MCP server) |
+| Docker, image CI, Sonar | Luật leo thang model + trần $4 / 20 bước |
+|  | Cổng kiểm chứng: test Docker + Sonar + người duyệt |
+|  | Kết nối luồng ticket/PR của khách |
 |  | Đo KPI và chi phí |
 
 **Khi nào dừng:** sau PoC, nếu không đạt ngưỡng ở mục 8 thì dừng. Không mở rộng chỉ vì đã lỡ đầu tư.
@@ -48,6 +51,7 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 | Dữ liệu | Khách chỉ cho xử lý ở Nhật | PoC trên repo nội bộ nên không vướng; khi dùng code khách → profile `jp.` (mục 7) |
 | Sonar | Chuẩn bị cả Server và Cloud | Cả hai hỗ trợ Rust qua Clippy |
 | Người đọc | Chỉ nội bộ | Giữ tiếng Việt, chưa cần bản tiếng Nhật |
+| Ngôn ngữ platform | Rust, tự làm vòng lặp agent | Không dùng Claude Agent SDK; xem [ADR 0001](../adr/0001-platform-in-rust.md) |
 
 ## 1. Mục tiêu & phạm vi
 
@@ -280,7 +284,7 @@ Ba phase, mỗi phase có cổng "đi tiếp / dừng". Không qua cổng thì d
 | Phase | Thời gian | Làm gì | Cổng để đi tiếp |
 | --- | --- | --- | --- |
 | 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động |
-| 1. PoC | 4–6 tuần | Dùng Claude Code / Agent SDK có sẵn + Tầng 2, 3, 4 tối thiểu; chạy bộ issue | Đạt các ngưỡng ở mục 8 |
+| 1. PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; chạy bộ issue | Đạt các ngưỡng ở mục 8 |
 | 2. Pilot | 2–3 tháng | Nối vào luồng ticket thật, thêm SBFL, chỉ mục repo, dashboard chi phí | Team dùng hằng ngày; chi phí/tháng trong ngân sách |
 | 3. Mở rộng | Sau pilot | Thêm ngôn ngữ/repo, cân nhắc kỹ thuật nén context nâng cao | Có ROI rõ ràng từ pilot |
 

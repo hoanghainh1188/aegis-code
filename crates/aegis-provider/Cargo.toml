@@ -1,0 +1,8 @@
+[package]
+name = "aegis-provider"
+description = "ModelProvider trait with Claude API and Bedrock backends, cache_control placement, jp. guard (design §4, §5.1, §7)."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]

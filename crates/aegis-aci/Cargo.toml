@@ -1,0 +1,8 @@
+[package]
+name = "aegis-aci"
+description = "ACI tools served over MCP: search_symbol, open, edit, run_tests (design §3.1)."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]

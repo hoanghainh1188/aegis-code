@@ -11,7 +11,8 @@ Tài liệu này mô tả cách làm PoC, theo đúng các quyết định trong
 | Repo | Repo nội bộ, Rust, > 100k dòng |
 | Test | `cargo test` chạy trên CI hiện có |
 | Thời gian build | Chưa đo — đo ở Phase 0 |
-| Agent harness | Claude Agent SDK (dùng sẵn vòng lặp, công cụ đọc/sửa file, chạy lệnh) |
+| Ngôn ngữ platform | Rust, Cargo workspace (`crates/`) — xem [ADR 0001](../adr/0001-platform-in-rust.md) |
+| Agent harness | Tự làm bằng Rust; gọi model qua trait `ModelProvider` (Claude API qua HTTP, Bedrock qua AWS SDK for Rust) |
 | Chỉ mục repo | Codebase-Memory MCP |
 | Sandbox | Docker, dùng lại image CI, không có mạng ra ngoài |
 | Sonar | Hỗ trợ cả SonarQube Server và SonarQube Cloud |
@@ -30,9 +31,10 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 
 | Thành phần | Việc làm | Tự làm hay dùng sẵn |
 | --- | --- | --- |
-| Orchestrator | Nhận issue, gọi các bước, giữ trạng thái, tính tiền | Tự làm (mỏng, dựa trên Agent SDK) |
+| Orchestrator | Nhận issue, gọi các bước, giữ trạng thái, tính tiền | Tự làm (Rust, vòng lặp tool-use riêng) |
+| Model provider | Gọi Claude API / Bedrock, đặt `cache_control`, chặn model ID không có `jp.` ở cấu hình khách | Tự làm |
 | Router | Chọn model theo tầng và luật leo thang | Tự làm |
-| ACI tools | Tìm, xem, sửa code | Dùng sẵn + bổ sung giới hạn |
+| ACI tools | Tìm, xem, sửa code | Tự làm (MCP server Rust, dùng tree-sitter + rust-analyzer) |
 | Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn |
 | Gate runner | Chạy linter, test, coverage, Sonar trong Docker | Tự làm (script) |
 | PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm |
