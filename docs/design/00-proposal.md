@@ -2,13 +2,13 @@
 
 Oct 17, 2026 · @Nguyen Han Hoang Hai
 
-Đề xuất: bắt đầu bằng một PoC 6–8 tuần trên một repo bảo trì thật. Platform viết bằng Rust, tự làm vòng lặp agent (xem [ADR 0001](../adr/0001-platform-in-rust.md)). Chỉ mở rộng khi PoC đạt KPI ở mục 8.
+Mục tiêu: xây platform đầy đủ ([ADR 0002](../adr/0002-full-platform-mvp-as-checkpoint.md)). Bắt đầu bằng MVP/PoC 6–8 tuần trên một repo bảo trì thật để đo KPI ở mục 8; kết quả dùng để điều chỉnh hướng, không phải cổng dừng. Platform viết bằng Rust, tự làm vòng lặp agent (xem [ADR 0001](../adr/0001-platform-in-rust.md)).
 
 Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 
 ## 0. Có nên bắt đầu dự án không?
 
-**Có, nhưng bắt đầu bằng PoC nhỏ, không build cả platform ngay.**
+**Có. Mục tiêu là platform đầy đủ, nhưng làm phần lõi và đo KPI trên MVP/PoC trước khi xây lớp dịch vụ.**
 
 **Vì sao nên làm:**
 
@@ -16,10 +16,10 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 - Chi phí thử rẻ: khoảng dưới $200 tiền API cho 50 issue (mục 9). Chi phí chính là công 1–2 người trong vài tuần.
 - Kết quả PoC dùng được ngay làm bằng chứng khi đề xuất AI cho các dự án bảo trì (ví dụ AMS).
 
-**Vì sao chưa nên build cả 4 tầng:**
+**Vì sao làm lõi và đo trước:**
 
 - Các kỹ thuật nén context nâng cao (SWEzze, SaraCoder…) còn ở mức nghiên cứu, chưa đáng làm trước khi có số liệu thật.
-- Platform viết bằng Rust, tự làm vòng lặp agent (ADR 0001), nên phải làm theo thứ tự và qua cổng PoC trước khi làm phần Pilot.
+- Platform viết bằng Rust, tự làm vòng lặp agent (ADR 0001); mọi tính năng platform đều dựa vào phần lõi, nên lõi phải xong và đo được trước.
 - Rủi ro lớn nhất không nằm ở kỹ thuật. Nó nằm ở 2 câu hỏi: agent có sửa được bug thật của khách không, và khách có cho code ra API không.
 
 **Nên tự làm phần nào:**
@@ -33,7 +33,7 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 |  | Kết nối luồng ticket/PR của khách |
 |  | Đo KPI và chi phí |
 
-**Khi nào dừng:** sau PoC, nếu không đạt ngưỡng ở mục 8 thì dừng. Không mở rộng chỉ vì đã lỡ đầu tư.
+**Nếu MVP không đạt ngưỡng ở mục 8:** không dừng dự án, nhưng không mở rộng lớp dịch vụ khi lõi chưa tốt. Phân tích ledger để tìm điểm nghẽn (định vị lỗi, chi phí, cache, gate), sửa lõi, đo lại (ADR 0002).
 
 **Việc cần làm tuần tới:**
 
@@ -217,7 +217,7 @@ Bản vá chỉ tới tay người duyệt khi qua đủ 4 cổng dưới đây.
 
 **Khi thất bại:** agent làm trên nhánh hoặc worktree riêng. Fail thì xóa nhánh. Không cần cơ chế rollback riêng.
 
-**Định vị lỗi (SBFL):** chạy test, chấm điểm nghi ngờ cho từng hàm. Hữu ích khi repo có test tốt. Để ở Phase 2, không bắt buộc cho PoC.
+**Định vị lỗi (SBFL):** chạy test, chấm điểm nghi ngờ cho từng hàm. Hữu ích khi repo có test tốt. Để ở Phase 3, hoặc sớm hơn nếu MVP cho thấy định vị lỗi sai nhiều; không bắt buộc cho MVP.
 
 ## 7. Bảo mật & dữ liệu khách hàng
 
@@ -279,16 +279,16 @@ Các ngưỡng trên là đề xuất ban đầu. Nên chốt lại với team s
 
 ## 9. Lộ trình triển khai
 
-Ba phase, mỗi phase có cổng "đi tiếp / dừng". Không qua cổng thì dừng, không đốt thêm tiền.
+Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sửa phần lõi trước khi đi tiếp, không dừng dự án (ADR 0002).
 
-| Phase | Thời gian | Làm gì | Cổng để đi tiếp |
+| Phase | Thời gian | Làm gì | Mốc đo |
 | --- | --- | --- | --- |
 | 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động |
-| 1. PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; chạy bộ issue | Đạt các ngưỡng ở mục 8 |
-| 2. Pilot | 2–3 tháng | Nối vào luồng ticket thật, thêm SBFL, chỉ mục repo, dashboard chi phí | Team dùng hằng ngày; chi phí/tháng trong ngân sách |
-| 3. Mở rộng | Sau pilot | Thêm ngôn ngữ/repo, cân nhắc kỹ thuật nén context nâng cao | Có ROI rõ ràng từ pilot |
+| 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; chạy bộ issue | Đạt các ngưỡng ở mục 8 |
+| 2. Platform | 2–3 tháng | Chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP |
+| 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài Rust, model local | Có ROI rõ ràng |
 
-**Nhân lực gợi ý cho PoC:** 1 tech lead (bán thời gian) + 1–2 dev. Không cần team riêng.
+**Nhân lực gợi ý cho MVP:** 1 tech lead (bán thời gian) + 1–2 dev. Không cần team riêng.
 
 **Ước tính chi phí API cho PoC:** 50 issue × tối đa $4 ≈ dưới $200, chưa tính chạy lại. Chi phí chính là công người.
 
@@ -299,6 +299,7 @@ Ba phase, mỗi phase có cổng "đi tiếp / dừng". Không qua cổng thì d
 | Khách không cho gửi code ra API | Hỏi ở Phase 0; phương án: endpoint theo vùng hoặc model local |
 | Repo không chạy test tự động được | Chọn repo khác cho PoC; không cố gượng |
 | Agent sửa đi sửa lại, đốt tiền | Trần $4 + 20 bước + luật dừng ở mục 5 |
+| Xây lớp dịch vụ khi lõi chưa tốt | Đo KPI bắt buộc cuối Phase 1; theo dõi KPI liên tục trên dashboard ở Phase 2 (ADR 0002) |
 | Golden Master khóa luôn con bug | Đánh dấu test "được phép đổi", người duyệt xác nhận |
 | Cache miss do prompt thay đổi | Cố định thứ tự; theo dõi tỉ lệ đọc cache (mục 8) |
 

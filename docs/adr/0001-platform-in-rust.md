@@ -27,7 +27,7 @@ Phần còn lại là vòng lặp tool-use, khoảng vài trăm dòng.
    - Bedrock — dùng AWS SDK for Rust chính thức.
    Kiểm tra "model ID phải bắt đầu bằng `jp.`" (Thiết kế §7) nằm trong lớp provider.
 3. Bộ công cụ ACI viết thành MCP server (SDK Rust chính thức của MCP). Orchestrator gọi ACI và Codebase-Memory qua cùng một giao thức MCP.
-4. Giữ cổng PoC của Proposal §9: thiết kế theo hướng platform đầy đủ, nhưng làm theo thứ tự provider → vòng lặp → ACI → gate → ledger, chạy bộ 30–50 issue trước khi làm phần Pilot (luồng ticket, dashboard).
+4. *(Được thay bằng [ADR 0002](0002-full-platform-mvp-as-checkpoint.md): PoC là mốc đo, không phải cổng dừng.)* Giữ cổng PoC của Proposal §9: thiết kế theo hướng platform đầy đủ, nhưng làm theo thứ tự provider → vòng lặp → ACI → gate → ledger, chạy bộ 30–50 issue trước khi làm phần Pilot (luồng ticket, dashboard).
 
 ## Phương án dự phòng
 

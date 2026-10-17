@@ -1,6 +1,6 @@
 # aegis-code
 
-PoC Agentic Code Maintenance Platform: nhận một issue bảo trì (bug, lỗi CI, cảnh báo Sonar) và trả về một PR đã qua kiểm chứng, chờ người duyệt.
+Agentic Code Maintenance Platform: nhận một issue bảo trì (bug, lỗi CI, cảnh báo Sonar) và trả về một PR đã qua kiểm chứng, chờ người duyệt.
 
 Tài liệu thiết kế:
 
