@@ -24,6 +24,7 @@ Mục tiêu nay là xây một platform đầy đủ: chạy như dịch vụ, n
 
 - Lộ trình có thêm milestone `Phase 2 – Platform` và `Phase 3 – Mở rộng`, kèm issue.
 - Kiến trúc lõi phải sẵn cho chạy nhiều issue song song, nhiều repo, lưu trạng thái bền — dù MVP chạy theo lô từ CLI. Cụ thể: không giữ trạng thái toàn cục, cấu hình theo repo, ledger ghi qua một interface có thể đổi sang DB.
+- Kiến trúc lớp dịch vụ và các ràng buộc cụ thể cho phần lõi: [ADR 0003](0003-platform-service-architecture.md).
 - Rủi ro "build tiếp khi lõi chưa tốt" được giảm bằng việc đo KPI bắt buộc ở cuối Phase 1 và theo dõi KPI liên tục trên dashboard ở Phase 2.
 
 ## Phương án đã cân nhắc
