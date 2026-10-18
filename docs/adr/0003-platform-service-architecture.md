@@ -87,7 +87,7 @@ Phase 2 chỉ bắt đầu khi lõi xong và đo được (ADR 0002), nhưng lõ
 ## Hệ quả
 
 - Thêm crate `aegis-store` (thư viện) và `aegis-server` (binary); dashboard nằm trong `aegis-server`.
-- Phụ thuộc mới khi làm Phase 2: `sqlx`, `axum`, `tower-http`, `askama`, `bollard`, `tokio-util`, `openidconnect`. Mỗi crate thêm vào phải qua allow-list `cargo deny` (#12).
+- Phụ thuộc mới khi làm Phase 2: `sqlx`, `axum`, `tower-http`, `askama`, `bollard`, `tokio-util`, `openidconnect`. Mỗi crate thêm vào phải qua `cargo deny` của chính aegis-code (#42). Allow-list cho repo đích (#12) là việc khác.
 - CI cần một service PostgreSQL cho test tích hợp của `aegis-store` và `aegis-server`.
 - Chỉ có một thành phần hạ tầng có trạng thái để vận hành (PostgreSQL). Đổi lại, hàng đợi tự làm phải có test cho lease, lấy lại job và giới hạn theo repo.
 - Chạy lại từ đầu khi restart tốn thêm tiền cho job bị gián đoạn. Ledger ghi theo từng lượt nên đo được khoản này; nếu đáng kể thì làm checkpoint.
