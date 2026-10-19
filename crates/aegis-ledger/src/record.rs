@@ -12,6 +12,10 @@ const MAX_ISSUE_ID_LEN: usize = 128;
 
 /// Issue identifier, also used as a file name by [`crate::JsonFileLedger`],
 /// so it is limited to `[A-Za-z0-9._-]` and may not start with `.`.
+///
+/// Stored upper-cased: on case-insensitive filesystems (macOS) `gh-7` and
+/// `GH-7` would share a file, so they are the same issue (#56). Tracker keys
+/// such as Jira's are upper-case and case-insensitive anyway.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct IssueId(String);
@@ -35,7 +39,7 @@ impl IssueId {
         };
         match reason {
             Some(reason) => Err(LedgerError::InvalidIssueId { id, reason }),
-            None => Ok(Self(id)),
+            None => Ok(Self(id.to_ascii_uppercase())),
         }
     }
 
@@ -304,9 +308,19 @@ mod tests {
 
     #[test]
     fn issue_id_accepts_tracker_ids() {
-        for ok in ["GH-123", "PROJ-7", "sonar_2026.10", "42"] {
+        for ok in ["GH-123", "PROJ-7", "SONAR_2026.10", "42"] {
             assert_eq!(id(ok).as_str(), ok);
         }
+    }
+
+    #[test]
+    fn issue_id_ignores_case() {
+        assert_eq!(id("gh-7"), id("GH-7"));
+        assert_eq!(id("sonar_2026.10").as_str(), "SONAR_2026.10");
+        assert_eq!(
+            serde_json::from_value::<IssueId>(json!("proj-1")).unwrap(),
+            id("PROJ-1")
+        );
     }
 
     #[test]
