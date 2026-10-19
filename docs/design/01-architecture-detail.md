@@ -2,7 +2,7 @@
 
 Oct 17, 2026 · @Nguyen Han Hoang Hai
 
-Tài liệu này mô tả cách làm PoC, theo đúng các quyết định trong tab Proposal. Dev làm theo tài liệu này. Nếu hai tab mâu thuẫn, Proposal là chuẩn.
+Tài liệu này mô tả kiến trúc kỹ thuật của phần lõi (Phase 1 – MVP / PoC), phục vụ mục tiêu xây platform đầy đủ theo [ADR 0002](../adr/0002-full-platform-mvp-as-checkpoint.md) và tuân thủ các ràng buộc kiến trúc cho Phase 2 theo [ADR 0003](../adr/0003-platform-service-architecture.md) §7. Dev làm theo tài liệu này. Nếu mâu thuẫn lộ trình, ADR 0002 và ADR 0003 là chuẩn.
 
 ## 1. Phạm vi & giả định
 
@@ -29,16 +29,17 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 
 **Thành phần:**
 
-| Thành phần | Việc làm | Tự làm hay dùng sẵn |
+| Thành phần | Việc làm | Crate / Triển khai |
 | --- | --- | --- |
-| Orchestrator | Nhận issue, gọi các bước, giữ trạng thái, tính tiền | Tự làm (Rust, vòng lặp tool-use riêng) |
-| Model provider | Gọi Claude API / Bedrock, đặt `cache_control`, chặn model ID không có `jp.` ở cấu hình khách | Tự làm |
-| Router | Chọn model theo tầng và luật leo thang | Tự làm |
-| ACI tools | Tìm, xem, sửa code | Tự làm (MCP server Rust, dùng tree-sitter + rust-analyzer) |
-| Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn |
-| Gate runner | Chạy linter, test, coverage, Sonar trong Docker | Tự làm (script) |
-| PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm |
-| Ledger | Ghi log, token, chi phí cho từng issue | Tự làm |
+| Orchestrator | Nhận issue, gọi các bước, giữ trạng thái, tính tiền | Tự làm (`crates/aegis-orchestrator`, vòng lặp tool-use riêng) |
+| Model provider | Gọi Claude API / Bedrock, đặt `cache_control`, chặn model ID không có `jp.` ở cấu hình khách | Tự làm (`crates/aegis-provider`) |
+| Router | Chọn model theo tầng và luật leo thang, kiểm soát ngân sách | Tự làm (`crates/aegis-router`) |
+| ACI tools | Tìm, xem, sửa code | Tự làm (`crates/aegis-aci`, MCP server Rust, dùng tree-sitter + rust-analyzer) |
+| Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn (SQLite index) |
+| Gate runner | Chạy linter, test, coverage, Sonar trong Docker | Tự làm (`crates/aegis-gate`) |
+| PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm (`crates/aegis-pr`) |
+| Ledger | Ghi log, token, chi phí cho từng issue | Tự làm (`crates/aegis-ledger`, trait ghi JSON / DB) |
+| Sonar batcher | Chia nhóm cảnh báo Sonar, gộp nhánh integration | Tự làm (`crates/aegis-sonar-batch`) |
 
 **Vòng lặp cho một issue:**
 
@@ -47,7 +48,7 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 3. Core tìm vị trí lỗi bằng ACI + Codebase-Memory.
 4. Core viết test tái hiện. Chạy để chắc là FAIL.
 5. Core viết bản vá.
-6. Gate runner chạy 4 cổng (mục 6).
+6. Gate runner chạy chuỗi kiểm chứng trong Docker (6 bước ở mục 6.1).
 7. Qua hết → PR writer mở PR. Dừng.
 8. Fail → log được Light tóm tắt, trả lại Core. Quay lại bước 5.
 9. Chạm luật leo thang → chuyển sang Expert, tiếp tục từ bước 3 với toàn bộ lịch sử.
@@ -176,7 +177,7 @@ Khi chuyển sang Expert, giữ toàn bộ lịch sử. Lượt gọi Light khô
 - Ledger cộng chi phí thật từ `usage` sau mỗi request (công thức mục 4.3 + output).
 - Trước mỗi lượt gọi Core/Expert: nếu chi phí đã dùng + ước tính lượt tới > $4 → dừng luôn, không gọi.
 - Với cấu hình Bedrock, nhân thêm phụ phí vùng (khoảng +10%) khi tính.
-- Trần $4 là giá trị khởi đầu. Đo lại sau 10 issue đầu tiên của PoC.
+- Trần $4 là giá trị khởi đầu cho PoC nội bộ. Ở quy mô mở rộng, ngưỡng kinh tế tối đa cho phép trung bình ≤ $8/issue (bao gồm cả các ca thất bại và phụ phí vùng Bedrock), chốt lại theo số liệu thực tế đo được (ADR 0002).
 
 ## 6. Tầng 4 – Kiểm chứng
 
