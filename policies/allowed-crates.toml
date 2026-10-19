@@ -1,0 +1,7 @@
+# Crate mà bản vá của agent được phép THÊM vào repo đích (#12, design §7).
+# Crate đã có trong Cargo.lock trước bản vá không cần liệt kê; nâng phiên bản
+# crate đã có thì được phép (cargo deny vẫn kiểm advisory và license).
+# Crate mới ngoài danh sách, hoặc từ nguồn ngoài crates.io → gate chặn.
+#
+# Thêm tên vào đây sau khi người duyệt đồng ý.
+allowed = []

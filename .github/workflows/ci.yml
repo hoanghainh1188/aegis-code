@@ -63,6 +63,12 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+      # Policy the gate applies to target repos (#12): keep it loadable.
+      - name: policies/deny.toml is valid
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          arguments: --config policies/deny.toml
+          command: check
 
   coverage:
     name: coverage
