@@ -54,6 +54,16 @@ jobs:
       - name: test (aegis-provider, bedrock)
         run: cargo test -p aegis-provider --features bedrock
 
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # deny.toml đặt `all-features = true`, nên một lượt đã gồm cả feature bedrock.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
   coverage:
     name: coverage
     runs-on: ubuntu-latest

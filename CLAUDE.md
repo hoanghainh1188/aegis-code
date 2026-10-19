@@ -25,6 +25,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p aegis-provider --all-targets --features bedrock -- -D warnings
 cargo test --workspace
 cargo test -p aegis-provider --features bedrock
+cargo deny check
 ```
 
 Commit theo Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`).

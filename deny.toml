@@ -1,0 +1,43 @@
+# cargo deny cho chính aegis-code (#42). Allow-list cho repo đích nằm ở
+# policies/deny.toml (#12), không dùng file này.
+
+[graph]
+all-features = true
+
+[advisories]
+# Mọi advisory RustSec (lỗ hổng, unmaintained, unsound, yanked) đều làm fail.
+# Bỏ qua một advisory phải ghi id và lý do ở `ignore`.
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+[licenses]
+# Chỉ license permissive. Thêm license mới phải qua review.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Crate trong workspace có `publish = false`, không cần license.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
