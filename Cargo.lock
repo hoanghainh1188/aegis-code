@@ -58,6 +58,15 @@ dependencies = [
 [[package]]
 name = "aegis-router"
 version = "0.1.0"
+dependencies = [
+ "aegis-ledger",
+ "aegis-orchestrator",
+ "aegis-provider",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
 
 [[package]]
 name = "aegis-sonar-batch"
