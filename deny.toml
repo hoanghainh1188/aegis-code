@@ -36,6 +36,13 @@ multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
 
+# Độ ổn định byte của prompt (prompt cache) dựa vào `serde_json::Map` là
+# `BTreeMap`. `preserve_order` đổi nó thành `IndexMap`; feature unification
+# sẽ âm thầm đổi thứ tự key trong binary cuối (#20).
+[[bans.features]]
+crate = "serde_json"
+deny = ["preserve_order"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
