@@ -48,7 +48,11 @@ async fn sends_headers_and_decodes_response() {
                 "input_tokens": 12,
                 "output_tokens": 3,
                 "cache_creation_input_tokens": 600,
-                "cache_read_input_tokens": 0
+                "cache_read_input_tokens": 0,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 100,
+                    "ephemeral_1h_input_tokens": 500
+                }
             }
         })))
         .expect(1)
@@ -60,6 +64,8 @@ async fn sends_headers_and_decodes_response() {
     assert_eq!(response.content, vec![ContentBlock::text("done")]);
     assert_eq!(response.stop_reason, Some(StopReason::EndTurn));
     assert_eq!(response.usage.cache_creation_input_tokens, 600);
+    assert_eq!(response.usage.cache_creation.ephemeral_5m_input_tokens, 100);
+    assert_eq!(response.usage.cache_creation.ephemeral_1h_input_tokens, 500);
 }
 
 #[tokio::test]

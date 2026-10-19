@@ -82,6 +82,7 @@ fn usage(input: u64, cache_read: u64) -> Usage {
         output_tokens: 10,
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: cache_read,
+        ..Usage::default()
     }
 }
 

@@ -17,6 +17,14 @@ version = "0.1.0"
 [[package]]
 name = "aegis-ledger"
 version = "0.1.0"
+dependencies = [
+ "aegis-provider",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "toml",
+]
 
 [[package]]
 name = "aegis-orchestrator"
