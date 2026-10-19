@@ -268,6 +268,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ids_differing_only_in_case_share_one_ledger() {
+        let root = temp_root();
+        let store = JsonFileLedger::new(&root);
+        let lower = IssueId::parse("gh-7").unwrap();
+        store.append(&lower, &classified()).await.unwrap();
+        store.append(&issue(), &finished()).await.unwrap();
+
+        assert_eq!(store.events_path(&lower), store.events_path(&issue()));
+        assert_eq!(
+            store.events(&lower).await.unwrap(),
+            vec![classified(), finished()]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn file_ledger_drops_a_torn_last_line() {
         let root = temp_root();
         let store = JsonFileLedger::new(&root);
