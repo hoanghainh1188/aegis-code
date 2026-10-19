@@ -167,6 +167,19 @@ pub struct Usage {
     pub cache_creation_input_tokens: u64,
     #[serde(default, deserialize_with = "null_as_zero")]
     pub cache_read_input_tokens: u64,
+    /// Split of `cache_creation_input_tokens` by TTL, priced differently
+    /// (design §4.3). Some backends omit it; the ledger then treats the
+    /// unattributed tokens as one-hour writes.
+    #[serde(default, deserialize_with = "null_as_zero")]
+    pub cache_creation: CacheCreation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub struct CacheCreation {
+    #[serde(default, deserialize_with = "null_as_zero")]
+    pub ephemeral_5m_input_tokens: u64,
+    #[serde(default, deserialize_with = "null_as_zero")]
+    pub ephemeral_1h_input_tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -178,8 +191,12 @@ pub struct Response {
     pub usage: Usage,
 }
 
-fn null_as_zero<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(0))
+fn null_as_zero<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -205,7 +222,8 @@ mod tests {
                 "input_tokens": 10,
                 "output_tokens": 5,
                 "cache_creation_input_tokens": null,
-                "cache_read_input_tokens": 900
+                "cache_read_input_tokens": 900,
+                "cache_creation": null
             }
         });
         let response: Response = serde_json::from_value(raw).unwrap();
@@ -226,6 +244,7 @@ mod tests {
                 output_tokens: 5,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 900,
+                cache_creation: CacheCreation::default(),
             }
         );
     }

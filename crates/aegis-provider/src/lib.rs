@@ -19,8 +19,8 @@ pub use config::{Provider, ProviderConfig};
 pub use error::ProviderError;
 pub use guard::ModelPolicy;
 pub use types::{
-    CachePlan, CacheTtl, ContentBlock, Effort, Message, Request, Response, Role, StopReason,
-    ToolDefinition, Usage,
+    CacheCreation, CachePlan, CacheTtl, ContentBlock, Effort, Message, Request, Response, Role,
+    StopReason, ToolDefinition, Usage,
 };
 
 /// One backend that can answer a Messages request.
