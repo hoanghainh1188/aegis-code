@@ -5,6 +5,10 @@ version = 4
 [[package]]
 name = "aegis-aci"
 version = "0.1.0"
+dependencies = [
+ "aegis-lang",
+ "thiserror",
+]
 
 [[package]]
 name = "aegis-cli"

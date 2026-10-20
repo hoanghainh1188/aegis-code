@@ -30,6 +30,7 @@ pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};
 pub use profile::{
     Coverage, CoverageFormat, Dependencies, Detect, GateSteps, Profile, Profiles, Sandbox,
+    glob_match,
 };
 pub use resolve::{
     GateOverrides, GatePlan, ProfileOverrides, ResolvedProfile, SkipReason, Step, StepOverride,
