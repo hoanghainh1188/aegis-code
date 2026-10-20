@@ -10,6 +10,16 @@ use crate::profile::glob_match;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
 use crate::{go_lock, maven_lock, npm_lock, nuget_lock, python_lock};
 
+/// MSBuild files that can add packages or package sources.
+const MSBUILD_FILES: &[&str] = &[
+    "*.csproj",
+    "*.fsproj",
+    "*.vbproj",
+    "*.proj",
+    "*.props",
+    "*.targets",
+];
+
 /// Dependencies a patch may add, e.g. `policies/allowed-crates.toml`.
 /// Dependencies already locked before the patch need no entry.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
@@ -43,12 +53,12 @@ pub fn read_lockfile(
         (Language::Java, "pom.xml") => maven_lock::pom_xml(text),
         (Language::Java, "extensions.xml") => maven_lock::maven_extensions(text),
         (Language::CSharp, "packages.lock.json") => nuget_lock::packages_lock(text),
-        (Language::CSharp, name @ ("nuget.config" | "NuGet.Config")) => {
+        (Language::CSharp, name) if name.eq_ignore_ascii_case("nuget.config") => {
             nuget_lock::nuget_config(name, text)
         }
-        (Language::CSharp, name)
-            if name == "Directory.Packages.props" || glob_match("*.csproj", name) =>
-        {
+        (Language::CSharp, "global.json") => nuget_lock::global_json(text),
+        (Language::CSharp, "dotnet-tools.json") => nuget_lock::dotnet_tools(text),
+        (Language::CSharp, name) if MSBUILD_FILES.iter().any(|p| glob_match(p, name)) => {
             nuget_lock::msbuild_project(name, text)
         }
         (Language::Java, name @ ("gradle.lockfile" | "buildscript-gradle.lockfile")) => {
