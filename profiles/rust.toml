@@ -37,5 +37,8 @@ fetch = ["cargo", "fetch", "--locked"]
 image = "aegis-sandbox-rust"
 cache_dirs = ["target", "/usr/local/cargo/registry"]
 
-# Thuộc tính Sonar cho Rust chốt ở #64.
+# SonarQube tự chạy `cargo clippy` (tắt bằng sonar.rust.clippy.enabled = false);
+# chỉ cần trỏ tới report coverage. Nguồn: docs SonarQube Server 2026.4,
+# "Rust" và "Test coverage parameters".
 [sonar.properties]
+"sonar.rust.lcov.reportPaths" = "lcov.info"

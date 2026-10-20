@@ -29,6 +29,18 @@ pub enum LangError {
     #[error("tree-sitter could not parse the {0} source")]
     ParseFailed(Language),
 
+    #[error("invalid lockfile {file}: {message}")]
+    InvalidLockfile { file: String, message: String },
+
+    #[error("no {language} reader for lockfile `{file}` yet")]
+    UnsupportedLockfile { language: Language, file: String },
+
+    #[error("invalid allow-list: {0}")]
+    InvalidAllowList(String),
+
+    #[error("symbol query for {language} does not compile: {message}")]
+    InvalidQuery { language: Language, message: String },
+
     #[error("invalid command: {0}")]
     InvalidCommand(String),
 
