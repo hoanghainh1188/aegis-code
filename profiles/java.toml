@@ -42,7 +42,7 @@ path = "target/site/jacoco/jacoco.xml"
 manifests = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties"]
 # Maven không có lockfile: pom.xml cho phụ thuộc khai báo trực tiếp; cây đã
 # resolve là #80.
-lockfiles = ["pom.xml", "gradle.lockfile", "buildscript-gradle.lockfile"]
+lockfiles = ["pom.xml", "extensions.xml", "gradle.lockfile", "buildscript-gradle.lockfile"]
 official_source = "https://repo.maven.apache.org/maven2"
 fetch = [
     "mvn", "-B", "-q",
@@ -55,6 +55,26 @@ fetch = [
     "-DfailIfNoTests=false",
 ]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+# Bản vá chạm vào là bị chặn (#83): cấu hình Maven ngoài pom (thêm -D, -s
+# settings.xml, mirror), build script và wrapper của Gradle, không đọc được.
+protected = [
+    "**/.mvn/maven.config",
+    "**/.mvn/jvm.config",
+    "**/.mvn/wrapper/**",
+    "settings.xml",
+    "mvnw",
+    "mvnw.cmd",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "gradle.properties",
+    "*.init.gradle",
+    "init.gradle",
+    "**/gradle/wrapper/**",
+    "gradlew",
+    "gradlew.bat",
+]
 
 [sandbox]
 image = "aegis-sandbox-java"

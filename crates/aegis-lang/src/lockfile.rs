@@ -116,10 +116,9 @@ impl Profile {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .is_some_and(|name| {
-                    deps.manifests
-                        .iter()
-                        .chain(&deps.lockfiles)
-                        .any(|pattern| glob_match(pattern, name))
+                    deps.manifests.iter().chain(&deps.lockfiles).any(|pattern| {
+                        glob_match(&pattern.to_ascii_lowercase(), &name.to_ascii_lowercase())
+                    })
                 })
         })
     }

@@ -32,6 +32,14 @@ manifests = ["Cargo.toml"]
 lockfiles = ["Cargo.lock"]
 official_source = "registry+https://github.com/rust-lang/crates.io-index"
 fetch = ["cargo", "fetch", "--locked"]
+# Bản vá chạm vào là bị chặn (#83): source replacement trong .cargo/config
+# không hiện trong Cargo.lock; toolchain file đổi compiler được tải về.
+protected = [
+    "**/.cargo/config.toml",
+    "**/.cargo/config",
+    "rust-toolchain",
+    "rust-toolchain.toml",
+]
 # Rust kiểm advisory + license bằng `cargo deny` với policies/deny.toml (#12, #11).
 
 [sandbox]

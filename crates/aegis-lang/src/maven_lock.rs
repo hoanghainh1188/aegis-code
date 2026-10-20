@@ -85,10 +85,10 @@ impl Properties {
         for field in ["groupId", "version"] {
             let own = format!("project.{field}");
             let inherited = format!("project.parent.{field}");
-            if !map.contains_key(&own) {
-                if let Some(v) = map.get(&inherited).cloned() {
-                    map.insert(own, v);
-                }
+            if !map.contains_key(&own)
+                && let Some(v) = map.get(&inherited).cloned()
+            {
+                map.insert(own, v);
             }
         }
         Ok(Self(map))
@@ -132,7 +132,7 @@ pub(crate) fn pom_xml(text: &str) -> Result<Vec<LockedDependency>, LangError> {
         let field = |name: &str| -> Result<Option<String>, LangError> {
             child_text(node, name)
                 .and_then(|v| v.map(|v| properties.resolve(&v)).transpose())
-                .map_err(&err)
+                .map_err(err)
         };
         let coordinate = |default_group: Option<&str>| -> Result<(String, String), LangError> {
             let group = field("groupId")?
@@ -141,7 +141,7 @@ pub(crate) fn pom_xml(text: &str) -> Result<Vec<LockedDependency>, LangError> {
             let artifact =
                 field("artifactId")?.ok_or_else(|| err(format!("<{tag}> without <artifactId>")))?;
             let version = child_text(node, "version")
-                .map_err(&err)?
+                .map_err(err)?
                 .unwrap_or_default();
             Ok((format!("{group}:{artifact}"), version))
         };
@@ -153,7 +153,7 @@ pub(crate) fn pom_xml(text: &str) -> Result<Vec<LockedDependency>, LangError> {
             }
             ("dependency", Some("dependencies")) => {
                 // A jar from a path on disk, outside any repository.
-                let scope = child_text(node, "scope").map_err(&err)?;
+                let scope = child_text(node, "scope").map_err(err)?;
                 if child(node, "systemPath").is_some() || scope.as_deref() == Some("system") {
                     return Err(err("system-scoped dependencies are not allowed".into()));
                 }

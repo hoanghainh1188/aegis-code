@@ -95,7 +95,7 @@ pub(crate) fn package_lock(text: &str) -> Result<Vec<LockedDependency>, LangErro
         let Some((_, key_name)) = key.rsplit_once("node_modules/") else {
             // A workspace member, e.g. "packages/core": code in the repo,
             // as long as it does not come from somewhere else.
-            let local = e.resolved.as_deref().is_none_or(|r| in_repo(r));
+            let local = e.resolved.as_deref().is_none_or(in_repo);
             if in_repo(key) && local {
                 continue;
             }
