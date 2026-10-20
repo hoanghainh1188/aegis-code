@@ -5,6 +5,7 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -27,17 +28,28 @@ pub(crate) enum Failure {
     TimedOut,
 }
 
-fn capture(stream: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
+/// How long to wait for the output pipes to close once the formatter has
+/// exited. A daemon it started may hold them open for good; its output is
+/// then dropped rather than blocking the edit.
+const PIPE_GRACE: Duration = Duration::from_secs(2);
+
+/// Reads up to [`MAX_OUTPUT_BYTES`] of `stream` on its own thread. The
+/// thread keeps draining the rest so the formatter never blocks on a full
+/// pipe, and is left behind if the pipe never closes.
+fn capture(stream: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut buf = Vec::new();
         if let Some(s) = stream {
             let mut limited = s.take(MAX_OUTPUT_BYTES);
             let _ = limited.read_to_end(&mut buf);
-            // Keep draining so the formatter never blocks on a full pipe.
+            let _ = sender.send(buf);
             let _ = std::io::copy(&mut limited.into_inner(), &mut std::io::sink());
+        } else {
+            let _ = sender.send(buf);
         }
-        buf
-    })
+    });
+    receiver
 }
 
 fn wait(child: &mut Child, program: &str) -> Result<Option<std::process::ExitStatus>, AciError> {
@@ -82,18 +94,21 @@ pub(crate) fn run(
         })?;
     let stdout = capture(child.stdout.take());
     let stderr = capture(child.stderr.take());
-    let status = wait(&mut child, &program)?;
-    let output = [stderr, stdout]
-        .into_iter()
-        .map(|h| String::from_utf8_lossy(&h.join().unwrap_or_default()).into_owned())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let Some(status) = status else {
+    let Some(status) = wait(&mut child, &program)? else {
         return Ok(Err(Failure::TimedOut));
     };
     if status.success() {
         return Ok(Ok(()));
     }
+    let deadline = Instant::now() + PIPE_GRACE;
+    let output = [stderr, stdout]
+        .into_iter()
+        .map(|r| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            String::from_utf8_lossy(&r.recv_timeout(left).unwrap_or_default()).into_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let message = output
         .lines()
         .filter(|l| !l.trim().is_empty())

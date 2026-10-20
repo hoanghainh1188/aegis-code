@@ -210,3 +210,43 @@ fn edit_of_a_file_with_out_of_line_modules_is_formatted() {
     assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
     assert_eq!(repo.read("src/shop.rs"), "mod till;\npub fn open() {}\n");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_formatter_leaving_a_process_behind_does_not_block_the_edit() {
+    // The background `sleep` keeps the output pipes open after `sh` exits.
+    let argv = ["sh", "-c", "sleep 30 & echo bad >&2; exit 3", "{file}"];
+    let overrides = ProfileOverrides {
+        edit_format: Some(StepOverride::Run(
+            argv.iter()
+                .map(|s| (*s).to_owned())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )),
+        ..ProfileOverrides::default()
+    };
+    let repo = Scratch::fixture("rust");
+    let mut aci = repo.aci(profile(Language::Rust, &overrides));
+    let started = std::time::Instant::now();
+
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/lib.rs",
+            from: 3,
+            to: 3,
+            content: "pub const MAX_ITEMS: usize = 4;",
+        })
+        .unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(
+        matches!(
+            &outcome,
+            EditOutcome::Rejected {
+                reason: Rejection::Formatter { code: Some(3), .. },
+                ..
+            }
+        ),
+        "{outcome}"
+    );
+}

@@ -1,0 +1,164 @@
+[
+  {
+    "description": "Replace lines `from` to `to` of a file with `content`. The result must parse and pass the repo's formatter, or the file is left unchanged and the proposed lines are shown. Returns the edited lines with 5 lines of context.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "content": {
+          "description": "New lines, without line numbers; empty deletes the range.",
+          "type": "string"
+        },
+        "file": {
+          "description": "File path relative to the repo root.",
+          "type": "string"
+        },
+        "from": {
+          "description": "First line to replace, 1-based.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "to": {
+          "description": "Last line to replace, inclusive; `from - 1` inserts before `from`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "from",
+        "to",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "edit"
+  },
+  {
+    "description": "Find files by name pattern. At most 50 results, otherwise asks to narrow.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "dir": {
+          "description": "Directory to search, relative to the repo root (default: root).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pattern": {
+          "description": "File name, `*` matches any run of characters (e.g. `test_*.py`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "name": "find_file"
+  },
+  {
+    "description": "Show the 100 lines around a line of the open file.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "line": {
+          "description": "1-based line of the open file.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "line"
+      ],
+      "type": "object"
+    },
+    "name": "goto"
+  },
+  {
+    "description": "Open a file and show 100 numbered lines around `line`, with the number of lines hidden above and below.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "file": {
+          "description": "File path relative to the repo root.",
+          "type": "string"
+        },
+        "line": {
+          "description": "1-based line to show near the middle of the window (default: 1).",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "name": "open"
+  },
+  {
+    "description": "Show the next 100 lines of the open file.",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "scroll_down"
+  },
+  {
+    "description": "Show the previous 100 lines of the open file.",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "scroll_up"
+  },
+  {
+    "description": "Find definitions by name. Returns kind, signature, file and line range; at most 50 results, otherwise asks to narrow.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "name": {
+          "description": "Name of a function, type, trait, class…; `Type::method` or\n`Class.method` for a method.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "search_symbol"
+  },
+  {
+    "description": "Find lines containing a literal text. Returns file and line; at most 50 results, otherwise asks to narrow.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "dir": {
+          "description": "Directory to search, relative to the repo root (default: root).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "Literal, case-sensitive text to find.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "name": "search_text"
+  }
+]
