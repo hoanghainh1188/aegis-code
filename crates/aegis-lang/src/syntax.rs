@@ -2,8 +2,11 @@
 //! code that does not compile, needs no toolchain, and runs before `edit`
 //! writes a file.
 
+use std::path::Path;
+
 use tree_sitter::{Node, Parser};
 
+use crate::grammar::Grammar;
 use crate::{LangError, Language};
 
 /// At most this many errors are reported; one is enough to refuse an edit.
@@ -18,26 +21,28 @@ pub struct SyntaxError {
     pub missing: bool,
 }
 
-pub(crate) fn grammar(language: Language) -> Option<tree_sitter::Language> {
-    match language {
-        Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
-        Language::Python => Some(tree_sitter_python::LANGUAGE.into()),
-        Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
-        // Grammars come with their profiles (#67, #68, #70).
-        Language::TypeScript | Language::Java | Language::CSharp => None,
-    }
-}
-
 pub fn has_grammar(language: Language) -> bool {
-    grammar(language).is_some()
+    Grammar::for_file(language, None).is_some()
 }
 
 /// Larger sources are refused rather than parsed.
 pub const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 
-/// Syntax errors in `source`, empty when it parses cleanly.
+/// Syntax errors in `source`, parsed with the language's main grammar.
 pub fn syntax_errors(language: Language, source: &str) -> Result<Vec<SyntaxError>, LangError> {
-    let grammar = grammar(language).ok_or(LangError::UnsupportedGrammar(language))?;
+    syntax_errors_in(language, None, source)
+}
+
+/// Syntax errors in `source`, with the grammar for `path`'s extension
+/// (e.g. TSX for `.tsx`). Empty when it parses cleanly.
+pub fn syntax_errors_in(
+    language: Language,
+    path: Option<&Path>,
+    source: &str,
+) -> Result<Vec<SyntaxError>, LangError> {
+    let grammar = Grammar::for_file(language, path)
+        .ok_or(LangError::UnsupportedGrammar(language))?
+        .language();
     if source.len() > MAX_SOURCE_BYTES {
         return Err(LangError::SourceTooLarge {
             language,
@@ -139,9 +144,14 @@ mod tests {
     #[test]
     fn languages_without_grammar_say_so() {
         assert!(
-            [Language::Rust, Language::Python, Language::Go]
-                .into_iter()
-                .all(has_grammar)
+            [
+                Language::Rust,
+                Language::Python,
+                Language::Go,
+                Language::TypeScript
+            ]
+            .into_iter()
+            .all(has_grammar)
         );
         assert_eq!(
             syntax_errors(Language::Java, "class A {}"),

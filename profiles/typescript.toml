@@ -1,0 +1,49 @@
+# Language profile TypeScript / JavaScript (ADR 0004, #67). Lệnh là mảng
+# argv, không qua shell. Công cụ chạy bằng `npx --no-install` để chỉ dùng bản
+# đã có trong node_modules của repo (gate không có mạng).
+# Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test (file hoặc
+# tên test, truyền cho test runner), `{lockfile}` / `{licenses}` ở audit.
+# RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
+
+language = "typescript"
+display_name = "TypeScript / JavaScript"
+
+[detect]
+markers = ["package.json", "tsconfig.json"]
+extensions = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+
+[aci]
+lsp = ["typescript-language-server", "--stdio"]
+
+[edit]
+format = ["npx", "--no-install", "prettier", "--write", "{file}"]
+
+[gate]
+format = ["npx", "--no-install", "prettier", "--check", "."]
+lint = ["npx", "--no-install", "eslint", "."]
+typecheck = ["npx", "--no-install", "tsc", "--noEmit"]
+repro_test = ["npm", "test", "--", "{test}"]
+test = ["npm", "test"]
+# c8 đo coverage V8 cho test runner chạy trên Node (node:test, mocha…).
+# Repo dùng Jest/Vitest thì ghi đè bằng lệnh coverage của runner đó.
+coverage = ["npx", "--no-install", "c8", "--reporter=lcov", "npm", "test"]
+
+[coverage]
+format = "lcov"
+path = "coverage/lcov.info"
+
+[dependencies]
+manifests = ["package.json"]
+# Mới đọc được package-lock.json (v2, v3); pnpm-lock.yaml và yarn.lock báo
+# "chưa hỗ trợ" nên gate dừng, không cho qua.
+lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
+official_source = "https://registry.npmjs.org"
+fetch = ["npm", "ci", "--ignore-scripts"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+
+[sandbox]
+image = "aegis-sandbox-node"
+cache_dirs = ["node_modules", "/root/.npm"]
+
+[sonar.properties]
+"sonar.javascript.lcov.reportPaths" = "coverage/lcov.info"

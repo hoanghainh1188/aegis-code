@@ -9,8 +9,8 @@ use serde::Deserialize;
 use crate::{CommandTemplate, LangError, Language, Placeholder};
 
 /// Profiles shipped with the platform. The other languages get theirs in
-/// #67, #68, #70.
-const BUILTIN: [(&str, &str); 3] = [
+/// #68, #70.
+const BUILTIN: [(&str, &str); 4] = [
     (
         "profiles/rust.toml",
         include_str!("../../../profiles/rust.toml"),
@@ -22,6 +22,10 @@ const BUILTIN: [(&str, &str); 3] = [
     (
         "profiles/go.toml",
         include_str!("../../../profiles/go.toml"),
+    ),
+    (
+        "profiles/typescript.toml",
+        include_str!("../../../profiles/typescript.toml"),
     ),
 ];
 
@@ -74,6 +78,10 @@ pub struct Edit {
 pub struct GateSteps {
     pub format: Option<CommandTemplate>,
     pub lint: Option<CommandTemplate>,
+    /// Type check separate from lint (e.g. `tsc --noEmit`); compiled
+    /// languages check types in `test`.
+    #[serde(default)]
+    pub typecheck: Option<CommandTemplate>,
     /// Runs one test, with `{test}`.
     pub repro_test: Option<CommandTemplate>,
     pub test: CommandTemplate,
@@ -249,6 +257,7 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
     let plain = [
         ("gate.format", &gate.format),
         ("gate.lint", &gate.lint),
+        ("gate.typecheck", &gate.typecheck),
         ("gate.coverage", &gate.coverage),
     ];
     for (name, c) in plain {
@@ -374,7 +383,12 @@ mod tests {
         let p = builtin();
         assert_eq!(
             p.languages().collect::<Vec<_>>(),
-            vec![Language::Rust, Language::Python, Language::Go]
+            vec![
+                Language::Rust,
+                Language::Python,
+                Language::TypeScript,
+                Language::Go
+            ]
         );
         assert_eq!(p.get(Language::Rust).unwrap().display_name, "Rust");
         assert_eq!(
@@ -418,7 +432,8 @@ mod tests {
             p.detect(["pyproject.toml", "Cargo.toml"]),
             vec![Language::Rust, Language::Python]
         );
-        assert!(p.detect(["package.json"]).is_empty());
+        assert_eq!(p.detect(["package.json"]), vec![Language::TypeScript]);
+        assert!(p.detect(["pom.xml"]).is_empty());
     }
 
     #[test]
