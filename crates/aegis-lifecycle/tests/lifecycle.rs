@@ -587,3 +587,55 @@ fn relative_paths_in_the_config_are_taken_from_the_working_directory() {
     assert_eq!(config.repo.path, scratch.0.join(".workspace/repos/scrapy"));
     assert_eq!(config.run.pricing, scratch.0.join("config/pricing.toml"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn secrets_in_the_issue_and_the_repo_are_hidden_and_counted() {
+    let scratch = repo_with_bug();
+    let token = format!("ghp_{}", "Q".repeat(36));
+    std::fs::write(
+        scratch.0.join("clone/src/keys.rs"),
+        format!("pub const KEY: &str = \"{token}\";\n"),
+    )
+    .unwrap();
+    git(&scratch.0.join("clone"), &["add", "-A"]);
+    git(
+        &scratch.0.join("clone"),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "keys",
+        ],
+    );
+    let model = Scripted::new(
+        vec![
+            call("t1", "open", json!({"file": "src/keys.rs"})),
+            call("t2", "search_symbol", json!({"name": "Cart"})),
+        ],
+        vec![],
+    );
+    let p = platform(config(&scratch, "http://127.0.0.1:1", 2), model);
+    let leaky = IssueInput {
+        body: format!("It fails when I set GITHUB_TOKEN={token} and add a fourth item."),
+        ..issue()
+    };
+
+    run_issue(Arc::clone(&p), leaky, CancellationToken::new())
+        .await
+        .unwrap();
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    assert_eq!(
+        record.secrets_redacted, 2,
+        "one in the issue, one in the opened file"
+    );
+    for request in p.provider.requests.lock().unwrap().iter() {
+        let sent = serde_json::to_string(&request.messages).unwrap() + &request.system.concat();
+        assert!(!sent.contains(&token), "the token reached the model");
+    }
+}

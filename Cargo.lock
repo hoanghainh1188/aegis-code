@@ -9,6 +9,7 @@ dependencies = [
  "aegis-lang",
  "aegis-orchestrator",
  "aegis-provider",
+ "regex",
  "rmcp",
  "serde",
  "serde_json",

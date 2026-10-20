@@ -174,6 +174,11 @@ pub enum LedgerEvent {
         cost_usd: f64,
     },
     GateRun(GateRun),
+    /// Secret values hidden from the model in tool output or input text
+    /// (design §7).
+    SecretsRedacted {
+        count: u32,
+    },
     Finished {
         outcome: Outcome,
         wall_time_s: f64,
@@ -186,7 +191,7 @@ impl LedgerEvent {
     /// event could not be read back, so stores refuse such events.
     pub(crate) fn ensure_finite(&self) -> Result<(), LedgerError> {
         let fields: &[(&'static str, f64)] = match self {
-            Self::Classified { .. } => &[],
+            Self::Classified { .. } | Self::SecretsRedacted { .. } => &[],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
             Self::Finished { wall_time_s, .. } => &[("wall_time_s", *wall_time_s)],
@@ -225,6 +230,9 @@ pub struct IssueRecord {
     pub gate_runs: Vec<GateRun>,
     pub wall_time_s: Option<f64>,
     pub review: Option<Review>,
+    /// Secret values hidden from the model during the run.
+    #[serde(default)]
+    pub secrets_redacted: u32,
 }
 
 impl IssueRecord {
@@ -240,6 +248,7 @@ impl IssueRecord {
             gate_runs: Vec::new(),
             wall_time_s: None,
             review: None,
+            secrets_redacted: 0,
         }
     }
 
@@ -270,6 +279,9 @@ impl IssueRecord {
                 self.cost_usd += cost_usd;
             }
             LedgerEvent::GateRun(run) => self.gate_runs.push(run.clone()),
+            LedgerEvent::SecretsRedacted { count } => {
+                self.secrets_redacted = self.secrets_redacted.saturating_add(*count);
+            }
             LedgerEvent::Finished {
                 outcome,
                 wall_time_s,

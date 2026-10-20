@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aegis_aci::{Workspace, load_or_create_summary};
+use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{CancelToken, GateReport, GateRequest, StepName, StepStatus, run_gate};
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
@@ -145,6 +145,16 @@ where
     if cancel.is_cancelled() {
         return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
     }
+    // Issue text goes to the model too (design §7).
+    let (title, body) = (redact(&issue.title), redact(&issue.body));
+    ledger
+        .secrets_redacted(count(title.count() + body.count()))
+        .await?;
+    let issue = &IssueInput {
+        title: title.text,
+        body: body.text,
+        ..issue.clone()
+    };
     let (class, response) = light::classify(&platform.provider, &cfg.models.light, issue).await;
     if let Some(r) = &response {
         ledger
@@ -363,6 +373,25 @@ fn last_reply(session: &Session) -> String {
         .unwrap_or_default()
 }
 
+fn count(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// Values the ACI server hid in the tool results of `messages`.
+fn hidden_in_tool_results(messages: &[Message]) -> u32 {
+    let n = messages
+        .iter()
+        .flat_map(|m| &m.content)
+        .filter_map(|b| match b {
+            ContentBlock::ToolResult { content, .. } => {
+                Some(content.matches(REDACTED_MARKER).count())
+            }
+            _ => None,
+        })
+        .sum();
+    count(n)
+}
+
 fn gate_run(report: &GateReport, took: Duration) -> GateRun {
     GateRun {
         passed: report.passed(),
@@ -414,6 +443,7 @@ where
             budget = budget.with_first_call_estimate(dearest_call_usd * 3.0);
         }
         let check = JobCheck::new(budget, router, cancel.clone());
+        let seen = session.messages().len();
         let model = model_spec(cfg, tier);
         let outcome = run_loop(
             &platform.provider,
@@ -435,6 +465,9 @@ where
         }
         router = after_edits;
         session = outcome.session;
+        ledger
+            .secrets_redacted(hidden_in_tool_results(&session.messages()[seen..]))
+            .await?;
 
         let reply = match outcome.end {
             LoopEnd::ProviderFailed(e) => {
@@ -539,8 +572,10 @@ where
         if cancel.is_cancelled() {
             return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
         }
+        let gate_text = redact(&report.to_string());
+        ledger.secrets_redacted(count(gate_text.count())).await?;
         let (summary, response) =
-            light::summarize_gate(&platform.provider, &cfg.models.light, &report.to_string()).await;
+            light::summarize_gate(&platform.provider, &cfg.models.light, &gate_text.text).await;
         if let Some(r) = &response {
             ledger
                 .model_call(Tier::Light, &cfg.models.light.id, &r.usage)
