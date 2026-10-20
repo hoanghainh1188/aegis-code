@@ -45,12 +45,20 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    env:
+      # Fixture tests of the language profiles must run, not skip.
+      AEGIS_REQUIRE_PROFILE_TOOLS: "1"
     steps:
       - uses: actions/checkout@v4
       # aegis-lang's fixture test runs the Rust profile's gate (rustfmt, clippy).
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python profile tools
+        run: python -m pip install ruff==0.17.1 pytest==9.1.1 pytest-cov==7.1.0
       - uses: Swatinem/rust-cache@v2
       - name: test (workspace)
         run: cargo test --workspace
@@ -76,11 +84,18 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
+    env:
+      AEGIS_REQUIRE_PROFILE_TOOLS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview, rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python profile tools
+        run: python -m pip install ruff==0.17.1 pytest==9.1.1 pytest-cov==7.1.0
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:

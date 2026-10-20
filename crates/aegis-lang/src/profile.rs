@@ -104,6 +104,10 @@ pub struct Dependencies {
     pub official_source: String,
     /// Fetch command, run in its own container before the gate (#66).
     pub fetch: Option<CommandTemplate>,
+    /// Advisory and license audit of one lockfile, with `{lockfile}` and
+    /// optionally `{licenses}`. Needs network (license data from deps.dev),
+    /// so it runs with the fetch step (#66), not in the offline gate.
+    pub audit: Option<CommandTemplate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -170,6 +174,9 @@ impl Profile {
         if let Some(c) = &self.dependencies.fetch {
             field("dependencies.fetch", c, &[], &[])?;
         }
+        if let Some(c) = &self.dependencies.audit {
+            check_audit(c).map_err(|e| format!("dependencies.audit: {e}"))?;
+        }
         if self.dependencies.official_source.trim().is_empty() {
             return Err("dependencies.official_source must not be empty".into());
         }
@@ -225,6 +232,13 @@ pub(crate) fn check_repo_path(path: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn check_audit(c: &CommandTemplate) -> Result<(), String> {
+    c.check_placeholders(
+        &[Placeholder::Lockfile, Placeholder::Licenses],
+        &[Placeholder::Lockfile],
+    )
 }
 
 pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {

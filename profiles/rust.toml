@@ -32,6 +32,7 @@ manifests = ["Cargo.toml"]
 lockfiles = ["Cargo.lock"]
 official_source = "registry+https://github.com/rust-lang/crates.io-index"
 fetch = ["cargo", "fetch", "--locked"]
+# Rust kiểm advisory + license bằng `cargo deny` với policies/deny.toml (#12, #11).
 
 [sandbox]
 image = "aegis-sandbox-rust"

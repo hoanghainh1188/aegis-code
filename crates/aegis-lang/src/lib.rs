@@ -13,6 +13,7 @@ mod error;
 mod language;
 mod lockfile;
 mod profile;
+mod python_lock;
 mod resolve;
 mod symbols;
 mod syntax;

@@ -15,15 +15,21 @@ pub enum Placeholder {
     File,
     /// Name or path of the reproduction test (`gate.repro_test`).
     Test,
+    /// Lockfile being audited (`dependencies.audit`).
+    Lockfile,
+    /// Allowed licenses, comma-separated (`dependencies.audit`).
+    Licenses,
 }
 
 impl Placeholder {
-    const ALL: [Self; 2] = [Self::File, Self::Test];
+    const ALL: [Self; 4] = [Self::File, Self::Test, Self::Lockfile, Self::Licenses];
 
     pub fn token(self) -> &'static str {
         match self {
             Self::File => "{file}",
             Self::Test => "{test}",
+            Self::Lockfile => "{lockfile}",
+            Self::Licenses => "{licenses}",
         }
     }
 
@@ -31,6 +37,8 @@ impl Placeholder {
         match self {
             Self::File => "file",
             Self::Test => "test",
+            Self::Lockfile => "lockfile",
+            Self::Licenses => "licenses",
         }
     }
 
