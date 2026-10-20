@@ -1,0 +1,40 @@
+# Language profile Python (ADR 0004, #63, #65). Lệnh là mảng argv, không qua
+# shell. Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test.
+# RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
+
+language = "python"
+display_name = "Python"
+
+[detect]
+markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt"]
+extensions = ["py", "pyi"]
+
+[aci]
+lsp = ["basedpyright-langserver", "--stdio"]
+
+[edit]
+format = ["ruff", "format", "{file}"]
+
+[gate]
+format = ["ruff", "format", "--check", "."]
+lint = ["ruff", "check", "."]
+repro_test = ["python", "-m", "pytest", "{test}"]
+test = ["python", "-m", "pytest"]
+coverage = ["python", "-m", "pytest", "--cov", "--cov-report=xml:coverage.xml"]
+
+[coverage]
+format = "cobertura"
+path = "coverage.xml"
+
+[dependencies]
+manifests = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt"]
+lockfiles = ["uv.lock", "poetry.lock", "requirements*.txt"]
+official_source = "https://pypi.org/simple"
+fetch = ["uv", "sync", "--frozen"]
+
+[sandbox]
+image = "aegis-sandbox-python"
+cache_dirs = [".venv", "/root/.cache/uv"]
+
+[sonar.properties]
+"sonar.python.coverage.reportPaths" = "coverage.xml"

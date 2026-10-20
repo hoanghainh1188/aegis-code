@@ -24,6 +24,7 @@ allow = [
     "MIT-0",
     "Unicode-3.0",
     "Unlicense",
+    "Zlib",
 ]
 confidence-threshold = 0.9
 
@@ -36,12 +37,10 @@ multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
 
-# Độ ổn định byte của prompt (prompt cache) dựa vào `serde_json::Map` là
-# `BTreeMap`. `preserve_order` đổi nó thành `IndexMap`; feature unification
-# sẽ âm thầm đổi thứ tự key trong binary cuối (#20).
-[[bans.features]]
-crate = "serde_json"
-deny = ["preserve_order"]
+# `serde_json/preserve_order` (#20) không chặn ở đây: cargo deny không phân
+# biệt build-dependency, mà tree-sitter bật feature này trong build.rs, vốn
+# được resolve riêng và không vào binary. Thứ tự key lúc chạy được giữ bằng
+# test `serde_json_map_keeps_keys_sorted` trong aegis-provider.
 
 [sources]
 unknown-registry = "deny"

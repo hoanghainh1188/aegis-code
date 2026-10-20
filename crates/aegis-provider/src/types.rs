@@ -204,6 +204,21 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The prompt cache relies on `serde_json::Map` being a `BTreeMap`
+    /// (design §4.4). `cargo test --workspace` unifies the normal-dependency
+    /// features of every member, so any crate turning on `preserve_order`
+    /// makes this fail (#20). Build-dependencies are resolved separately and
+    /// do not affect it.
+    #[test]
+    fn serde_json_map_keeps_keys_sorted() {
+        let value: Value =
+            serde_json::from_str(r#"{"b": 1, "a": 2, "c": {"z": 0, "y": 1}}"#).unwrap();
+        assert_eq!(
+            serde_json::to_string(&value).unwrap(),
+            r#"{"a":2,"b":1,"c":{"y":1,"z":0}}"#
+        );
+    }
+
     #[test]
     fn response_decodes_usage_and_skips_unknown_blocks() {
         let raw = json!({
