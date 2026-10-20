@@ -11,18 +11,22 @@ mod command;
 mod deps;
 mod error;
 mod language;
+mod lockfile;
 mod profile;
 mod resolve;
+mod symbols;
 mod syntax;
 
 pub use command::{CommandTemplate, Placeholder};
 pub use deps::{DependencyViolation, LockedDependency, ViolationKind, new_dependency_violations};
 pub use error::LangError;
 pub use language::Language;
+pub use lockfile::{AllowList, read_lockfile};
 pub use profile::{
     Coverage, CoverageFormat, Dependencies, Detect, GateSteps, Profile, Profiles, Sandbox,
 };
 pub use resolve::{
     GateOverrides, GatePlan, ProfileOverrides, ResolvedProfile, SkipReason, Step, StepOverride,
 };
+pub use symbols::{Symbol, SymbolKind, has_symbol_query, symbols};
 pub use syntax::{MAX_SOURCE_BYTES, SyntaxError, has_grammar, syntax_errors};

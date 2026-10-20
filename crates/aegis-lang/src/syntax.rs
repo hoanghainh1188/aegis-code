@@ -18,7 +18,7 @@ pub struct SyntaxError {
     pub missing: bool,
 }
 
-fn grammar(language: Language) -> Option<tree_sitter::Language> {
+pub(crate) fn grammar(language: Language) -> Option<tree_sitter::Language> {
     match language {
         Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
         Language::Python => Some(tree_sitter_python::LANGUAGE.into()),

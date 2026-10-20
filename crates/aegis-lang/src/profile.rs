@@ -250,7 +250,7 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
 }
 
 /// `*` matches any run of characters; everything else is literal.
-fn glob_match(pattern: &str, name: &str) -> bool {
+pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
     match pattern.split_once('*') {
         None => pattern == name,
         Some((head, tail)) => {

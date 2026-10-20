@@ -1,0 +1,12 @@
+# Repo mẫu cho profile Rust (#64): ACI và gate chạy trên đây chỉ qua profile.
+# Không phải thành viên workspace của aegis-code; `[workspace]` rỗng để cargo
+# coi đây là gốc riêng.
+[package]
+name = "fixture-rust"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+
+[workspace]
