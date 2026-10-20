@@ -38,7 +38,7 @@ Nếu vòng lặp tự làm chậm tiến độ PoC: chương trình Rust gọi 
 - Tự chịu trách nhiệm phần vòng lặp, retry, streaming, đặt `cache_control`, thu gọn lịch sử.
 - Kiểm soát hoàn toàn bố cục prompt và điểm ngắt cache → dễ đạt KPI tỉ lệ đọc cache ≥ 70%.
 - Không bị chặn khi SDK Python/TS đổi API; nhưng phải tự theo dõi thay đổi của Messages API.
-- Platform cùng ngôn ngữ với repo đích: team bảo trì dễ đóng góp, và có thể cho platform tự sửa chính nó.
+- Platform cùng ngôn ngữ với repo đích: team bảo trì dễ đóng góp, và có thể cho platform tự sửa chính nó. *(Xem lại ở [ADR 0004](0004-multi-language-profiles.md): repo đích có thể viết bằng ngôn ngữ khác; platform vẫn giữ Rust.)*
 
 ## Phương án đã cân nhắc
 
