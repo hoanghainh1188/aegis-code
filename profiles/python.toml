@@ -20,6 +20,7 @@ format = ["ruff", "format", "--check", "."]
 lint = ["ruff", "check", "."]
 repro_test = ["python", "-m", "pytest", "{test}"]
 test = ["python", "-m", "pytest"]
+test_output = "pytest"
 coverage = ["python", "-m", "pytest", "--cov", "--cov-report=xml:coverage.xml"]
 
 [coverage]

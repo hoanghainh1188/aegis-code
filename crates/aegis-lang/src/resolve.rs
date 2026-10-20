@@ -5,7 +5,9 @@
 use serde::Deserialize;
 
 use crate::profile::{check_audit, check_gate, check_image, check_repo_path};
-use crate::{CommandTemplate, Coverage, GateSteps, LangError, Language, Placeholder, Profile};
+use crate::{
+    CommandTemplate, Coverage, GateSteps, LangError, Language, Placeholder, Profile, TestOutput,
+};
 
 /// A command from the repo, or `false` to turn the step off.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -24,6 +26,8 @@ pub struct GateOverrides {
     pub repro_test: Option<StepOverride>,
     pub test: Option<StepOverride>,
     pub coverage: Option<StepOverride>,
+    /// Output format of an overridden `test` command.
+    pub test_output: Option<TestOutput>,
 }
 
 /// The language part of `RepoConfig` (#16, #24).
@@ -70,6 +74,7 @@ pub struct GatePlan {
     /// Never skipped: a gate without tests proves nothing.
     pub test: CommandTemplate,
     pub coverage: Step,
+    pub test_output: Option<TestOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +105,12 @@ impl Profile {
                 Step::Skipped(_) => return Err(invalid("gate.test cannot be turned off".into())),
             },
             coverage: step(&self.gate.coverage, &o.coverage).map_err(invalid)?,
+            // A repo's own test command may print differently: its format
+            // is used only when the repo names it.
+            test_output: match &o.test {
+                Some(StepOverride::Run(_)) => o.test_output,
+                _ => o.test_output.or(self.gate.test_output),
+            },
         };
         check_gate(&GateSteps {
             format: gate.format.command().cloned(),
@@ -108,6 +119,7 @@ impl Profile {
             repro_test: gate.repro_test.command().cloned(),
             test: gate.test.clone(),
             coverage: gate.coverage.command().cloned(),
+            test_output: gate.test_output,
         })
         .map_err(invalid)?;
 
