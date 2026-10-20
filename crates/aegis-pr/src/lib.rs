@@ -1,1 +1,64 @@
-//! PR writer: branch agent/<issue-id>, PR template, Golden Master allowed-change list (design §6.2, §6.4).
+//! Turns a gated patch into a pull request (design §2 steps 2, 7, 10;
+//! §6.4; §7): the commit holds exactly the tree the gate checked, on top
+//! of the base it was compared with, on the branch `agent/<issue-id>`,
+//! and the PR is opened in the agent's own fork.
+//!
+//! The token should only be allowed to push `agent/*` and open PRs (a
+//! ruleset on the fork protects every other branch); this crate also never
+//! pushes any other ref, and pushes only to the repo the PR is opened in
+//! ([`GitHub::remote`]).
+//!
+//! The PR's base branch must still point at the gate's base revision when
+//! the PR is opened; the lifecycle (#16) checks that before calling.
+
+mod body;
+mod branch;
+mod commit_message;
+mod coverage;
+mod error;
+mod git;
+mod github;
+
+use std::path::Path;
+
+use aegis_gate::GateReport;
+
+pub use body::{AllowedTestChange, ChangeNote, Cost, PrContent, gate_line, inert, render};
+pub use branch::AgentBranch;
+pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};
+pub use coverage::{cobertura_percent, lcov_percent};
+pub use error::PrError;
+pub use git::{Identity, Remote};
+pub use github::{GitHub, PullRequest};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pushed {
+    pub branch: AgentBranch,
+    pub commit: String,
+}
+
+/// Commits the tree the gate passed and pushes it to `agent/<issue_id>`.
+pub fn push_gated(
+    repo: &Path,
+    issue_id: &str,
+    gate: &GateReport,
+    message: &str,
+    who: &Identity,
+    remote: &Remote,
+) -> Result<Pushed, PrError> {
+    if !gate.passed() {
+        return Err(PrError::GateNotPassed);
+    }
+    let branch = AgentBranch::for_issue(issue_id)?;
+    let staging = git::Staging::new(repo)?;
+    let commit = git::commit_tree(&staging, &gate.tree, &gate.base, message, who)?;
+    git::push(&staging, remote, &branch, &commit)?;
+    Ok(Pushed { branch, commit })
+}
+
+/// Deletes the agent's branch when it stops, only while the branch still
+/// holds the commit the agent pushed.
+pub fn abandon(repo: &Path, pushed: &Pushed, remote: &Remote) -> Result<(), PrError> {
+    let staging = git::Staging::new(repo)?;
+    git::delete(&staging, remote, &pushed.branch, &pushed.commit)
+}

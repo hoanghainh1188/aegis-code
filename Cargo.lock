@@ -76,6 +76,18 @@ dependencies = [
 [[package]]
 name = "aegis-pr"
 version = "0.1.0"
+dependencies = [
+ "aegis-gate",
+ "aegis-lang",
+ "aegis-provider",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "toml",
+ "wiremock",
+]
 
 [[package]]
 name = "aegis-provider"
