@@ -211,7 +211,8 @@ mod tests {
     /// do not affect it.
     #[test]
     fn serde_json_map_keeps_keys_sorted() {
-        let value: Value = serde_json::from_str(r#"{"b": 1, "a": 2, "c": {"z": 0, "y": 1}}"#).unwrap();
+        let value: Value =
+            serde_json::from_str(r#"{"b": 1, "a": 2, "c": {"z": 0, "y": 1}}"#).unwrap();
         assert_eq!(
             serde_json::to_string(&value).unwrap(),
             r#"{"a":2,"b":1,"c":{"y":1,"z":0}}"#
