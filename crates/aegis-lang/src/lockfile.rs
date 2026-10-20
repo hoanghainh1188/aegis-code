@@ -41,6 +41,7 @@ pub fn read_lockfile(
         (Language::Go, "go.mod") => go_lock::go_mod(text),
         (Language::TypeScript, "package-lock.json") => npm_lock::package_lock(text),
         (Language::Java, "pom.xml") => maven_lock::pom_xml(text),
+        (Language::Java, "extensions.xml") => maven_lock::maven_extensions(text),
         (Language::CSharp, "packages.lock.json") => nuget_lock::packages_lock(text),
         (Language::CSharp, name @ ("nuget.config" | "NuGet.Config")) => {
             nuget_lock::nuget_config(name, text)
