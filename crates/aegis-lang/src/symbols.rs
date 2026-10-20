@@ -3,16 +3,16 @@
 //! `@name` / `@definition.<kind>` convention.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
-use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Parser, QueryCursor, StreamingIterator};
 
-use crate::syntax::{MAX_SOURCE_BYTES, grammar};
+use crate::grammar::Grammar;
+use crate::syntax::MAX_SOURCE_BYTES;
 use crate::{LangError, Language};
 
 /// Nodes that wrap a definition with its decorators; the symbol's range
 /// starts at the wrapper so `open` shows the decorators too.
-const WRAPPERS: &[&str] = &["decorated_definition"];
+const WRAPPERS: &[&str] = &["decorated_definition", "export_statement"];
 
 /// Longest signature returned; longer ones are cut with `…`.
 const MAX_SIGNATURE_CHARS: usize = 200;
@@ -80,18 +80,8 @@ pub struct Symbol {
     pub signature: String,
 }
 
-fn query_source(language: Language) -> Option<&'static str> {
-    match language {
-        Language::Rust => Some(include_str!("../../../profiles/queries/rust.scm")),
-        Language::Python => Some(include_str!("../../../profiles/queries/python.scm")),
-        Language::Go => Some(include_str!("../../../profiles/queries/go.scm")),
-        // Queries come with their profiles (#67, #68, #70).
-        Language::TypeScript | Language::Java | Language::CSharp => None,
-    }
-}
-
 pub fn has_symbol_query(language: Language) -> bool {
-    query_source(language).is_some() && grammar(language).is_some()
+    Grammar::for_file(language, None).is_some()
 }
 
 struct Found {
@@ -102,11 +92,21 @@ struct Found {
     explicit_container: Option<String>,
 }
 
-/// Definitions in `source`, in source order.
+/// Definitions in `source`, parsed with the language's main grammar.
 pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangError> {
+    symbols_in(language, None, source)
+}
+
+/// Definitions in `source`, with the grammar for `path`'s extension, in
+/// source order.
+pub fn symbols_in(
+    language: Language,
+    path: Option<&std::path::Path>,
+    source: &str,
+) -> Result<Vec<Symbol>, LangError> {
     let unsupported = || LangError::UnsupportedGrammar(language);
-    let grammar = grammar(language).ok_or_else(unsupported)?;
-    let query_text = query_source(language).ok_or_else(unsupported)?;
+    let chosen = Grammar::for_file(language, path).ok_or_else(unsupported)?;
+    let grammar = chosen.language();
     if source.len() > MAX_SOURCE_BYTES {
         return Err(LangError::SourceTooLarge {
             language,
@@ -114,7 +114,7 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
             limit: MAX_SOURCE_BYTES,
         });
     }
-    let query = compiled_query(language, &grammar, query_text)?;
+    let query = chosen.query(language)?;
     let mut parser = Parser::new();
     parser.set_language(&grammar).map_err(|_| unsupported())?;
     let tree = parser
@@ -196,29 +196,6 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
             }
         })
         .collect())
-}
-
-/// Queries compile once per language and are shared across threads.
-fn compiled_query(
-    language: Language,
-    grammar: &tree_sitter::Language,
-    text: &str,
-) -> Result<&'static Query, LangError> {
-    static RUST: OnceLock<Result<Query, String>> = OnceLock::new();
-    static PYTHON: OnceLock<Result<Query, String>> = OnceLock::new();
-    static GO: OnceLock<Result<Query, String>> = OnceLock::new();
-    let cell = match language {
-        Language::Rust => &RUST,
-        Language::Python => &PYTHON,
-        Language::Go => &GO,
-        other => return Err(LangError::UnsupportedGrammar(other)),
-    };
-    cell.get_or_init(|| Query::new(grammar, text).map_err(|e| e.to_string()))
-        .as_ref()
-        .map_err(|message| LangError::InvalidQuery {
-            language,
-            message: message.clone(),
-        })
 }
 
 /// Type named by a receiver or parameter list, e.g. Go's `(c *Cart)` or
@@ -500,9 +477,108 @@ func New() *Cart { return &Cart{} }
         assert_eq!(total.container.as_deref(), Some("Priced"));
     }
 
+    const TS: &str = r#"export const MAX_ITEMS = 3;
+let counter = 0;
+
+export type Total = number;
+
+export interface Priced {
+  total(): Total;
+}
+
+export enum Color { Red, Blue }
+
+namespace Shop {
+  export function open(): void {}
+}
+
+export abstract class Base {
+  abstract describe(): string;
+}
+
+export class Cart extends Base implements Priced {
+  private items: number[] = [];
+  add(price: number): void { this.items.push(price); }
+  total(): Total { return 0; }
+  describe(): string { return "cart"; }
+}
+
+export const cartOf = (...prices: number[]): Cart => new Cart();
+function* ids() { yield 1; }
+"#;
+
+    #[test]
+    fn finds_typescript_definitions() {
+        let all = symbols_in(
+            Language::TypeScript,
+            Some(std::path::Path::new("cart.ts")),
+            TS,
+        )
+        .unwrap();
+        let kinds = [
+            ("MAX_ITEMS", SymbolKind::Variable),
+            ("counter", SymbolKind::Variable),
+            ("Total", SymbolKind::TypeAlias),
+            ("Priced", SymbolKind::Interface),
+            ("Color", SymbolKind::Enum),
+            ("Shop", SymbolKind::Module),
+            ("Base", SymbolKind::Class),
+            ("Cart", SymbolKind::Class),
+            ("cartOf", SymbolKind::Function),
+            ("ids", SymbolKind::Function),
+        ];
+        for (name, kind) in kinds {
+            assert_eq!(find(&all, name).kind, kind, "{name}");
+        }
+        assert_eq!(find(&all, "open").container.as_deref(), Some("Shop"));
+        let cart = find(&all, "Cart");
+        assert_eq!(cart.start_line, 20, "starts at export");
+        assert_eq!(cart.signature, "class Cart extends Base implements Priced");
+    }
+
+    #[test]
+    fn typescript_methods_belong_to_classes_and_interfaces() {
+        let all = symbols(Language::TypeScript, TS).unwrap();
+        let containers = |name: &str| {
+            all.iter()
+                .filter(|s| s.name == name && s.kind == SymbolKind::Method)
+                .map(|s| s.container.as_deref())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(containers("total"), vec![Some("Priced"), Some("Cart")]);
+        assert_eq!(containers("describe"), vec![Some("Base"), Some("Cart")]);
+        assert_eq!(containers("add"), vec![Some("Cart")]);
+    }
+
+    #[test]
+    fn tsx_and_javascript_use_their_own_grammars() {
+        let tsx = "export const App = () => <div>{1}</div>;\n";
+        let all = symbols_in(
+            Language::TypeScript,
+            Some(std::path::Path::new("App.tsx")),
+            tsx,
+        )
+        .unwrap();
+        assert_eq!(find(&all, "App").kind, SymbolKind::Function);
+        let js = "class Cart { add(p) { return p; } }\nconst make = function () {};\n";
+        let all = symbols_in(
+            Language::TypeScript,
+            Some(std::path::Path::new("cart.js")),
+            js,
+        )
+        .unwrap();
+        assert_eq!(find(&all, "add").container.as_deref(), Some("Cart"));
+        assert_eq!(find(&all, "make").kind, SymbolKind::Function);
+    }
+
     #[test]
     fn languages_without_a_query_say_so() {
-        for language in [Language::Rust, Language::Python, Language::Go] {
+        for language in [
+            Language::Rust,
+            Language::Python,
+            Language::Go,
+            Language::TypeScript,
+        ] {
             assert!(has_symbol_query(language), "{language}");
         }
         assert!(!has_symbol_query(Language::Java));

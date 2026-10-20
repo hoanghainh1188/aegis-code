@@ -63,6 +63,10 @@ jobs:
         with:
           go-version: stable
           cache: false
+      # Node 24 runs the TypeScript fixture's tests without a build step.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - uses: Swatinem/rust-cache@v2
       - name: test (workspace)
         run: cargo test --workspace
@@ -104,6 +108,10 @@ jobs:
         with:
           go-version: stable
           cache: false
+      # Node 24 runs the TypeScript fixture's tests without a build step.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:

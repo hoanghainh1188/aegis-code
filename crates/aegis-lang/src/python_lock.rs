@@ -47,7 +47,7 @@ fn host(url: &str) -> Option<&str> {
 }
 
 /// Relative path that stays inside the repo.
-fn in_repo(path: &str) -> bool {
+pub(crate) fn in_repo(path: &str) -> bool {
     let p = std::path::Path::new(path);
     !path.is_empty()
         && !p.is_absolute()

@@ -1,0 +1,18 @@
+{
+  "name": "fixture-typescript",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Repo m\u1eabu cho profile TypeScript (#67): ACI v\u00e0 gate ch\u1ea1y tr\u00ean \u0111\u00e2y ch\u1ec9 qua profile.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "c8": "^10.1.3",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.2"
+  }
+}

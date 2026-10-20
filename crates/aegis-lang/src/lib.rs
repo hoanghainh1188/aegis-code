@@ -11,8 +11,10 @@ mod command;
 mod deps;
 mod error;
 mod go_lock;
+mod grammar;
 mod language;
 mod lockfile;
+mod npm_lock;
 mod profile;
 mod python_lock;
 mod resolve;
@@ -30,5 +32,5 @@ pub use profile::{
 pub use resolve::{
     GateOverrides, GatePlan, ProfileOverrides, ResolvedProfile, SkipReason, Step, StepOverride,
 };
-pub use symbols::{Symbol, SymbolKind, has_symbol_query, symbols};
-pub use syntax::{MAX_SOURCE_BYTES, SyntaxError, has_grammar, syntax_errors};
+pub use symbols::{Symbol, SymbolKind, has_symbol_query, symbols, symbols_in};
+pub use syntax::{MAX_SOURCE_BYTES, SyntaxError, has_grammar, syntax_errors, syntax_errors_in};

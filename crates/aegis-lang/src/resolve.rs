@@ -20,6 +20,7 @@ pub enum StepOverride {
 pub struct GateOverrides {
     pub format: Option<StepOverride>,
     pub lint: Option<StepOverride>,
+    pub typecheck: Option<StepOverride>,
     pub repro_test: Option<StepOverride>,
     pub test: Option<StepOverride>,
     pub coverage: Option<StepOverride>,
@@ -64,6 +65,7 @@ impl Step {
 pub struct GatePlan {
     pub format: Step,
     pub lint: Step,
+    pub typecheck: Step,
     pub repro_test: Step,
     /// Never skipped: a gate without tests proves nothing.
     pub test: CommandTemplate,
@@ -91,6 +93,7 @@ impl Profile {
         let gate = GatePlan {
             format: step(&self.gate.format, &o.format).map_err(invalid)?,
             lint: step(&self.gate.lint, &o.lint).map_err(invalid)?,
+            typecheck: step(&self.gate.typecheck, &o.typecheck).map_err(invalid)?,
             repro_test: step(&self.gate.repro_test, &o.repro_test).map_err(invalid)?,
             test: match step(&Some(self.gate.test.clone()), &o.test).map_err(invalid)? {
                 Step::Run(c) => c,
@@ -101,6 +104,7 @@ impl Profile {
         check_gate(&GateSteps {
             format: gate.format.command().cloned(),
             lint: gate.lint.command().cloned(),
+            typecheck: gate.typecheck.command().cloned(),
             repro_test: gate.repro_test.command().cloned(),
             test: gate.test.clone(),
             coverage: gate.coverage.command().cloned(),
