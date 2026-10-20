@@ -142,20 +142,18 @@ mod tests {
     }
 
     #[test]
-    fn languages_without_grammar_say_so() {
-        assert!(
-            [
-                Language::Rust,
-                Language::Python,
-                Language::Go,
-                Language::TypeScript
-            ]
-            .into_iter()
-            .all(has_grammar)
-        );
-        assert_eq!(
-            syntax_errors(Language::CSharp, "class A {}"),
-            Err(LangError::UnsupportedGrammar(Language::CSharp))
-        );
+    fn every_language_has_a_grammar() {
+        assert!(Language::ALL.into_iter().all(has_grammar));
+        for (language, broken) in [
+            (Language::TypeScript, "function f( {"),
+            (Language::Java, "class A { void f( }"),
+            (Language::CSharp, "class A { void F( }"),
+            (Language::Go, "package x\nfunc ( {"),
+        ] {
+            assert!(
+                !syntax_errors(language, broken).unwrap().is_empty(),
+                "{language}"
+            );
+        }
     }
 }

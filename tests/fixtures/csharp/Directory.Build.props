@@ -1,0 +1,6 @@
+<Project>
+  <!-- Repo mẫu cho profile C#/.NET (#70). Lockfile để gate so phụ thuộc. -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+</Project>

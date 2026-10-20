@@ -640,21 +640,71 @@ record Point(int x, int y) { int sum() { return x + y; } }
         assert_eq!(ctor.container.as_deref(), Some("Cart"));
     }
 
+    const CS: &str = r#"namespace Example.Shop
+{
+    public interface IPriced { int Total(); }
+    public enum Color { Red, Blue }
+    public record Point(int X, int Y);
+    public delegate void Changed(object sender);
+
+    public struct Money
+    {
+        public int Cents { get; init; }
+        public readonly int Dollars() => Cents / 100;
+    }
+
+    public class Cart : IPriced
+    {
+        public const int MaxItems = 3;
+        private readonly List<int> _items = new();
+        public Cart() { }
+        public int Count => _items.Count;
+        public int Total()
+        {
+            int Twice(int x) => x * 2;
+            return Twice(_items.Sum());
+        }
+    }
+}
+"#;
+
     #[test]
-    fn languages_without_a_query_say_so() {
-        for language in [
-            Language::Rust,
-            Language::Python,
-            Language::Go,
-            Language::TypeScript,
-            Language::Java,
-        ] {
+    fn finds_csharp_definitions_and_their_containers() {
+        let all = symbols(Language::CSharp, CS).unwrap();
+        let kinds = [
+            ("Example.Shop", SymbolKind::Module),
+            ("IPriced", SymbolKind::Interface),
+            ("Color", SymbolKind::Enum),
+            ("Point", SymbolKind::Class),
+            ("Changed", SymbolKind::TypeAlias),
+            ("Money", SymbolKind::Struct),
+            ("MaxItems", SymbolKind::Variable),
+            ("_items", SymbolKind::Variable),
+            ("Count", SymbolKind::Variable),
+            ("Twice", SymbolKind::Function),
+        ];
+        for (name, kind) in kinds {
+            assert_eq!(find(&all, name).kind, kind, "{name}");
+        }
+        let method = |name: &str| {
+            all.iter()
+                .filter(|s| s.name == name && s.kind == SymbolKind::Method)
+                .map(|s| s.container.as_deref())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(method("Total"), vec![Some("IPriced"), Some("Cart")]);
+        assert_eq!(method("Dollars"), vec![Some("Money")]);
+        assert_eq!(method("Cart"), vec![Some("Cart")], "constructor");
+        assert_eq!(
+            find(&all, "Cart").container.as_deref(),
+            Some("Example.Shop")
+        );
+    }
+
+    #[test]
+    fn every_language_has_a_symbol_query() {
+        for language in Language::ALL {
             assert!(has_symbol_query(language), "{language}");
         }
-        assert!(!has_symbol_query(Language::CSharp));
-        assert_eq!(
-            symbols(Language::CSharp, "class A {}"),
-            Err(LangError::UnsupportedGrammar(Language::CSharp))
-        );
     }
 }

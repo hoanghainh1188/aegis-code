@@ -1,0 +1,58 @@
+# Language profile C# / .NET (ADR 0004, #70). Lệnh là mảng argv, không qua
+# shell. Gate chạy không mạng nên mọi lệnh sau `dotnet restore` có
+# `--no-restore`.
+# Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test (biểu thức
+# `--filter` của `dotnet test`, ví dụ FullyQualifiedName~CartTests.Adds),
+# `{lockfile}` / `{licenses}` ở audit.
+# RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
+#
+# Sonar với .NET khác các profile khác: SonarScanner for .NET chạy quanh bước
+# build (`begin` → `dotnet build` → `end`), gate gộp bước Sonar vào build (#11).
+
+language = "csharp"
+display_name = "C# / .NET"
+
+[detect]
+markers = ["*.sln", "*.slnx", "*.csproj", "Directory.Build.props", "global.json"]
+extensions = ["cs"]
+
+[aci]
+lsp = ["csharp-ls"]
+
+[edit]
+format = ["dotnet", "format", "whitespace", "--folder", "--include", "{file}"]
+
+[gate]
+format = ["dotnet", "format", "--verify-no-changes", "--no-restore"]
+# Cảnh báo của Roslyn analyzers là lỗi.
+lint = ["dotnet", "build", "--no-restore", "-warnaserror"]
+repro_test = ["dotnet", "test", "--no-restore", "--filter", "{test}"]
+test = ["dotnet", "test", "--no-restore"]
+coverage = [
+    "dotnet", "test", "--no-restore",
+    "--results-directory", "TestResults",
+    "--collect", "XPlat Code Coverage;Format=opencover",
+]
+
+# SonarQube C# không đọc Cobertura; coverlet xuất OpenCover vào một thư mục
+# GUID, nên đường dẫn có `*`.
+[coverage]
+format = "open_cover"
+path = "TestResults/*/coverage.opencover.xml"
+
+[dependencies]
+manifests = ["*.csproj", "Directory.Packages.props", "Directory.Build.props", "nuget.config", "NuGet.Config", "global.json"]
+# packages.lock.json khi repo bật RestorePackagesWithLockFile; không thì
+# PackageReference trong *.csproj (cây đã resolve là #80). nuget.config cho
+# biết package lấy từ đâu.
+lockfiles = ["packages.lock.json", "*.csproj", "Directory.Packages.props", "nuget.config", "NuGet.Config"]
+official_source = "https://api.nuget.org/v3/index.json"
+fetch = ["dotnet", "restore"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+
+[sandbox]
+image = "aegis-sandbox-dotnet"
+cache_dirs = ["bin", "obj", "/root/.nuget/packages"]
+
+[sonar.properties]
+"sonar.cs.opencover.reportsPaths" = "TestResults/*/coverage.opencover.xml"
