@@ -499,3 +499,19 @@ fn repro_files_must_be_regular_files_in_the_repo() {
         );
     }
 }
+
+#[test]
+fn the_log_keeps_the_order_of_stdout_and_stderr() {
+    let mixed = profile(
+        Language::Rust,
+        "[gate]\nformat = [\"sh\", \"-c\", \"for i in 1 2 3 4 5; do echo out$i; echo err$i >&2; done; exit 1\"]\n",
+    );
+    let repo = Repo::new("rust", &[]);
+    let report = repo.gate(&mixed, None);
+    let format = report.step(StepName::Format).unwrap();
+    let expected: Vec<String> = (1..=5)
+        .flat_map(|i| [format!("out{i}"), format!("err{i}")])
+        .collect();
+    let lines: Vec<&str> = format.detail.lines().skip(2).collect();
+    assert_eq!(lines, expected, "{}", format.detail);
+}
