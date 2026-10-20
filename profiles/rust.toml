@@ -20,7 +20,8 @@ format = ["rustfmt", "--edition", "2021", "{file}"]
 format = ["cargo", "fmt", "--all", "--check"]
 lint = ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
 repro_test = ["cargo", "test", "--workspace", "--", "--exact", "{test}"]
-test = ["cargo", "test", "--workspace"]
+test = ["cargo", "test", "--workspace", "--no-fail-fast"]
+test_output = "libtest"
 coverage = ["cargo", "llvm-cov", "--workspace", "--lcov", "--output-path", "lcov.info"]
 
 [coverage]

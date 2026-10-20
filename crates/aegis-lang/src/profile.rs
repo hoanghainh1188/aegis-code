@@ -93,6 +93,20 @@ pub struct GateSteps {
     pub repro_test: Option<CommandTemplate>,
     pub test: CommandTemplate,
     pub coverage: Option<CommandTemplate>,
+    /// How `test` reports failing tests, so the gate can compare them with
+    /// the base branch. Without it only the exit code is compared.
+    #[serde(default)]
+    pub test_output: Option<TestOutput>,
+}
+
+/// Test runner output the gate can read failing test names from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestOutput {
+    /// Rust's built-in harness: `test name ... FAILED`.
+    Libtest,
+    /// pytest's short summary: `FAILED path::name`.
+    Pytest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -455,7 +469,11 @@ mod tests {
     #[test]
     fn rust_profile_matches_the_design() {
         let rust = builtin().get(Language::Rust).unwrap().clone();
-        assert_eq!(rust.gate.test.argv(), ["cargo", "test", "--workspace"]);
+        assert_eq!(
+            rust.gate.test.argv(),
+            ["cargo", "test", "--workspace", "--no-fail-fast"]
+        );
+        assert_eq!(rust.gate.test_output, Some(TestOutput::Libtest));
         assert!(
             rust.gate
                 .repro_test
@@ -638,7 +656,7 @@ mod tests {
         );
         rejects(
             &t.replace(
-                "[\"cargo\", \"test\", \"--workspace\"]",
+                "[\"cargo\", \"test\", \"--workspace\", \"--no-fail-fast\"]",
                 "[\"cargo\", \"test\", \"{file}\"]",
             ),
             "gate.test",
@@ -666,7 +684,10 @@ mod tests {
         );
         rejects(&format!("{t}\n[extra]\nx = 1\n"), "unknown field");
         rejects(
-            &t.replace("test = [\"cargo\", \"test\", \"--workspace\"]\n", ""),
+            &t.replace(
+                "test = [\"cargo\", \"test\", \"--workspace\", \"--no-fail-fast\"]\n",
+                "",
+            ),
             "missing field `test`",
         );
     }

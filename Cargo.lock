@@ -24,6 +24,12 @@ version = "0.1.0"
 [[package]]
 name = "aegis-gate"
 version = "0.1.0"
+dependencies = [
+ "aegis-lang",
+ "libc",
+ "thiserror",
+ "toml",
+]
 
 [[package]]
 name = "aegis-lang"
