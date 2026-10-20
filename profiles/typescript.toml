@@ -40,6 +40,14 @@ lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
 official_source = "https://registry.npmjs.org"
 fetch = ["npm", "ci", "--ignore-scripts"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+# Bản vá chạm vào là bị chặn (#83): .npmrc đổi registry mà lockfile vẫn
+# ghi registry.npmjs.org.
+protected = [
+    ".npmrc",
+    ".yarnrc",
+    ".yarnrc.yml",
+    ".pnpmfile.cjs",
+]
 
 [sandbox]
 image = "aegis-sandbox-node"

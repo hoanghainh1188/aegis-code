@@ -36,6 +36,13 @@ lockfiles = ["go.mod", "go.sum"]
 official_source = "proxy.golang.org"
 fetch = ["go", "mod", "download"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+# Bản vá chạm vào là bị chặn (#83): go.work ghi đè replace của go.mod;
+# vendor/ được build thay cho module tải về, không kiểm hash.
+protected = [
+    "go.work",
+    "go.work.sum",
+    "vendor/**",
+]
 
 [sandbox]
 image = "aegis-sandbox-go"

@@ -41,14 +41,17 @@ format = "open_cover"
 path = "TestResults/*/coverage.opencover.xml"
 
 [dependencies]
-manifests = ["*.csproj", "Directory.Packages.props", "Directory.Build.props", "nuget.config", "NuGet.Config", "global.json"]
+manifests = ["*.csproj", "*.fsproj", "*.vbproj", "*.proj", "*.props", "*.targets", "nuget.config", "global.json", "dotnet-tools.json"]
 # packages.lock.json khi repo bật RestorePackagesWithLockFile; không thì
-# PackageReference trong *.csproj (cây đã resolve là #80). nuget.config cho
-# biết package lấy từ đâu.
-lockfiles = ["packages.lock.json", "*.csproj", "Directory.Packages.props", "nuget.config", "NuGet.Config"]
+# PackageReference trong mọi file MSBuild (cây đã resolve là #80).
+# nuget.config cho biết package lấy từ đâu; global.json và dotnet-tools.json
+# cho SDK và tool tải từ NuGet. Tên file so không phân biệt hoa thường.
+lockfiles = ["packages.lock.json", "*.csproj", "*.fsproj", "*.vbproj", "*.proj", "*.props", "*.targets", "nuget.config", "global.json", "dotnet-tools.json"]
 official_source = "https://api.nuget.org/v3/index.json"
 fetch = ["dotnet", "restore"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+# Bản vá chạm vào là bị chặn (#83): response file thêm tham số MSBuild.
+protected = ["Directory.Build.rsp", "*.rsp"]
 
 [sandbox]
 image = "aegis-sandbox-dotnet"

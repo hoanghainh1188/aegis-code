@@ -49,6 +49,10 @@ impl Workspace {
     }
 
     pub fn run(&self, argv: &[String]) -> Output {
+        // Some runners point XDG_RUNTIME_DIR at a directory that does not
+        // exist; NuGet keeps its shared-memory locks there.
+        let runtime = self.root.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
         let mut cmd = Command::new(&argv[0]);
         cmd.args(&argv[1..])
             .current_dir(self.repo())
@@ -59,7 +63,8 @@ impl Workspace {
             // English, quiet output from the .NET CLI.
             .env("DOTNET_CLI_UI_LANGUAGE", "en")
             .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
-            .env("DOTNET_NOLOGO", "1");
+            .env("DOTNET_NOLOGO", "1")
+            .env("XDG_RUNTIME_DIR", &runtime);
         for var in INHERITED {
             cmd.env_remove(var);
         }

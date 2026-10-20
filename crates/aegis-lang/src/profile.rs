@@ -123,6 +123,12 @@ pub struct Dependencies {
     pub official_source: String,
     /// Fetch command, run in its own container before the gate (#66).
     pub fetch: Option<CommandTemplate>,
+    /// Build configuration the readers cannot check (e.g. `.npmrc`,
+    /// `.cargo/config.toml`, `go.work`) that can change where dependencies
+    /// come from or run code at build time. A patch that touches one is
+    /// blocked (#83). Patterns as [`Profile::protected_changes`] matches them.
+    #[serde(default)]
+    pub protected: Vec<String>,
     /// Advisory and license audit of one lockfile, with `{lockfile}` and
     /// optionally `{licenses}`. Needs network (license data from deps.dev),
     /// so it runs with the fetch step (#66), not in the offline gate.
@@ -196,6 +202,16 @@ impl Profile {
         if let Some(c) = &self.dependencies.audit {
             check_audit(c).map_err(|e| format!("dependencies.audit: {e}"))?;
         }
+        if let Some(bad) = self
+            .dependencies
+            .protected
+            .iter()
+            .find(|p| p.is_empty() || p.contains(".."))
+        {
+            return Err(format!(
+                "protected pattern `{bad}` must be non-empty and without `..`"
+            ));
+        }
         if self.dependencies.official_source.trim().is_empty() {
             return Err("dependencies.official_source must not be empty".into());
         }
@@ -208,6 +224,23 @@ impl Profile {
             check_repo_path(&c.path).map_err(|e| format!("coverage.path: {e}"))?;
         }
         Ok(())
+    }
+
+    /// Changed paths that match a `dependencies.protected` pattern, ignoring
+    /// case (over-matching only blocks more). A
+    /// pattern without `/` matches a file name in any directory; one with
+    /// `/` matches the whole path from the repo root, `**` standing for any
+    /// number of directories.
+    pub fn protected_changes<P: AsRef<Path>>(&self, changed: &[P]) -> Vec<String> {
+        changed
+            .iter()
+            .map(|p| p.as_ref().to_string_lossy().replace('\\', "/"))
+            .filter(|path| {
+                self.dependencies.protected.iter().any(|pattern| {
+                    path_glob(&pattern.to_ascii_lowercase(), &path.to_ascii_lowercase())
+                })
+            })
+            .collect()
     }
 
     /// Whether `path` is a source file of this language, by extension
@@ -281,6 +314,29 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
             .map_err(|e| format!("gate.repro_test: {e}"))?;
     }
     Ok(())
+}
+
+/// Path pattern for [`Profile::protected_changes`].
+pub(crate) fn path_glob(pattern: &str, path: &str) -> bool {
+    fn segments(pattern: &[&str], path: &[&str]) -> bool {
+        match pattern.split_first() {
+            None => path.is_empty(),
+            Some((&"**", rest)) => (0..=path.len()).any(|i| segments(rest, &path[i..])),
+            Some((seg, rest)) => path
+                .split_first()
+                .is_some_and(|(head, tail)| glob_match(seg, head) && segments(rest, tail)),
+        }
+    }
+    let path = path.trim_start_matches("./");
+    if !pattern.contains('/') {
+        return path
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| glob_match(pattern, name));
+    }
+    let pattern: Vec<&str> = pattern.split('/').collect();
+    let path: Vec<&str> = path.split('/').collect();
+    segments(&pattern, &path)
 }
 
 /// `*` matches any run of characters; everything else is literal.
@@ -446,6 +502,111 @@ mod tests {
             Some(Language::Python)
         );
         assert_eq!(p.language_of(Path::new("Makefile")), None);
+    }
+
+    #[test]
+    fn path_glob_matches_names_anywhere_and_rooted_paths() {
+        assert!(path_glob(".npmrc", ".npmrc"));
+        assert!(path_glob(".npmrc", "packages/app/.npmrc"));
+        assert!(path_glob(".cargo/config.toml", ".cargo/config.toml"));
+        assert!(!path_glob(
+            ".cargo/config.toml",
+            "crates/a/.cargo/config.toml"
+        ));
+        assert!(path_glob(
+            "**/.cargo/config.toml",
+            "crates/a/.cargo/config.toml"
+        ));
+        assert!(path_glob("vendor/**", "vendor/github.com/a/b/x.go"));
+        assert!(path_glob("vendor/**", "./vendor/modules.txt"));
+        assert!(!path_glob("vendor/**", "src/vendor.go"));
+        assert!(path_glob(
+            "gradle/wrapper/*",
+            "gradle/wrapper/gradle-wrapper.jar"
+        ));
+    }
+
+    #[test]
+    fn every_profile_protects_build_configuration_it_cannot_read() {
+        let p = builtin();
+        let cases: &[(Language, &[&str], &[&str])] = &[
+            (
+                Language::Rust,
+                &[
+                    ".cargo/config.toml",
+                    "crates/a/.cargo/config",
+                    "rust-toolchain.toml",
+                ],
+                &["src/lib.rs", "Cargo.toml"],
+            ),
+            (
+                Language::Python,
+                &["pip.conf", "uv.toml"],
+                &["pyproject.toml", "app/main.py"],
+            ),
+            (
+                Language::Go,
+                &[
+                    "go.work",
+                    "go.work.sum",
+                    "vendor/modules.txt",
+                    "vendor/github.com/a/b/x.go",
+                ],
+                &["go.mod", "cmd/vendor.go"],
+            ),
+            (
+                Language::TypeScript,
+                &[
+                    ".npmrc",
+                    "packages/app/.npmrc",
+                    ".yarnrc.yml",
+                    ".pnpmfile.cjs",
+                ],
+                &["package.json", "src/npmrc.ts"],
+            ),
+            (
+                Language::Java,
+                &[
+                    ".mvn/maven.config",
+                    ".mvn/jvm.config",
+                    "settings.xml",
+                    "build.gradle.kts",
+                    "gradle/wrapper/gradle-wrapper.properties",
+                    "gradlew",
+                ],
+                &["pom.xml", "src/main/java/A.java"],
+            ),
+            (
+                Language::CSharp,
+                &["Directory.Build.rsp", "build.rsp"],
+                &["App.csproj", "nuget.config"],
+            ),
+        ];
+        for (language, blocked, allowed) in cases {
+            let profile = p.get(*language).unwrap();
+            assert_eq!(
+                profile.protected_changes(blocked).len(),
+                blocked.len(),
+                "{language}: {blocked:?}"
+            );
+            assert!(
+                profile.protected_changes(allowed).is_empty(),
+                "{language}: {allowed:?}"
+            );
+        }
+        // Case does not help a patch through.
+        assert_eq!(
+            p.get(Language::TypeScript)
+                .unwrap()
+                .protected_changes(&[".NPMRC"])
+                .len(),
+            1
+        );
+        assert!(
+            p.get(Language::CSharp)
+                .unwrap()
+                .touches_dependencies(&["NuGet.Config", "src/App.FSPROJ"])
+        );
     }
 
     #[test]

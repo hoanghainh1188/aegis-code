@@ -30,11 +30,56 @@ fn invalid(n: usize, message: impl Into<String>) -> LangError {
     }
 }
 
-/// Words of a line, with `"quoted"` and `` `raw` `` paths unquoted.
-fn words(line: &str) -> Vec<String> {
-    line.split_whitespace()
-        .map(|w| w.trim_matches(['"', '`']).to_owned())
+/// Words of a line, with `"quoted"` and `` `raw` `` paths unquoted. Go
+/// resolves escapes in `"…"` strings, so a word with `\` (or a quote that
+/// is not at both ends) could name a different module than it looks like:
+/// refused.
+fn words(n: usize, line: &str) -> Result<Vec<String>, LangError> {
+    line.split_ascii_whitespace()
+        .map(|w| {
+            let inner = w
+                .strip_prefix('"')
+                .and_then(|x| x.strip_suffix('"'))
+                .or_else(|| w.strip_prefix('`').and_then(|x| x.strip_suffix('`')))
+                .unwrap_or(w);
+            if inner.contains(['\\', '"', '`']) || !line.is_ascii() {
+                return Err(invalid(
+                    n,
+                    format!("`{w}`: escapes and non-ASCII are not supported"),
+                ));
+            }
+            Ok(inner.to_owned())
+        })
         .collect()
+}
+
+/// Cuts a `//` comment that is not inside a quoted string.
+fn strip_comment(line: &str) -> &str {
+    let mut quote = None;
+    let bytes = line.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None if b == b'"' || b == b'`' => quote = Some(b),
+            None if b == b'/' && bytes.get(i + 1) == Some(&b'/') => return &line[..i],
+            None => {}
+        }
+    }
+    line
+}
+
+/// Since Go 1.17 the main `go.mod` lists every module the build needs;
+/// before that, transitive requirements live in other modules' go.mod.
+const MIN_GO: (u32, u32) = (1, 17);
+
+fn go_version(n: usize, v: &str) -> Result<(u32, u32), LangError> {
+    let mut parts = v.split('.');
+    let mut num = || parts.next().and_then(|x| x.parse::<u32>().ok());
+    match (num(), num()) {
+        (Some(major), Some(minor)) => Ok((major, minor)),
+        _ => Err(invalid(n, format!("cannot read go version `{v}`"))),
+    }
 }
 
 /// Lines of `go.mod` as (line number, directive, arguments), with
@@ -44,7 +89,7 @@ fn directives(text: &str) -> Result<Vec<(usize, String, Vec<String>)>, LangError
     let mut block: Option<String> = None;
     for (i, raw) in text.lines().enumerate() {
         let n = i + 1;
-        let line = raw.split("//").next().unwrap_or(raw).trim();
+        let line = strip_comment(raw).trim();
         if line.is_empty() {
             continue;
         }
@@ -52,11 +97,11 @@ fn directives(text: &str) -> Result<Vec<(usize, String, Vec<String>)>, LangError
             if line == ")" {
                 block = None;
             } else {
-                out.push((n, verb.clone(), words(line)));
+                out.push((n, verb.clone(), words(n, line)?));
             }
             continue;
         }
-        let mut w = words(line);
+        let mut w = words(n, line)?;
         let verb = w.remove(0);
         if !KNOWN.contains(&verb.as_str()) {
             return Err(invalid(n, format!("unknown directive `{verb}`")));
@@ -88,8 +133,13 @@ pub(crate) fn go_mod(text: &str) -> Result<Vec<LockedDependency>, LangError> {
     let mut required: Vec<(String, String)> = Vec::new();
     // (module, version or "" for all versions) -> source
     let mut replaced: BTreeMap<(String, String), Option<String>> = BTreeMap::new();
+    let mut go = None;
     for (n, verb, args) in directives(text)? {
         match verb.as_str() {
+            "go" => match args.as_slice() {
+                [v] => go = Some(go_version(n, v)?),
+                _ => return Err(invalid(n, "`go` needs one version")),
+            },
             "require" => match args.as_slice() {
                 [module, version, ..] => required.push((module.clone(), version.clone())),
                 _ => return Err(invalid(n, "`require` needs a module and a version")),
@@ -119,6 +169,21 @@ pub(crate) fn go_mod(text: &str) -> Result<Vec<LockedDependency>, LangError> {
                 replaced.insert(key, source);
             }
             _ => {}
+        }
+    }
+    match go {
+        Some(v) if v >= MIN_GO => {}
+        Some((major, minor)) => {
+            return Err(invalid(
+                1,
+                format!("go {major}.{minor}: go.mod lists every module only from go 1.17"),
+            ));
+        }
+        None => {
+            return Err(invalid(
+                1,
+                "no `go` directive (go.mod lists every module only from go 1.17)",
+            ));
         }
     }
     Ok(required
@@ -181,6 +246,7 @@ require \"github.com/quoted/mod\" v0.1.0
     #[test]
     fn replace_changes_the_source() {
         let text = "module m
+go 1.22
 require (
 	github.com/a/b v1.2.3
 	github.com/c/d v0.1.0
@@ -210,10 +276,49 @@ replace github.com/g/h v9.9.9 => github.com/never/used v1.0.0
     #[test]
     fn fails_closed_on_unknown_or_broken_input() {
         let err = |t: &str| go_mod(t).unwrap_err().to_string();
-        assert!(err("module m\nfrobnicate x\n").contains("unknown directive `frobnicate`"));
+        assert!(
+            err("module m\ngo 1.22\nfrobnicate x\n").contains("unknown directive `frobnicate`")
+        );
         assert!(err("module m\nrequire (\n a v1\n").contains("not closed"));
         assert!(err("module m\nrequire a\n").contains("needs a module and a version"));
         assert!(err("module m\nreplace a b\n").contains("without `=>`"));
         assert!(err("module m\nreplace a => b c d\n").contains("right side"));
+    }
+
+    #[test]
+    fn escapes_and_odd_quotes_are_refused() {
+        let err = |t: &str| go_mod(t).unwrap_err().to_string();
+        let base = "module m\ngo 1.22\nrequire github.com/a/b v1.0.0\n";
+        assert!(
+            err(&format!(
+                "{base}replace \"github.com/\\x61/b\" => github.com/evil/b v1.0.0\n"
+            ))
+            .contains("escapes")
+        );
+        assert!(err(&format!("{base}replace github.com/a/b\" => x v1\n")).contains("escapes"));
+        assert!(
+            err(&format!("{base}require github.com/\u{00e4}/b v1.0.0\n")).contains("non-ASCII")
+        );
+        // A raw string has no escapes and is fine.
+        let raw = format!("{base}replace `github.com/a/b` => github.com/evil/b v1.0.0\n");
+        assert_eq!(
+            go_mod(&raw).unwrap()[0].source,
+            "replace+github.com/evil/b@v1.0.0"
+        );
+    }
+
+    #[test]
+    fn comment_markers_inside_quotes_are_not_comments() {
+        let text = "module m\ngo 1.22\nrequire \"example.com/a//b\" v1.0.0 // indirect\n";
+        assert_eq!(go_mod(text).unwrap()[0].name, "example.com/a//b");
+    }
+
+    #[test]
+    fn go_below_1_17_or_missing_is_refused() {
+        let err = |t: &str| go_mod(t).unwrap_err().to_string();
+        assert!(err("module m\ngo 1.16\nrequire a v1\n").contains("go 1.16"));
+        assert!(err("module m\nrequire a v1\n").contains("no `go` directive"));
+        assert!(err("module m\ngo one\n").contains("cannot read go version"));
+        assert!(go_mod("module m\ngo 1.17\n").unwrap().is_empty());
     }
 }
