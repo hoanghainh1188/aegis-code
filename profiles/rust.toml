@@ -52,3 +52,6 @@ cache_dirs = ["target", "/usr/local/cargo/registry"]
 # "Rust" và "Test coverage parameters".
 [sonar.properties]
 "sonar.rust.lcov.reportPaths" = "lcov.info"
+
+[prompt]
+conventions = "rust.md"

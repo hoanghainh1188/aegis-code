@@ -48,3 +48,6 @@ cache_dirs = [".venv", "/root/.cache/uv"]
 
 [sonar.properties]
 "sonar.python.coverage.reportPaths" = "coverage.xml"
+
+[prompt]
+conventions = "python.md"

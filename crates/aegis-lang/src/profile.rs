@@ -166,11 +166,41 @@ pub struct Sonar {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Prompt {
-    /// Conventions file for BP2 (#13).
+    /// Conventions for BP2 (#13): a file name in `prompts/conventions/`,
+    /// built into the binary like the profiles.
     pub conventions: Option<String>,
 }
 
+/// `prompts/conventions/<name>`, the files a profile's `[prompt]
+/// conventions` may name.
+const CONVENTIONS: [(&str, &str); 2] = [
+    (
+        "rust.md",
+        include_str!("../../../prompts/conventions/rust.md"),
+    ),
+    (
+        "python.md",
+        include_str!("../../../prompts/conventions/python.md"),
+    ),
+];
+
+fn conventions_text(name: &str) -> Option<&'static str> {
+    CONVENTIONS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, text)| *text)
+}
+
 impl Profile {
+    /// The language's code conventions for the system prompt (BP2), if the
+    /// profile has them.
+    pub fn conventions(&self) -> Option<&'static str> {
+        self.prompt
+            .conventions
+            .as_deref()
+            .and_then(conventions_text)
+    }
+
     /// Parses and checks one profile. `source_name` is only used in errors.
     pub fn from_toml(source_name: &str, text: &str) -> Result<Self, LangError> {
         let invalid = |message: String| LangError::InvalidProfile {
@@ -187,6 +217,13 @@ impl Profile {
             c.check_placeholders(allowed, required)
                 .map_err(|e| format!("{name}: {e}"))
         };
+        if let Some(name) = &self.prompt.conventions
+            && conventions_text(name).is_none()
+        {
+            return Err(format!(
+                "prompt.conventions: no file `{name}` in prompts/conventions"
+            ));
+        }
         if self.detect.markers.is_empty() || self.detect.extensions.is_empty() {
             return Err("detect.markers and detect.extensions must not be empty".into());
         }
@@ -475,6 +512,18 @@ mod tests {
         );
         assert_eq!(rust.gate.test_output, Some(TestOutput::Libtest));
         assert!(
+            rust.conventions()
+                .unwrap()
+                .starts_with("# Rust conventions")
+        );
+        let python = builtin().get(Language::Python).unwrap().clone();
+        assert!(
+            python
+                .conventions()
+                .unwrap()
+                .starts_with("# Python conventions")
+        );
+        assert!(
             rust.gate
                 .repro_test
                 .as_ref()
@@ -683,6 +732,13 @@ mod tests {
             "unknown variant",
         );
         rejects(&format!("{t}\n[extra]\nx = 1\n"), "unknown field");
+        rejects(
+            &t.replace(
+                "conventions = \"rust.md\"",
+                "conventions = \"../secrets.md\"",
+            ),
+            "no file `../secrets.md` in prompts/conventions",
+        );
         rejects(
             &t.replace(
                 "test = [\"cargo\", \"test\", \"--workspace\", \"--no-fail-fast\"]\n",
