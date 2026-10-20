@@ -134,14 +134,23 @@ fn write(path: &Path, text: &str) -> Result<(), AciError> {
     std::fs::write(path, text).map_err(|e| AciError::io(path, &e))
 }
 
+/// Puts back what was there: the old content, or no file at all.
+fn restore(path: &Path, original: Option<&str>) -> Result<(), AciError> {
+    match original {
+        Some(text) => write(path, text),
+        None => std::fs::remove_file(path).map_err(|e| AciError::io(path, &e)),
+    }
+}
+
 /// Writes `text` to `path` and runs the profile's formatter on it in place,
 /// so the formatter sees the file where it lives (its config, its
-/// submodules). When the formatter refuses, `original` is written back.
+/// submodules). When the formatter refuses, `original` is put back
+/// (`None`: the file did not exist).
 fn write_formatted(
     ws: &Workspace,
     path: &Path,
     text: &str,
-    original: &str,
+    original: Option<&str>,
 ) -> Result<Result<String, Rejection>, AciError> {
     let profile = ws.profile();
     let command = profile
@@ -161,12 +170,50 @@ fn write_formatted(
             message: format!("timed out after {}s", formatter::TIMEOUT.as_secs()),
         },
         Err(e) => {
-            write(path, original)?;
+            restore(path, original)?;
             return Err(e);
         }
     };
-    write(path, original)?;
+    restore(path, original)?;
     Ok(Err(rejection))
+}
+
+/// `create_file`: a new file with `content`, checked like an edit. A
+/// refused file is not left behind.
+pub fn create(ws: &Workspace, file: &str, content: &str) -> Result<EditOutcome, AciError> {
+    let path = ws.resolve_new(file)?;
+    let shown = ws.display(&path);
+    let lines: Vec<String> = content.lines().map(str::to_owned).collect();
+    let text = if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    };
+    let proposed = || snippet(&shown, &lines, 1, lines.len().min(2 * CONTEXT));
+    if let Some(reason) = syntax_rejection(ws, &path, "", &text, (1, lines.len()))? {
+        return Ok(EditOutcome::Rejected {
+            reason,
+            proposed: proposed(),
+        });
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AciError::io(parent, &e))?;
+    }
+    match write_formatted(ws, &path, &text, None)? {
+        Ok(formatted) => {
+            let lines: Vec<String> = formatted.lines().map(str::to_owned).collect();
+            Ok(EditOutcome::Applied(snippet(
+                &shown,
+                &lines,
+                1,
+                lines.len().min(2 * CONTEXT),
+            )))
+        }
+        Err(reason) => Ok(EditOutcome::Rejected {
+            reason,
+            proposed: proposed(),
+        }),
+    }
 }
 
 pub fn edit(ws: &Workspace, request: EditRequest<'_>) -> Result<EditOutcome, AciError> {
@@ -195,7 +242,7 @@ pub fn edit(ws: &Workspace, request: EditRequest<'_>) -> Result<EditOutcome, Aci
             proposed: proposed(),
         });
     }
-    let formatted = match write_formatted(ws, &path, &candidate, &before)? {
+    let formatted = match write_formatted(ws, &path, &candidate, Some(&before))? {
         Ok(formatted) => formatted,
         Err(reason) => {
             return Ok(EditOutcome::Rejected {

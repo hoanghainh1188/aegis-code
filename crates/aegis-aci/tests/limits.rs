@@ -298,3 +298,60 @@ fn a_syntax_error_on_the_edited_lines_is_refused_even_if_one_is_fixed() {
         .unwrap();
     assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
 }
+
+#[test]
+fn create_file_makes_new_files_inside_the_repo_only() {
+    let (repo, mut aci) = rust_repo();
+    let outcome = aci.create_file("tests/new/case.txt", "one\ntwo").unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    assert_eq!(repo.read("tests/new/case.txt"), "one\ntwo\n");
+
+    assert!(matches!(
+        aci.create_file("tests/new/case.txt", "x").unwrap_err(),
+        AciError::InvalidInput(_)
+    ));
+    for bad in [
+        "../outside.txt",
+        "/tmp/x.txt",
+        ".git/hooks/pre-commit",
+        "src/..",
+    ] {
+        assert_eq!(
+            aci.create_file(bad, "x").unwrap_err(),
+            AciError::OutsideWorkspace(bad.to_owned()),
+            "{bad}"
+        );
+    }
+    // A file that does not parse is not left behind.
+    let outcome = aci.create_file("src/broken.rs", "fn broken( {").unwrap();
+    assert!(matches!(outcome, EditOutcome::Rejected { .. }), "{outcome}");
+    assert!(!repo.repo().join("src/broken.rs").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn create_file_does_not_follow_a_symlinked_directory_out() {
+    let (repo, mut aci) = rust_repo();
+    std::fs::create_dir_all(repo.outside()).unwrap();
+    std::os::unix::fs::symlink(repo.outside(), repo.repo().join("out")).unwrap();
+    assert_eq!(
+        aci.create_file("out/planted.txt", "x").unwrap_err(),
+        AciError::OutsideWorkspace("out/planted.txt".to_owned())
+    );
+    assert_eq!(
+        aci.create_file("out/deeper/planted.txt", "x").unwrap_err(),
+        AciError::OutsideWorkspace("out/deeper/planted.txt".to_owned())
+    );
+    assert!(!repo.outside().join("planted.txt").exists());
+    assert!(!repo.outside().join("deeper").exists());
+}
+
+#[test]
+fn a_refused_new_file_leaves_no_directories() {
+    let (repo, mut aci) = rust_repo();
+    let outcome = aci
+        .create_file("tests/deep/broken.rs", "fn broken( {")
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Rejected { .. }), "{outcome}");
+    assert!(!repo.repo().join("tests").exists());
+}

@@ -5,7 +5,18 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-[dependencies]
 [[bin]]
 name = "aegis"
 path = "src/main.rs"
+
+[dependencies]
+aegis-lang = { path = "../aegis-lang" }
+aegis-ledger = { path = "../aegis-ledger" }
+aegis-lifecycle = { path = "../aegis-lifecycle" }
+aegis-provider = { path = "../aegis-provider" }
+tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-util = "0.7.20"
+
+[features]
+# Bedrock backend for config/customer-jp.toml.
+bedrock = ["aegis-provider/bedrock"]

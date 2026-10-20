@@ -53,6 +53,15 @@ pub struct GotoParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateFileParams {
+    /// Path of the new file, relative to the repo root; missing
+    /// directories are created.
+    pub file: String,
+    /// The whole content of the file.
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct EditParams {
     /// File path relative to the repo root.
     pub file: String,
@@ -171,6 +180,24 @@ impl AciServer {
     #[tool(description = "Show the previous 100 lines of the open file.")]
     async fn scroll_up(&self) -> Result<String, String> {
         self.with_aci(Aci::scroll_up).await
+    }
+
+    #[tool(
+        description = "Create a new file, for example a test file. The file must not \
+                          exist yet (use `edit` to change a file) and must parse and pass the \
+                          repo's formatter, or nothing is written."
+    )]
+    async fn create_file(
+        &self,
+        Parameters(p): Parameters<CreateFileParams>,
+    ) -> Result<String, String> {
+        let outcome = self
+            .run(move |aci| aci.create_file(&p.file, &p.content))
+            .await?;
+        match outcome {
+            EditOutcome::Applied(_) => Ok(outcome.to_string()),
+            EditOutcome::Rejected { .. } => Err(outcome.to_string()),
+        }
     }
 
     #[tool(

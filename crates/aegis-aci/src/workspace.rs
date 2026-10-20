@@ -84,6 +84,46 @@ impl Workspace {
         }
     }
 
+    /// Absolute path for a new file at `relative`; missing parent
+    /// directories are left for the caller to create. Refused when the
+    /// path leaves the root (also through a symlinked directory) or already
+    /// exists.
+    pub fn resolve_new(&self, relative: &str) -> Result<PathBuf, AciError> {
+        let outside = || AciError::OutsideWorkspace(relative.to_owned());
+        let path = Path::new(relative.trim());
+        if path.is_absolute() || !plain_inside(path) || path.file_name().is_none() {
+            return Err(outside());
+        }
+        let joined = self.root.join(path);
+        if std::fs::symlink_metadata(&joined).is_ok() {
+            return Err(AciError::InvalidInput(format!(
+                "`{relative}` already exists; use `edit` to change it"
+            )));
+        }
+        // The deepest directory that exists must resolve inside the root.
+        let mut existing = joined.parent().map(Path::to_path_buf).ok_or_else(outside)?;
+        let mut missing = Vec::new();
+        while std::fs::symlink_metadata(&existing).is_err() {
+            missing.push(existing.file_name().ok_or_else(outside)?.to_owned());
+            existing = existing
+                .parent()
+                .map(Path::to_path_buf)
+                .ok_or_else(outside)?;
+        }
+        let real = existing
+            .canonicalize()
+            .map_err(|e| AciError::io(&existing, &e))?;
+        match real.strip_prefix(&self.root) {
+            Ok(inside) if plain_inside(inside) && real.is_dir() => {}
+            _ => return Err(outside()),
+        }
+        let mut dir = real;
+        for name in missing.into_iter().rev() {
+            dir.push(name);
+        }
+        Ok(dir.join(path.file_name().ok_or_else(outside)?))
+    }
+
     /// Path relative to the root with `/` separators, as tools print it.
     pub fn display(&self, path: &Path) -> String {
         let relative = path.strip_prefix(&self.root).unwrap_or(path);
