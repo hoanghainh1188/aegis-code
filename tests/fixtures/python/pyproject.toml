@@ -1,0 +1,13 @@
+# Repo mẫu cho profile Python (#65): ACI và gate chạy trên đây chỉ qua profile.
+[project]
+name = "fixture-python"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["cart"]

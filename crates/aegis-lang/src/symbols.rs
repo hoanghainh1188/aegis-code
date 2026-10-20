@@ -10,6 +10,10 @@ use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
 use crate::syntax::{MAX_SOURCE_BYTES, grammar};
 use crate::{LangError, Language};
 
+/// Nodes that wrap a definition with its decorators; the symbol's range
+/// starts at the wrapper so `open` shows the decorators too.
+const WRAPPERS: &[&str] = &["decorated_definition"];
+
 /// Longest signature returned; longer ones are cut with `…`.
 const MAX_SIGNATURE_CHARS: usize = 200;
 
@@ -72,12 +76,9 @@ pub struct Symbol {
 fn query_source(language: Language) -> Option<&'static str> {
     match language {
         Language::Rust => Some(include_str!("../../../profiles/queries/rust.scm")),
-        // Queries come with their profiles (#65, #67–#70).
-        Language::Python
-        | Language::TypeScript
-        | Language::Java
-        | Language::Go
-        | Language::CSharp => None,
+        Language::Python => Some(include_str!("../../../profiles/queries/python.scm")),
+        // Queries come with their profiles (#67–#70).
+        Language::TypeScript | Language::Java | Language::Go | Language::CSharp => None,
     }
 }
 
@@ -136,11 +137,15 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
             continue;
         }
         let text = |n: tree_sitter::Node<'_>| source[n.byte_range()].to_owned();
+        let outer = node
+            .parent()
+            .filter(|p| WRAPPERS.contains(&p.kind()))
+            .unwrap_or(node);
         by_node.insert(
             node.id(),
             Found {
                 pattern: m.pattern_index,
-                range: (node.start_byte(), node.end_byte()),
+                range: (outer.start_byte(), outer.end_byte()),
                 symbol: Symbol {
                     kind,
                     name: match kind {
@@ -148,7 +153,7 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
                         _ => text(name),
                     },
                     container: None,
-                    start_line: node.start_position().row + 1,
+                    start_line: outer.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     signature: signature(&source[node.byte_range()]),
                 },
@@ -186,8 +191,10 @@ fn compiled_query(
     text: &str,
 ) -> Result<&'static Query, LangError> {
     static RUST: OnceLock<Result<Query, String>> = OnceLock::new();
+    static PYTHON: OnceLock<Result<Query, String>> = OnceLock::new();
     let cell = match language {
         Language::Rust => &RUST,
+        Language::Python => &PYTHON,
         other => return Err(LangError::UnsupportedGrammar(other)),
     };
     cell.get_or_init(|| Query::new(grammar, text).map_err(|e| e.to_string()))
@@ -349,13 +356,76 @@ fn helper() {}
         assert!(all.iter().any(|s| s.name == "ok"));
     }
 
+    const PY: &str = r#"
+MAX_ITEMS = 3
+
+def helper(x):
+    def inner():
+        return x
+    return inner
+
+@dataclass
+class Cart:
+    items: list
+
+    def add(self, price):
+        self.items.append(price)
+
+    @property
+    def total(self):
+        return sum(self.items)
+
+    class Line:
+        def cost(self):
+            return 0
+"#;
+
+    #[test]
+    fn finds_python_definitions() {
+        let all = symbols(Language::Python, PY).unwrap();
+        assert_eq!(find(&all, "MAX_ITEMS").kind, SymbolKind::Constant);
+        assert_eq!(find(&all, "helper").kind, SymbolKind::Function);
+        let inner = find(&all, "inner");
+        assert_eq!(
+            (inner.kind, inner.container.as_deref()),
+            (SymbolKind::Function, None)
+        );
+        let cart = find(&all, "Cart");
+        assert_eq!(cart.kind, SymbolKind::Class);
+        assert_eq!(cart.start_line, 9, "starts at the decorator");
+        assert_eq!(cart.signature, "class Cart:");
+    }
+
+    #[test]
+    fn python_methods_and_decorated_methods_belong_to_their_class() {
+        let all = symbols(Language::Python, PY).unwrap();
+        let add = find(&all, "add");
+        assert_eq!(
+            (add.kind, add.container.as_deref()),
+            (SymbolKind::Method, Some("Cart"))
+        );
+        let total = find(&all, "total");
+        assert_eq!(
+            (total.kind, total.container.as_deref()),
+            (SymbolKind::Method, Some("Cart"))
+        );
+        assert_eq!(total.start_line, 16, "starts at @property");
+        assert_eq!(total.signature, "def total(self):");
+        let cost = find(&all, "cost");
+        assert_eq!(
+            (cost.kind, cost.container.as_deref()),
+            (SymbolKind::Method, Some("Line"))
+        );
+        assert_eq!(all.iter().filter(|s| s.name == "total").count(), 1);
+    }
+
     #[test]
     fn languages_without_a_query_say_so() {
-        assert!(has_symbol_query(Language::Rust));
-        assert!(!has_symbol_query(Language::Python));
+        assert!(has_symbol_query(Language::Rust) && has_symbol_query(Language::Python));
+        assert!(!has_symbol_query(Language::Go));
         assert_eq!(
-            symbols(Language::Python, "def f(): pass"),
-            Err(LangError::UnsupportedGrammar(Language::Python))
+            symbols(Language::Go, "package main"),
+            Err(LangError::UnsupportedGrammar(Language::Go))
         );
     }
 }

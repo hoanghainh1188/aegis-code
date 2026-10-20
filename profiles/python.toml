@@ -31,6 +31,10 @@ manifests = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt"]
 lockfiles = ["uv.lock", "poetry.lock", "requirements*.txt"]
 official_source = "https://pypi.org/simple"
 fetch = ["uv", "sync", "--frozen"]
+# Advisory + license, cho mọi hệ sinh thái ngoài Rust (ADR 0004 §3, chốt ở #65).
+# Cần mạng (dữ liệu license từ deps.dev) nên chạy cùng bước lấy phụ thuộc (#66).
+# {licenses} lấy từ policies/licenses.toml.
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
 
 [sandbox]
 image = "aegis-sandbox-python"

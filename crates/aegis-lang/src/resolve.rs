@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 
-use crate::profile::{check_gate, check_image, check_repo_path};
+use crate::profile::{check_audit, check_gate, check_image, check_repo_path};
 use crate::{CommandTemplate, Coverage, GateSteps, LangError, Language, Placeholder, Profile};
 
 /// A command from the repo, or `false` to turn the step off.
@@ -33,6 +33,7 @@ pub struct ProfileOverrides {
     pub gate: GateOverrides,
     pub edit_format: Option<StepOverride>,
     pub fetch: Option<StepOverride>,
+    pub audit: Option<StepOverride>,
     /// Required when the coverage command is overridden.
     pub coverage: Option<Coverage>,
     pub image: Option<String>,
@@ -75,6 +76,7 @@ pub struct ResolvedProfile {
     pub gate: GatePlan,
     pub edit_format: Step,
     pub fetch: Step,
+    pub audit: Step,
     pub coverage: Option<Coverage>,
     pub image: String,
 }
@@ -130,6 +132,10 @@ impl Profile {
             c.check_placeholders(&[], &[])
                 .map_err(|e| invalid(format!("fetch: {e}")))?;
         }
+        let audit = step(&self.dependencies.audit, &overrides.audit).map_err(invalid)?;
+        if let Some(c) = audit.command() {
+            check_audit(c).map_err(|e| invalid(format!("audit: {e}")))?;
+        }
         let image = match &overrides.image {
             Some(i) => {
                 check_image(i).map_err(|e| invalid(format!("image {e}")))?;
@@ -142,6 +148,7 @@ impl Profile {
             gate,
             edit_format,
             fetch,
+            audit,
             coverage,
             image,
         })
@@ -227,6 +234,49 @@ mod tests {
         p.gate.lint = None;
         let r = p.resolve(&ProfileOverrides::default()).unwrap();
         assert_eq!(r.gate.lint, Step::Skipped(SkipReason::NotInProfile));
+    }
+
+    #[test]
+    fn audit_renders_lockfile_and_license_policy() {
+        let r = python().resolve(&ProfileOverrides::default()).unwrap();
+        let policy =
+            crate::AllowList::from_toml(include_str!("../../../policies/licenses.toml")).unwrap();
+        let licenses = policy.names().iter().cloned().collect::<Vec<_>>().join(",");
+        let argv = r
+            .audit
+            .command()
+            .unwrap()
+            .render(&[
+                (Placeholder::Lockfile, "uv.lock"),
+                (Placeholder::Licenses, &licenses),
+            ])
+            .unwrap();
+        assert_eq!(argv[..4], ["osv-scanner", "scan", "source", "--lockfile"]);
+        assert_eq!(argv[4], "uv.lock");
+        assert!(
+            argv[5].starts_with("--licenses=0BSD,Apache-2.0,"),
+            "{}",
+            argv[5]
+        );
+
+        let rust = Profiles::builtin()
+            .unwrap()
+            .get(Language::Rust)
+            .unwrap()
+            .clone();
+        let r = rust.resolve(&ProfileOverrides::default()).unwrap();
+        assert_eq!(
+            r.audit,
+            Step::Skipped(SkipReason::NotInProfile),
+            "Rust uses cargo deny"
+        );
+        let err = python()
+            .resolve(&overrides("audit = [\"osv-scanner\", \"scan\"]\n"))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("must contain `{lockfile}`"),
+            "{err}"
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::profile::glob_match;
+use crate::python_lock;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
 
 /// Dependencies a patch may add, e.g. `policies/allowed-crates.toml`.
@@ -35,6 +36,11 @@ pub fn read_lockfile(
 ) -> Result<Vec<LockedDependency>, LangError> {
     match (language, file_name) {
         (Language::Rust, "Cargo.lock") => cargo_lock(text),
+        (Language::Python, "uv.lock") => python_lock::uv_lock(text),
+        (Language::Python, "poetry.lock") => python_lock::poetry_lock(text),
+        (Language::Python, name) if glob_match("requirements*.txt", name) => {
+            python_lock::requirements(name, text)
+        }
         _ => Err(LangError::UnsupportedLockfile {
             language,
             file: file_name.to_owned(),
@@ -115,10 +121,19 @@ impl Profile {
             None => Vec::new(),
         };
         let after = read(after, "after")?;
+        // Lockfile names are normalized; the allow-list must be too.
+        let allowed: BTreeSet<String> = match self.language {
+            Language::Python => allowed
+                .names()
+                .iter()
+                .map(|n| python_lock::normalize_name(n))
+                .collect(),
+            _ => allowed.names().clone(),
+        };
         Ok(crate::new_dependency_violations(
             &before,
             &after,
-            allowed.names(),
+            &allowed,
             &self.dependencies.official_source,
         ))
     }
@@ -283,6 +298,27 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.to_string().contains("before the patch"), "{err}");
+    }
+
+    #[test]
+    fn python_lockfiles_go_through_the_same_check() {
+        let py = Profiles::builtin()
+            .unwrap()
+            .get(Language::Python)
+            .unwrap()
+            .clone();
+        let before = "requests==2.32.3\n";
+        let after = "requests==2.33.0\nLeft_Pad==1.0\nhttpx==0.27\n";
+        let allowed = AllowList::from_toml("allowed = [\"HTTPX\"]").unwrap();
+        let v = py
+            .dependency_violations("requirements-dev.txt", Some(before), after, &allowed)
+            .unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].dependency.name, "left-pad");
+        assert!(matches!(
+            read_lockfile(Language::Python, "Pipfile.lock", "{}"),
+            Err(LangError::UnsupportedLockfile { .. })
+        ));
     }
 
     #[test]
