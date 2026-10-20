@@ -130,6 +130,7 @@ async fn tool_list_is_sorted_with_schemas() {
     assert_eq!(
         names,
         [
+            "create_file",
             "edit",
             "find_file",
             "goto",
@@ -140,7 +141,7 @@ async fn tool_list_is_sorted_with_schemas() {
             "search_text"
         ]
     );
-    let edit = &tools.definitions()[0];
+    let edit = &tools.definitions()[1];
     assert!(
         edit.description.contains("formatter"),
         "{}",

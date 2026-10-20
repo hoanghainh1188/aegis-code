@@ -1,5 +1,27 @@
 [
   {
+    "description": "Create a new file, for example a test file. The file must not exist yet (use `edit` to change a file) and must parse and pass the repo's formatter, or nothing is written.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "content": {
+          "description": "The whole content of the file.",
+          "type": "string"
+        },
+        "file": {
+          "description": "Path of the new file, relative to the repo root; missing\ndirectories are created.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "create_file"
+  },
+  {
     "description": "Replace lines `from` to `to` of a file with `content`. The result must parse and pass the repo's formatter, or the file is left unchanged and the proposed lines are shown. Returns the edited lines with 5 lines of context.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -14,3 +14,34 @@ id = "claude-sonnet-5-5"
 [models.expert]
 id = "claude-opus-5-5"
 effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 20
+
+# Target repo of the PoC (#2): a clone of the fork, each job gets a worktree.
+[repo]
+path = ".workspace/repos/scrapy"
+language = "python"
+base = "master"
+key = "scrapy"
+
+# From the measurements of #2: pytest in parallel, the venv's python on PATH.
+[repo.overrides.gate]
+test = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "scrapy", "tests", "--doctest-modules"]
+test_output = "pytest"
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "scrapy"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

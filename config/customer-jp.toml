@@ -18,3 +18,6 @@ effort = "low"
 [models.expert]
 id = "jp.anthropic.claude-opus-5-5"
 effort = "high"
+
+# [run], [repo] and [identity] as in poc.toml are added once a customer repo
+# is chosen; until then this file only configures the provider and models.

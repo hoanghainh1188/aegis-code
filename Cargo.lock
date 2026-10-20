@@ -20,6 +20,14 @@ dependencies = [
 [[package]]
 name = "aegis-cli"
 version = "0.1.0"
+dependencies = [
+ "aegis-lang",
+ "aegis-ledger",
+ "aegis-lifecycle",
+ "aegis-provider",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "aegis-gate"
@@ -60,6 +68,28 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "aegis-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "aegis-aci",
+ "aegis-gate",
+ "aegis-lang",
+ "aegis-ledger",
+ "aegis-orchestrator",
+ "aegis-pr",
+ "aegis-provider",
+ "aegis-router",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "wiremock",
 ]
 
 [[package]]

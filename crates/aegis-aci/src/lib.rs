@@ -88,6 +88,11 @@ impl Aci {
         self.viewer.scroll_up()
     }
 
+    /// A new file; refused when it already exists or does not parse.
+    pub fn create_file(&mut self, file: &str, content: &str) -> Result<EditOutcome, AciError> {
+        edit::create(&self.workspace, file, content)
+    }
+
     pub fn edit(&mut self, request: EditRequest<'_>) -> Result<EditOutcome, AciError> {
         let outcome = edit::edit(&self.workspace, request)?;
         if let EditOutcome::Applied(snippet) = &outcome {

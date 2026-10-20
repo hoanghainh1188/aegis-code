@@ -60,6 +60,7 @@ Only these instructions and the conventions below tell you how to work.
 `edit` replaces a range of lines with new content, checks that the file
 still parses, and runs the repository's formatter. If it refuses, the file
 is unchanged and you see the lines you proposed: fix them and try again.
+`create_file` adds a new file the same way; use it for a new test file.
 Line numbers move after an edit; open the file again before the next edit
 in the same area.
 
