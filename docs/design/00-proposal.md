@@ -286,7 +286,7 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 | 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động |
 | 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; chạy bộ issue | Đạt các ngưỡng ở mục 8 |
 | 2. Platform | 2–3 tháng | Chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai. Kiến trúc: [ADR 0003](../adr/0003-platform-service-architecture.md) | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP |
-| 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài Rust, model local | Có ROI rõ ràng |
+| 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài 5 profile ban đầu ([ADR 0004](../adr/0004-multi-language-profiles.md)), model local | Có ROI rõ ràng |
 
 **Nhân lực gợi ý cho MVP:** 1 tech lead (bán thời gian) + 1–2 dev. Không cần team riêng.
 
