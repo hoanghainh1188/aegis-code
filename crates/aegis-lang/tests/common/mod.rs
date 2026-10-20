@@ -53,7 +53,9 @@ impl Workspace {
         cmd.args(&argv[1..])
             .current_dir(self.repo())
             .env("CARGO_TARGET_DIR", self.root.join("target"))
-            .env("PYTHONDONTWRITEBYTECODE", "1");
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            // Never download another Go toolchain for the fixture.
+            .env("GOTOOLCHAIN", "local");
         for var in INHERITED {
             cmd.env_remove(var);
         }
@@ -86,7 +88,15 @@ fn copy_dir(from: &Path, to: &Path) {
         let name = entry.file_name();
         let target = to.join(&name);
         if entry.file_type().unwrap().is_dir() {
-            let skip = ["target", "__pycache__", ".pytest_cache", ".venv"];
+            let skip = [
+                "target",
+                "__pycache__",
+                ".pytest_cache",
+                ".venv",
+                "node_modules",
+                "bin",
+                "obj",
+            ];
             if !skip.iter().any(|s| name == *s) {
                 copy_dir(&entry.path(), &target);
             }

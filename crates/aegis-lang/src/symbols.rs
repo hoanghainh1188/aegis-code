@@ -32,6 +32,8 @@ pub enum SymbolKind {
     Constant,
     Static,
     Class,
+    Interface,
+    Variable,
 }
 
 impl SymbolKind {
@@ -50,13 +52,18 @@ impl SymbolKind {
             "constant" => Self::Constant,
             "static" => Self::Static,
             "class" => Self::Class,
+            "interface" => Self::Interface,
+            "variable" => Self::Variable,
             _ => return None,
         })
     }
 
     /// Kinds that hold other symbols, reported as their `container`.
     fn is_container(self) -> bool {
-        matches!(self, Self::Impl | Self::Trait | Self::Module | Self::Class)
+        matches!(
+            self,
+            Self::Impl | Self::Trait | Self::Module | Self::Class | Self::Interface
+        )
     }
 }
 
@@ -77,8 +84,9 @@ fn query_source(language: Language) -> Option<&'static str> {
     match language {
         Language::Rust => Some(include_str!("../../../profiles/queries/rust.scm")),
         Language::Python => Some(include_str!("../../../profiles/queries/python.scm")),
-        // Queries come with their profiles (#67–#70).
-        Language::TypeScript | Language::Java | Language::Go | Language::CSharp => None,
+        Language::Go => Some(include_str!("../../../profiles/queries/go.scm")),
+        // Queries come with their profiles (#67, #68, #70).
+        Language::TypeScript | Language::Java | Language::CSharp => None,
     }
 }
 
@@ -90,6 +98,8 @@ struct Found {
     pattern: usize,
     range: (usize, usize),
     symbol: Symbol,
+    /// Container named by an `@container` capture, not by nesting.
+    explicit_container: Option<String>,
 }
 
 /// Definitions in `source`, in source order.
@@ -118,10 +128,13 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
     while let Some(m) = matches.next() {
         let mut name = None;
         let mut definition = None;
+        let mut container = None;
         for c in m.captures() {
             let capture = names[c.index as usize];
             if capture == "name" {
                 name = Some(c.node);
+            } else if capture == "container" {
+                container = Some(c.node);
             } else if let Some(kind) = SymbolKind::from_capture(capture) {
                 definition = Some((kind, c.node));
             }
@@ -157,6 +170,7 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
                     end_line: node.end_position().row + 1,
                     signature: signature(&source[node.byte_range()]),
                 },
+                explicit_container: container.map(|c| receiver_type(&text(c))),
             },
         );
     }
@@ -171,13 +185,13 @@ pub fn symbols(language: Language, source: &str) -> Result<Vec<Symbol>, LangErro
     Ok(found
         .into_iter()
         .map(|f| {
-            let container = containers
+            let nested = containers
                 .iter()
                 .filter(|(r, _)| r.0 <= f.range.0 && f.range.1 <= r.1 && *r != f.range)
                 .min_by_key(|(r, _)| r.1 - r.0)
                 .map(|(_, name)| name.clone());
             Symbol {
-                container,
+                container: f.explicit_container.or(nested),
                 ..f.symbol
             }
         })
@@ -192,9 +206,11 @@ fn compiled_query(
 ) -> Result<&'static Query, LangError> {
     static RUST: OnceLock<Result<Query, String>> = OnceLock::new();
     static PYTHON: OnceLock<Result<Query, String>> = OnceLock::new();
+    static GO: OnceLock<Result<Query, String>> = OnceLock::new();
     let cell = match language {
         Language::Rust => &RUST,
         Language::Python => &PYTHON,
+        Language::Go => &GO,
         other => return Err(LangError::UnsupportedGrammar(other)),
     };
     cell.get_or_init(|| Query::new(grammar, text).map_err(|e| e.to_string()))
@@ -205,14 +221,21 @@ fn compiled_query(
         })
 }
 
+/// Type named by a receiver or parameter list, e.g. Go's `(c *Cart)` or
+/// `(s Stack[T])`: the last word, without parentheses, then as [`impl_name`].
+fn receiver_type(text: &str) -> String {
+    let inner = text.trim().trim_start_matches('(').trim_end_matches(')');
+    impl_name(inner.split_whitespace().last().unwrap_or(inner))
+}
+
 /// `impl<T> fmt::Display for &mut crate::a::Foo<T>` is the impl of `Foo`:
 /// the name an agent searches for, without references, generics or path.
 fn impl_name(type_text: &str) -> String {
     let t = type_text.trim();
-    let t = t.strip_prefix('&').unwrap_or(t).trim_start();
+    let t = t.trim_start_matches(['&', '*']).trim_start();
     let t = t.strip_prefix("mut ").unwrap_or(t).trim_start();
     let t = t.strip_prefix("dyn ").unwrap_or(t).trim_start();
-    let t = t.split('<').next().unwrap_or(t);
+    let t = t.split(['<', '[']).next().unwrap_or(t);
     t.rsplit("::").next().unwrap_or(t).trim().to_owned()
 }
 
@@ -419,13 +442,73 @@ class Cart:
         assert_eq!(all.iter().filter(|s| s.name == "total").count(), 1);
     }
 
+    const GO: &str = r#"package cart
+
+const MaxItems = 3
+
+var defaultCart = Cart{}
+
+type Total = int
+
+type Cart struct {
+	items []int
+}
+
+type Priced interface {
+	Total() Total
+}
+
+func (c *Cart) Add(price int) error {
+	return nil
+}
+
+func (s Stack[T]) Push(v T) {}
+
+func New() *Cart { return &Cart{} }
+"#;
+
+    #[test]
+    fn finds_go_definitions() {
+        let all = symbols(Language::Go, GO).unwrap();
+        assert_eq!(find(&all, "MaxItems").kind, SymbolKind::Constant);
+        assert_eq!(find(&all, "defaultCart").kind, SymbolKind::Variable);
+        assert_eq!(find(&all, "Total").kind, SymbolKind::TypeAlias);
+        assert_eq!(find(&all, "Cart").kind, SymbolKind::Struct);
+        assert_eq!(find(&all, "Priced").kind, SymbolKind::Interface);
+        assert_eq!(find(&all, "New").kind, SymbolKind::Function);
+        assert_eq!(
+            all.iter().filter(|s| s.name == "Cart").count(),
+            1,
+            "struct, not also type"
+        );
+    }
+
+    #[test]
+    fn go_methods_belong_to_their_receiver_or_interface() {
+        let all = symbols(Language::Go, GO).unwrap();
+        let add = find(&all, "Add");
+        assert_eq!(
+            (add.kind, add.container.as_deref()),
+            (SymbolKind::Method, Some("Cart"))
+        );
+        let push = find(&all, "Push");
+        assert_eq!(push.container.as_deref(), Some("Stack"));
+        let total = all
+            .iter()
+            .find(|s| s.kind == SymbolKind::Method && s.name == "Total")
+            .unwrap();
+        assert_eq!(total.container.as_deref(), Some("Priced"));
+    }
+
     #[test]
     fn languages_without_a_query_say_so() {
-        assert!(has_symbol_query(Language::Rust) && has_symbol_query(Language::Python));
-        assert!(!has_symbol_query(Language::Go));
+        for language in [Language::Rust, Language::Python, Language::Go] {
+            assert!(has_symbol_query(language), "{language}");
+        }
+        assert!(!has_symbol_query(Language::Java));
         assert_eq!(
-            symbols(Language::Go, "package main"),
-            Err(LangError::UnsupportedGrammar(Language::Go))
+            symbols(Language::Java, "class A {}"),
+            Err(LangError::UnsupportedGrammar(Language::Java))
         );
     }
 }

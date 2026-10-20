@@ -10,6 +10,7 @@
 mod command;
 mod deps;
 mod error;
+mod go_lock;
 mod language;
 mod lockfile;
 mod profile;

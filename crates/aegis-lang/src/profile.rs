@@ -9,8 +9,8 @@ use serde::Deserialize;
 use crate::{CommandTemplate, LangError, Language, Placeholder};
 
 /// Profiles shipped with the platform. The other languages get theirs in
-/// #67–#70.
-const BUILTIN: [(&str, &str); 2] = [
+/// #67, #68, #70.
+const BUILTIN: [(&str, &str); 3] = [
     (
         "profiles/rust.toml",
         include_str!("../../../profiles/rust.toml"),
@@ -18,6 +18,10 @@ const BUILTIN: [(&str, &str); 2] = [
     (
         "profiles/python.toml",
         include_str!("../../../profiles/python.toml"),
+    ),
+    (
+        "profiles/go.toml",
+        include_str!("../../../profiles/go.toml"),
     ),
 ];
 
@@ -366,11 +370,11 @@ mod tests {
     }
 
     #[test]
-    fn builtin_has_rust_and_python() {
+    fn builtin_has_phase_one_profiles_and_go() {
         let p = builtin();
         assert_eq!(
             p.languages().collect::<Vec<_>>(),
-            vec![Language::Rust, Language::Python]
+            vec![Language::Rust, Language::Python, Language::Go]
         );
         assert_eq!(p.get(Language::Rust).unwrap().display_name, "Rust");
         assert_eq!(

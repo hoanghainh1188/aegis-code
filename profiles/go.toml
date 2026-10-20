@@ -1,0 +1,45 @@
+# Language profile Go (ADR 0004, #69). Lệnh là mảng argv, không qua shell.
+# Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test (regex
+# của `go test -run`), `{lockfile}` / `{licenses}` ở dependencies.audit.
+# RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
+
+language = "go"
+display_name = "Go"
+
+[detect]
+markers = ["go.mod"]
+extensions = ["go"]
+
+[aci]
+lsp = ["gopls"]
+
+[edit]
+format = ["gofmt", "-w", "{file}"]
+
+[gate]
+# `gofmt -l` luôn trả 0; `-d` trả 1 khi có khác biệt.
+format = ["gofmt", "-d", "."]
+lint = ["go", "vet", "./..."]
+repro_test = ["go", "test", "./...", "-run", "{test}"]
+test = ["go", "test", "./..."]
+coverage = ["go", "test", "./...", "-coverprofile=coverage.out"]
+
+[coverage]
+format = "go_coverprofile"
+path = "coverage.out"
+
+[dependencies]
+# Go không có lockfile riêng: go.mod liệt kê mọi module (từ Go 1.17),
+# go.sum chỉ giữ hash. Bộ đọc lấy go.mod, có tính `replace`.
+manifests = ["go.mod"]
+lockfiles = ["go.mod", "go.sum"]
+official_source = "proxy.golang.org"
+fetch = ["go", "mod", "download"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+
+[sandbox]
+image = "aegis-sandbox-go"
+cache_dirs = ["/go/pkg/mod", "/root/.cache/go-build"]
+
+[sonar.properties]
+"sonar.go.coverage.reportPaths" = "coverage.out"
