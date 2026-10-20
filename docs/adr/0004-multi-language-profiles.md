@@ -1,7 +1,7 @@
 # ADR 0004 – Repo đích đa ngôn ngữ qua language profile
 
 - Ngày: 2026-10-20
-- Trạng thái: Đề xuất
+- Trạng thái: Đã chấp nhận
 - Người quyết định: @Nguyen Han Hoang Hai
 - Liên quan: [ADR 0001](0001-platform-in-rust.md), [ADR 0002](0002-full-platform-mvp-as-checkpoint.md), [ADR 0003](0003-platform-service-architecture.md), Proposal §3, §6, §9, Thiết kế §3.1, §6.1, §7
 
