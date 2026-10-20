@@ -13,6 +13,7 @@ mod error;
 mod formatter;
 mod search;
 mod server;
+mod summary;
 mod viewer;
 mod workspace;
 
@@ -24,6 +25,7 @@ pub use edit::{CONTEXT, EditOutcome, EditRequest, Rejection, Snippet};
 pub use error::AciError;
 pub use search::{FileHit, Hits, MAX_RESULTS, SearchResult, SymbolHit, TextHit};
 pub use server::AciServer;
+pub use summary::{load_or_create_summary, module_summary};
 pub use viewer::{WINDOW, Window};
 pub use workspace::Workspace;
 

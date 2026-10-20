@@ -2,6 +2,7 @@
 
 mod agent_loop;
 mod mcp_tools;
+mod prompt;
 mod session;
 
 pub use agent_loop::{
@@ -9,4 +10,5 @@ pub use agent_loop::{
     ToolExecutor, ToolOutcome, TurnRecord, Warning, run_loop,
 };
 pub use mcp_tools::{INHERITED_ENV, McpServerSpec, McpTools, McpToolsError};
+pub use prompt::{RepoPrompt, SYSTEM_PROMPT, system_blocks};
 pub use session::{COLLAPSED, ModelSpec, Session};
