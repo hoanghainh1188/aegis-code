@@ -340,7 +340,7 @@ pub(crate) fn path_glob(pattern: &str, path: &str) -> bool {
 }
 
 /// `*` matches any run of characters; everything else is literal.
-pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
+pub fn glob_match(pattern: &str, name: &str) -> bool {
     match pattern.split_once('*') {
         None => pattern == name,
         Some((head, tail)) => {

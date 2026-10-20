@@ -6,3 +6,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+aegis-lang = { path = "../aegis-lang" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
