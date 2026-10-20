@@ -27,7 +27,7 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 | Dùng sẵn | Tự làm (Rust) |
 | --- | --- |
 | Claude API / Bedrock (AWS SDK for Rust) | Vòng lặp agent, đặt điểm ngắt cache, thu gọn lịch sử |
-| Codebase-Memory MCP, rust-analyzer, tree-sitter | Bộ công cụ ACI (MCP server) |
+| Codebase-Memory MCP, tree-sitter, language server theo ngôn ngữ | Bộ công cụ ACI (MCP server), language profile |
 | Docker, image CI, Sonar | Luật leo thang model + trần $4 / 20 bước |
 |  | Cổng kiểm chứng: test Docker + Sonar + người duyệt |
 |  | Kết nối luồng ticket/PR của khách |
@@ -45,11 +45,11 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 
 | Mục | Quyết định | Ảnh hưởng |
 | --- | --- | --- |
-| Repo | Repo nội bộ, Rust, > 100k dòng | Dùng Codebase-Memory MCP làm chỉ mục (mục 3) |
+| Repo | Repo nội bộ, > 100k dòng; ngôn ngữ nào cũng được qua language profile ([ADR 0004](../adr/0004-multi-language-profiles.md)). PoC đo trên một repo Rust và một repo Python | Dùng Codebase-Memory MCP làm chỉ mục (mục 3) |
 | Test | Có, chạy trên CI | Đủ điều kiện làm PoC ngay; Phase 0 rút ngắn |
 | Thời gian build | Chưa đo | Đo ở Phase 0; quyết định cache 5 phút hay 1 giờ |
 | Dữ liệu | Khách chỉ cho xử lý ở Nhật | PoC trên repo nội bộ nên không vướng; khi dùng code khách → profile `jp.` (mục 7) |
-| Sonar | Chuẩn bị cả Server và Cloud | Cả hai hỗ trợ Rust qua Clippy |
+| Sonar | Chuẩn bị cả Server và Cloud | Cả hai hỗ trợ đủ 6 profile ban đầu |
 | Người đọc | Chỉ nội bộ | Giữ tiếng Việt, chưa cần bản tiếng Nhật |
 | Ngôn ngữ platform | Rust, tự làm vòng lặp agent | Không dùng Claude Agent SDK; xem [ADR 0001](../adr/0001-platform-in-rust.md) |
 
@@ -101,7 +101,7 @@ Chỉ đưa cho model đúng phần code cần, không nạp cả repo. Giai đo
 
 Lưu ý: con số 1–2k token chỉ là của phần bản đồ. Cả request vẫn có system prompt, tool, code và lịch sử, thường vài chục nghìn token.
 
-**Với Rust:** Tree-sitter có sẵn grammar Rust, nên cả RepoMap lẫn công cụ tìm theo AST đều dùng được. Có thể cho agent gọi `rust-analyzer` để tra định nghĩa và chỗ dùng chính xác hơn.
+**Theo ngôn ngữ:** tree-sitter có grammar cho cả 6 profile ban đầu (Rust, Python, TypeScript/JavaScript, Java, Go, C#), nên cả RepoMap lẫn công cụ tìm theo AST đều dùng được. Có thể cho agent gọi language server của profile (`rust-analyzer`, `basedpyright`…) để tra định nghĩa và chỗ dùng chính xác hơn ([ADR 0004](../adr/0004-multi-language-profiles.md)).
 
 **Chọn cho PoC: Codebase-Memory MCP.** Repo > 100k dòng thì bản đồ RepoMap 1–2k token không đủ phủ. Truy vấn đồ thị gọi hàm qua MCP hợp hơn.
 
@@ -200,14 +200,13 @@ Bản vá chỉ tới tay người duyệt khi qua đủ 4 cổng dưới đây.
 3. **Sonar Quality Gate:** dùng mặc định "Sonar way" cho code mới — coverage ≥ 80%, trùng lặp ≤ 3%, không lỗi mới, hotspot bảo mật đã xem hết.
 4. **Người duyệt:** agent mở PR, kèm giải thích từng đoạn sửa. Người merge.
 
-**Cấu hình cho Rust:**
+**Cấu hình theo language profile ([ADR 0004](../adr/0004-multi-language-profiles.md)):**
 
-- Linter: `cargo clippy` + `rustfmt --check`. Lỗi biên dịch cũng chặn bản vá ngay.
-- Test: `cargo test` trong Docker, dùng lại image CI hiện có.
-- Coverage: `cargo llvm-cov` xuất LCOV cho Sonar.
-- Sonar: cả SonarQube Server và SonarQube Cloud đều hỗ trợ Rust qua Clippy, nhập coverage dạng LCOV hoặc Cobertura.
-- Build Rust chậm: phải cache thư mục `target` và registry giữa các lần chạy. Nếu không, mỗi vòng sửa có thể tốn vài phút và vượt thời hạn cache 5 phút.
-- Thời gian build chưa đo. Đo ở Phase 0: dưới 3 phút dùng cache 5 phút; từ 3 phút trở lên dùng cache 1 giờ. Nếu trên 10 phút, chỉ chạy test của crate bị sửa (`cargo test -p <crate>`), chạy toàn bộ ở bước cuối.
+- Linter, test, coverage và báo cáo cho Sonar lấy từ profile của repo; `RepoConfig` ghi đè bằng lệnh CI của chính repo.
+- Ví dụ profile Rust: `cargo clippy` + `rustfmt --check` (lỗi biên dịch cũng chặn bản vá ngay), `cargo test`, `cargo llvm-cov` xuất LCOV. Profile Python: `ruff`, `pytest`, `coverage.py` xuất Cobertura.
+- Sonar: cả SonarQube Server và SonarQube Cloud hỗ trợ đủ 6 profile ban đầu, nhập coverage dạng LCOV hoặc Cobertura (Go có định dạng riêng; .NET chạy SonarScanner for .NET quanh bước build).
+- Build chậm (nhất là Rust, Java, .NET): phải cache thư mục build và cache phụ thuộc của profile giữa các lần chạy. Nếu không, mỗi vòng sửa có thể tốn vài phút và vượt thời hạn cache 5 phút.
+- Thời gian build chưa đo, đo theo từng repo ở Phase 0: dưới 3 phút dùng cache 5 phút; từ 3 phút trở lên dùng cache 1 giờ. Nếu trên 10 phút, chỉ chạy test của phần bị sửa (`cargo test -p <crate>`, `pytest <thư mục>`), chạy toàn bộ ở bước cuối.
 
 **Với code legacy chưa có test (Golden Master):**
 
@@ -284,8 +283,8 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 | Phase | Thời gian | Làm gì | Mốc đo |
 | --- | --- | --- | --- |
 | 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động |
-| 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; chạy bộ issue | Đạt các ngưỡng ở mục 8 |
-| 2. Platform | 2–3 tháng | Chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai. Kiến trúc: [ADR 0003](../adr/0003-platform-service-architecture.md) | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP |
+| 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; language profile Rust và Python; chạy bộ issue của một repo mỗi ngôn ngữ | Đạt các ngưỡng ở mục 8 |
+| 2. Platform | 2–3 tháng | Profile TypeScript/JavaScript, Java, Go, C#/.NET; chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai. Kiến trúc: [ADR 0003](../adr/0003-platform-service-architecture.md) | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP |
 | 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài 6 profile ban đầu ([ADR 0004](../adr/0004-multi-language-profiles.md)), model local | Có ROI rõ ràng |
 
 **Nhân lực gợi ý cho MVP:** 1 tech lead (bán thời gian) + 1–2 dev. Không cần team riêng.
@@ -307,17 +306,18 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 
 | Câu hỏi | Trả lời | Nguồn |
 | --- | --- | --- |
-| Repo nào cho PoC? | Repo **nội bộ**, Rust, > 100k dòng, test chạy trên CI | Bạn |
+| Repo nào cho PoC? | Repo **nội bộ**, > 100k dòng, test chạy trên CI: một repo Rust và một repo Python ([ADR 0004](../adr/0004-multi-language-profiles.md)). Chưa chọn repo cụ thể | Bạn |
 | Khách có cho code ra API? | Chỉ khi xử lý ở Nhật. Khách chấp nhận PoC trên repo nội bộ | Bạn |
 | Có endpoint ở Nhật cho dòng 5.5? | Bedrock có profile `jp.` cho **Opus 5.5** và **Haiku 5.5** (Tokyo/Osaka). **Sonnet 5.5 chỉ có global.** Foundry chưa có vùng Nhật; Vertex chưa xác nhận | [Bedrock – Sonnet 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5-5.html), [Opus 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5-5.html), [Haiku 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-5-5.html) |
 | Ngưỡng token tối thiểu để cache? | 512 cho Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5. Sonnet 5 là 1,024. Bedrock có ngưỡng riêng | [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
 | Thời hạn cache tính từ đâu? | Từ lúc **bắt đầu** request ghi/đọc cache. Mỗi lần đọc trúng làm mới hạn. Response stream 4 phút thì lượt sau phải bắt đầu trong khoảng 1 phút | [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
 | SWEzze "5.0% → 9.2%" là gì? | Là mức tăng **tương đối** so với không nén, tức +2.0 đến +4.6 điểm %. Tỉ lệ giải quyết tuyệt đối 42%–58% | [Paper SWEzze](https://arxiv.org/pdf/2603.28119) |
-| SonarQube loại nào? | Chuẩn bị cho cả Server và Cloud. Cả hai đều hỗ trợ Rust | Bạn |
+| SonarQube loại nào? | Chuẩn bị cho cả Server và Cloud. Cả hai hỗ trợ đủ 6 profile ban đầu | Bạn |
 
 **Còn mở:**
 
-- [ ] Đo thời gian `cargo build` + `cargo test` trên CI (Phase 0). Dưới 3 phút → cache 5 phút; từ 3 phút trở lên → cache 1 giờ.
+- [ ] Chọn repo đích Rust và repo đích Python cho PoC.
+- [ ] Đo thời gian build + test trên CI của từng repo đích (Phase 0). Dưới 3 phút → cache 5 phút; từ 3 phút trở lên → cache 1 giờ.
 - [ ] Kiểm tra ngưỡng cache tối thiểu riêng của Bedrock cho Opus 5.5 và Haiku 5.5.
 - [ ] Theo dõi khi nào Sonnet 5.5 có profile `jp.` (gọi `GetInferenceProfile` từ Tokyo).
 - [ ] Kiểm tra Vertex AI có Opus / Sonnet 5.5 ở `asia-northeast1` không.

@@ -47,7 +47,7 @@ flowchart TD
 
 ### Chi tiết 4 Tầng kiểm soát cốt lõi
 1. **Tầng 1 – Ngữ cảnh chuẩn xác (Context Engine):**
-   * Truy vấn đồ thị quan hệ (`CALLS`, `IMPORTS`, `TESTS`) qua Codebase-Memory MCP (SQLite) kết hợp `rust-analyzer`.
+   * Truy vấn đồ thị quan hệ (`CALLS`, `IMPORTS`, `TESTS`) qua Codebase-Memory MCP (SQLite) kết hợp language server của từng ngôn ngữ (`rust-analyzer`, `basedpyright`…).
    * Bộ công cụ ACI định lượng: Giới hạn mở đúng 100 dòng (SWE-agent standard), tìm kiếm tối đa 50 kết quả. Lệnh `edit` bắt buộc chạy qua linter kiểm tra cú pháp trước khi ghi lên đĩa.
    * **Batch History Collapse:** Khi context vượt $60\%$ window, nén các output quan sát cũ thành `[Observation collapsed]` để bảo vệ cache và context, nhưng bảo toàn nguyên vẹn suy nghĩ (reasoning) của model.
 2. **Tầng 2 – Prompt Caching toán học:**
@@ -59,7 +59,7 @@ flowchart TD
    * **Expert (`Opus 5.5`):** Xử lý ca khó, lỗi kiến trúc hoặc trải trên $\ge 3$ files.
    * **Luật dừng kinh tế:** Dừng ngay lập tức nếu tổng chi phí $> \$4$ hoặc vượt 20 lượt gọi model.
 4. **Tầng 4 – Cổng kiểm chứng 6 bước trong Docker:**
-   * Format (`cargo fmt`) $\rightarrow$ Lint (`cargo clippy`) $\rightarrow$ Test tái hiện (chứng minh FAIL $\rightarrow$ PASS) $\rightarrow$ Toàn bộ workspace test $\rightarrow$ Coverage (`cargo llvm-cov`) $\rightarrow$ Sonar Quality Gate.
+   * Format $\rightarrow$ Lint $\rightarrow$ Test tái hiện (chứng minh FAIL $\rightarrow$ PASS) $\rightarrow$ Test toàn bộ $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate. Lệnh của từng bước lấy từ language profile của repo (ví dụ Rust: `cargo fmt`, `cargo clippy`, `cargo llvm-cov`) — xem [ADR 0004](docs/adr/0004-multi-language-profiles.md).
    * **Kỹ thuật Golden Master:** Với code legacy chưa có test, agent viết test ghi nhận hành vi hiện tại trước khi sửa; mọi thay đổi kết quả bắt buộc phải khai báo trong mục *"Test được phép đổi kết quả"* của PR.
 
 ### Kiến trúc Dịch vụ Doanh nghiệp (Phase 2 Platform Service)
@@ -130,9 +130,9 @@ cargo test -p aegis-provider --features bedrock
 ## 🗺️ 6. Lộ Trình Phát Triển
 
 * **Phase 0 – Chuẩn bị:** Thiết lập CI repo, dựng Docker sandbox, đo build CI, gom bộ 30–50 issue ([Proposal §9](docs/design/00-proposal.md)).
-* **Phase 1 – MVP / PoC:** Hoàn thiện 9 crates phần lõi; đo lường 3 KPI thực nghiệm trên repo nội bộ ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md)).
-* **Phase 2 – Nền Tảng Dịch Vụ:** Single binary `aegis-server` (Axum), PostgreSQL job queue, connectors (Jira/GitLab), Askama+htmx dashboard ([ADR 0003](docs/adr/0003-platform-service-architecture.md)).
-* **Phase 3 – Mở Rộng:** Kỹ thuật định vị lỗi nâng cao SBFL, nén ngữ cảnh sâu (SWEzze/SaraCoder), hỗ trợ đa ngôn ngữ ngoài Rust.
+* **Phase 1 – MVP / PoC:** Hoàn thiện các crate phần lõi và language profile Rust, Python; đo lường 3 KPI thực nghiệm trên một repo nội bộ mỗi ngôn ngữ ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md)).
+* **Phase 2 – Nền Tảng Dịch Vụ:** Profile TypeScript/JavaScript, Java, Go, C#/.NET; single binary `aegis-server` (Axum), PostgreSQL job queue, connectors (Jira/GitLab), Askama+htmx dashboard ([ADR 0003](docs/adr/0003-platform-service-architecture.md)).
+* **Phase 3 – Mở Rộng:** Kỹ thuật định vị lỗi nâng cao SBFL, nén ngữ cảnh sâu (SWEzze/SaraCoder), thêm ngôn ngữ ngoài 6 profile ban đầu.
 
 ---
 
