@@ -360,3 +360,59 @@ async fn tool_definitions_match_the_snapshot() {
         "tool definitions changed; check them and rerun with AEGIS_UPDATE_SNAPSHOTS=1:\n{actual}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn secret_values_never_reach_the_model_and_cannot_be_written_back() {
+    let repo = Scratch::fixture("rust");
+    // Built at run time so the source holds no secret-shaped string.
+    let token = format!("ghp_{}", "Z".repeat(36));
+    repo.write(
+        "src/config.rs",
+        &format!("// Deploy token, rotated yearly.\npub const TOKEN: &str = \"{token}\";\n"),
+    );
+    let tools = McpTools::connect(&[aci_spec("aci", &repo, None)])
+        .await
+        .unwrap();
+
+    let opened = tools.call("open", &json!({"file": "src/config.rs"})).await;
+    assert!(!opened.is_error, "{}", opened.content);
+    assert!(!opened.content.contains(&token));
+    assert!(
+        opened
+            .content
+            .contains("1:// Deploy token, rotated yearly."),
+        "comments stay"
+    );
+    assert!(
+        opened
+            .content
+            .contains("2:pub const TOKEN: &str = \"[REDACTED:github-token]\";")
+    );
+    assert!(
+        opened
+            .content
+            .contains("[aegis: 1 secret value(s) hidden (github-token).")
+    );
+
+    let found = tools.call("search_text", &json!({"text": "TOKEN"})).await;
+    assert!(!found.content.contains(&token), "{}", found.content);
+
+    let written_back = tools
+        .call(
+            "edit",
+            &json!({"file": "src/config.rs", "from": 2, "to": 2,
+                    "content": "pub const TOKEN: &str = \"[REDACTED:github-token]\";"}),
+        )
+        .await;
+    assert!(written_back.is_error);
+    assert!(
+        written_back.content.contains("hidden secret value"),
+        "{}",
+        written_back.content
+    );
+    assert!(
+        repo.read("src/config.rs").contains(&token),
+        "the file keeps the real value"
+    );
+    tools.shutdown().await;
+}

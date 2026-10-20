@@ -13,7 +13,7 @@ use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
-use crate::{Aci, AciError, EditOutcome, EditRequest};
+use crate::{Aci, AciError, EditOutcome, EditRequest, redact};
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchSymbolParams {
@@ -121,8 +121,14 @@ impl AciServer {
         &self,
         run: impl FnOnce(&mut Aci) -> Result<T, AciError> + Send + 'static,
     ) -> Result<String, String> {
-        self.run(run).await.map(|out| out.to_string())
+        hide(self.run(run).await.map(|out| out.to_string()))
     }
+}
+
+/// Every tool result passes here before it reaches the model (design §7).
+fn hide(result: Result<String, String>) -> Result<String, String> {
+    let clean = |text: String| redact(&text).with_notice();
+    result.map(clean).map_err(clean)
 }
 
 #[tool_router]
@@ -194,10 +200,10 @@ impl AciServer {
         let outcome = self
             .run(move |aci| aci.create_file(&p.file, &p.content))
             .await?;
-        match outcome {
+        hide(match outcome {
             EditOutcome::Applied(_) => Ok(outcome.to_string()),
             EditOutcome::Rejected { .. } => Err(outcome.to_string()),
-        }
+        })
     }
 
     #[tool(
@@ -219,10 +225,10 @@ impl AciServer {
             .await?;
         // A refused edit is a failed call, so the agent does not take it
         // for written.
-        match outcome {
+        hide(match outcome {
             EditOutcome::Applied(_) => Ok(outcome.to_string()),
             EditOutcome::Rejected { .. } => Err(outcome.to_string()),
-        }
+        })
     }
 }
 

@@ -9,6 +9,7 @@ use std::path::Path;
 use aegis_lang::{SyntaxError, has_grammar, syntax_errors_in};
 
 use crate::formatter::{self, Failure};
+use crate::secrets::MARKER;
 use crate::viewer::write_numbered;
 use crate::{AciError, Workspace};
 
@@ -134,6 +135,18 @@ fn write(path: &Path, text: &str) -> Result<(), AciError> {
     std::fs::write(path, text).map_err(|e| AciError::io(path, &e))
 }
 
+/// The model sees secret values as placeholders (`crate::secrets`); writing
+/// one back would destroy the real value.
+fn refuse_hidden_values(content: &str) -> Result<(), AciError> {
+    if content.contains(MARKER) {
+        return Err(AciError::InvalidInput(format!(
+            "the new content contains `{MARKER}…]`, a hidden secret value; edit around those \
+             lines and leave them as they are"
+        )));
+    }
+    Ok(())
+}
+
 /// Puts back what was there: the old content, or no file at all.
 fn restore(path: &Path, original: Option<&str>) -> Result<(), AciError> {
     match original {
@@ -181,6 +194,7 @@ fn write_formatted(
 /// `create_file`: a new file with `content`, checked like an edit. A
 /// refused file is not left behind.
 pub fn create(ws: &Workspace, file: &str, content: &str) -> Result<EditOutcome, AciError> {
+    refuse_hidden_values(content)?;
     let path = ws.resolve_new(file)?;
     let shown = ws.display(&path);
     let lines: Vec<String> = content.lines().map(str::to_owned).collect();
@@ -223,6 +237,7 @@ pub fn edit(ws: &Workspace, request: EditRequest<'_>) -> Result<EditOutcome, Aci
         to,
         content,
     } = request;
+    refuse_hidden_values(content)?;
     let path = ws.resolve(file)?;
     let shown = ws.display(&path);
     let before = ws.read_named_text(&path)?;

@@ -68,6 +68,14 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         Ok(cost_usd)
     }
 
+    /// Secret values hidden from the model; nothing is recorded for zero.
+    pub async fn secrets_redacted(&mut self, count: u32) -> Result<(), LedgerError> {
+        if count == 0 {
+            return Ok(());
+        }
+        self.push(LedgerEvent::SecretsRedacted { count }).await
+    }
+
     pub async fn gate_run(&mut self, run: GateRun) -> Result<(), LedgerError> {
         self.push(LedgerEvent::GateRun(run)).await
     }
