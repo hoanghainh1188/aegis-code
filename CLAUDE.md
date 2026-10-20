@@ -9,7 +9,7 @@ Mọi việc đều đi qua một GitHub issue.
 - **Nhánh:** `<số issue>-<mô-tả-ngắn>`, chữ thường, nối bằng gạch ngang. Ví dụ: `10-router-escalation`.
 - **PR:** mô tả có dòng `Closes #<số>` để issue tự đóng khi merge. Một PR chỉ xử lý một issue.
 - **Label:** mỗi issue có ít nhất một `area/*` theo crate hoặc mảng việc:
-  - Crate: `area/provider`, `area/orchestrator`, `area/router`, `area/aci`, `area/gate`, `area/ledger`, `area/pr`, `area/sonar`
+  - Crate: `area/provider`, `area/orchestrator`, `area/router`, `area/aci`, `area/gate`, `area/ledger`, `area/pr`, `area/sonar`, `area/lang` (language profile, [ADR 0004](docs/adr/0004-multi-language-profiles.md))
   - Mảng việc: `area/infra` (Docker, CI, policies, prompts), `area/eval` (bộ thử, KPI)
   - Platform (Phase 2): `area/server`, `area/connectors`, `area/web`, `area/security`, `area/deploy`
   - Thêm `research` cho việc cần đo/kiểm tra trước khi quyết, `tech-debt` cho việc còn nợ từ review.
