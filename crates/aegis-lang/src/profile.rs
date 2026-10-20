@@ -8,9 +8,8 @@ use serde::Deserialize;
 
 use crate::{CommandTemplate, LangError, Language, Placeholder};
 
-/// Profiles shipped with the platform. The other languages get theirs in
-/// #70.
-const BUILTIN: [(&str, &str); 5] = [
+/// Profiles shipped with the platform, one per [`Language`].
+const BUILTIN: [(&str, &str); 6] = [
     (
         "profiles/rust.toml",
         include_str!("../../../profiles/rust.toml"),
@@ -30,6 +29,10 @@ const BUILTIN: [(&str, &str); 5] = [
     (
         "profiles/java.toml",
         include_str!("../../../profiles/java.toml"),
+    ),
+    (
+        "profiles/csharp.toml",
+        include_str!("../../../profiles/csharp.toml"),
     ),
 ];
 
@@ -383,22 +386,13 @@ mod tests {
     }
 
     #[test]
-    fn builtin_profiles() {
+    fn builtin_has_one_profile_per_language() {
         let p = builtin();
-        assert_eq!(
-            p.languages().collect::<Vec<_>>(),
-            vec![
-                Language::Rust,
-                Language::Python,
-                Language::TypeScript,
-                Language::Java,
-                Language::Go
-            ]
-        );
+        assert_eq!(p.languages().collect::<Vec<_>>(), Language::ALL.to_vec());
         assert_eq!(p.get(Language::Rust).unwrap().display_name, "Rust");
         assert_eq!(
-            p.get(Language::CSharp),
-            Err(LangError::MissingProfile(Language::CSharp))
+            Profiles::default().get(Language::Java),
+            Err(LangError::MissingProfile(Language::Java))
         );
     }
 
@@ -439,7 +433,8 @@ mod tests {
         );
         assert_eq!(p.detect(["package.json"]), vec![Language::TypeScript]);
         assert_eq!(p.detect(["pom.xml"]), vec![Language::Java]);
-        assert!(p.detect(["App.sln"]).is_empty());
+        assert_eq!(p.detect(["App.sln"]), vec![Language::CSharp]);
+        assert!(p.detect(["Makefile", "README.md"]).is_empty());
     }
 
     #[test]

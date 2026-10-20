@@ -18,10 +18,11 @@ pub(crate) enum Grammar {
     Tsx,
     JavaScript,
     Java,
+    CSharp,
 }
 
 impl Grammar {
-    const COUNT: usize = 7;
+    const COUNT: usize = 8;
 
     /// Grammar for a file of `language`; without a path, the language's
     /// main grammar. `None` while the language has no grammar yet.
@@ -40,8 +41,7 @@ impl Grammar {
                 _ => Self::TypeScript,
             }),
             Language::Java => Some(Self::Java),
-            // Grammar comes with its profile (#70).
-            Language::CSharp => None,
+            Language::CSharp => Some(Self::CSharp),
         }
     }
 
@@ -54,6 +54,7 @@ impl Grammar {
             Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Self::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Self::Java => tree_sitter_java::LANGUAGE.into(),
+            Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
         }
     }
 
@@ -67,6 +68,7 @@ impl Grammar {
             }
             Self::JavaScript => include_str!("../../../profiles/queries/javascript.scm"),
             Self::Java => include_str!("../../../profiles/queries/java.scm"),
+            Self::CSharp => include_str!("../../../profiles/queries/csharp.scm"),
         }
     }
 
@@ -102,6 +104,7 @@ mod tests {
         Grammar::Tsx,
         Grammar::JavaScript,
         Grammar::Java,
+        Grammar::CSharp,
     ];
 
     #[test]
@@ -127,6 +130,10 @@ mod tests {
             Grammar::for_file(Language::TypeScript, None),
             Some(Grammar::TypeScript)
         );
-        assert_eq!(Grammar::for_file(Language::CSharp, None), None);
+        assert!(
+            Language::ALL
+                .iter()
+                .all(|l| Grammar::for_file(*l, None).is_some())
+        );
     }
 }

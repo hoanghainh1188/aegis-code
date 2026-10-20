@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::profile::glob_match;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
-use crate::{go_lock, maven_lock, npm_lock, python_lock};
+use crate::{go_lock, maven_lock, npm_lock, nuget_lock, python_lock};
 
 /// Dependencies a patch may add, e.g. `policies/allowed-crates.toml`.
 /// Dependencies already locked before the patch need no entry.
@@ -41,6 +41,15 @@ pub fn read_lockfile(
         (Language::Go, "go.mod") => go_lock::go_mod(text),
         (Language::TypeScript, "package-lock.json") => npm_lock::package_lock(text),
         (Language::Java, "pom.xml") => maven_lock::pom_xml(text),
+        (Language::CSharp, "packages.lock.json") => nuget_lock::packages_lock(text),
+        (Language::CSharp, name @ ("nuget.config" | "NuGet.Config")) => {
+            nuget_lock::nuget_config(name, text)
+        }
+        (Language::CSharp, name)
+            if name == "Directory.Packages.props" || glob_match("*.csproj", name) =>
+        {
+            nuget_lock::msbuild_project(name, text)
+        }
         (Language::Java, name @ ("gradle.lockfile" | "buildscript-gradle.lockfile")) => {
             maven_lock::gradle_lockfile(name, text)
         }

@@ -54,7 +54,7 @@ Mọi chỗ phụ thuộc ngôn ngữ của repo đích đi qua một **language
 | TypeScript / JavaScript | `tree-sitter-typescript`, `tree-sitter-javascript` / `typescript-language-server` | `prettier`, `eslint`, `tsc --noEmit` | lệnh test của repo (Jest, Vitest…) / LCOV | `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` |
 | Java | `tree-sitter-java` / `jdtls` | formatter và linter của repo (Spotless, Checkstyle…) | Maven / Gradle / JaCoCo XML | Gradle lockfile; Maven: cây phụ thuộc đã resolve |
 | Go | `tree-sitter-go` / `gopls` | `gofmt`, `go vet`, `golangci-lint` nếu repo có | `go test` / `-coverprofile` | `go.sum` |
-| C# / .NET | `tree-sitter-c-sharp` / Roslyn language server | `dotnet format --verify-no-changes`, Roslyn analyzers (`dotnet build -warnaserror`) | `dotnet test` / coverlet (Cobertura hoặc OpenCover) | `packages.lock.json` |
+| C# / .NET | `tree-sitter-c-sharp` / Roslyn language server | `dotnet format --verify-no-changes`, Roslyn analyzers (`dotnet build -warnaserror`) | `dotnet test` / coverlet (OpenCover, vì SonarQube C# không đọc Cobertura) | `packages.lock.json` |
 
 - Cả sáu profile đều có grammar tree-sitter ổn định, language server dùng được, lockfile để so phụ thuộc, và được SonarQube Server và Cloud hỗ trợ.
 - **Profile C#/.NET** phủ hệ sinh thái .NET: `dotnet` CLI, MSBuild, NuGet. Bản đầu làm C#. F# và VB.NET dùng chung build, test và phụ thuộc, nhưng ACI cần grammar riêng (grammar tree-sitter của F# chưa ổn định, VB.NET gần như chưa có), nên thêm sau theo nhu cầu.

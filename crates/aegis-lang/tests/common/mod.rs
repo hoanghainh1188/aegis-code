@@ -55,7 +55,11 @@ impl Workspace {
             .env("CARGO_TARGET_DIR", self.root.join("target"))
             .env("PYTHONDONTWRITEBYTECODE", "1")
             // Never download another Go toolchain for the fixture.
-            .env("GOTOOLCHAIN", "local");
+            .env("GOTOOLCHAIN", "local")
+            // English, quiet output from the .NET CLI.
+            .env("DOTNET_CLI_UI_LANGUAGE", "en")
+            .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+            .env("DOTNET_NOLOGO", "1");
         for var in INHERITED {
             cmd.env_remove(var);
         }

@@ -16,6 +16,7 @@ mod language;
 mod lockfile;
 mod maven_lock;
 mod npm_lock;
+mod nuget_lock;
 mod profile;
 mod python_lock;
 mod resolve;
