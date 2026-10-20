@@ -1,0 +1,64 @@
+# Language profile Java (ADR 0004, #68). Lệnh là mảng argv, không qua shell.
+# Mặc định cho Maven; repo dùng Gradle hay có formatter/linter riêng
+# (Spotless, Checkstyle…) thì ghi đè trong RepoConfig.
+# Placeholder: `{test}` ở gate.repro_test (`Class#method` của surefire),
+# `{lockfile}` / `{licenses}` ở audit.
+#
+# Gate chạy không mạng nên mọi lệnh Maven có `-o`. Bước lấy phụ thuộc chạy
+# pha `test` với một tag JUnit không có thật: surefire tải provider JUnit
+# Platform (dependency:go-offline không tải) mà không chạy test nào của repo.
+
+language = "java"
+display_name = "Java"
+
+[detect]
+markers = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+extensions = ["java"]
+
+[aci]
+lsp = ["jdtls"]
+
+# Không có formatter chung cho Java; repo có Spotless thì ghi đè edit_format
+# và gate.format (ví dụ `mvn -o spotless:apply` / `spotless:check`).
+[edit]
+
+[gate]
+# Lỗi biên dịch, kể cả test, chặn bản vá ngay.
+lint = ["mvn", "-B", "-o", "-q", "test-compile"]
+repro_test = ["mvn", "-B", "-o", "-q", "test", "-Dtest={test}"]
+test = ["mvn", "-B", "-o", "-q", "test"]
+coverage = [
+    "mvn", "-B", "-o", "-q",
+    "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",
+    "test",
+    "org.jacoco:jacoco-maven-plugin:0.8.12:report",
+]
+
+[coverage]
+format = "jacoco"
+path = "target/site/jacoco/jacoco.xml"
+
+[dependencies]
+manifests = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties"]
+# Maven không có lockfile: pom.xml cho phụ thuộc khai báo trực tiếp; cây đã
+# resolve là #80.
+lockfiles = ["pom.xml", "gradle.lockfile", "buildscript-gradle.lockfile"]
+official_source = "https://repo.maven.apache.org/maven2"
+fetch = [
+    "mvn", "-B", "-q",
+    "dependency:go-offline",
+    "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",
+    "test",
+    "org.jacoco:jacoco-maven-plugin:0.8.12:report",
+    "-Dgroups=aegis-fetch-only",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "-DfailIfNoTests=false",
+]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+
+[sandbox]
+image = "aegis-sandbox-java"
+cache_dirs = ["target", "/root/.m2/repository", "/root/.gradle/caches"]
+
+[sonar.properties]
+"sonar.coverage.jacoco.xmlReportPaths" = "target/site/jacoco/jacoco.xml"

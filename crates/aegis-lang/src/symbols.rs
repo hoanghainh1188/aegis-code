@@ -62,7 +62,13 @@ impl SymbolKind {
     fn is_container(self) -> bool {
         matches!(
             self,
-            Self::Impl | Self::Trait | Self::Module | Self::Class | Self::Interface
+            Self::Impl
+                | Self::Trait
+                | Self::Module
+                | Self::Class
+                | Self::Interface
+                | Self::Enum
+                | Self::Struct
         )
     }
 }
@@ -571,6 +577,69 @@ function* ids() { yield 1; }
         assert_eq!(find(&all, "make").kind, SymbolKind::Function);
     }
 
+    const JAVA: &str = r#"package example;
+
+public class Cart implements Priced {
+    public static final int MAX_ITEMS = 3;
+    private final java.util.List<Integer> items = new java.util.ArrayList<>();
+
+    public Cart() {}
+
+    public void add(int price) { items.add(price); }
+
+    public static class Line {
+        int cost() { return 0; }
+    }
+}
+
+interface Priced {
+    int total();
+    int LIMIT = 10;
+}
+
+enum Color { RED, BLUE; Color next() { return RED; } }
+
+record Point(int x, int y) { int sum() { return x + y; } }
+
+@interface Audited {}
+"#;
+
+    #[test]
+    fn finds_java_definitions_and_their_containers() {
+        let all = symbols(Language::Java, JAVA).unwrap();
+        let kinds = [
+            ("Cart", SymbolKind::Class),
+            ("MAX_ITEMS", SymbolKind::Variable),
+            ("items", SymbolKind::Variable),
+            ("Line", SymbolKind::Class),
+            ("Priced", SymbolKind::Interface),
+            ("LIMIT", SymbolKind::Constant),
+            ("Color", SymbolKind::Enum),
+            ("Point", SymbolKind::Class),
+            ("Audited", SymbolKind::Interface),
+        ];
+        for (name, kind) in kinds {
+            assert_eq!(find(&all, name).kind, kind, "{name}");
+        }
+        let method = |name: &str| {
+            let s = all
+                .iter()
+                .find(|s| s.name == name && s.kind == SymbolKind::Method)
+                .unwrap();
+            s.container.clone()
+        };
+        assert_eq!(method("add").as_deref(), Some("Cart"));
+        assert_eq!(method("cost").as_deref(), Some("Line"));
+        assert_eq!(method("total").as_deref(), Some("Priced"));
+        assert_eq!(method("next").as_deref(), Some("Color"));
+        assert_eq!(method("sum").as_deref(), Some("Point"));
+        let ctor = all
+            .iter()
+            .find(|s| s.name == "Cart" && s.kind == SymbolKind::Method)
+            .unwrap();
+        assert_eq!(ctor.container.as_deref(), Some("Cart"));
+    }
+
     #[test]
     fn languages_without_a_query_say_so() {
         for language in [
@@ -578,13 +647,14 @@ function* ids() { yield 1; }
             Language::Python,
             Language::Go,
             Language::TypeScript,
+            Language::Java,
         ] {
             assert!(has_symbol_query(language), "{language}");
         }
-        assert!(!has_symbol_query(Language::Java));
+        assert!(!has_symbol_query(Language::CSharp));
         assert_eq!(
-            symbols(Language::Java, "class A {}"),
-            Err(LangError::UnsupportedGrammar(Language::Java))
+            symbols(Language::CSharp, "class A {}"),
+            Err(LangError::UnsupportedGrammar(Language::CSharp))
         );
     }
 }
