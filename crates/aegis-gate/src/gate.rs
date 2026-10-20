@@ -489,5 +489,6 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         };
         steps.push(step);
     }
-    Ok(GateReport { steps, tree })
+    let base = run.base.clone();
+    Ok(GateReport { steps, tree, base })
 }

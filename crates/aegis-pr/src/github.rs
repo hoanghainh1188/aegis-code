@@ -1,0 +1,165 @@
+//! Opens the pull request on GitHub (REST API). The PR is always opened in
+//! the configured repo, from a branch of that same repo: the agent works on
+//! a fork and has no way to target another repository.
+
+use std::time::Duration;
+
+use serde::Deserialize;
+use serde_json::json;
+
+use crate::{AgentBranch, PrError, Remote};
+
+const API_VERSION: &str = "2022-11-28";
+
+/// A request to GitHub still running after this long fails.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone)]
+pub struct GitHub {
+    client: reqwest::Client,
+    api: String,
+    owner: String,
+    repo: String,
+    token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PullRequest {
+    pub number: u64,
+    #[serde(rename = "html_url")]
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiError {
+    message: String,
+    #[serde(default)]
+    errors: Vec<serde_json::Value>,
+}
+
+impl ApiError {
+    /// `message` plus the details GitHub gives for a 422.
+    fn text(self) -> String {
+        let details: Vec<String> = self
+            .errors
+            .iter()
+            .filter_map(|e| e.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+            .collect();
+        if details.is_empty() {
+            self.message
+        } else {
+            format!("{} ({})", self.message, details.join("; "))
+        }
+    }
+}
+
+/// `https://…`, or `http://` to this machine (tests). The bearer token
+/// goes there.
+fn checked_api(api: &str) -> Result<String, PrError> {
+    let api = api.trim_end_matches('/');
+    let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
+        .iter()
+        .any(|p| api.starts_with(p));
+    if api.starts_with("https://") || local {
+        Ok(api.to_owned())
+    } else {
+        Err(PrError::InvalidRemote(format!(
+            "API root `{api}` must use https"
+        )))
+    }
+}
+
+fn plain_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+        && s != "."
+        && s != ".."
+}
+
+impl GitHub {
+    /// `api` is `https://api.github.com` (or a GitHub Enterprise API root);
+    /// `owner/repo` is the fork the agent works on.
+    pub fn new(api: &str, owner: &str, repo: &str, token: &str) -> Result<Self, PrError> {
+        if !plain_name(owner) || !plain_name(repo) {
+            return Err(PrError::GitHub {
+                status: 0,
+                message: format!("`{owner}/{repo}` is not a repository name"),
+            });
+        }
+        let api = checked_api(api)?;
+        let client = reqwest::Client::builder()
+            .user_agent("aegis-code")
+            .timeout(HTTP_TIMEOUT)
+            .build()
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        Ok(Self {
+            client,
+            api,
+            owner: owner.to_owned(),
+            repo: repo.to_owned(),
+            token: token.to_owned(),
+        })
+    }
+
+    /// Where the agent's branch for this repo is pushed: the web host of
+    /// the API root (`api.github.com` → `github.com`, `<host>/api/v3` →
+    /// `<host>`), same owner and repo, same token.
+    pub fn remote(&self) -> Result<Remote, PrError> {
+        let rest = self
+            .api
+            .split_once("://")
+            .map_or(self.api.as_str(), |(_, r)| r);
+        let host = rest.split('/').next().unwrap_or(rest);
+        let host = host.strip_prefix("api.").unwrap_or(host);
+        Remote::https(host, &self.owner, &self.repo, &self.token)
+    }
+
+    /// Opens a PR from `head` into `base`.
+    pub async fn open_pull_request(
+        &self,
+        head: &AgentBranch,
+        base: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> Result<PullRequest, PrError> {
+        let url = format!("{}/repos/{}/{}/pulls", self.api, self.owner, self.repo);
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .json(&json!({
+                "title": title,
+                "head": head.name(),
+                "base": base,
+                "body": body,
+                "draft": draft,
+                "maintainer_can_modify": false,
+            }))
+            .send()
+            .await
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        if status.is_success() {
+            serde_json::from_str(&text).map_err(|e| PrError::GitHub {
+                status: status.as_u16(),
+                message: format!("unexpected reply: {e}"),
+            })
+        } else {
+            let message = serde_json::from_str::<ApiError>(&text)
+                .map(ApiError::text)
+                .unwrap_or_else(|_| text.chars().take(200).collect());
+            Err(PrError::GitHub {
+                status: status.as_u16(),
+                message,
+            })
+        }
+    }
+}

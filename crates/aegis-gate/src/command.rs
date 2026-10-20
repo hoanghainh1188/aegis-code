@@ -166,18 +166,22 @@ impl Runner {
             )
             .envs(self.env.iter().cloned())
             .envs(extra.iter().copied())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdin(Stdio::null());
+        // One pipe for stdout and stderr, so the log keeps the order the
+        // command wrote in: cargo's `Running …` (stderr) before the test
+        // binary's `test … FAILED` (stdout), which the failure parser needs.
+        let (output, writer) = std::io::pipe().map_err(|e| GateError::io(log, &e))?;
+        let writer_err = writer.try_clone().map_err(|e| GateError::io(log, &e))?;
+        command.stdout(writer).stderr(writer_err);
         own_group(&mut command);
-        let mut child = command.spawn().map_err(|e| GateError::Spawn {
+        let spawned = command.spawn();
+        // Our ends of the pipe must close, or the reader never sees EOF.
+        drop(command);
+        let mut child = spawned.map_err(|e| GateError::Spawn {
             program: argv[0].clone(),
             message: e.to_string(),
         })?;
-        let pipes = [
-            spawn_copy(child.stdout.take(), Arc::clone(&file)),
-            spawn_copy(child.stderr.take(), Arc::clone(&file)),
-        ];
+        let pipes = [spawn_copy(Some(output), Arc::clone(&file))];
         let exit = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break exit_of(status),

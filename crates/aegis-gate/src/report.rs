@@ -114,6 +114,9 @@ pub struct GateReport {
     /// Git tree id of exactly the files the gate checked; the pull request
     /// commits this tree, not whatever the working tree holds later.
     pub tree: String,
+    /// Full commit id of the base revision the patch was compared with;
+    /// the pull request's commit goes on top of it.
+    pub base: String,
 }
 
 impl GateReport {
