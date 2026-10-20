@@ -22,8 +22,9 @@ pub(crate) fn grammar(language: Language) -> Option<tree_sitter::Language> {
     match language {
         Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
         Language::Python => Some(tree_sitter_python::LANGUAGE.into()),
-        // Grammars come with their profiles (#67–#70).
-        Language::TypeScript | Language::Java | Language::Go | Language::CSharp => None,
+        Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
+        // Grammars come with their profiles (#67, #68, #70).
+        Language::TypeScript | Language::Java | Language::CSharp => None,
     }
 }
 
@@ -137,10 +138,14 @@ mod tests {
 
     #[test]
     fn languages_without_grammar_say_so() {
-        assert!(has_grammar(Language::Rust) && has_grammar(Language::Python));
+        assert!(
+            [Language::Rust, Language::Python, Language::Go]
+                .into_iter()
+                .all(has_grammar)
+        );
         assert_eq!(
-            syntax_errors(Language::Go, "package main"),
-            Err(LangError::UnsupportedGrammar(Language::Go))
+            syntax_errors(Language::Java, "class A {}"),
+            Err(LangError::UnsupportedGrammar(Language::Java))
         );
     }
 }

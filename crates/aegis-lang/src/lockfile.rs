@@ -7,8 +7,8 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::profile::glob_match;
-use crate::python_lock;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
+use crate::{go_lock, python_lock};
 
 /// Dependencies a patch may add, e.g. `policies/allowed-crates.toml`.
 /// Dependencies already locked before the patch need no entry.
@@ -38,6 +38,7 @@ pub fn read_lockfile(
         (Language::Rust, "Cargo.lock") => cargo_lock(text),
         (Language::Python, "uv.lock") => python_lock::uv_lock(text),
         (Language::Python, "poetry.lock") => python_lock::poetry_lock(text),
+        (Language::Go, "go.mod") => go_lock::go_mod(text),
         (Language::Python, name) if glob_match("requirements*.txt", name) => {
             python_lock::requirements(name, text)
         }
