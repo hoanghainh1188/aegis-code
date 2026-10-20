@@ -4,13 +4,15 @@
 //! (ADR 0004); this crate names no tool of any language.
 //!
 //! Each tool returns a value whose `Display` is the fixed text shown to the
-//! agent, with paths relative to the repo root and line numbers. Served
-//! over MCP by #8.
+//! agent, with paths relative to the repo root and line numbers.
+//! [`AciServer`] serves them over MCP; the `aegis-aci` binary runs it on
+//! stdio.
 
 mod edit;
 mod error;
 mod formatter;
 mod search;
+mod server;
 mod viewer;
 mod workspace;
 
@@ -21,6 +23,7 @@ use aegis_lang::ResolvedProfile;
 pub use edit::{CONTEXT, EditOutcome, EditRequest, Rejection, Snippet};
 pub use error::AciError;
 pub use search::{FileHit, Hits, MAX_RESULTS, SearchResult, SymbolHit, TextHit};
+pub use server::AciServer;
 pub use viewer::{WINDOW, Window};
 pub use workspace::Workspace;
 
