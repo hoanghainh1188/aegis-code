@@ -1,0 +1,14 @@
+[package]
+name = "aegis-lang"
+description = "Language profiles for target repos: detection, ACI grammar, edit checks, gate steps, dependencies (ADR 0004)."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.1.8"
+tree-sitter = "0.27.1"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"

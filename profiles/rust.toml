@@ -1,0 +1,41 @@
+# Language profile Rust (ADR 0004, #63, #64). Lệnh là mảng argv, không qua
+# shell. Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test.
+# RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
+
+language = "rust"
+display_name = "Rust"
+
+[detect]
+markers = ["Cargo.toml"]
+extensions = ["rs"]
+
+[aci]
+lsp = ["rust-analyzer"]
+
+[edit]
+# Chỉ format file vừa sửa. Edition mặc định 2021; repo khác edition thì ghi đè.
+format = ["rustfmt", "--edition", "2021", "{file}"]
+
+[gate]
+format = ["cargo", "fmt", "--all", "--check"]
+lint = ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
+repro_test = ["cargo", "test", "--workspace", "--", "--exact", "{test}"]
+test = ["cargo", "test", "--workspace"]
+coverage = ["cargo", "llvm-cov", "--workspace", "--lcov", "--output-path", "lcov.info"]
+
+[coverage]
+format = "lcov"
+path = "lcov.info"
+
+[dependencies]
+manifests = ["Cargo.toml"]
+lockfiles = ["Cargo.lock"]
+official_source = "registry+https://github.com/rust-lang/crates.io-index"
+fetch = ["cargo", "fetch", "--locked"]
+
+[sandbox]
+image = "aegis-sandbox-rust"
+cache_dirs = ["target", "/usr/local/cargo/registry"]
+
+# Thuộc tính Sonar cho Rust chốt ở #64.
+[sonar.properties]
