@@ -9,8 +9,8 @@ use serde::Deserialize;
 use crate::{CommandTemplate, LangError, Language, Placeholder};
 
 /// Profiles shipped with the platform. The other languages get theirs in
-/// #68, #70.
-const BUILTIN: [(&str, &str); 4] = [
+/// #70.
+const BUILTIN: [(&str, &str); 5] = [
     (
         "profiles/rust.toml",
         include_str!("../../../profiles/rust.toml"),
@@ -26,6 +26,10 @@ const BUILTIN: [(&str, &str); 4] = [
     (
         "profiles/typescript.toml",
         include_str!("../../../profiles/typescript.toml"),
+    ),
+    (
+        "profiles/java.toml",
+        include_str!("../../../profiles/java.toml"),
     ),
 ];
 
@@ -379,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_has_phase_one_profiles_and_go() {
+    fn builtin_profiles() {
         let p = builtin();
         assert_eq!(
             p.languages().collect::<Vec<_>>(),
@@ -387,13 +391,14 @@ mod tests {
                 Language::Rust,
                 Language::Python,
                 Language::TypeScript,
+                Language::Java,
                 Language::Go
             ]
         );
         assert_eq!(p.get(Language::Rust).unwrap().display_name, "Rust");
         assert_eq!(
-            p.get(Language::Java),
-            Err(LangError::MissingProfile(Language::Java))
+            p.get(Language::CSharp),
+            Err(LangError::MissingProfile(Language::CSharp))
         );
     }
 
@@ -433,7 +438,8 @@ mod tests {
             vec![Language::Rust, Language::Python]
         );
         assert_eq!(p.detect(["package.json"]), vec![Language::TypeScript]);
-        assert!(p.detect(["pom.xml"]).is_empty());
+        assert_eq!(p.detect(["pom.xml"]), vec![Language::Java]);
+        assert!(p.detect(["App.sln"]).is_empty());
     }
 
     #[test]

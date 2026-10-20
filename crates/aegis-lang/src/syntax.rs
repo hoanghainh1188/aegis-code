@@ -154,8 +154,8 @@ mod tests {
             .all(has_grammar)
         );
         assert_eq!(
-            syntax_errors(Language::Java, "class A {}"),
-            Err(LangError::UnsupportedGrammar(Language::Java))
+            syntax_errors(Language::CSharp, "class A {}"),
+            Err(LangError::UnsupportedGrammar(Language::CSharp))
         );
     }
 }

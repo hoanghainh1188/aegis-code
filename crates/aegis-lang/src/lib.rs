@@ -14,6 +14,7 @@ mod go_lock;
 mod grammar;
 mod language;
 mod lockfile;
+mod maven_lock;
 mod npm_lock;
 mod profile;
 mod python_lock;
