@@ -20,6 +20,7 @@ use crate::failures::failing_tests;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, tail};
+use crate::sandbox::Sandbox;
 use crate::{GateError, deps};
 
 /// Failing tests listed for the agent; the rest are counted.
@@ -49,6 +50,8 @@ pub struct GateRequest<'a> {
     pub env: Vec<(String, String)>,
     pub step_timeout: Duration,
     pub cancel: CancelToken,
+    /// Run the steps in containers (#5); `None` runs them on the machine.
+    pub sandbox: Option<Sandbox>,
 }
 
 struct Run<'a> {
@@ -462,6 +465,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
             env: req.env.clone(),
             timeout: req.step_timeout,
             cancel: req.cancel.clone(),
+            sandbox: req.sandbox.clone(),
         },
         base,
         base_tree: None,

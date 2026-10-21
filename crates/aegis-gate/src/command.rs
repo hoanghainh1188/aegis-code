@@ -14,6 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::GateError;
+use crate::sandbox::{CLIENT_ENV, Sandbox, container_name};
 
 /// Variables a step gets from this process. Everything else, including
 /// provider credentials, stays out; the caller adds what the repo needs.
@@ -75,6 +76,8 @@ pub struct Runner {
     pub env: Vec<(String, String)>,
     pub timeout: Duration,
     pub cancel: CancelToken,
+    /// Run each command in a container instead of on the machine.
+    pub sandbox: Option<Sandbox>,
 }
 
 fn spawn_copy(
@@ -154,19 +157,37 @@ impl Runner {
         if let Ok(mut f) = file.lock() {
             let _ = writeln!(f, "$ {}", argv.join(" "));
         }
-        let mut command = Command::new(&argv[0]);
-        command
-            .args(&argv[1..])
-            .current_dir(dir)
-            .env_clear()
-            .envs(
-                INHERITED_ENV
-                    .iter()
-                    .filter_map(|k| Some((*k, std::env::var_os(k)?))),
-            )
-            .envs(self.env.iter().cloned())
-            .envs(extra.iter().copied())
-            .stdin(Stdio::null());
+        let container = self.sandbox.as_ref().map(|s| (s, container_name()));
+        let mut command = match &container {
+            // The container gets the request's env; the client only what
+            // it needs to reach the daemon. Its own /tmp replaces `extra`.
+            Some((sandbox, name)) => {
+                let mut inner = Sandbox::clone(sandbox);
+                inner.env.extend(self.env.iter().cloned());
+                let wrapped = inner.wrap(name, argv, dir);
+                let mut c = Command::new(&wrapped[0]);
+                c.args(&wrapped[1..]).env_clear().envs(
+                    CLIENT_ENV
+                        .iter()
+                        .filter_map(|k| Some((*k, std::env::var_os(k)?))),
+                );
+                c
+            }
+            None => {
+                let mut c = Command::new(&argv[0]);
+                c.args(&argv[1..])
+                    .env_clear()
+                    .envs(
+                        INHERITED_ENV
+                            .iter()
+                            .filter_map(|k| Some((*k, std::env::var_os(k)?))),
+                    )
+                    .envs(self.env.iter().cloned())
+                    .envs(extra.iter().copied());
+                c
+            }
+        };
+        command.current_dir(dir).stdin(Stdio::null());
         // One pipe for stdout and stderr, so the log keeps the order the
         // command wrote in: cargo's `Running …` (stderr) before the test
         // binary's `test … FAILED` (stdout), which the failure parser needs.
@@ -202,8 +223,13 @@ impl Runner {
             thread::sleep(POLL);
         };
         // Nothing the command started may outlive it and touch the repo
-        // during later steps.
+        // during later steps; a container lives outside the process group.
         kill_group(&child);
+        if let Some((sandbox, name)) = &container
+            && matches!(exit, Exit::TimedOut | Exit::Cancelled)
+        {
+            sandbox.kill(name);
+        }
         let deadline = Instant::now() + PIPE_GRACE;
         for pipe in pipes {
             let _ = pipe.recv_timeout(deadline.saturating_duration_since(Instant::now()));

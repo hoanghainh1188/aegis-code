@@ -307,6 +307,7 @@ fn work_dir_inside_the_repo_is_refused() {
         env: vec![],
         step_timeout: Duration::from_secs(1),
         cancel: CancelToken::new(),
+        sandbox: None,
     })
     .unwrap_err();
     assert!(
@@ -486,6 +487,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             env: vec![],
             step_timeout: Duration::from_secs(60),
             cancel: CancelToken::new(),
+            sandbox: None,
         })
     };
     #[cfg(unix)]

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
-use aegis_gate::{CancelToken, GateReport, GateRequest, StepName, StepStatus, run_gate};
+use aegis_gate::{CancelToken, GateReport, GateRequest, Sandbox, StepName, StepStatus, run_gate};
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
 use aegis_orchestrator::{
@@ -279,6 +279,34 @@ fn model_spec(cfg: &RunConfig, tier: Tier) -> ModelSpec {
     }
 }
 
+/// The gate's container: the profile's image, and each cache directory
+/// outside the tree kept on the host under `state_dir/cache/<repo>/`, so it
+/// survives between jobs.
+fn sandbox(cfg: &RunConfig, profile: &ResolvedProfile) -> Result<Option<Sandbox>, LifecycleError> {
+    if !cfg.run.sandbox {
+        return Ok(None);
+    }
+    let cache = cfg.run.state_dir.join("cache").join(&cfg.repo.key);
+    let mut mounts = Vec::new();
+    for dir in profile
+        .profile
+        .sandbox
+        .cache_dirs
+        .iter()
+        .filter(|d| d.starts_with('/'))
+    {
+        let host = cache.join(dir.trim_start_matches('/').replace('/', "_"));
+        std::fs::create_dir_all(&host).map_err(|e| LifecycleError::io(&host, &e))?;
+        mounts.push((host, dir.clone()));
+    }
+    Ok(Some(Sandbox {
+        docker: cfg.run.docker.clone(),
+        image: profile.image.clone(),
+        mounts,
+        env: cfg.run.sandbox_env.clone().into_iter().collect(),
+    }))
+}
+
 fn allowed_packages(cfg: &RunConfig) -> Result<BTreeSet<String>, LifecycleError> {
     let Some(path) = &cfg.repo.allowed_packages else {
         return Ok(BTreeSet::new());
@@ -299,6 +327,7 @@ async fn gate(
     cancel: &CancellationToken,
 ) -> Result<GateReport, LifecycleError> {
     let allowed = allowed_packages(cfg)?;
+    let sandbox = sandbox(cfg, profile)?;
     let gate_cancel = CancelToken::new();
     // Stops the gate when the job is cancelled, and when this future is
     // dropped (a server aborting the job).
@@ -318,9 +347,10 @@ async fn gate(
         answer.repro.clone(),
         job_dir.join("gate"),
         Duration::from_secs(cfg.run.step_timeout_s),
+        sandbox,
     );
     let report = tokio::task::spawn_blocking(move || {
-        let (repo, base, profile, allowed, repro, work_dir, step_timeout) = owned;
+        let (repo, base, profile, allowed, repro, work_dir, step_timeout, sandbox) = owned;
         run_gate(&GateRequest {
             repo: &repo,
             base: &base,
@@ -331,6 +361,7 @@ async fn gate(
             env: vec![],
             step_timeout,
             cancel: gate_cancel,
+            sandbox,
         })
     })
     .await

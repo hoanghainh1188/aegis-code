@@ -44,7 +44,7 @@ protected = [
 
 [sandbox]
 image = "aegis-sandbox-python"
-cache_dirs = [".venv", "/root/.cache/uv"]
+cache_dirs = [".venv", "/home/aegis/.cache/uv"]
 
 [sonar.properties]
 "sonar.python.coverage.reportPaths" = "coverage.xml"
