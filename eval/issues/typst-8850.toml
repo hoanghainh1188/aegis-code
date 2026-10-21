@@ -1,0 +1,22 @@
+# Matrix/vector element spacing in multiline equations in MathML output
+id = "typst-8850"
+language = "rust"
+repo = "typst/typst"
+issue = 8850
+url = "https://github.com/typst/typst/issues/8850"
+title = "Matrix/vector element spacing in multiline equations in MathML output"
+closed_at = "2026-09-18T13:26:00Z"
+labels = ["bug", "math", "html"]
+base_commit = "2312927483a0575296bfd4c09793b055a01ff04f"
+fix_commit = "db9b1de596ab18fa63507d4e2972e80ba9695dfe"
+fix_pr = 8851
+source_files = ["crates/typst-html/src/mathml.rs"]
+test_files = ["tests/ref/html/hashes.txt", "tests/suite/html/mathml.typ"]
+hidden_tests = ["mathml-multiline-matrix-spacing"]
+body = "### Description\n\nOriginal discussion: https://discord.com/channels/1054443721975922748/1546766604321292329\n\nThere's some weird spacing issues for elements of matrices and vectors when using them in multiline equations.\n\nTested in Safari 26.6.2 and Helium 0.16.5.1 (Chromium 152.0.7977.82)\n\n<img width=\"1144\" height=\"684\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/fe35e53f-478d-4dbe-a8d0-fa64b4b3ed88\" />\n\n<details><summary>Code</summary>\n\n```typst\nIndividual lines:\n\n$ \"square matrix\" = mat(1, 0; 0, 1;) $\n$ \"array\" = mat(1, 0) $\n$ \"vector\" & = vec(1, 0) $\n\nMultiline:\n\n$\n  \"square matrix\" & = mat(1, 0; 0, 1) \\\n          \"array\" & = mat(1, 0) \\\n         \"vector\" & = vec(1, 0)\n$\n```\n\n</details>\n\nThis seems to be an issue with Typst's default CSS for multiline equations, specifically:\n\n```css\nmath > mtable.multiline-equation mtr:not(:last-child) mtd {\n  padding-bottom: 0.5em;\n}\n\nmtable.multiline-equation mtd {\n  padding: 0;\n}\n```\n\nThese also match the matrix/vector `mtd`s inside the multiline equation `mtable`. The workaround I've been using for now to override the padding is:\n\n```css\nmtable.multiline-equation mtable mtd {\n     padding: 0.5ex !important;\n}\n```\n\nI believe the fix would be to add `>` child combinators to specifically target the `mtr` and `mtd` elements directly inside the `mtable.multiline-equation`, and to override the padding for matrix/vector elements with:\n\n```css\nmtable > mtr > mtd {\n  padding: 0.5ex;\n}\n```\n\nbefore the tables section in the CSS.\n\n<details><summary>Full working CSS based on my (very basic) testing, may have extra unneeded <code>&gt;</code> combinators</summary>\n\n```css\n/* Alignment */\nmtable.right-align mtd,\nmtable mtd.right-align,\nmtable.left-align mtd.right-align,\nmtable.aligned > mtr > mtd:nth-child(odd) {\n    justify-items: end;\n    text-align: right;\n}\nmtable.cases mtd,\nmtable.left-align mtd,\nmtable mtd.left-align,\nmtable.aligned > mtr > mtd:nth-child(even),\nmath:is(:not([display])) > mtable.multiline-equation mtd {\n    justify-items: start;\n    text-align: left;\n}\nmtable.cases mtd,\nmtable.aligned > mtr > mtd,\nmtable mtd.flushed,\nmtable mtd.left-flush {\n    padding-left: 0;\n}\nmtable.cases mtd,\nmtable.aligned > mtr > mtd,\nmtable mtd.flushed,\nmtable mtd.right-flush {\n    padding-right: 0;\n}\n\n/* Matrices */\nmtable > mtr > mtd {\n    padding: 0.5ex;\n}\n\n/* Tables */\nmtable {\n    math-style: inherit;\n}\nmtd {\n    math-depth: auto-add;\n    math-style: compact;\n    math-shift: compact;\n}\n\n/* Equations */\nmtable.multiline-equation > mtr > mtd {\n    math-depth: inherit;\n    math-style: inherit;\n    math-shift: inherit;\n    padding: 0;\n}\nmath > mtable.multiline-equation > mtr:not(:last-child) > mtd {\n    padding-bottom: 0.5em;\n}\n\n/* Fractions */\nmfrac {\n    padding-inline: 0;\n    margin-inline: 0.1em;\n}\n\n/* Accents */\nmover[accent=\"true\" i] > :first-child {\n    font-feature-settings: \"dtls\";\n}\nmover.dotted[accent=\"true\" i] > :first-child {\n    font-feature-settings: \"dtls\" 0;\n}\n\n/* Other rules for scriptlevel, displaystyle and math-shift */\nmunder > :nth-child(2),\nmunderover > :nth-child(2) {\n    math-shift: compact;\n}\nmunder[accentunder=\"true\" i] > :not(:first-child),\nmover[accent=\"true\" i] > :not(:first-child) {\n    math-depth: inherit;\n    math-style: inherit;\n    math-shift: inherit;\n}\n```\n\n</details>\n\n### Operating system\n\nmacOS\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 27

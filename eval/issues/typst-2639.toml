@@ -1,0 +1,22 @@
+# Hanging-indent styling not applying to bibliography formats correctly
+id = "typst-2639"
+language = "rust"
+repo = "typst/typst"
+issue = 2639
+url = "https://github.com/typst/typst/issues/2639"
+title = "Hanging-indent styling not applying to bibliography formats correctly"
+closed_at = "2026-10-09T16:09:33Z"
+labels = ["bug", "bibliography"]
+base_commit = "3fe9fc05a7eb377521740dac83923ef07b2fed62"
+fix_commit = "d7dfb34ae79689ed78857ab38a3f6a24a1747770"
+fix_pr = 8712
+source_files = ["crates/typst-layout/src/rules.rs", "crates/typst-library/src/model/bibliography.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/bibliography-hanging-indent.png", "tests/ref/svg/hashes.txt", "tests/suite/model/bibliography.typ"]
+hidden_tests = ["bibliography-hanging-indent"]
+body = "### Description\n\nThe `hanging-indent` parameter from `par` doesn't apply to `apa` and `mla` bibliography styles, but it does to other bibliography styles though not perfectly in some cases (`ieee`).\r\n\r\nReproducible example:\r\n\r\nBibliography (`.bib`) file contents:\r\n```\r\n@article{aalbersFinancializationHomeMortgage2008,\r\n  title = {The Financialization of Home and the Mortgage Market Crisis},\r\n  author = {Aalbers, Manuel B.},\r\n  year = {2008},\r\n  month = jun,\r\n  journal = {Competition \\& Change},\r\n  volume = {12},\r\n  number = {2},\r\n  pages = {148--166},\r\n  publisher = {{SAGE Publications Ltd}},\r\n  issn = {1024-5294},\r\n  doi = {10.1179/102452908X289802},\r\n  urldate = {2023-05-22},\r\n  langid = {english},\r\n}\r\n\r\n@article{aalbersSociologyGeographyMortgage2009a,\r\n  title = {The Sociology and Geography of Mortgage Markets: {{Reflections}} on the Financial Crisis},\r\n  shorttitle = {The {{Sociology}} and {{Geography}} of {{Mortgage Markets}}},\r\n  author = {Aalbers, Manuel B.},\r\n  year = {2009},\r\n  journal = {International Journal of Urban and Regional Research},\r\n  volume = {33},\r\n  number = {2},\r\n  pages = {281--290},\r\n  issn = {1468-2427},\r\n  doi = {10.1111/j.1468-2427.2009.00875.x},\r\n  urldate = {2023-03-08},\r\n  langid = {english},\r\n}\r\n\r\n```\r\n\r\nTypst file content:\r\n```\r\n#set par(\r\n  first-line-indent: 0in,\r\n  hanging-indent: 2.5in\r\n)\r\n= Hello\r\nHere are my citations @aalbersFinancializationHomeMortgage2008 @aalbersSociologyGeographyMortgage2009a.\r\n#lorem(20)\r\n\r\n#bibliography(\"bibliography.bib\", style: \"apa\")\r\n\r\n```\r\n\r\nOutput:\r\n[apa7_typst.pdf](https://github.com/typst/typst/files/13316310/apa7_typst.pdf)\r\n\r\nMLA style has the same issue:\r\n(Same code as above except)\r\n`#bibliography(\"bibliography.bib\", style: \"mla\")`\r\n\r\nOutput:\r\n[mla_typst.pdf](https://github.com/typst/typst/files/13316324/mla_typst.pdf)\r\n\r\nIEEE style conforms with the `par` settings though not perfectly:\r\n(Same code as above except)\r\n`#bibliography(\"bibliography.bib\", style: \"ieee\")`\r\n\r\nOutput:\r\n[ieee_typst.pdf](https://github.com/typst/typst/files/13316348/ieee_typst.pdf)\r\n\r\nI'm using the following version of Typst:\r\n```\r\n➜  ~ typst --version\r\ntypst 0.9.0 (7bb4f6df)\r\n```\n\n### Reproduction URL\n\n_No response_\n\n### Operating system\n\nmacOS\n\n### Typst version\n\n- [X] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 88

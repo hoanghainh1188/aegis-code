@@ -1,0 +1,22 @@
+# Bibliography with `full: true` breaks numbering offsets
+id = "typst-8476"
+language = "rust"
+repo = "typst/typst"
+issue = 8476
+url = "https://github.com/typst/typst/issues/8476"
+title = "Bibliography with `full: true` breaks numbering offsets"
+closed_at = "2026-06-12T08:24:15Z"
+labels = ["bug", "bibliography", "urgent"]
+base_commit = "ac2b9c337934a1ff983ae37016480b6f5b727344"
+fix_commit = "804b798842082717538b1b529ef625c1a9df54f3"
+fix_pr = 8483
+source_files = ["crates/typst-library/src/model/bibliography.rs"]
+test_files = ["tests/ref/html/hashes.txt", "tests/suite/model/bibliography.typ"]
+hidden_tests = ["bibliography-group-full", "bibliography-group-mixed-full", "bibliography-group-mixed-styles", "bibliography-group-citation-numbers-only", "bibliography-group-form-year", "bibliography-group-full-custom-style"]
+body = "### Description\n\nThe new `bibliography` implementation allows for multiple bibliographies.\nHowever, a `bibliography` with `full: true` does not correctly update the numbering offset for consecutive bibliographies:\n\n**Code**\n```rust\n#bibliography(\"a.bib\", full: true)\n\n#divider()\n\n#divider()\n\n#bibliography(\"b.bib\", full: true)\n```\n**Rendered**\n<img width=\"440\" height=\"503\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/db61aa76-1eff-4878-90be-fcdcce75e4e0\" />\n\nThis issue is not present if the first `bibliography` has at least one reference to its items:\n**Code**\n```rust\n#bibliography(\"a.bib\", full: true)\n\n#divider()\n\n@a_1\n\n#divider()\n\n#bibliography(\"b.bib\", full: true)\n```\n**Rendered**\n<img width=\"453\" height=\"571\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/005cce4a-f3d1-46c4-975c-309600543c40\" />\n\nThe issue seems to be a check in the rendering code:\nhttps://github.com/typst/typst/blob/380769ca95ae4b7fd713669a426d354cbecdee45/crates/typst-library/src/model/bibliography.rs#L1094-L1105\n\nAs can be seen, the code checks whether at least one citation uses a `CitationNumber` element. This obviously breaks if there is no citation.\n\nRemoving this check correctly fixes this issue, however, this might break other cases where different citation styles are mixed and one does not use numbers.\n\n### Operating system\n\nWindows, Web app\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 20

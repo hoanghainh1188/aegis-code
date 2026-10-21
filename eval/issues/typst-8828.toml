@@ -1,0 +1,22 @@
+# `location.position()` returns the origin in HTML export, even inside `html.frame`
+id = "typst-8828"
+language = "rust"
+repo = "typst/typst"
+issue = 8828
+url = "https://github.com/typst/typst/issues/8828"
+title = "`location.position()` returns the origin in HTML export, even inside `html.frame`"
+closed_at = "2026-09-23T14:07:50Z"
+labels = ["bug", "introspection"]
+base_commit = "0b258bd7eebdd648ffefc529fdc9d5dc201ed528"
+fix_commit = "7e9a95d2f26b46101a40ec507c4dcc9cef40e576"
+fix_pr = 8832
+source_files = ["crates/typst-library/src/introspection/location.rs", "crates/typst-library/src/introspection/position.rs"]
+test_files = ["tests/ref/html/hashes.txt", "tests/suite/html/frame.typ", "tests/suite/introspection/convergence.typ", "tests/suite/introspection/locate.typ"]
+hidden_tests = ["html-frame-position"]
+body = "### Description\n\nIn HTML export, `location.position()` always reports `(page: 1, x: 0pt, y: 0pt)`, including for content inside an `html.frame`, where the position is actually known.\n\n```typ\n#context repr(query(<a>).first().location().position())\n\n#html.frame(box(width: 300pt, height: 120pt, {\n  place(top + left, dx: 90pt, dy: 55pt, [#metadata(none)<a>A])\n}))\n\n#link(<a>)[jump]\n```\n\n`typst compile --format html --features html`, 0.15.0:\n\n```html\n<p>(page: 1, x: 0pt, y: 0pt)</p>\n...\n<g id=\"a\" transform=\"translate(90 55)\"/>\n```\n\nThe link anchor in the same document is emitted at (90pt, 55pt), so the coordinates are there: `HtmlIntrospector` records a frame-local position for every tag inside a frame (`HtmlPosition::in_frame` in `crates/typst-html/src/introspect.rs`), and both `create_link_anchors` and typst-ide's click-to-jump read them. They are dropped in `PositionIntrospection` (`crates/typst-library/src/introspection/location.rs`):\n\n```rust\nmatch introspector.position(self.0) {\n    Some(DocumentPosition::Paged(pos)) => pos,\n    // Maybe error here instead?\n    Some(DocumentPosition::Html(_)) | None => PagedPosition::ORIGIN,\n}\n```\n\nA frame is laid out by the same engine that lays out a page, so positions within it are as well-defined as in paged export. Outside of a frame the browser determines the layout and there is genuinely nothing to report, but the origin is a wrong answer rather than no answer. The `locate-html` test currently pins the current behaviour with the comment \"This is not optimal, it should probably rather error.\"\n\n### Operating system\n\nmacOS\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 34

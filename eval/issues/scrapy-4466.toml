@@ -1,0 +1,22 @@
+# HTTP11DownloadHandler: Cannot get certificate information when http body is empty
+id = "scrapy-4466"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 4466
+url = "https://github.com/scrapy/scrapy/issues/4466"
+title = "HTTP11DownloadHandler: Cannot get certificate information when http body is empty"
+closed_at = "2026-09-07T16:28:24Z"
+labels = ["bug"]
+base_commit = "f44abb91f6a0d7666eba0d1d25a0f63503fb7c7a"
+fix_commit = "544f4d2d52377c7a5d6e12b51e219a310ec1b43d"
+fix_pr = 8048
+source_files = ["scrapy/core/downloader/handlers/http11.py"]
+test_files = ["tests/test_crawl.py", "tests/utils/bases/download_handlers_http.py"]
+hidden_tests = ["tests/test_crawl.py"]
+body = "### Description\r\n\r\nCan not get certificate information when http body is empty.\r\n\r\n### Steps to Reproduce\r\nHere is the Code:\r\n```\r\n# -*- coding: utf-8 -*-\r\nimport scrapy\r\nclass TestSpider(scrapy.Spider):\r\n    name = 'test'\r\n    # 49.235.192.63:443\r\n    start_urls = ['https://49.235.192.63/', ]\r\n    handle_httpstatus_list = [i for i in range(199, 600)]  # handle all response\r\n\r\n    def parse(self, response):\r\n        if response.certificate:\r\n            cert = response.certificate.inspect()\r\n        else:\r\n            cert = \"\"\r\n        print(\"Cert is --->\", cert)\r\n```\r\n\r\n**Expected behavior:** [What you expect to happen]\r\ncert is not empty\r\n**Actual behavior:** [What actually happens]\r\ncert is empty\r\n**Reproduces how often:** [What percentage of the time does it reproduce?]\r\nevery time\r\n### Versions\r\n\r\n> Scrapy       : 2.0.1\r\nlxml         : 4.5.0.0\r\nlibxml2      : 2.9.10\r\ncssselect    : 1.1.0\r\nparsel       : 1.5.2\r\nw3lib        : 1.21.0\r\nTwisted      : 20.3.0\r\nPython       : 3.7.5 (default, Nov 20 2019, 09:21:52) - [GCC 9.2.1 20191008]\r\npyOpenSSL    : 19.1.0 (OpenSSL 1.1.1d  10 Sep 2019)\r\ncryptography : 2.8\r\nPlatform     : Linux-5.3.0-45-generic-x86_64-with-Ubuntu-19.10-eoan\r\n\r\n\r\n### Additional context\r\nthis connectionMade won't be called when the response has nobody.\r\nI do not know how to resolve and need your help.\r\nhttps://github.com/scrapy/scrapy/blob/dfbe1d95071acfbba159cea051530749b1684460/scrapy/core/downloader/handlers/http11.py#L467\r\nThanks so much!\r\n#4054 "
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 28

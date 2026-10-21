@@ -1,0 +1,22 @@
+# Request priority not guaranteed with the default scheduler configurations due to different queues (memory/disk) used.
+id = "scrapy-3666"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 3666
+url = "https://github.com/scrapy/scrapy/issues/3666"
+title = "Request priority not guaranteed with the default scheduler configurations due to different queues (memory/disk) used."
+closed_at = "2026-10-09T07:12:01Z"
+labels = ["bug"]
+base_commit = "0778a7411daccef99485d10791da2db9e99dccc9"
+fix_commit = "2c9804b93a90930403e8278c716e72d97033e4b0"
+fix_pr = 8237
+source_files = ["scrapy/core/scheduler.py", "scrapy/pqueues.py"]
+test_files = ["tests/test_pqueues.py", "tests/test_scheduler.py"]
+hidden_tests = ["tests/test_pqueues.py", "tests/test_scheduler.py"]
+body = "**Description**\r\n\r\nRequest priority not guaranteed with the default scheduler configurations due to different queues (memory/disk) used.\r\n\r\n**Reproduction of the issue**\r\n\r\n```\r\n$ scrapy shell -s JOBDIR=/tmp/scrapytmp -s LOG_UNSERIALIZABLE_REQUESTS=0\r\n(MULTIPLE LINES OMITTED HERE)\r\nIn [1]: schdlr = scrapy.core.scheduler.Scheduler.from_crawler(crawler)                                                                                                                        \r\n\r\nIn [2]: schdlr.open(spider)                                                                                                                                                                   \r\n\r\nIn [3]: schdlr.enqueue_request(scrapy.Request('http://a.com/mqs-0-unserializable', meta={'foo': lambda: 'bar'}, priority=0))                                                                  \r\nOut[3]: True\r\n\r\nIn [4]: schdlr.enqueue_request(scrapy.Request('http://a.com/dqs-100', priority=100))                                                                                                          \r\nOut[4]: True\r\n\r\nIn [5]: schdlr.next_request()                                                                                                                                                                 \r\nOut[5]: <GET http://a.com/mqs-0-unserializable>\r\n\r\nIn [6]: schdlr.next_request()                                                                                                                                                                 \r\nOut[6]: <GET http://a.com/dqs-100>\r\n```\r\n\r\nScrapy version involved: c72ab1d (the current HEAD).\r\n\r\n**Expected behavior**\r\n\r\nThe request with higher priority shall have come out first.\r\n\r\n**Cause of the issue**\r\n\r\nThe scheduler maintains two queues (memory / disk) and the memory queue always have a higher priority when generating the next request.\r\nRelated code: https://github.com/scrapy/scrapy/blob/c72ab1d/scrapy/core/scheduler.py#L66"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 2

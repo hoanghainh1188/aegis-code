@@ -1,0 +1,22 @@
+# `strip_url()` strips :80 from the password
+id = "scrapy-7604"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 7604
+url = "https://github.com/scrapy/scrapy/issues/7604"
+title = "`strip_url()` strips :80 from the password"
+closed_at = "2026-06-15T06:41:57Z"
+labels = ["bug"]
+base_commit = "3a3695526122b9e3ccaf477ec32b6ff1ad750a60"
+fix_commit = "f63a3aff254f43f06fa7de074159ff1f42546789"
+fix_pr = 7605
+source_files = ["scrapy/utils/url.py"]
+test_files = ["tests/test_utils_url.py"]
+hidden_tests = ["tests/test_utils_url.py"]
+body = "```\nIn [3]: strip_url(\"http://user:80@example.com:80/p\", strip_credentials=False)\nOut[3]: 'http://user@example.com/p'\n```"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 1

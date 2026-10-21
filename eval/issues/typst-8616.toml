@@ -1,0 +1,22 @@
+# Bundle export fails if PNG or SVG document contains more than one page in earlier iteration
+id = "typst-8616"
+language = "rust"
+repo = "typst/typst"
+issue = 8616
+url = "https://github.com/typst/typst/issues/8616"
+title = "Bundle export fails if PNG or SVG document contains more than one page in earlier iteration"
+closed_at = "2026-07-10T09:11:02Z"
+labels = ["bug", "bundle"]
+base_commit = "6516661f29af1ab7f648f96fcb71ad4e026b08b0"
+fix_commit = "031a592c6f125a1be075318d5be6617f3563a670"
+fix_pr = 8618
+source_files = ["crates/typst-bundle/src/lib.rs"]
+test_files = ["tests/ref/bundle/issue-8616-document-delayed-pages.txt", "tests/suite/model/document.typ"]
+hidden_tests = ["issue-8616-document-delayed-pages"]
+body = "### Description\n\nI have a document which results in one page if I use `pdf` or `png` as output format or `bunde` with\n```typ\n#document(\"name.pdf\")[\n<contents>\n]\n```\nHowever, if I change that to `\"name.png\"`, the compile fails stating that it resulted in more than one page. If I shorten the contents it works with `bundle+png`.\n\nUnfortunately, I don't have a minimal reproducer. The document where it happens is overly complex, including usage of `elembic`.\n\n### Operating system\n\nLinux\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 26

@@ -1,0 +1,22 @@
+# `repr` of a fully-auto stroke denotes a different value than the stroke itself
+id = "typst-8857"
+language = "rust"
+repo = "typst/typst"
+issue = 8857
+url = "https://github.com/typst/typst/issues/8857"
+title = "`repr` of a fully-auto stroke denotes a different value than the stroke itself"
+closed_at = "2026-09-18T09:31:25Z"
+labels = ["bug"]
+base_commit = "6f6923dafb7659239a6cebf164e8223532a9f543"
+fix_commit = "5d5ed38af5316b305525a4fce54a336306a862f2"
+fix_pr = 8858
+source_files = ["crates/typst-library/src/visualize/stroke.rs"]
+test_files = ["tests/suite/foundations/repr.typ", "tests/suite/visualize/stroke.typ"]
+hidden_tests = ["stroke-repr"]
+body = "### Description\n\n```typst\n#repr(stroke())  // \"1pt + black\"\n#repr(stroke(1pt + blakc))  // \"1pt + luma(0%)\"\n```\n\nSo we have funny behaviors such as\n\n```typst\n#stroke() == stroke(black)          // false\n#stroke() == stroke(1pt)            // false\n#stroke() == stroke(1pt + black)    // false\n#stroke() == eval(repr(stroke()))   // false\n```\n\nThe other simple-stroke repr forms are faithful. A bare color or length\ncasts back to the same stroke value wherever a stroke is expected,\nkeeping the remaining fields auto, and the combined form even round-trips\nthrough `eval`:\n\n```typst\n#(2pt + red) == eval(repr(2pt + red))  // true\n```\n\nThe all-auto case is a hardcoded string in\n`crates/typst-library/src/visualize/stroke.rs` (line 321, v0.15.1):\n\n```rust\n(Smart::Auto, Smart::Auto) => r.push_str(\"1pt + black\")\n```\n\nFound while matching implementing Typst stroke support for pandoc: https://github.com/jgm/typst-hs/pull/76#discussion_r4011113216\n\n### Operating system\n\nmacOS\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 40

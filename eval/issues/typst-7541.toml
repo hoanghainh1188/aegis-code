@@ -1,0 +1,22 @@
+# Justification regression with zws
+id = "typst-7541"
+language = "rust"
+repo = "typst/typst"
+issue = 7541
+url = "https://github.com/typst/typst/issues/7541"
+title = "Justification regression with zws"
+closed_at = "2026-06-05T09:50:42Z"
+labels = ["bug", "layout", "text", "urgent", "regression"]
+base_commit = "ace322514971d0d7e36d2576b5be5dc6ac2fa5d5"
+fix_commit = "0a61a29212b094b83ec46f626c267c2fcf8757b7"
+fix_pr = 8415
+source_files = ["crates/typst-layout/src/inline/line.rs", "crates/typst-layout/src/inline/linebreak.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/issue-7541-justify-with-zero-width-space.png", "tests/ref/svg/hashes.txt", "tests/suite/layout/inline/justify.typ"]
+hidden_tests = ["issue-7541-justify-with-zero-width-space"]
+body = "### Description\n\n```typ\n#set page(width: 4cm, height: auto, margin: .5cm, background: pad(.5cm, rect(width: 100%, height: 100%, stroke: .4pt+blue)))\n#set par(justify: true)\n\n#let n = h(100%-3.1em);\n\n#n;Foo Bar Buzz\n\n#n;Foo Bar#sym.zws;Buzz\n```\n\n![Image](https://github.com/user-attachments/assets/2a07e56f-acc5-45db-ad98-907552988fae)\n\nWe would not expect the zws to cause the text to hang into the margin. Indeed, that is the behavior when compiling the sample with 0.13.1 and before.\n\nI initially expected the origin to be the character-level justification PR, but further investigation led me to exactly 154980b (#6866). It appears a similar issue was found and fixed for RTL text (#7168), but this case is still borked as of 0.14.1 / f3d08bfb.\n\nNot sure if this is the only remaining issue with the commit, at least `sym.space.*` seems to be fine.\n\n---\n\nI first became aware of the issue on Discord: [Typst › quick-questions 🗪](https://discord.com/channels/1054443721975922748/1088371919725793360/1446613048017162301), thanks to saffronner."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 35

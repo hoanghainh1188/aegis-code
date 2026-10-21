@@ -1,0 +1,22 @@
+# Noto Color Emoji is shrinked in SVG with typst `main`
+id = "typst-8372"
+language = "rust"
+repo = "typst/typst"
+issue = 8372
+url = "https://github.com/typst/typst/issues/8372"
+title = "Noto Color Emoji is shrinked in SVG with typst `main`"
+closed_at = "2026-06-09T11:54:40Z"
+labels = ["bug", "svg", "regression"]
+base_commit = "d069c02c9426472cebb10893ee623cf515faf73f"
+fix_commit = "d6548454b243521271715aff0e72153696d9df7d"
+fix_pr = 8440
+source_files = ["crates/typst-library/src/text/font/color.rs", "crates/typst-render/src/text.rs", "crates/typst-svg/src/text.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/issue-8372-stretched-glyphs.png", "tests/ref/svg/hashes.txt", "tests/suite/layout/inline/text.typ"]
+hidden_tests = ["issue-8372-stretched-glyphs"]
+body = "### Description\n\nAs shown below, when exporting to SVG, ✅ from _Noto Color Emoji_ is shrinked horizontally with typst `main`.\n\n- Left: Typst v0.14.2.\n- Right: 331f1010 (2026-05-27, downloaded from https://github.com/typst-community/dev-builds/actions/runs/26505890452)\n\n<img width=\"260\" height=\"224\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/39123116-a474-4d68-9489-8d11813d4772\" />\n<img width=\"281\" height=\"239\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/140cffc6-807e-451e-a2d0-c41a7cb815b8\" />\n\n```typst\n#set page(height: auto, width: auto, margin: 1em)\n#set text(5em)\n#block(stroke: blue, width: 1.5em, height: 1.5em, {\n  set align(center + horizon)\n  set text(font: \"Noto Color Emoji\", fallback: false)\n  emoji.checkmark.box\n})\n```\n\n### Further experiments\n\nAll emojis (👩‍💻🩺☠️🎓🇱🇰💞🎐🎟📻) from _Noto Color Emoji_ have this problem: (v0.14.2 vs. 331f1010)\n\n<img width=\"1448\" height=\"157\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/6d376c27-ec21-48be-b1b2-7d44141f8b16\" />\n<img width=\"1449\" height=\"206\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/abdd76b3-0b44-4b14-9496-865dfe1588bd\" />\n\n_Twitter Color Emoji_ doesn't have this problem: (331f1010)\n<img width=\"200\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/402df55a-6126-44f5-8344-f581b0e857e6\" />\n\nExporting _Noto Color Emoji_ to PDF works as usual: (331f1010)\n\n<img width=\"200\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/5a1d890c-9f11-425d-86bb-9c1255bd3994\" />\n\n---\n\nIf anyone has problem reproduce the above results, please let me know. I'm willing to provide the exact version of my _Noto Color Emoji_.\n(The version I am currently testing is the one installed on my system. I'm not sure which version it is at present, and I don't know if all versions are problematic.)\n\n### Operating system\n\nWindows\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 30

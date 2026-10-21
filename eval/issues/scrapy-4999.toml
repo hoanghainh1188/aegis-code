@@ -1,0 +1,22 @@
+# spider middleware process_spider_output() doesn't capture item yielded by spider request errback if it was called by downloader
+id = "scrapy-4999"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 4999
+url = "https://github.com/scrapy/scrapy/issues/4999"
+title = "spider middleware process_spider_output() doesn't capture item yielded by spider request errback if it was called by downloader"
+closed_at = "2026-10-05T08:32:23Z"
+labels = ["bug"]
+base_commit = "d4d354b5d30f16a2a4a822a06425d26b9e31273d"
+fix_commit = "948e8e31dff916d8793478de2a58f7a4dbc98a06"
+fix_pr = 7992
+source_files = ["scrapy/core/scraper.py", "scrapy/core/spidermw.py", "scrapy/spidermiddlewares/base.py", "scrapy/spidermiddlewares/start.py"]
+test_files = ["tests/test_spidermiddleware_output_chain.py"]
+hidden_tests = ["tests/test_spidermiddleware_output_chain.py"]
+body = "spider middleware process_spider_output() doesn't capture item yielded by request errback if this method was called after an error raised in downloader/downloader middleware.\r\n\r\nHowever, it does capture items yielded by errback if this method was called after an error raised in spider or spider middleware.\r\n\r\nIs it a bug or a design decision?"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 2
