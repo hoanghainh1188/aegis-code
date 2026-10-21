@@ -127,6 +127,10 @@ pub struct RepoConfig {
     /// Packages a patch may add (`policies/allowed-*.toml`).
     #[serde(default)]
     pub allowed_packages: Option<PathBuf>,
+    /// How eval runs run an issue's hidden tests (#98): `{tests}` becomes
+    /// the tests as separate arguments, `{tests_regex}` one `^(a|b)$`.
+    #[serde(default)]
+    pub hidden_test: Option<Vec<String>>,
     pub fork: ForkConfig,
 }
 

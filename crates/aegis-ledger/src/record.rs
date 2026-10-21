@@ -179,6 +179,11 @@ pub enum LedgerEvent {
     SecretsRedacted {
         count: u32,
     },
+    /// The fix's own tests run on the agent's patch (eval runs, #98).
+    HiddenTests {
+        passed: bool,
+        duration_s: f64,
+    },
     Finished {
         outcome: Outcome,
         wall_time_s: f64,
@@ -192,6 +197,7 @@ impl LedgerEvent {
     pub(crate) fn ensure_finite(&self) -> Result<(), LedgerError> {
         let fields: &[(&'static str, f64)] = match self {
             Self::Classified { .. } | Self::SecretsRedacted { .. } => &[],
+            Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
             Self::Finished { wall_time_s, .. } => &[("wall_time_s", *wall_time_s)],
@@ -233,6 +239,10 @@ pub struct IssueRecord {
     /// Secret values hidden from the model during the run.
     #[serde(default)]
     pub secrets_redacted: u32,
+    /// In eval runs: whether the fix's own tests pass on the agent's patch.
+    /// `None` when they did not run (no eval, or no gated patch).
+    #[serde(default)]
+    pub hidden_tests_passed: Option<bool>,
 }
 
 impl IssueRecord {
@@ -249,6 +259,7 @@ impl IssueRecord {
             wall_time_s: None,
             review: None,
             secrets_redacted: 0,
+            hidden_tests_passed: None,
         }
     }
 
@@ -279,6 +290,7 @@ impl IssueRecord {
                 self.cost_usd += cost_usd;
             }
             LedgerEvent::GateRun(run) => self.gate_runs.push(run.clone()),
+            LedgerEvent::HiddenTests { passed, .. } => self.hidden_tests_passed = Some(*passed),
             LedgerEvent::SecretsRedacted { count } => {
                 self.secrets_redacted = self.secrets_redacted.saturating_add(*count);
             }

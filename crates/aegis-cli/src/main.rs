@@ -4,6 +4,7 @@
 //! aegis run   --config config/poc.toml --issue scrapy/scrapy#6123
 //! aegis run   --config config/poc.toml --issue-file issue.md --id local-1
 //! aegis batch --config config/poc.toml --issues issues.txt
+//! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …]
 //! ```
 //!
 //! `issues.txt` has one `owner/repo#number` per line (`#` comments allowed).
@@ -22,7 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 const USAGE: &str = "usage:
   aegis run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
-  aegis batch --config <file> --issues <file>";
+  aegis batch --config <file> --issues <file>
+  aegis eval  --config <file> --set <dir> [--only <id>]...";
 
 #[derive(Debug, Default)]
 struct Args {
@@ -32,6 +34,8 @@ struct Args {
     issue_file: Option<PathBuf>,
     id: Option<String>,
     issues: Option<PathBuf>,
+    set: Option<PathBuf>,
+    only: Vec<String>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -47,6 +51,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--issue-file" => parsed.issue_file = Some(value()?.into()),
             "--id" => parsed.id = Some(value()?),
             "--issues" => parsed.issues = Some(value()?.into()),
+            "--set" => parsed.set = Some(value()?.into()),
+            "--only" => parsed.only.push(value()?),
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -137,14 +143,19 @@ fn line(report: &IssueReport) -> String {
         (None, Some(reason)) => reason.clone(),
         (None, None) => String::new(),
     };
+    let hidden = match report.hidden_tests_passed {
+        Some(true) => "\thidden: pass",
+        Some(false) => "\thidden: FAIL",
+        None => "",
+    };
     format!(
-        "{}\t{:?}\t${:.2}\t{} calls\t{end}",
+        "{}\t{:?}\t${:.2}\t{} calls{hidden}\t{end}",
         report.issue_id, report.outcome, report.cost_usd, report.model_calls
     )
 }
 
 async fn main_inner(args: Args) -> Result<bool, String> {
-    if !["run", "batch"].contains(&args.command.as_str()) {
+    if !["run", "batch", "eval"].contains(&args.command.as_str()) {
         return Err(format!("unknown command `{}`", args.command));
     }
     let config = args.config.as_deref().ok_or("--config is required")?;
@@ -195,8 +206,50 @@ async fn main_inner(args: Args) -> Result<bool, String> {
             }
             Ok(all_ok)
         }
+        "eval" => eval(&run, &args, &cancel).await,
         other => Err(format!("unknown command `{other}`")),
     }
+}
+
+/// Runs the set's issues of the configured repo's language, one after the
+/// other, each under a new run id. Exit code 0 when every run opened a PR
+/// whose hidden tests pass.
+async fn eval(run: &Arc<Run>, args: &Args, cancel: &CancellationToken) -> Result<bool, String> {
+    let dir = args.set.as_deref().ok_or("--set is required")?;
+    let set = aegis_lifecycle::load_set(dir).map_err(|e| e.to_string())?;
+    let language = run.config.repo.language;
+    let picked: Vec<_> = set
+        .iter()
+        .filter(|i| i.language == language)
+        .filter(|i| args.only.is_empty() || args.only.contains(&i.id))
+        .collect();
+    if picked.is_empty() {
+        return Err(format!("no {language} issue in {} matches", dir.display()));
+    }
+    let (mut prs, mut hidden_ok) = (0, 0);
+    for issue in &picked {
+        if cancel.is_cancelled() {
+            println!("{}\tskipped\tcancelled", issue.id);
+            continue;
+        }
+        let run_id = aegis_lifecycle::next_run_id(&run.store, &issue.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let job = issue.job(&run.config, &run_id).map_err(|e| e.to_string())?;
+        match one(run, job, cancel).await {
+            Ok(report) => {
+                prs += usize::from(report.pr_url.is_some());
+                hidden_ok += usize::from(report.hidden_tests_passed == Some(true));
+                println!("{}", line(&report));
+            }
+            Err(e) => println!("{run_id}\terror\t{e}"),
+        }
+    }
+    println!(
+        "{} issues: {prs} PRs opened, {hidden_ok} with hidden tests passing",
+        picked.len()
+    );
+    Ok(hidden_ok == picked.len())
 }
 
 #[tokio::main]

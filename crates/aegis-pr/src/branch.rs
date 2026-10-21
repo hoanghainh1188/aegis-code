@@ -39,6 +39,26 @@ impl AgentBranch {
     }
 }
 
+/// The base an eval run's PR targets: `eval/<run-id>`, set by the platform
+/// at the issue's base commit (#98). The agent never pushes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvalBranch(String);
+
+impl EvalBranch {
+    pub fn for_run(id: &str) -> Result<Self, PrError> {
+        let agent = AgentBranch::for_issue(id)?;
+        Ok(Self(agent.name().replacen(PREFIX, "eval/", 1)))
+    }
+
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+
+    pub fn full_ref(&self) -> String {
+        format!("refs/heads/{}", self.0)
+    }
+}
+
 impl fmt::Display for AgentBranch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)

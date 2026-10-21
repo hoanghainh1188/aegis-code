@@ -76,6 +76,11 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::SecretsRedacted { count }).await
     }
 
+    pub async fn hidden_tests(&mut self, passed: bool, duration_s: f64) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::HiddenTests { passed, duration_s })
+            .await
+    }
+
     pub async fn gate_run(&mut self, run: GateRun) -> Result<(), LedgerError> {
         self.push(LedgerEvent::GateRun(run)).await
     }

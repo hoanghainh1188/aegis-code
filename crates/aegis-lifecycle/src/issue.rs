@@ -14,6 +14,20 @@ pub struct IssueInput {
     pub title: String,
     pub body: String,
     pub url: String,
+    /// Commit to work from; `None` takes the tip of `repo.base`.
+    pub base: Option<String>,
+    /// Eval runs only (#98): the fix's tests, run on the agent's patch
+    /// after the gate. The agent never sees them.
+    pub hidden: Option<HiddenTests>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HiddenTests {
+    /// Where the test files come from, in the platform's clone.
+    pub fix_commit: String,
+    pub test_files: Vec<String>,
+    /// The command that runs them, placeholders already filled.
+    pub command: Vec<String>,
 }
 
 /// Longest issue body sent to the model; the rest is cut.
@@ -70,6 +84,8 @@ impl IssueInput {
             title: issue.title,
             body: issue.body.unwrap_or_default(),
             url: issue.html_url,
+            base: None,
+            hidden: None,
         })
     }
 
@@ -83,6 +99,8 @@ impl IssueInput {
             title: first.trim_start_matches('#').trim().to_owned(),
             body: rest.trim().to_owned(),
             url: format!("file://{}", path.display()),
+            base: None,
+            hidden: None,
         })
     }
 

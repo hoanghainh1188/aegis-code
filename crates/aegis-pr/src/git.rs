@@ -274,7 +274,17 @@ pub fn push(
     branch: &AgentBranch,
     commit: &str,
 ) -> Result<(), PrError> {
-    let refspec = format!("{commit}:{}", branch.full_ref());
+    push_ref(staging, remote, &branch.full_ref(), commit)
+}
+
+/// `commit` to `full_ref`; callers only pass `agent/*` and `eval/*` refs.
+pub fn push_ref(
+    staging: &Staging,
+    remote: &Remote,
+    full_ref: &str,
+    commit: &str,
+) -> Result<(), PrError> {
+    let refspec = format!("{commit}:{full_ref}");
     let args = ["push", "--porcelain", remote.url.as_str(), refspec.as_str()];
     staging.run(&args, None, remote.token.as_deref()).map(drop)
 }

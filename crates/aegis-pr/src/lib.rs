@@ -24,7 +24,7 @@ use std::path::Path;
 use aegis_gate::GateReport;
 
 pub use body::{AllowedTestChange, ChangeNote, Cost, PrContent, gate_line, inert, render};
-pub use branch::AgentBranch;
+pub use branch::{AgentBranch, EvalBranch};
 pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};
 pub use coverage::{cobertura_percent, lcov_percent};
 pub use error::PrError;
@@ -54,6 +54,21 @@ pub fn push_gated(
     let commit = git::commit_tree(&staging, &gate.tree, &gate.base, message, who)?;
     git::push(&staging, remote, &branch, &commit)?;
     Ok(Pushed { branch, commit })
+}
+
+/// Sets `eval/<run_id>` on the fork at `commit`, the base the eval run's
+/// PR targets, so the PR shows only the agent's patch. The commit must be in
+/// `repo`'s objects.
+pub fn push_eval_base(
+    repo: &Path,
+    run_id: &str,
+    commit: &str,
+    remote: &Remote,
+) -> Result<EvalBranch, PrError> {
+    let branch = EvalBranch::for_run(run_id)?;
+    let staging = git::Staging::new(repo)?;
+    git::push_ref(&staging, remote, &branch.full_ref(), commit)?;
+    Ok(branch)
 }
 
 /// Deletes the agent's branch when it stops, only while the branch still

@@ -31,6 +31,23 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, LifecycleError> {
     }
 }
 
+/// `path` as it is at `rev` in the clone (bytes: test data may be
+/// binary), or `None` when it does not exist there.
+pub fn show(repo: &Path, rev: &str, path: &str) -> Result<Option<Vec<u8>>, LifecycleError> {
+    let out = Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(["-c", "core.hooksPath=/dev/null", "-C"])
+        .arg(repo)
+        .args(["show", &format!("{rev}:{path}")])
+        .output()
+        .map_err(|e| LifecycleError::Git {
+            args: "show".into(),
+            message: e.to_string(),
+        })?;
+    Ok(out.status.success().then_some(out.stdout))
+}
+
 /// Full commit id of `rev` in the clone.
 pub fn resolve(repo: &Path, rev: &str) -> Result<String, LifecycleError> {
     let spec = format!("{rev}^{{commit}}");
