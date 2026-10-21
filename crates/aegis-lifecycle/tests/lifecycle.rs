@@ -321,6 +321,8 @@ fn issue() -> IssueInput {
         title: "Cart accepts a fourth item".into(),
         body: "`cart![1, 2, 3].add(4)` returns Ok(()), expected Err(CartError::Full).".into(),
         url: "https://github.com/me/fixture/issues/7".into(),
+        base: None,
+        hidden: None,
     }
 }
 
@@ -638,4 +640,150 @@ async fn secrets_in_the_issue_and_the_repo_are_hidden_and_counted() {
         let sent = serde_json::to_string(&request.messages).unwrap() + &request.system.concat();
         assert!(!sent.contains(&token), "the token reached the model");
     }
+}
+
+const HIDDEN: &str = "use fixture_rust::{cart, Cart, CartError, Priced};\n\n#[test]\nfn hidden_fourth_item() {\n    let mut three: Cart = cart![1, 2, 3];\n    assert_eq!(three.add(4), Err(CartError::Full));\n    assert_eq!(three.total(), 6);\n}\n";
+
+/// The bug's fix as a later commit of the clone, with the hidden test; the
+/// eval issue's base is the commit before it.
+fn eval_issue(scratch: &Scratch) -> aegis_lifecycle::EvalIssue {
+    let clone = scratch.0.join("clone");
+    let rev = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&clone)
+            .args(args)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    let base = rev(&["rev-parse", "HEAD"]);
+    let lib = std::fs::read_to_string(clone.join("src/lib.rs")).unwrap();
+    std::fs::write(clone.join("src/lib.rs"), lib.replacen(BUG_TO, BUG_FROM, 1)).unwrap();
+    std::fs::create_dir_all(clone.join("tests")).unwrap();
+    std::fs::write(clone.join("tests/hidden.rs"), HIDDEN).unwrap();
+    git(&clone, &["add", "-A"]);
+    git(
+        &clone,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "fix",
+        ],
+    );
+    aegis_lifecycle::EvalIssue {
+        id: "fixture-7".into(),
+        language: aegis_lang::Language::Rust,
+        repo: "me/fixture".into(),
+        issue: 7,
+        url: "https://github.com/me/fixture/issues/7".into(),
+        title: issue().title,
+        base_commit: base,
+        fix_commit: rev(&["rev-parse", "HEAD"]),
+        test_files: vec!["tests/hidden.rs".into()],
+        hidden_tests: vec!["hidden_fourth_item".into()],
+        body: issue().body,
+    }
+}
+
+fn eval_config(scratch: &Scratch, api: &str) -> RunConfig {
+    let mut config = config(scratch, api, 20);
+    config.repo.hidden_test = Some(
+        ["cargo", "test", "--workspace", "--", "--exact", "{tests}"]
+            .map(String::from)
+            .to_vec(),
+    );
+    config
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_eval_run_works_from_the_issue_base_and_passes_the_hidden_tests() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let eval = eval_issue(&scratch);
+    let server = github().await;
+    let model = Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]);
+    let p = platform(eval_config(&scratch, &server.uri()), model);
+    let run_id = aegis_lifecycle::next_run_id(&p.store, &eval.id)
+        .await
+        .unwrap();
+    assert_eq!(run_id, "fixture-7-r1");
+
+    let job = eval.job(&p.config, &run_id).unwrap();
+    let report = run_issue(Arc::clone(&p), job, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(report.hidden_tests_passed, Some(true));
+    // The PR targets the issue's base, set on the fork as eval/<run>.
+    let pr: Value = server.received_requests().await.unwrap()[0]
+        .body_json()
+        .unwrap();
+    assert_eq!(
+        (pr["head"].as_str(), pr["base"].as_str()),
+        (Some("agent/fixture-7-r1"), Some("eval/fixture-7-r1"))
+    );
+    let base = Command::new("git")
+        .arg("-C")
+        .arg(scratch.0.join("fork.git"))
+        .args(["rev-parse", "eval/fixture-7-r1"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&base.stdout).trim(),
+        eval.base_commit
+    );
+    // The agent never saw the hidden test.
+    for request in p.provider.requests.lock().unwrap().iter() {
+        let sent = serde_json::to_string(&request.messages).unwrap();
+        assert!(
+            !sent.contains("hidden_fourth_item"),
+            "the hidden test reached the model"
+        );
+    }
+    // The next run of the same issue gets a new id.
+    assert_eq!(
+        aegis_lifecycle::next_run_id(&p.store, &eval.id)
+            .await
+            .unwrap(),
+        "fixture-7-r2"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_patch_that_passes_the_gate_can_still_fail_the_hidden_tests() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let eval = eval_issue(&scratch);
+    let server = github().await;
+    // Refuses the fourth item but keeps it: the agent's own repro passes,
+    // the fix's hidden test (the total stays 6) does not.
+    let wrong = call(
+        "t2",
+        "edit",
+        json!({"file": "src/lib.rs", "from": 24, "to": 27,
+               "content": "        self.items.push(price);\n        if self.items.len() > MAX_ITEMS {\n            return Err(CartError::Full);\n        }"}),
+    );
+    let model = Scripted::new(vec![create_repro("t1"), wrong, fixed_answer()], vec![]);
+    let p = platform(eval_config(&scratch, &server.uri()), model);
+
+    let job = eval.job(&p.config, "fixture-7-r1").unwrap();
+    let report = run_issue(Arc::clone(&p), job, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(report.hidden_tests_passed, Some(false));
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7-r1").unwrap())
+        .unwrap();
+    assert_eq!(record.hidden_tests_passed, Some(false));
 }

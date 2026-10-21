@@ -13,7 +13,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
-use aegis_gate::{CancelToken, GateReport, GateRequest, Sandbox, StepName, StepStatus, run_gate};
+use aegis_gate::{
+    CancelToken, GateReport, GateRequest, Runner, Sandbox, StepName, StepStatus, run_gate,
+};
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
 use aegis_orchestrator::{
@@ -26,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::checks::{Halt, JobCheck, fold_edits};
+use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
 use crate::publish::publish;
@@ -63,6 +66,8 @@ pub struct IssueReport {
     pub pr_url: Option<String>,
     pub cost_usd: f64,
     pub model_calls: u32,
+    /// Eval runs: whether the fix's own tests pass on the agent's patch.
+    pub hidden_tests_passed: Option<bool>,
 }
 
 /// How the work on an issue ended, before the ledger closes it.
@@ -128,6 +133,7 @@ where
         pr_url: ending.pr_url,
         cost_usd: record.cost_usd,
         model_calls: record.model_calls,
+        hidden_tests_passed: record.hidden_tests_passed,
     })
 }
 
@@ -227,7 +233,10 @@ where
     S: LedgerStore + Send + Sync + 'static,
 {
     let cfg = &platform.config;
-    let base = job::resolve(&cfg.repo.path, &cfg.repo.base)?;
+    let base = job::resolve(
+        &cfg.repo.path,
+        issue.base.as_deref().unwrap_or(&cfg.repo.base),
+    )?;
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     let tree = Worktree::create(&cfg.repo.path, &base, &job_dir.join("repo"))?;
 
@@ -423,6 +432,53 @@ fn hidden_in_tool_results(messages: &[Message]) -> u32 {
     count(n)
 }
 
+/// The fix's own tests on the agent's patch, after the PR is open (the
+/// PR holds the gated tree, so copying the tests in changes nothing sent).
+/// Same runner and sandbox as the gate; the log stays in the job dir and
+/// never reaches the model.
+async fn run_hidden(
+    cfg: &RunConfig,
+    profile: &ResolvedProfile,
+    tree: &Path,
+    job_dir: &Path,
+    hidden: &HiddenTests,
+    cancel: &CancellationToken,
+) -> Result<(bool, Duration), LifecycleError> {
+    for file in &hidden.test_files {
+        let content = job::show(&cfg.repo.path, &hidden.fix_commit, file)?;
+        let Some(content) = content else { continue };
+        let target = tree.join(file);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| LifecycleError::io(parent, &e))?;
+        }
+        std::fs::write(&target, content).map_err(|e| LifecycleError::io(&target, &e))?;
+    }
+    let gate_cancel = CancelToken::new();
+    let _stop = CancelOnDrop(gate_cancel.clone());
+    let _watcher = AbortOnDrop(tokio::spawn({
+        let (outer, inner) = (cancel.clone(), gate_cancel.clone());
+        async move {
+            outer.cancelled().await;
+            inner.cancel();
+        }
+    }));
+    let runner = Runner {
+        env: vec![],
+        timeout: Duration::from_secs(cfg.run.step_timeout_s),
+        cancel: gate_cancel,
+        sandbox: sandbox(cfg, profile)?,
+    };
+    let (argv, tree, log) = (
+        hidden.command.clone(),
+        tree.to_path_buf(),
+        job_dir.join("hidden-tests.log"),
+    );
+    let ran = tokio::task::spawn_blocking(move || runner.run(&argv, &tree, &log, &[]))
+        .await
+        .map_err(|e| LifecycleError::Config(format!("the hidden tests did not finish: {e}")))??;
+    Ok((ran.exit.success(), ran.duration))
+}
+
 fn gate_run(report: &GateReport, took: Duration) -> GateRun {
     GateRun {
         passed: report.passed(),
@@ -566,6 +622,11 @@ where
             debug_assert_eq!(decision, Decision::OpenPr);
             let published =
                 publish(platform, ledger, profile, tree, issue, &answer, &report).await?;
+            if let Some(hidden) = &issue.hidden {
+                let (passed, took) =
+                    run_hidden(cfg, profile, tree, job_dir, hidden, cancel).await?;
+                ledger.hidden_tests(passed, took.as_secs_f64()).await?;
+            }
             return Ok(Ending {
                 outcome: Outcome::PrOpened,
                 reason: None,

@@ -34,6 +34,8 @@ path = ".workspace/repos/scrapy"
 language = "python"
 base = "master"
 key = "scrapy"
+# Hidden tests of eval runs (#98): eval/issues lists scrapy's as files.
+hidden_test = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "{tests}"]
 
 # From the measurements of #2: pytest in parallel, the venv's python on PATH.
 [repo.overrides.gate]

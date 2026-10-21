@@ -16,7 +16,7 @@ mod integrity;
 mod report;
 mod sandbox;
 
-pub use command::{CancelToken, INHERITED_ENV};
+pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner};
 pub use error::GateError;
 pub use gate::{GateRequest, Repro, run_gate};
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus};

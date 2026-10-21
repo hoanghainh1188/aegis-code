@@ -8,7 +8,7 @@ use aegis_lang::{CoverageFormat, ResolvedProfile};
 use aegis_ledger::{IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
     CommitInput, Cost, GitHub, Identity, PrContent, Remote, abandon, cobertura_percent,
-    lcov_percent, push_gated, render, write_commit_message,
+    lcov_percent, push_eval_base, push_gated, render, write_commit_message,
 };
 use aegis_provider::ModelProvider;
 
@@ -74,6 +74,14 @@ where
         email: cfg.identity.email.clone(),
     };
     let pushed = push_gated(tree, &issue.id, gate, &message.text, &identity, &remote)?;
+    // An eval run's PR targets a branch at the issue's old base, so it shows
+    // only the agent's patch (#98).
+    let target = match &issue.hidden {
+        Some(_) => push_eval_base(tree, &issue.id, &gate.base, &remote)?
+            .name()
+            .to_owned(),
+        None => cfg.repo.base.clone(),
+    };
 
     let record = ledger.record();
     let body = render(&PrContent {
@@ -92,13 +100,7 @@ where
     });
     let title = message.text.lines().next().unwrap_or("fix").to_owned();
     match github
-        .open_pull_request(
-            &pushed.branch,
-            &cfg.repo.base,
-            &title,
-            &body,
-            cfg.run.draft_prs,
-        )
+        .open_pull_request(&pushed.branch, &target, &title, &body, cfg.run.draft_prs)
         .await
     {
         Ok(pr) => Ok(Published { url: pr.url }),

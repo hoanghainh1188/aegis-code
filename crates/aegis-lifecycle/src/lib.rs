@@ -12,6 +12,7 @@ mod answer;
 mod checks;
 mod config;
 mod error;
+mod eval;
 mod issue;
 mod job;
 mod light;
@@ -24,5 +25,6 @@ pub use config::{
     BudgetSection, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig, RunSection,
 };
 pub use error::LifecycleError;
-pub use issue::IssueInput;
+pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
+pub use issue::{HiddenTests, IssueInput};
 pub use run::{IssueReport, Platform, job_dir, run_issue};
