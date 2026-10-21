@@ -8,6 +8,7 @@
 
 mod command;
 mod deps;
+mod egress;
 mod error;
 mod failures;
 mod gate;
@@ -17,7 +18,8 @@ mod report;
 mod sandbox;
 
 pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner};
+pub use egress::{Egress, EgressSession};
 pub use error::GateError;
-pub use gate::{GateRequest, Repro, run_gate};
+pub use gate::{FetchStep, GateRequest, Repro, run_gate};
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus};
 pub use sandbox::{Sandbox, WORKDIR};

@@ -20,8 +20,9 @@ effort = "high"
 state_dir = ".workspace/state"
 pricing = "config/pricing.toml"
 step_timeout_s = 1800
-# Gate steps in docker/<profile> images, --network none (#5). Turn on once
-# #66 fetches each job's dependencies; until then the gate runs on the host.
+# Gate steps in docker/<profile> images, --network none (#5); dependencies
+# come from the fetch step behind the egress proxy (#66). To be turned on
+# with the first real-model run (#6).
 sandbox = false
 
 [budget]
@@ -36,6 +37,11 @@ base = "master"
 key = "scrapy"
 # Hidden tests of eval runs (#98): eval/issues lists scrapy's as files.
 hidden_test = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "{tests}"]
+
+# scrapy has no uv.lock: the fetch step (#66) installs it and its test
+# requirements (#2) into .venv through the egress proxy.
+[repo.overrides]
+fetch = ["sh", "-c", "uv venv -q --allow-existing .venv && uv pip install -q --python .venv/bin/python -e . attrs coverage pexpect psutil pyftpdlib pygments pytest pytest-cov pytest-rerunfailures pytest-timeout pytest-xdist sybil pytest-twisted"]
 
 # From the measurements of #2: pytest in parallel, the venv's python on PATH.
 [repo.overrides.gate]

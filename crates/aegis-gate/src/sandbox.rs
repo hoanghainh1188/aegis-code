@@ -36,6 +36,12 @@ pub struct Sandbox {
     /// Set in the container (the profile's `sandbox.env`, the request's
     /// env); not passed to the `docker` client.
     pub env: Vec<(String, String)>,
+    /// Docker network; `None` is `none`. Only the fetch step (#66) sets
+    /// one, an internal network whose only way out is the egress proxy.
+    pub network: Option<String>,
+    /// Mount `mounts` read-only: gate steps read the caches the fetch step
+    /// filled, they never change them (#66).
+    pub read_only_mounts: bool,
 }
 
 #[cfg(unix)]
@@ -70,7 +76,7 @@ impl Sandbox {
             "--name".into(),
             name.into(),
             "--network".into(),
-            "none".into(),
+            self.network.clone().unwrap_or_else(|| "none".into()),
             "--cap-drop".into(),
             "ALL".into(),
             "--security-opt".into(),
@@ -84,9 +90,10 @@ impl Sandbox {
             "--workdir".into(),
             WORKDIR.into(),
         ];
+        let mode = if self.read_only_mounts { ":ro" } else { "" };
         for (host, inside) in &self.mounts {
             out.push("--volume".into());
-            out.push(format!("{}:{inside}", host.display()));
+            out.push(format!("{}:{inside}{mode}", host.display()));
         }
         for (key, value) in &self.env {
             out.push("--env".into());
@@ -121,6 +128,8 @@ mod tests {
                 "/usr/local/cargo/registry".into(),
             )],
             env: vec![("GATE_X".into(), "1".into())],
+            network: None,
+            read_only_mounts: true,
         };
         let argv = sandbox.wrap(
             "n",
@@ -131,7 +140,7 @@ mod tests {
         for expected in [
             "docker run --rm --name n --network none --cap-drop ALL --security-opt no-new-privileges",
             "--volume /jobs/7/repo:/work --workdir /work",
-            "--volume /state/cache/registry:/usr/local/cargo/registry",
+            "--volume /state/cache/registry:/usr/local/cargo/registry:ro",
             "--env GATE_X=1 aegis-sandbox-rust cargo test",
         ] {
             assert!(text.contains(expected), "{text}");

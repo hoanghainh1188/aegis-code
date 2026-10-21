@@ -158,6 +158,7 @@ impl Repo {
             step_timeout,
             cancel,
             sandbox,
+            fetch: None,
         })
         .unwrap()
     }

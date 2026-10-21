@@ -54,6 +54,13 @@ pub struct RunSection {
     /// Docker VM is small (typst needs 2 jobs on 8 GB, #5).
     #[serde(default)]
     pub sandbox_env: std::collections::BTreeMap<String, String>,
+    /// Image the egress proxy of the fetch step runs in; any with Python 3.
+    #[serde(default = "default_egress_image")]
+    pub egress_image: String,
+}
+
+fn default_egress_image() -> String {
+    "aegis-sandbox-python".into()
 }
 
 fn default_docker() -> String {

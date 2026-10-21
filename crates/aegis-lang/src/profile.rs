@@ -137,6 +137,15 @@ pub struct Dependencies {
     pub official_source: String,
     /// Fetch command, run in its own container before the gate (#66).
     pub fetch: Option<CommandTemplate>,
+    /// Hosts the fetch container may reach through the egress proxy
+    /// (#66): the ecosystem's registry and nothing else.
+    #[serde(default)]
+    pub fetch_hosts: Vec<String>,
+    /// Where the fetch step installs dependencies inside the tree (e.g.
+    /// `.venv`). Kept outside the job's tree and mounted read-only into
+    /// the gate's containers.
+    #[serde(default)]
+    pub dirs: Vec<String>,
     /// Build configuration the readers cannot check (e.g. `.npmrc`,
     /// `.cargo/config.toml`, `go.work`) that can change where dependencies
     /// come from or run code at build time. A patch that touches one is

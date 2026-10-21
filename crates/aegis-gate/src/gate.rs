@@ -16,6 +16,7 @@ use std::time::Duration;
 use aegis_lang::{Placeholder, ResolvedProfile, SkipReason, Step};
 
 use crate::command::{CancelToken, Exit, Ran, Runner};
+use crate::egress::Egress;
 use crate::failures::failing_tests;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
@@ -52,6 +53,16 @@ pub struct GateRequest<'a> {
     pub cancel: CancelToken,
     /// Run the steps in containers (#5); `None` runs them on the machine.
     pub sandbox: Option<Sandbox>,
+    /// Fetch the dependencies of a patch that changed them, once they pass
+    /// the check (#66). Needs `sandbox`.
+    pub fetch: Option<FetchStep>,
+}
+
+/// The profile's fetch command and where it may go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchStep {
+    pub egress: Egress,
+    pub command: Vec<String>,
 }
 
 struct Run<'a> {
@@ -192,8 +203,42 @@ impl Run<'_> {
         )?;
         Ok(match checked {
             None => StepReport::skipped(name, Skip::NoDependencyChange),
-            Some(Ok(())) => report(name, StepStatus::Passed, &[], String::new()),
+            Some(Ok(())) => self.fetch_checked()?,
             Some(Err(why)) => report(name, StepStatus::Failed, &[], why),
+        })
+    }
+
+    /// The patch's dependencies passed the check: fetch them through the
+    /// egress proxy into the caches the later steps read (#66). Without a
+    /// sandbox there is nothing to fetch into, and the step just passes.
+    fn fetch_checked(&self) -> Result<StepReport, GateError> {
+        let name = StepName::Dependencies;
+        let (Some(fetch), Some(sandbox)) = (&self.req.fetch, &self.req.sandbox) else {
+            return Ok(report(name, StepStatus::Passed, &[], String::new()));
+        };
+        let session = fetch.egress.start()?;
+        let ran = session.fetch(
+            sandbox,
+            &fetch.command,
+            self.req.repo,
+            &self.log("fetch"),
+            self.req.step_timeout,
+            self.req.cancel.clone(),
+        )?;
+        Ok(match ran.exit {
+            Exit::Cancelled => StepReport::skipped(name, Skip::Cancelled),
+            e if e.success() => report(name, StepStatus::Passed, &[&ran], String::new()),
+            e => report(
+                name,
+                StepStatus::Failed,
+                &[&ran],
+                format!(
+                    "fetching the new dependencies failed ({}):\n{}\n\nproxy:\n{}",
+                    exit_text(e),
+                    tail(&ran.log),
+                    session.log()
+                ),
+            ),
         })
     }
 
