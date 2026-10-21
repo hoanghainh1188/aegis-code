@@ -20,6 +20,9 @@ effort = "high"
 state_dir = ".workspace/state"
 pricing = "config/pricing.toml"
 step_timeout_s = 1800
+# Gate steps in docker/<profile> images, --network none (#5). Turn on once
+# #66 fetches each job's dependencies; until then the gate runs on the host.
+sandbox = false
 
 [budget]
 max_cost_usd = 4.0

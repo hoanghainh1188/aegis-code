@@ -9,7 +9,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, GateReport, GateRequest, Repro, StepName, StepStatus, run_gate};
+use aegis_gate::{
+    CancelToken, GateReport, GateRequest, Repro, Sandbox, StepName, StepStatus, run_gate,
+};
 use aegis_lang::{Language, ProfileOverrides, Profiles, ResolvedProfile};
 
 pub struct Repo {
@@ -130,6 +132,18 @@ impl Repo {
         cancel: CancelToken,
         env: Vec<(String, String)>,
     ) -> GateReport {
+        self.gate_in(profile, repro, step_timeout, cancel, env, None)
+    }
+
+    pub fn gate_in(
+        &self,
+        profile: &ResolvedProfile,
+        repro: Option<&Repro>,
+        step_timeout: Duration,
+        cancel: CancelToken,
+        env: Vec<(String, String)>,
+        sandbox: Option<Sandbox>,
+    ) -> GateReport {
         let allowed = BTreeSet::new();
         let dir = self.dir();
         let work = self.work();
@@ -143,6 +157,7 @@ impl Repo {
             env,
             step_timeout,
             cancel,
+            sandbox,
         })
         .unwrap()
     }

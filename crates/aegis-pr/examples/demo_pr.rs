@@ -41,6 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env: vec![],
         step_timeout: Duration::from_secs(300),
         cancel: CancelToken::new(),
+        sandbox: None,
     })?;
     println!("{report}");
     if !report.passed() {

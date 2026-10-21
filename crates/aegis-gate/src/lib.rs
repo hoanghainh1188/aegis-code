@@ -14,8 +14,10 @@ mod gate;
 mod git;
 mod integrity;
 mod report;
+mod sandbox;
 
 pub use command::{CancelToken, INHERITED_ENV};
 pub use error::GateError;
 pub use gate::{GateRequest, Repro, run_gate};
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus};
+pub use sandbox::{Sandbox, WORKDIR};

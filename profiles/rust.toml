@@ -45,7 +45,7 @@ protected = [
 
 [sandbox]
 image = "aegis-sandbox-rust"
-cache_dirs = ["target", "/usr/local/cargo/registry"]
+cache_dirs = ["target", "/usr/local/cargo/registry", "/usr/local/cargo/git"]
 
 # SonarQube tự chạy `cargo clippy` (tắt bằng sonar.rust.clippy.enabled = false);
 # chỉ cần trỏ tới report coverage. Nguồn: docs SonarQube Server 2026.4,

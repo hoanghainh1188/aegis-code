@@ -44,6 +44,20 @@ pub struct RunSection {
     /// Open PRs as drafts; a person marks them ready.
     #[serde(default = "default_true")]
     pub draft_prs: bool,
+    /// Run the gate in the profile's container image (#5), not on the
+    /// machine.
+    #[serde(default)]
+    pub sandbox: bool,
+    #[serde(default = "default_docker")]
+    pub docker: String,
+    /// Set inside the gate's containers, e.g. `CARGO_BUILD_JOBS` where the
+    /// Docker VM is small (typst needs 2 jobs on 8 GB, #5).
+    #[serde(default)]
+    pub sandbox_env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_docker() -> String {
+    "docker".into()
 }
 
 fn default_true() -> bool {
