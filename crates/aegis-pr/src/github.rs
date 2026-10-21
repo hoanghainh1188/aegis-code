@@ -115,6 +115,66 @@ impl GitHub {
         Remote::https(host, &self.owner, &self.repo, &self.token)
     }
 
+    async fn get(&self, path: &str) -> Result<serde_json::Value, PrError> {
+        let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .send()
+            .await
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        if !status.is_success() {
+            let message = serde_json::from_str::<ApiError>(&text)
+                .map(ApiError::text)
+                .unwrap_or_else(|_| text.chars().take(200).collect());
+            return Err(PrError::GitHub {
+                status: status.as_u16(),
+                message,
+            });
+        }
+        serde_json::from_str(&text).map_err(|e| PrError::GitHub {
+            status: status.as_u16(),
+            message: format!("unexpected reply: {e}"),
+        })
+    }
+
+    /// Lines the reviewers changed on top of the agent's commit: additions
+    /// plus deletions from the PR's first commit (the agent's) to its last
+    /// (design §8: "accepted" allows at most 10).
+    pub async fn review_edits(&self, number: u64) -> Result<u32, PrError> {
+        let commits = self
+            .get(&format!("pulls/{number}/commits?per_page=100"))
+            .await?;
+        let shas: Vec<&str> = commits
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["sha"].as_str())
+            .collect();
+        let (Some(first), Some(last)) = (shas.first(), shas.last()) else {
+            return Ok(0);
+        };
+        if first == last {
+            return Ok(0);
+        }
+        let compare = self.get(&format!("compare/{first}...{last}")).await?;
+        let lines: u64 = compare["files"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|f| f["additions"].as_u64().unwrap_or(0) + f["deletions"].as_u64().unwrap_or(0))
+            .sum();
+        Ok(u32::try_from(lines).unwrap_or(u32::MAX))
+    }
+
     /// Opens a PR from `head` into `base`.
     pub async fn open_pull_request(
         &self,

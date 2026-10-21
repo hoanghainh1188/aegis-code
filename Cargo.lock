@@ -25,6 +25,7 @@ dependencies = [
  "aegis-lang",
  "aegis-ledger",
  "aegis-lifecycle",
+ "aegis-pr",
  "aegis-provider",
  "tokio",
  "tokio-util",

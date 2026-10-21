@@ -324,6 +324,7 @@ mod tests {
             verdict: ReviewVerdict::Accepted,
             lines_edited: 0,
             review_minutes: 5.0,
+            broke_tests: false,
         };
         later.reviewed(review).await.unwrap();
 

@@ -118,6 +118,10 @@ pub struct Review {
     pub verdict: ReviewVerdict,
     pub lines_edited: u32,
     pub review_minutes: f64,
+    /// The PR broke a test that passed before and the reviewer caught it
+    /// (KPI "PR that breaks old tests reaching a person", design §8).
+    #[serde(default)]
+    pub broke_tests: bool,
 }
 
 /// Tokens by price class.
@@ -450,6 +454,7 @@ mod tests {
                     verdict: ReviewVerdict::AcceptedWithEdits,
                     lines_edited: 4,
                     review_minutes: 7.0,
+                    broke_tests: false,
                 }),
             ],
         );
