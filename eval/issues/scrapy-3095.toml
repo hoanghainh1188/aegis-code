@@ -1,0 +1,22 @@
+# Cannot retry requests in `scrapy parse`
+id = "scrapy-3095"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 3095
+url = "https://github.com/scrapy/scrapy/issues/3095"
+title = "Cannot retry requests in `scrapy parse`"
+closed_at = "2026-07-29T11:00:25Z"
+labels = ["bug"]
+base_commit = "0cbb20e8e83996a4d8a3339254c2d7e9b763ce7f"
+fix_commit = "01447f996500367fb999560d08a40cd2ff68815a"
+fix_pr = 7803
+source_files = ["scrapy/commands/parse.py"]
+test_files = ["tests/test_command_parse.py"]
+hidden_tests = ["tests/test_command_parse.py"]
+body = "This spider:\r\n\r\n```python\r\nimport scrapy\r\n\r\n\r\nclass HttpBinSpider(scrapy.Spider):\r\n\r\n    name = \"httpbin.org\"\r\n\r\n    start_urls = ['https://httpbin.org/'] \r\n\r\n    def parse(self, response):\r\n        if response.meta.get('retried'):\r\n            self.logger.info(\"done\")\r\n            return\r\n        response.meta['retried'] = True\r\n        yield response.request.replace(dont_filter=True)\r\n```\r\n\r\nworks fine with `scrapy crawl httpbin.org`, but `scrapy parse \"https://httpbin.org/\" -d 2` fails with the following traceback:\r\n\r\n```\r\nTraceback (most recent call last):\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/twisted/internet/defer.py\", line 653, in _runCallbacks\r\n    current.result = callback(current.result, *args, **kw)\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 195, in callback\r\n    items, requests = self.run_callback(response, cb)\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 117, in run_callback\r\n    for x in iterate_spider_output(cb(response)):\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 195, in callback\r\n    items, requests = self.run_callback(response, cb)\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 117, in run_callback\r\n    for x in iterate_spider_output(cb(response)):\r\n\r\n  [... the four lines above over and over again ...]\r\n\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 195, in callback\r\n    items, requests = self.run_callback(response, cb)\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 117, in run_callback\r\n    for x in iterate_spider_output(cb(response)):\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/commands/parse.py\", line 169, in callback\r\n    cb = response.meta['_callback']\r\n  File \"/home/jakob/.local/lib/python3.6/site-packages/scrapy/http/response/__init__.py\", line 30, in meta\r\n    return self.request.meta\r\nRecursionError: maximum recursion depth exceeded while calling a Python object\r\n```\r\n\r\nExplicitly also replacing the request callback (`yield response.request.replace(dont_filter=True, callback=self.parse)`) fixes the issue.\r\n\r\nThis is possibly caused by not properly cleaning up [this](https://github.com/scrapy/scrapy/blob/master/scrapy/commands/parse.py#L216) and [this](https://github.com/scrapy/scrapy/blob/master/scrapy/commands/parse.py#L207) line.\r\n\r\nShout-out to @VMRuiz for finding this. ;)"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 29

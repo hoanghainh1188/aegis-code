@@ -1,0 +1,22 @@
+# Relative `dy` and vertical alignment of `place` are ignored inside `layout`
+id = "typst-6822"
+language = "rust"
+repo = "typst/typst"
+issue = 6822
+url = "https://github.com/typst/typst/issues/6822"
+title = "Relative `dy` and vertical alignment of `place` are ignored inside `layout`"
+closed_at = "2026-08-27T17:03:37Z"
+labels = ["bug", "layout"]
+base_commit = "04720133f0bed8716145da7daa2ca29458f6b8ad"
+fix_commit = "ce2cee5e39246dc70beac6e0ad58d9578c1c9233"
+fix_pr = 8789
+source_files = ["crates/typst-layout/src/flow/collect.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/issue-6822-layout-expand.png", "tests/ref/render/issue-6822-layout-multiple.png", "tests/ref/svg/hashes.txt", "tests/suite/layout/layout.typ"]
+hidden_tests = ["issue-6822-layout-expand", "issue-6822-layout-multiple"]
+body = "### Description\n\nWhen inside a `layout(size => {...})`, the `place` function partially ignores the vertical component of `alignment` (correct anchor but incorrect placement) and the relative part of `dy`. No issues with horizontal placement and absolute vertical placement.\n\nThe document below is produced by writing the exact same code to produce the blue and red boxes, but blue uses `#box[...]` and red uses `#box[#layout(_ => {...})]`.\nVertical alignment is incorrect in the `layout` version. So is relative `dy`. On the other hand absolute `dy` is correctly taken into account and `move` correctly handles relative `dy`.\n\n<img width=\"417\" height=\"1041\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/376d1055-f4e6-406f-a17e-d46e3404e997\" />\n\n### Reproduction URL\n\nhttps://typst.app/project/rhaS6MTWfNv6OTdx78WjLQ\n\n```typ\n#set page(width: 5cm, height: 12.5cm)\n\n=== #text(fill: red)[#sym.crossmark] `place(alignment)`\n\n#box(width: 50pt, height: 50pt, stroke: blue)[\n  #place(top + left)[1]\n  #place(center + horizon)[2]\n  #place(bottom + right)[3]\n]\n#box(width: 50pt, height: 50pt, stroke: red)[#layout(_ => {\n  place(top + left)[1]\n  place(center + horizon)[2]\n  place(bottom + right)[3]\n})]\n\n=== #text(fill: red)[#sym.crossmark] `place(dy: %)`\n\n#box(width: 50pt, height: 50pt, stroke: blue)[\n  #place(top + left)[1]\n  #place(top + left, dx: 45%, dy: 42%)[2]\n  #place(top + left, dx: 90%, dy: 85%)[3]\n]\n#box(width: 50pt, height: 50pt, stroke: red)[#layout(_ => {\n  place(top + left)[1]\n  place(top + left, dx: 45%, dy: 42%)[2]\n  place(top + left, dx: 90%, dy: 85%)[3]\n})]\n\n=== #text(fill: green)[#sym.checkmark] `place(dy: pt)`\n\n#box(width: 50pt, height: 50pt, stroke: blue)[\n  #place(top + left)[1]\n  #place(top + left, dx: 23pt, dy: 22pt)[2]\n  #place(top + left, dx: 45pt, dy: 42pt)[3]\n]\n#box(width: 50pt, height: 50pt, stroke: red)[#layout(_ => {\n  place(top + left)[1]\n  place(top + left, dx: 23pt, dy: 22pt)[2]\n  place(top + left, dx: 45pt, dy: 42pt)[3]\n})]\n\n=== #text(fill: green)[#sym.checkmark] `move(dy: %)`\n\n#box(width: 50pt, height: 50pt, stroke: blue)[\n  #place(top + left)[1]\n  #place(top + left)[#move(dx: 45%, dy: 42%)[2]]\n  #place(top + left)[#move(dx: 90%, dy: 85%)[3]]\n]\n#box(width: 50pt, height: 50pt, stroke: red)[#layout(_ => {\n  place(top + left)[1]\n  place(top + left)[#move(dx: 45%, dy: 42%)[2]]\n  place(top + left)[#move(dx: 90%, dy: 85%)[3]]\n})]\n```\n\n### Operating system\n\n_No response_\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 42

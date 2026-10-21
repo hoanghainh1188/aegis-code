@@ -1,0 +1,22 @@
+# IMAGES_STORE_*_ACL are no longer used
+id = "scrapy-7597"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 7597
+url = "https://github.com/scrapy/scrapy/issues/7597"
+title = "IMAGES_STORE_*_ACL are no longer used"
+closed_at = "2026-06-15T19:24:45Z"
+labels = ["bug", "S3", "media pipelines"]
+base_commit = "e74647572d692598ca943db539d45aefdc4956ac"
+fix_commit = "0a4a92e84334770a3aca3a3c44985cb08692535c"
+fix_pr = 7614
+source_files = ["scrapy/pipelines/images.py"]
+test_files = ["tests/test_pipeline_images.py"]
+hidden_tests = ["tests/test_pipeline_images.py"]
+body = "Apparently 2ad5f0c12 removed code that sets `s3store.POLICY = settings[\"IMAGES_STORE_S3_ACL\"]` and `gcs_store.POLICY = settings[\"IMAGES_STORE_GCS_ACL\"] or None` as I missed that not everything there was copypasted.\n\nI don't like all of this logic anyway though, it needs refactoring."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 3

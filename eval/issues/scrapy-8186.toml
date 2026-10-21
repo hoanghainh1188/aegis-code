@@ -1,0 +1,22 @@
+# Fix timezone handling in `FilesPipeline` stores
+id = "scrapy-8186"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 8186
+url = "https://github.com/scrapy/scrapy/issues/8186"
+title = "Fix timezone handling in `FilesPipeline` stores"
+closed_at = "2026-09-27T09:13:23Z"
+labels = ["bug", "media pipelines"]
+base_commit = "71172304618e143ab5ba1a7519d85301b61f3fba"
+fix_commit = "e8c708f8d4e9c93b8c33f9a743c97275d18c1743"
+fix_pr = 8196
+source_files = ["scrapy/pipelines/files.py"]
+test_files = ["tests/test_pipeline_files.py"]
+hidden_tests = ["tests/test_pipeline_files.py"]
+body = "Found in https://github.com/scrapy/scrapy/pull/8182#discussion_r4053447020\n\nVarious `FilesPipeline` stores produce the `last_modifed` value as the UNIX timestamp and some or all of them may do it incorrectly, depending on what are the values returned by S3 and GCS and what is in FTP `MDTM`. Their tests may also hide these problems and may need to be improved."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 4

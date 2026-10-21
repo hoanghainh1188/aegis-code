@@ -1,0 +1,22 @@
+# HTML export panics on multi-byte character after `</` in raw text element
+id = "typst-8725"
+language = "rust"
+repo = "typst/typst"
+issue = 8725
+url = "https://github.com/typst/typst/issues/8725"
+title = "HTML export panics on multi-byte character after `</` in raw text element"
+closed_at = "2026-09-30T15:42:43Z"
+labels = ["bug", "html", "crash"]
+base_commit = "17461c5ced61b00058acb24793f7a64dc1947ca6"
+fix_commit = "508d5f79456bc8469a95b94eeee3dda5bc905c6d"
+fix_pr = 8905
+source_files = ["crates/typst-html/src/encode.rs"]
+test_files = ["tests/ref/html/hashes.txt", "tests/suite/html/syntax.typ"]
+hidden_tests = ["issue-8725-html-raw-multi-byte-char"]
+body = "### Description\n\n## Description\n\nHTML export panics with a char-boundary error when a raw text element (`style`, `script`, etc.) contains `</` followed by a multi byte character within \"tag name length\" distance.\n\nMinimal reproduction (`typst compile --features html repro.typ repro.html`):\n\n```typ\n#html.elem(\"style\", \"</abcd−\")\n```\n(note the last character is U+2212 MINUS SIGN)\n\nSorry, can't upload a `.typ` file, thanks Github!\n\nI get:\n```\nthread 'main' panicked at crates/typst-html/src/encode.rs:297:20:\nbyte index 5 is not a char boundary; it is inside '−' (bytes 4..7) of `abcd−`\n```\n\nThe text that triggered this originally is in Typst's standard library documentation for the cbor module: `crates/typst-library/src/loading/cbor.rs`, line 65, [see here](https://github.com/typst/typst/blob/69ec1decede39e21aaaa25873545ecdfe5b6535c/crates/typst-library/src/loading/cbor.rs#L65-L67). This was observed via tinymist's package doc generator.\n\nClaude patched a local checkout of the typst-html crate, but per CONTRIBUTING.md's policy on AI-implemented contributions I'm only reporting it as an issue rather than opening a PR with Claude's one-line fix. \n\n**Operating system:** macOS\n**Typst version:** 0.15.1\n\n### Operating system\n\nmacOS\n\n### Typst version\n\n- [ ] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 4

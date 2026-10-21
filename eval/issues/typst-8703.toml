@@ -1,0 +1,22 @@
+# PDF/UA-1 fails PAC (2026) checks on weird placement of raw code block figure
+id = "typst-8703"
+language = "rust"
+repo = "typst/typst"
+issue = 8703
+url = "https://github.com/typst/typst/issues/8703"
+title = "PDF/UA-1 fails PAC (2026) checks on weird placement of raw code block figure"
+closed_at = "2026-09-30T15:52:09Z"
+labels = ["bug", "pdf", "accessibility"]
+base_commit = "cad66a6c688635bda6f93e8619f166c7700b8fed"
+fix_commit = "17461c5ced61b00058acb24793f7a64dc1947ca6"
+fix_pr = 8796
+source_files = ["crates/typst-pdf/src/tags/mod.rs"]
+test_files = ["tests/ref/pdftags/hashes.txt", "tests/suite/pdftags/figure.typ"]
+hidden_tests = ["issue-8703-single-page-figure-without-bbox"]
+body = "### Description\n\nAs reference the issue happens with (the thesis document) https://github.com/jassielof/upsa-bolivia-typst/tree/026053356a8ac04e194a13dc935061a198f11816.\n\nThe specific issue is:\n\n<img width=\"1916\" height=\"874\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/76244cfe-8e8f-4593-ad1b-fd1269a791da\" />\n\nWhich was generated with PAC on Windows. Weirdly because if I set such figure placement at the bottom, the issue disappears, if I prepend a page break to its section it also disappears, if I use have the following test file:\n\n````typ\n#set document(\n  title: \"TFG\",\n  author: \"john\",\n)\n\n// overall\n#show figure: set figure.caption(position: top)\n#show figure.where(kind: image): set block(breakable: false, sticky: true)\n#show figure.where(kind: table): set block(breakable: true, sticky: false)\n#show figure.where(kind: math.equation): set figure(supplement: [Fórmula])\n#set figure(\n  gap: 1.5em,\n  placement: none,\n)\n\n// figure caption\n\n#set figure.caption(separator: parbreak(), position: top)\n#show figure.caption: set align(left)\n#show figure.caption: set text(font: \"Source Sans 3\")\n#show figure.caption: set par(first-line-indent: 0em)\n#show figure.caption: it => {\n  strong[#it.supplement #context it.counter.display(it.numbering)]\n  parbreak()\n  emph(it.body)\n}\n\n// raw only\n#show figure.where(kind: raw): set figure(placement: none)\n#show figure.where(kind: raw): set block(breakable: false, sticky: false, width: 100%)\n#show figure.where(kind: raw): set raw(block: true)\n\n\n= first heading\n\n#lorem(10)\n\n#figure(\n  table(\n    [hola],\n    [adios],\n  ),\n  alt: \"sample table\",\n)\n\n#figure(\n  ```c\n  \\documentclass{article}\n  \\begin{document}\n    Hello, World!\n  \\end{document}\n  ```,\n  caption: [Sample TeX Code],\n  alt: \"tex code\",\n)\n\n````\n\nThe issue doesn't happen.\n\nThe previous Discord discussion is on https://discord.com/channels/1054443721975922748/1054443722592497796/1532446501740216462.\n\n### Operating system\n\nWindows\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 28

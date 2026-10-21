@@ -1,0 +1,22 @@
+# Misaligned math equation - Regression from 14.2 to 15.0
+id = "typst-8560"
+language = "rust"
+repo = "typst/typst"
+issue = 8560
+url = "https://github.com/typst/typst/issues/8560"
+title = "Misaligned math equation - Regression from 14.2 to 15.0"
+closed_at = "2026-07-02T13:53:49Z"
+labels = ["bug", "math", "urgent", "regression"]
+base_commit = "7c76edca62ee16ca4c6dd4f5498fe57793f28517"
+fix_commit = "68cc52b60bee7de032625fef7db52f4814c6d291"
+fix_pr = 8566
+source_files = ["crates/typst-library/src/math/ir/process.rs", "crates/typst-library/src/math/ir/resolve.rs"]
+test_files = ["tests/ref/html/hashes.txt", "tests/ref/pdf/hashes.txt", "tests/ref/render/math-lr-single-line-align.png", "tests/ref/svg/hashes.txt", "tests/suite/math/delimited.typ"]
+hidden_tests = ["math-lr-single-line-align"]
+body = "### Description\n\n# Explanation of the bug\n\nDelimiters inside math equation disturb the alignment that should be respected in math equation.\n\n# Minimal reproduction code\n\nHere is the smallest code to reproduce :\n```typst\n$ \n     & x \\\n   ( & x ) // this line has been fixed. I did a mistake in first post of the issue.\n$\n```\n\nHere is the Output 15.0 :\n\n<img width=\"198\" height=\"237\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/a1763afb-0da2-42a1-8f5f-527d62e37655\" />\n\nHere is the Output 14.2 :\n\n<img width=\"198\" height=\"237\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/cbe82b0f-b03a-4c60-b250-bf954da4b478\" />\n\n# Reason\n\nAll of the output here is from 15.0.\n\nI don't know anything about the potential internal reason of this issue. However, the problem clearly comes from delimiters before and after the alignment in math with the `&` symbol.\n\nThis also works with other delimiters ... \n- such as curly braces `{` :\n```\n$ \n   & x \\\n   { & x }\n$\n```\n\n<img width=\"198\" height=\"237\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/6bd42c40-5716-4e9a-af8d-2f20257ead41\" />\n\n- such as brackets `[` :\n```\n$ \n   & x \\\n   [ & x ]\n$\n```\n\n<img width=\"198\" height=\"237\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8e74c43d-dd07-4d31-a0d3-d50591cd9af9\" />\n\n\n- such as `abs` `|` :\n```\n$ \n   & x \\\n   abs( & x )\n$\n```\n\n<img width=\"198\" height=\"237\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/2a8082f2-9c55-49e2-8483-ad73433d6bda\" />\n\nWhen putting only one delimiter this is not an issue.\n\nThis code :\n```\n$ \n   & x \\\n   & x )\n$\n```\nGives us this result in 15.0 :\n\n<img width=\"198\" height=\"237\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/3ed17e7e-9397-4b3a-ad21-535d724b79c5\" />\n\n\n\n### Operating system\n\n_No response_\n\n### Typst version\n\n- [ ] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 29

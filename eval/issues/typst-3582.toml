@@ -1,0 +1,22 @@
+# Footnote in text after heading can cause orphan
+id = "typst-3582"
+language = "rust"
+repo = "typst/typst"
+issue = 3582
+url = "https://github.com/typst/typst/issues/3582"
+title = "Footnote in text after heading can cause orphan"
+closed_at = "2026-07-13T08:09:00Z"
+labels = ["bug", "layout"]
+base_commit = "921bb8318a54caf152acea6554d229f5596eb4a0"
+fix_commit = "4eee706a7374b7c4945e94155f6e0be102f3992f"
+fix_pr = 8592
+source_files = ["crates/typst-layout/src/flow/distribute.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/flow-heading-no-orphan-with-footnote.png", "tests/ref/render/flow-heading-orphan-forced-with-footnote.png", "tests/ref/svg/hashes.txt", "tests/suite/layout/flow/orphan.typ"]
+hidden_tests = ["flow-heading-no-orphan-with-footnote", "flow-heading-orphan-forced-with-footnote"]
+body = "### Description\n\nUnder certain circumstances, a footnote in the text after a heading can cause the pagebreak to be placed between the heading and the text. I think this behavior is wrong because without the footnote heading and text stay on the same page.\r\n\r\nCode to reproduce the issue:\r\n```typst\r\n#lorem(620)\r\n= Heading\r\n#lorem(10)\r\n#footnote[#lorem(10)].\r\n```\r\n![image](https://github.com/typst/typst/assets/20155974/6ca12431-01f5-439e-a2b0-d89565181485)\r\n\r\nExpected behavior is similar to what happens here, i.e., the heading appears on the next page together with the text.\r\n```typst\r\n#lorem(624)\r\n= Heading\r\n#lorem(20)\r\n```\r\n![image](https://github.com/typst/typst/assets/20155974/8c33f0c2-b9cb-4a75-80a5-92bfaab4fb7d)\r\n\r\n\r\n\n\n### Reproduction URL\n\n_No response_\n\n### Operating system\n\nWindows\n\n### Typst version\n\n- [X] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 68

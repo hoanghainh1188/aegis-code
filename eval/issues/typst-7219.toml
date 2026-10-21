@@ -1,0 +1,22 @@
+# Overhang disabled if word has label
+id = "typst-7219"
+language = "rust"
+repo = "typst/typst"
+issue = 7219
+url = "https://github.com/typst/typst/issues/7219"
+title = "Overhang disabled if word has label"
+closed_at = "2026-08-04T09:31:01Z"
+labels = ["bug", "layout", "text"]
+base_commit = "45b81ce0787fb0ee91c04b8f3804ba51d2e030f0"
+fix_commit = "d1277b06ac6fcf90138194638420f5e8b34b0e73"
+fix_pr = 8131
+source_files = ["crates/typst-layout/src/inline/collect.rs", "crates/typst-layout/src/inline/line.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/issue-8130-overhang-in-show-rule.png", "tests/ref/render/overhang-dash.png", "tests/ref/render/overhang-label.png", "tests/ref/svg/hashes.txt", "tests/suite/layout/inline/overhang.typ"]
+hidden_tests = ["overhang-label", "overhang-dash", "issue-8130-overhang-in-show-rule"]
+body = "### Description\n\nTypst version: 0.14.0\n\nIf I label a word like `just,` then punctuation overhang is disabled for the relevant comma. It's expected that adding a label doesn't change the layout.\n\n\n```typ\n#set par(justify: true)\nRegular:\n#block(stroke: 0.5pt + blue, width: 4cm)[This is a text with just, the right length.]\nLabel the word:\n#block(stroke: 0.5pt + blue, width: 4cm)[This is a text with just,<label> the right length.]\n```\n\n\n\n<img width=\"200\" height=\"200\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/8a836dc1-de46-4bb4-856b-83682859d0ac\" />\n\n### Reproduction URL\n\n_No response_\n\n### Operating system\n\nWeb app\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 31

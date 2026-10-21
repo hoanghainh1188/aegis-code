@@ -1,0 +1,22 @@
+# Exported item batches only finalized/uploaded at spider closing
+id = "scrapy-7730"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 7730
+url = "https://github.com/scrapy/scrapy/issues/7730"
+title = "Exported item batches only finalized/uploaded at spider closing"
+closed_at = "2026-07-29T14:30:05Z"
+labels = ["bug"]
+base_commit = "01447f996500367fb999560d08a40cd2ff68815a"
+fix_commit = "b2d4eedea8873700b2597a44dabafe7c9d169275"
+fix_pr = 7733
+source_files = ["scrapy/extensions/feedexport.py"]
+test_files = ["tests/test_feedexport_batch.py"]
+hidden_tests = ["tests/test_feedexport_batch.py"]
+body = "<!--\n\nThanks for taking an interest in Scrapy!\n\nIf you have a question that starts with \"How to...\", please see the Scrapy Community page: https://scrapy.org/community/.\nThe GitHub issue tracker's purpose is to deal with bug reports and feature requests for the project itself.\n\nKeep in mind that by filing an issue, you are expected to comply with Scrapy's Code of Conduct, including treating everyone with respect: https://github.com/scrapy/scrapy/blob/master/CODE_OF_CONDUCT.md\n\nThe following is a suggested template to structure your issue, you can find more guidelines at https://doc.scrapy.org/en/latest/contributing.html#reporting-bugs\n\n-->\n\n### Description\n\nFeed exports slots seem be closed only at the end of the crawl. The feed export docs say under \"delayed file delivery\" that a exported batch file wil be delivered/uploaded as soon as a batch is finished. Yet neither FeedStorage.store() nor Item exporter.finish_exporting() is called upon completion of a batch. Both only run at the end of a crawl.\n\nI am unsure this is the intended behaviour.\n\n\n### Steps to Reproduce\n\n1) Export items using the feed exporter with batch_item count set.\n2) Use an item exporter with easily observable behaviour in finish_exporting or use a feed storage where you can see the upload time e.g. s3 feed \n3) observe that the batch doesn't upload/ finalize until the end of the crawl\n\n**Expected behavior:** \nBatch is finalized as soon as it is filled completely. \n\n**Actual behavior:**\nAll batches finish at the same time\n\n**Reproduces how often:** Always when exporting in batches.\n\n### Version\nStarted noticing this since 2.14 to this day 2.17\n\n\n### Additional context\n\nUpon digging through the code a bit I notice that the FeedExporter component only adds the coro returned by its close_slot() method to a list of pending coroutines which I believe doesn't actually schedule / call the coroutine yet as it is not a task. On the contrary, it is awaited only in the close_spider signal handler, which explains the observed behaviour.\n\nInitially, I found this bug not by using blocking feed storages but using the plain file feed storage. Thr issue describes above causes both store method of FeedStorage classes and the  finish_exporting methods of Item exporter classes to only be called when the spider closes. In my case I was using a custom item exporter that did meaningfull finalization and memory cleanup in finish_exporting. I hoped use the batches feature to  conserve memory and prevent complete data loss  in case my long-running crawl errored. Instead, I notice the files not being completed and and file handles not being closed until the end of the crawel."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 8

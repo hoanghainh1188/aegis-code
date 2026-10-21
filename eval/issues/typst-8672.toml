@@ -1,0 +1,22 @@
+# SVG export produces invalid XML when a hyperlink URL contains an ampersand
+id = "typst-8672"
+language = "rust"
+repo = "typst/typst"
+issue = 8672
+url = "https://github.com/typst/typst/issues/8672"
+title = "SVG export produces invalid XML when a hyperlink URL contains an ampersand"
+closed_at = "2026-07-23T16:04:10Z"
+labels = ["bug", "svg"]
+base_commit = "98fec489a67551728aa52da43eaceadb72b1d962"
+fix_commit = "053f41d0e61a4b2da3c9aedf6e20fe633dbe21e0"
+fix_pr = 8510
+source_files = ["crates/typst-svg/src/write.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/link-url-svg-escape.png", "tests/ref/svg/hashes.txt", "tests/suite/model/link.typ"]
+hidden_tests = ["link-url-svg-escape"]
+body = "### Description\n\nWhen exporting a document to SVG, a hyperlink URL containing an ampersand(`&`) may be written to the SVG without XML escaping.\n\n## Step to Reproduce\n\n1. write `references.bib` and `main.typ`\n```\n@online{aaaaa,\n  author  = {{bbbbb}},\n  title   = {ccccc},\n  url     = {https://example.com/files?page=1&status=active},\n}\n```\n\n```typst\n  Citation: @aaaaa\n\n...\n\n  #bibliography(\"references.bib\", title: \"references\", style: \"ieee\")\n```\n\n2. export to svg\n```bash\ntypst compile --format \"main.typ\" \"main.svg\"\n```\n\n3. Validate the generated SVG\n```bash\nxmllint --noout main.svg\n```\n\n## Actual behavior\n\nThe generated SVG contains an unescaped ampersand in an `xlink:href` attribute and is rejected by XML/SVG parsers with an error such as:\n```bash\nparser error: EntityRef: expecting ';'\n```\nIs also fails to render with resvg.\n\n## Expected behavior\n\nAmpersands in hyperlink attributes should be serialized as `&amd;` so that the generated SVG in well-formed XML while preserving the original URL.\n\n### Operating system\n\nLinux\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 29

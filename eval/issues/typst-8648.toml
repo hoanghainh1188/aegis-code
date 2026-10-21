@@ -1,0 +1,22 @@
+# Gap inserted in enum
+id = "typst-8648"
+language = "rust"
+repo = "typst/typst"
+issue = 8648
+url = "https://github.com/typst/typst/issues/8648"
+title = "Gap inserted in enum"
+closed_at = "2026-07-16T16:41:33Z"
+labels = ["bug", "layout", "urgent", "regression"]
+base_commit = "14fa8cd16446e2be59a44468a649ca3d315766f1"
+fix_commit = "62ec6eb0a0c7ae07b10afc758d2391041da92eb3"
+fix_pr = 8649
+source_files = ["crates/typst-layout/src/lists.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/render/issue-8648-enum-gap.png", "tests/ref/svg/hashes.txt", "tests/suite/model/list.typ"]
+hidden_tests = ["issue-8648-enum-gap"]
+body = "### Description\n\nSee https://typst.app/project/pDR4uyUuVq9ixDM18QhcYg\n\n```\n#let note(content) = content\n#set page(width:6in,height:9in,margin:1in,\n)\n#box[]<k1-source>\n#box[]<k2-source>\n#box[]<k3-source>\n#box[]<k4-source>\n#box[]<k5-source>\n#[#enum(number-align:top + end,indent:17pt,spacing:0pt,numbering:n => [#let k = \"k\"+str(n);#link(label(k+\"-source\"), [x])#label(k)],enum.item([#note([#par([#text(\"Lorem ipsum dolor sit amet consectetur adipiscin\"\n);]\n);]\n);]),enum.item([#note([#par([#text(\"Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore magna aliqua enim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat duis aute irure voluptate velit esse cillum fugiat nulla pariatur. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore magna aliqua enim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat duis aute irure voluptate velit esse cillum fugiat nulla pariatur. Lo\"\n);]\n);]\n);]),enum.item([#note([#par([#text(\"Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labo\"\n);]\n);]\n);]),enum.item([#note([#par([#text(\"Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore magna aliqua enim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat duis aute irure voluptate velit esse cillum fugiat nulla pariatur. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore m Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore magna aliqua enim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat duis aute irure voluptate velit esse cillum fugiat nulla pariatur excepteur sint occaecat cupidatat non proident sunt culpa qui officia deserunt mollit anim id est laborum. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore magna aliqua enim veniam quis nostrud exercitation ullamco laboris nisi aliquip commodo consequat duis aute irure voluptate velit esse cillum fugiat nulla pariatur excepteur sint occaecat cupidatat non proident sunt culpa qui officia deserunt mollit anim id est laborum. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt labore dolore magna aliqua enim veniam quis nostrud exer\"\n);]\n);]\n);]),enum.item([#note([#par([#text(\"Aliqua dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim ad minim veniam quis nostrud exercitation ullamco laboris nisi aliquip ex ea commodo consequat duis aute irure dolor in reprehenderit voluptate velit esse cillum dolore fugiat nulla pariatur excepteur sint occaecat cupidatat non proident sunt culpa qui officia deserunt mollit anim id est laborum. Aliqua dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim ad minim veniam quis nostrud exercitation ullamco laboris nisi aliquip ex ea commodo consequat duis aute irure dolor in reprehenderit voluptate velit esse cillum dolore fugiat nulla pariatur \"\n);]\n);]\n);]),\n);\n;]\n```\n\nOn 0.14, this works. On 0.15, it inserts a large gap in the list. It seems to have something to do with the interplay of the function (note), the references, and page boundary.\n\n\n### Operating system\n\nWeb app\n\n### Typst version\n\n- [x] I am using the latest version of Typst"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 26

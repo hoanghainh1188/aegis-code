@@ -1,0 +1,22 @@
+# The spider doesn't wait for pipelines of items produced from start()
+id = "scrapy-7029"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 7029
+url = "https://github.com/scrapy/scrapy/issues/7029"
+title = "The spider doesn't wait for pipelines of items produced from start()"
+closed_at = "2026-08-17T17:57:10Z"
+labels = ["bug", "asyncio"]
+base_commit = "c7eacdbb30a4563bbbe04ed02781768f4e19eabb"
+fix_commit = "eab4c09ca1addd0fdbcd8a10350cf8ee55a7b3f8"
+fix_pr = 7891
+source_files = ["scrapy/core/engine.py", "scrapy/core/scraper.py"]
+test_files = ["tests/test_spider_start.py"]
+hidden_tests = ["tests/test_spider_start.py"]
+body = "This was reported by a user and I didn't check it myself but it looks true from the code.\n\n`ExecutionEngine._process_start_next()` just schedules `self.scraper.start_itemproc_async()` for items produced from `start()`, and so if there are async pipelines, nothing in the Scrapy code requires waiting until they finish before e.g. closing the spider (that's one of the downsides of `_schedule_coro()` as opposed to awaiting). I don't see a simple fix though, we may need to add some machinery to wait for these."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 7

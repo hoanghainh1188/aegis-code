@@ -1,0 +1,22 @@
+# PDF export raises internal error "expected link ancestor in logical tree"
+id = "typst-7777"
+language = "rust"
+repo = "typst/typst"
+issue = 7777
+url = "https://github.com/typst/typst/issues/7777"
+title = "PDF export raises internal error \"expected link ancestor in logical tree\""
+closed_at = "2026-08-03T14:37:55Z"
+labels = ["bug", "pdf", "accessibility"]
+base_commit = "14087c62d22abfb153a888b15a54cf2460d05d62"
+fix_commit = "45b81ce0787fb0ee91c04b8f3804ba51d2e030f0"
+fix_pr = 8714
+source_files = ["crates/typst-layout/src/inline/line.rs"]
+test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/pdftags/hashes.txt", "tests/ref/render/hyphenate-repeat-style.png", "tests/ref/svg/hashes.txt", "tests/suite/pdftags/link.typ"]
+hidden_tests = ["issue-7777-missing-link-parent", "issue-7777-missing-link-parent-repeated-hyphen"]
+body = "### Description\n\nWhen running `typst c test.typ`, I get this error:\n\n    error: internal error: expected link ancestor in logical tree (occurred at crates/typst-pdf/src/link.rs:88:10)\n\nwith `test.typ`:\n```typst\n#show link: underline\n#link(\"https://example.com\")[#image(\"globe.svg\") linktext] something else\n```\n\nI believe this is a pretty minimal test case, the only occurs when `#show ...`, `#image()`, `linktext` and `something else` all coincide.\n\nThis isn't too big of a deal: I planned on removing the `underline` anyway, but typst told me to please report this as a bug.\n\n    $ typst --version\n    typst 0.14.2 (b33de9de)\n\n### Reproduction URL\n\n_No response_\n\n### Operating system\n\nNixOS\n\n### Typst version\n\n- [X] I am using the latest version of Typst (*see above*)"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 15

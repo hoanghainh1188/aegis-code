@@ -1,0 +1,22 @@
+# CrawlerProcess settings have no effect on spider settings if Crawler is passed to crawl method
+id = "scrapy-1280"
+language = "python"
+repo = "scrapy/scrapy"
+issue = 1280
+url = "https://github.com/scrapy/scrapy/issues/1280"
+title = "CrawlerProcess settings have no effect on spider settings if Crawler is passed to crawl method"
+closed_at = "2026-06-22T15:10:12Z"
+labels = ["bug"]
+base_commit = "75f05d4e80b82705f54b2fe6b2948c463c7eb36b"
+fix_commit = "b6596de317acb16c1a0de0a77496640f7542364b"
+fix_pr = 7647
+source_files = ["scrapy/crawler.py"]
+test_files = ["tests/test_crawl.py", "tests/test_crawler.py"]
+hidden_tests = ["tests/test_crawl.py", "tests/test_crawler.py"]
+body = "CrawlerProcess accepts either Crawler or Spider instances in its `crawl` method.\nFor spiders settings are merged: CrawlerProcess provides defaults and spider provides overrides. \nBut when a Crawler instance is passed CrawlerProcess settings are not used at all. I think they should be also used as defaults.\n"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-21"
+seconds = 57
