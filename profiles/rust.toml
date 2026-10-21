@@ -33,6 +33,9 @@ manifests = ["Cargo.toml"]
 lockfiles = ["Cargo.lock"]
 official_source = "registry+https://github.com/rust-lang/crates.io-index"
 fetch = ["cargo", "fetch", "--locked"]
+# Registry hosts the fetch container may reach (#66). Git dependencies need
+# their host added by the repo (`fetch_hosts` in RepoConfig).
+fetch_hosts = ["crates.io", "index.crates.io", "static.crates.io"]
 # Bản vá chạm vào là bị chặn (#83): source replacement trong .cargo/config
 # không hiện trong Cargo.lock; toolchain file đổi compiler được tải về.
 protected = [

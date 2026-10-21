@@ -103,6 +103,7 @@ fn gated(scratch: &Scratch, test_command: &str) -> (PathBuf, PathBuf, GateReport
         step_timeout: Duration::from_secs(60),
         cancel: CancelToken::new(),
         sandbox: None,
+        fetch: None,
     })
     .unwrap();
     (repo, fork, report)

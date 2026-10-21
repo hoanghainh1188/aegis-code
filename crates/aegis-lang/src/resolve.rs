@@ -38,6 +38,10 @@ pub struct ProfileOverrides {
     pub gate: GateOverrides,
     pub edit_format: Option<StepOverride>,
     pub fetch: Option<StepOverride>,
+    /// Hosts added to the profile's `fetch_hosts`, e.g. `github.com` for a
+    /// repo with git dependencies.
+    #[serde(default)]
+    pub fetch_hosts: Vec<String>,
     pub audit: Option<StepOverride>,
     /// Required when the coverage command is overridden.
     pub coverage: Option<Coverage>,
@@ -83,6 +87,8 @@ pub struct ResolvedProfile {
     pub gate: GatePlan,
     pub edit_format: Step,
     pub fetch: Step,
+    /// The profile's `fetch_hosts` and the repo's, in that order.
+    pub fetch_hosts: Vec<String>,
     pub audit: Step,
     pub coverage: Option<Coverage>,
     pub image: String,
@@ -144,6 +150,15 @@ impl Profile {
                 .map_err(|e| invalid(format!("edit_format: {e}")))?;
         }
         let fetch = step(&self.dependencies.fetch, &overrides.fetch).map_err(invalid)?;
+        let mut fetch_hosts = self.dependencies.fetch_hosts.clone();
+        for host in &overrides.fetch_hosts {
+            if !plain_host(host) {
+                return Err(invalid(format!("fetch_hosts: `{host}` is not a host name")));
+            }
+            if !fetch_hosts.contains(host) {
+                fetch_hosts.push(host.clone());
+            }
+        }
         if let Some(c) = fetch.command() {
             c.check_placeholders(&[], &[])
                 .map_err(|e| invalid(format!("fetch: {e}")))?;
@@ -164,11 +179,22 @@ impl Profile {
             gate,
             edit_format,
             fetch,
+            fetch_hosts,
             audit,
             coverage,
             image,
         })
     }
+}
+
+/// A DNS name the proxy can match exactly: letters, digits, `-` and `.`.
+fn plain_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && !host.starts_with(['.', '-'])
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
 }
 
 fn step(default: &Option<CommandTemplate>, o: &Option<StepOverride>) -> Result<Step, String> {
@@ -242,6 +268,22 @@ mod tests {
         assert_eq!(r.coverage, None);
         assert_eq!(r.image, "registry.local/app-ci:3.12");
         assert_eq!(r.fetch.command().unwrap().argv()[0], "pip");
+    }
+
+    #[test]
+    fn repo_fetch_hosts_add_to_the_profiles() {
+        let r = python()
+            .resolve(&overrides(r#"fetch_hosts = ["github.com", "pypi.org"]"#))
+            .unwrap();
+        assert_eq!(
+            r.fetch_hosts,
+            ["pypi.org", "files.pythonhosted.org", "github.com"]
+        );
+        for bad in ["", "*.github.com", "github.com:443", "-x.org", "a b"] {
+            let text = format!("fetch_hosts = [{bad:?}]");
+            let err = python().resolve(&overrides(&text)).unwrap_err();
+            assert!(err.to_string().contains("not a host name"), "{err}");
+        }
     }
 
     #[test]

@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    CancelToken, GateReport, GateRequest, Runner, Sandbox, StepName, StepStatus, run_gate,
+    CancelToken, Egress, FetchStep, GateReport, GateRequest, Runner, Sandbox, StepName, StepStatus,
+    WORKDIR, run_gate,
 };
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
@@ -254,6 +255,9 @@ where
         module_summary: Some(&map),
     });
 
+    if let Some(why) = fetch_base(cfg, profile, tree.path(), &job_dir, cancel).await? {
+        return Ok(Ending::stop(Outcome::StoppedSteps, why));
+    }
     let tools = McpTools::connect(&tool_specs(cfg, tree.path(), &job_dir)?).await?;
     let session = Session::new(
         system,
@@ -291,6 +295,62 @@ fn model_spec(cfg: &RunConfig, tier: Tier) -> ModelSpec {
 /// The gate's container: the profile's image, and each cache directory
 /// outside the tree kept on the host under `state_dir/cache/<repo>/`, so it
 /// survives between jobs.
+/// The profile's fetch command and its egress, when the gate runs in a
+/// sandbox (#66). On the machine there is no cache to fetch into.
+fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
+    let command = profile.fetch.command()?.render(&[]).ok()?;
+    cfg.run.sandbox.then(|| FetchStep {
+        egress: Egress {
+            docker: cfg.run.docker.clone(),
+            proxy_image: cfg.run.egress_image.clone(),
+            allow: profile.fetch_hosts.clone(),
+        },
+        command,
+    })
+}
+
+/// The base's dependencies, fetched through the egress proxy before the
+/// agent starts (#66); `Some(reason)` when that fails.
+async fn fetch_base(
+    cfg: &RunConfig,
+    profile: &ResolvedProfile,
+    tree: &Path,
+    job_dir: &Path,
+    cancel: &CancellationToken,
+) -> Result<Option<String>, LifecycleError> {
+    let (Some(fetch), Some(sandbox)) = (fetch_step(cfg, profile), sandbox(cfg, profile)?) else {
+        return Ok(None);
+    };
+    let gate_cancel = CancelToken::new();
+    let _stop = CancelOnDrop(gate_cancel.clone());
+    let _watcher = AbortOnDrop(tokio::spawn({
+        let (outer, inner) = (cancel.clone(), gate_cancel.clone());
+        async move {
+            outer.cancelled().await;
+            inner.cancel();
+        }
+    }));
+    let timeout = Duration::from_secs(cfg.run.step_timeout_s);
+    let (tree, log) = (tree.to_path_buf(), job_dir.join("fetch.log"));
+    let outcome = tokio::task::spawn_blocking(move || -> Result<_, aegis_gate::GateError> {
+        let session = fetch.egress.start()?;
+        let ran = session.fetch(&sandbox, &fetch.command, &tree, &log, timeout, gate_cancel)?;
+        Ok((ran, session.log()))
+    })
+    .await
+    .map_err(|e| LifecycleError::Config(format!("the fetch did not finish: {e}")))??;
+    let (ran, proxy) = outcome;
+    if ran.exit.success() {
+        return Ok(None);
+    }
+    let log = std::fs::read_to_string(&ran.log).unwrap_or_default();
+    let tail: Vec<&str> = log.lines().rev().take(20).collect();
+    Ok(Some(format!(
+        "fetching the dependencies failed:\n{}\n\nproxy:\n{proxy}",
+        tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+    )))
+}
+
 fn sandbox(cfg: &RunConfig, profile: &ResolvedProfile) -> Result<Option<Sandbox>, LifecycleError> {
     if !cfg.run.sandbox {
         return Ok(None);
@@ -308,11 +368,20 @@ fn sandbox(cfg: &RunConfig, profile: &ResolvedProfile) -> Result<Option<Sandbox>
         std::fs::create_dir_all(&host).map_err(|e| LifecycleError::io(&host, &e))?;
         mounts.push((host, dir.clone()));
     }
+    // Dependencies installed inside the tree (a venv) live outside it, so
+    // the base copy and every container of the job see the same ones.
+    for dir in &profile.profile.dependencies.dirs {
+        let host = cache.join("deps").join(dir.replace('/', "_"));
+        std::fs::create_dir_all(&host).map_err(|e| LifecycleError::io(&host, &e))?;
+        mounts.push((host, format!("{WORKDIR}/{dir}")));
+    }
     Ok(Some(Sandbox {
         docker: cfg.run.docker.clone(),
         image: profile.image.clone(),
         mounts,
         env: cfg.run.sandbox_env.clone().into_iter().collect(),
+        network: None,
+        read_only_mounts: true,
     }))
 }
 
@@ -357,9 +426,10 @@ async fn gate(
         job_dir.join("gate"),
         Duration::from_secs(cfg.run.step_timeout_s),
         sandbox,
+        fetch_step(cfg, profile),
     );
     let report = tokio::task::spawn_blocking(move || {
-        let (repo, base, profile, allowed, repro, work_dir, step_timeout, sandbox) = owned;
+        let (repo, base, profile, allowed, repro, work_dir, step_timeout, sandbox, fetch) = owned;
         run_gate(&GateRequest {
             repo: &repo,
             base: &base,
@@ -371,6 +441,7 @@ async fn gate(
             step_timeout,
             cancel: gate_cancel,
             sandbox,
+            fetch,
         })
     })
     .await

@@ -37,6 +37,8 @@ fn sandbox(repo: &Repo) -> Sandbox {
         image: IMAGE.into(),
         mounts: vec![(registry, "/usr/local/cargo/registry".into())],
         env: vec![],
+        network: None,
+        read_only_mounts: true,
     }
 }
 
