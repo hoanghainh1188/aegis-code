@@ -5,6 +5,8 @@
 //! aegis run   --config config/poc.toml --issue-file issue.md --id local-1
 //! aegis batch --config config/poc.toml --issues issues.txt
 //! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …]
+//! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
+//! aegis report --config config/poc.toml [--set eval/issues]
 //! ```
 //!
 //! `issues.txt` has one `owner/repo#number` per line (`#` comments allowed).
@@ -19,12 +21,17 @@ use aegis_lang::Profiles;
 use aegis_ledger::{JsonFileLedger, PriceTable};
 use aegis_lifecycle::{IssueInput, IssueReport, LifecycleError, Platform, RunConfig, run_issue};
 use aegis_provider::Provider;
+
+mod kpi;
 use tokio_util::sync::CancellationToken;
 
 const USAGE: &str = "usage:
   aegis run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
   aegis batch --config <file> --issues <file>
-  aegis eval  --config <file> --set <dir> [--only <id>]...";
+  aegis eval  --config <file> --set <dir> [--only <id>]...
+  aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
+               (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
+  aegis report --config <file> [--set <dir>]";
 
 #[derive(Debug, Default)]
 struct Args {
@@ -36,6 +43,7 @@ struct Args {
     issues: Option<PathBuf>,
     set: Option<PathBuf>,
     only: Vec<String>,
+    review: kpi::ReviewArgs,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -53,6 +61,12 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--issues" => parsed.issues = Some(value()?.into()),
             "--set" => parsed.set = Some(value()?.into()),
             "--only" => parsed.only.push(value()?),
+            "--verdict" => parsed.review.verdict = Some(value()?),
+            "--lines" => parsed.review.lines = Some(value()?),
+            "--minutes" => parsed.review.minutes = Some(value()?),
+            "--from-pr" => parsed.review.from_pr = Some(value()?),
+            "--broke-tests" => parsed.review.broke_tests = true,
+            "--replace" => parsed.review.replace = true,
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -154,9 +168,23 @@ fn line(report: &IssueReport) -> String {
     )
 }
 
-async fn main_inner(args: Args) -> Result<bool, String> {
-    if !["run", "batch", "eval"].contains(&args.command.as_str()) {
+async fn main_inner(mut args: Args) -> Result<bool, String> {
+    if !["run", "batch", "eval", "review", "report"].contains(&args.command.as_str()) {
         return Err(format!("unknown command `{}`", args.command));
+    }
+    // Reading and writing the ledger needs neither the model nor the fork.
+    if let "review" | "report" = args.command.as_str() {
+        let path = args.config.as_deref().ok_or("--config is required")?;
+        let config = RunConfig::load(path).map_err(|e| e.to_string())?;
+        let text = if args.command == "review" {
+            let mut review = std::mem::take(&mut args.review);
+            review.id = args.id.clone();
+            kpi::review(&config, &review).await?
+        } else {
+            kpi::report(&kpi::store(&config), args.set.as_deref()).await?
+        };
+        println!("{text}");
+        return Ok(true);
     }
     let config = args.config.as_deref().ok_or("--config is required")?;
     let run = Arc::new(platform(config).await?);

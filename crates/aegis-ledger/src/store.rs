@@ -31,6 +31,9 @@ pub trait LedgerStore {
         &self,
         record: &IssueRecord,
     ) -> impl Future<Output = Result<(), LedgerError>> + Send;
+
+    /// Every issue with at least one event, in id order (KPI reports).
+    fn issues(&self) -> impl Future<Output = Result<Vec<IssueId>, LedgerError>> + Send;
 }
 
 /// `<root>/<issue>.events.jsonl` (one event per line) and
@@ -110,6 +113,27 @@ impl LedgerStore for JsonFileLedger {
             .await
             .map_err(LedgerError::io(&path))?;
         sync_dir(&self.root).await
+    }
+
+    async fn issues(&self) -> Result<Vec<IssueId>, LedgerError> {
+        let mut dir = match tokio::fs::read_dir(&self.root).await {
+            Ok(dir) => dir,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(LedgerError::io(&self.root)(e)),
+        };
+        let mut ids = Vec::new();
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(LedgerError::io(&self.root))?
+        {
+            let name = entry.file_name();
+            if let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".events.jsonl")) {
+                ids.push(IssueId::parse(id)?);
+            }
+        }
+        ids.sort();
+        Ok(ids)
     }
 }
 
@@ -206,6 +230,10 @@ impl LedgerStore for MemoryLedger {
     async fn save_record(&self, record: &IssueRecord) -> Result<(), LedgerError> {
         lock(&self.records).insert(record.issue_id.clone(), record.clone());
         Ok(())
+    }
+
+    async fn issues(&self) -> Result<Vec<IssueId>, LedgerError> {
+        Ok(lock(&self.events).keys().cloned().collect())
     }
 }
 
@@ -373,5 +401,30 @@ mod tests {
         let record = IssueRecord::from_events(issue(), &[classified()]);
         store.save_record(&record).await.unwrap();
         assert_eq!(store.record(&issue()), Some(record));
+    }
+
+    #[tokio::test]
+    async fn json_files_list_their_issues() {
+        let root = std::env::temp_dir().join(format!("aegis-ledger-issues-{}", std::process::id()));
+        let store = JsonFileLedger::new(&root);
+        assert!(store.issues().await.unwrap().is_empty(), "no directory yet");
+        for id in ["b-2", "a-1"] {
+            let event = LedgerEvent::Classified {
+                kind: crate::IssueKind::Bug,
+            };
+            store
+                .append(&IssueId::parse(id).unwrap(), &event)
+                .await
+                .unwrap();
+        }
+        let ids: Vec<String> = store
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .map(|i| i.to_string())
+            .collect();
+        assert_eq!(ids, ["A-1", "B-2"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

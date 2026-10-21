@@ -353,3 +353,34 @@ fn the_push_goes_to_the_repo_the_pr_is_opened_in() {
     );
     assert!(GitHub::new("http://api.github.com", "me", "typst", "t").is_err());
 }
+
+#[tokio::test]
+async fn review_edits_count_the_lines_after_the_agents_commit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/me/typst/pulls/12/commits"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"sha": "aaa"}, {"sha": "bbb"}, {"sha": "ccc"}
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/me/typst/compare/aaa...ccc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "files": [{"additions": 3, "deletions": 1}, {"additions": 0, "deletions": 2}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/me/typst/pulls/13/commits"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"sha": "aaa"}])))
+        .mount(&server)
+        .await;
+    let github = GitHub::new(&server.uri(), "me", "typst", "t").unwrap();
+    assert_eq!(github.review_edits(12).await.unwrap(), 6);
+    assert_eq!(
+        github.review_edits(13).await.unwrap(),
+        0,
+        "only the agent's commit"
+    );
+}

@@ -6,12 +6,14 @@
 
 mod error;
 mod issue;
+mod kpi;
 mod pricing;
 mod record;
 mod store;
 
 pub use error::LedgerError;
 pub use issue::IssueLedger;
+pub use kpi::Kpi;
 pub use pricing::{ModelPrice, PriceTable};
 pub use record::{
     GateRun, IssueId, IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier,
