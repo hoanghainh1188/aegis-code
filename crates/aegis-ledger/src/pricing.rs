@@ -2,7 +2,9 @@
 //! (design §4.3):
 //!
 //! `C_in = R · (N_read·M_read + N_write·M_write + N_uncached)`, plus output,
-//! times `1 + regional_surcharge` on the Bedrock configuration (§5.4).
+//! times `1 + regional_surcharge` on the Bedrock configuration (§5.4). A
+//! model priced by prompt length (Haiku 5.5) takes its `long_prompt` R and
+//! output price for a call whose prompt is over the threshold (#54).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -38,6 +40,19 @@ pub struct ModelPrice {
     pub input: f64,
     pub output: f64,
     pub cache_read_multiplier: f64,
+    #[serde(default)]
+    pub long_prompt: Option<LongPrompt>,
+}
+
+/// Prices of a call whose prompt (input, cache reads and cache writes
+/// together) is over `over_tokens`. The whole call pays them, output too;
+/// the cache multipliers stay the same.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LongPrompt {
+    pub over_tokens: u64,
+    pub input: f64,
+    pub output: f64,
 }
 
 impl PriceTable {
@@ -73,12 +88,18 @@ impl PriceTable {
         regional: bool,
     ) -> Result<f64, LedgerError> {
         let price = self.price(model)?;
+        let prompt =
+            tokens.input + tokens.cache_read + tokens.cache_write_5m + tokens.cache_write_1h;
+        let (input_price, output_price) = match price.long_prompt {
+            Some(long) if prompt > long.over_tokens => (long.input, long.output),
+            _ => (price.input, price.output),
+        };
         let weighted_input = tokens.cache_read as f64 * price.cache_read_multiplier
             + tokens.cache_write_5m as f64 * self.cache_write_multiplier.five_minutes
             + tokens.cache_write_1h as f64 * self.cache_write_multiplier.one_hour
             + tokens.input as f64;
         let base =
-            (price.input * weighted_input + price.output * tokens.output as f64) / PER_MILLION;
+            (input_price * weighted_input + output_price * tokens.output as f64) / PER_MILLION;
         let surcharge = if regional {
             1.0 + self.regional_surcharge
         } else {
@@ -111,6 +132,14 @@ impl PriceTable {
                 .all(non_negative)
             {
                 return invalid(format!("prices for `{id}` must be finite and >= 0"));
+            }
+            let bad_long = |l: &LongPrompt| {
+                l.over_tokens == 0 || !non_negative(l.input) || !non_negative(l.output)
+            };
+            if p.long_prompt.as_ref().is_some_and(bad_long) {
+                return invalid(format!(
+                    "long_prompt of `{id}` needs over_tokens > 0 and finite prices >= 0"
+                ));
             }
         }
         Ok(())
@@ -158,6 +187,11 @@ mod tests {
         );
         let haiku = t.price("claude-haiku-5-5").unwrap();
         assert_eq!(haiku.cache_read_multiplier, 0.10);
+        let long = haiku.long_prompt.unwrap();
+        assert_eq!(
+            (long.over_tokens, long.input, long.output),
+            (100_000, 0.50, 2.50)
+        );
         assert_eq!(t.price("claude-fable-5-1").unwrap().output, 50.0);
         assert_eq!(t.price("claude-opus-5-5").unwrap().input, 4.0);
     }
@@ -232,6 +266,64 @@ mod tests {
             .cost("claude-unknown-9", &TokenCounts::default(), false)
             .unwrap_err();
         assert!(matches!(err, LedgerError::UnknownModel(m) if m == "claude-unknown-9"));
+    }
+
+    // Haiku, prompt of exactly 100 000 tokens (60 000 input + 40 000 read):
+    // not over the threshold, base prices.
+    // C_in  = 0.10 · (40 000·0.10 + 60 000) / 1e6 = 0.10 · 64 000 / 1e6 = 0.0064
+    // C_out = 1 000 · 0.50 / 1e6 = 0.0005
+    #[test]
+    fn haiku_at_the_threshold_pays_base_prices() {
+        let cost = table()
+            .cost(
+                "claude-haiku-5-5",
+                &tokens(60_000, 1_000, 0, 0, 40_000),
+                false,
+            )
+            .unwrap();
+        assert_usd(cost, 0.0069);
+    }
+
+    // One token more (60 001 + 40 000 = 100 001): the whole call, output too,
+    // at the long-prompt prices; the read multiplier stays 0.10.
+    // C_in  = 0.50 · (40 000·0.10 + 60 001) / 1e6 = 0.50 · 64 001 / 1e6 = 0.0320005
+    // C_out = 1 000 · 2.50 / 1e6 = 0.0025
+    #[test]
+    fn haiku_over_the_threshold_pays_long_prompt_prices_for_the_whole_call() {
+        let cost = table()
+            .cost(
+                "claude-haiku-5-5",
+                &tokens(60_001, 1_000, 0, 0, 40_000),
+                false,
+            )
+            .unwrap();
+        assert_usd(cost, 0.0345005);
+    }
+
+    // Cache writes count toward the prompt (1 + 100 000 written for 1 h):
+    // C_in = 0.50 · (100 000·2.0 + 1) / 1e6 = 0.1000005
+    // With the regional surcharge: · 1.10 = 0.11000055
+    #[test]
+    fn cache_writes_count_toward_the_prompt_length() {
+        let t = table();
+        let long = tokens(1, 0, 0, 100_000, 0);
+        assert_usd(t.cost("claude-haiku-5-5", &long, false).unwrap(), 0.1000005);
+        assert_usd(t.cost("claude-haiku-5-5", &long, true).unwrap(), 0.11000055);
+        // Models without a long-prompt price keep theirs at any length.
+        let sonnet = t.cost("claude-sonnet-5-5", &tokens(200_000, 0, 0, 0, 0), false);
+        assert_usd(sonnet.unwrap(), 0.4);
+    }
+
+    #[test]
+    fn rejects_bad_long_prompt_prices() {
+        for (from, to) in [
+            ("over_tokens = 100000", "over_tokens = 0"),
+            ("output = 2.50", "output = -2.50"),
+            ("over_tokens = 100000", "over = 100000"),
+        ] {
+            let text = SHIPPED.replace(from, to);
+            assert!(PriceTable::from_toml(&text).is_err(), "{to}");
+        }
     }
 
     #[test]

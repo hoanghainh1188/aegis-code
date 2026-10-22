@@ -129,8 +129,9 @@ Phần đầu prompt giống nhau qua các lượt thì chỉ trả 5%–10% gi�
 | Opus 5.5 | 4 | 20 | 5 | 8 | 0.20 (5%) |
 | Sonnet 5.5 | 2 | 10 | 2.50 | 4 | 0.10 (5%) |
 | Haiku 5.5 (prompt ≤ 100k) | 0.10 | 0.50 | 0.125 | 0.20 | 0.01 (10%) |
+| Haiku 5.5 (prompt > 100k) | 0.50 | 2.50 | 0.625 | 1 | 0.05 (10%) |
 
-Nguồn: [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing). Haiku 5.5 tính giá cao hơn khi prompt trên 100k token.
+Nguồn: [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing). Độ dài prompt của Haiku 5.5 tính mọi token đầu vào, kể cả đọc và ghi cache. Mỗi lượt gọi tính riêng: lượt có prompt trên 100.000 token trả giá cao cho cả lượt, kể cả output.
 
 **Cách bật:** dùng cache tự động (một trường `cache_control` ở cấp request). Hệ thống tự dời điểm ngắt khi hội thoại dài ra. Chỉ đặt điểm ngắt thủ công khi cần kiểm soát kỹ.
 
