@@ -17,8 +17,8 @@ aegis eval --config <config với sandbox = true> --set eval/issues --replay --n
 | | scrapy (Python) | typst (Rust) |
 | --- | --- | --- |
 | Issue | 14 | 18 |
-| Qua gate và hidden test | **14/14** | **14/14** trong số các issue không cần #105 |
-| Bị chặn vì phải cập nhật tham chiếu test (#105) | 0 | 4 (7777, 8372, 8826, 8850) |
+| Qua gate và hidden test | **14/14** | **18/18** (4 issue cuối chạy sau #105) |
+| Cần gate cập nhật tham chiếu test (#105) | 0 | 2 (7777, 8372) |
 | Thời gian một issue | 5–9 phút | 14–22 phút với cache build ấm, ~39 phút lạnh |
 
 scrapy, lượt cuối cùng đạt của mỗi issue:
@@ -49,8 +49,8 @@ typst, lượt cuối cùng đạt của mỗi issue (cache build ấm):
 | typst-6822 | 952s | |
 | typst-7219 | 872s | |
 | typst-7541 | 1042s | Bản sửa thêm ảnh tham chiếu mới: lượt chạy khô không ghi test, hidden test chép vào sau gate |
-| typst-7777 | — | Bị chặn bởi #105 (3 test có sẵn đổi tham chiếu) |
-| typst-8372 | — | Bị chặn bởi #105 (25 test) |
+| typst-7777 | 1312s | Gate cập nhật tham chiếu của 3 test có sẵn (#105) |
+| typst-8372 | 1276s | Gate cập nhật tham chiếu của 25 test có sẵn (#105) |
 | typst-8476 | 885s | |
 | typst-8560 | 885s | |
 | typst-8616 | 892s | Test mới và tham chiếu mới đều là text: lượt chạy khô ghi cả hai |
@@ -58,9 +58,9 @@ typst, lượt cuối cùng đạt của mỗi issue (cache build ấm):
 | typst-8672 | 867s | |
 | typst-8703 | 1282s | |
 | typst-8725 | 1351s | |
-| typst-8826 | — | Bị chặn bởi #105 (3 test) |
+| typst-8826 | 1298s | Bản sửa chỉ đổi `pdftags/hashes.txt`, mà lượt test thường không so: không cần cập nhật |
 | typst-8828 | 1172s | |
-| typst-8850 | — | Bị chặn bởi #105 (368 test) |
+| typst-8850 | 1191s | Bản sửa chỉ đổi `html/hashes.txt`, mà lượt test thường không so: không cần cập nhật |
 | typst-8857 | 1015s | |
 
 ## Những gì lượt chạy khô tìm ra và đã sửa
@@ -95,6 +95,6 @@ Các lỗi dưới đây đều sẽ làm hỏng lượt chạy model thật, t�
 
 ## Còn lại
 
-- **#105:** bản sửa đổi output của test có sẵn thì phải cập nhật file tham chiếu (ảnh `.png`, `hashes.txt`). Công cụ chỉ ghi được text, nên mọi agent đều fail gate ở 4/18 issue typst. Cho tới khi #105 xong, 4 issue này được tính là "nền tảng chưa hỗ trợ" khi đọc KPI typst.
+- **#105 (đã xong):** bản sửa đổi output của test có sẵn thì phải cập nhật file tham chiếu (ảnh `.png`, `hashes.txt`), mà công cụ chỉ ghi được text. Nay gate chạy `--update` của harness cho đúng các test agent khai báo trong `allowed_test_changes`, chỉ được ghi trong `tests/ref`. Ban đầu đếm tĩnh ra 4 issue cần việc này; chạy thật thì chỉ 7777 và 8372 cần, vì 8826 và 8850 chỉ đổi hash của stage `pdftags` / `html` mà lượt test thường không so.
 - **Docker Desktop:** VM bị treo một lần khi đang chạy, và một lần đầy đĩa (~25 GB `target/` trong lúc build typst). Lượt chạy dài cần đủ chỗ trống, khoảng 30 GB trở lên.
 - **typst-7541 trên base:** `import-nested-item` fail sẵn trong sandbox, như nhau ở cả hai phía, nên gate không tính là lỗi.

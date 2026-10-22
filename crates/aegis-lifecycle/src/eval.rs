@@ -32,6 +32,10 @@ pub struct EvalIssue {
     /// as the dry run found them (#104).
     #[serde(default)]
     pub hidden_known_failures: Vec<String>,
+    /// Existing tests whose reference output the fix changes
+    /// (`scripts/eval/changed_tests.py`, #105).
+    #[serde(default)]
+    pub changed_tests: Vec<String>,
     #[serde(default)]
     pub body: String,
 }

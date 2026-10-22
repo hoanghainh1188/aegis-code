@@ -14,6 +14,12 @@ source_files = ["crates/typst-layout/src/inline/line.rs"]
 test_files = ["tests/ref/pdf/hashes.txt", "tests/ref/pdftags/hashes.txt", "tests/ref/render/hyphenate-repeat-style.png", "tests/ref/svg/hashes.txt", "tests/suite/pdftags/link.typ"]
 hidden_tests = ["issue-7777-missing-link-parent", "issue-7777-missing-link-parent-repeated-hyphen"]
 body = "### Description\n\nWhen running `typst c test.typ`, I get this error:\n\n    error: internal error: expected link ancestor in logical tree (occurred at crates/typst-pdf/src/link.rs:88:10)\n\nwith `test.typ`:\n```typst\n#show link: underline\n#link(\"https://example.com\")[#image(\"globe.svg\") linktext] something else\n```\n\nI believe this is a pretty minimal test case, the only occurs when `#show ...`, `#image()`, `linktext` and `something else` all coincide.\n\nThis isn't too big of a deal: I planned on removing the `underline` anyway, but typst told me to please report this as a bug.\n\n    $ typst --version\n    typst 0.14.2 (b33de9de)\n\n### Reproduction URL\n\n_No response_\n\n### Operating system\n\nNixOS\n\n### Typst version\n\n- [X] I am using the latest version of Typst (*see above*)"
+# Existing tests whose reference output the fix changes (#105).
+changed_tests = [
+    "hyphenate-between-shape-runs",
+    "hyphenate-repeat-style",
+    "issue-hyphenate-after-tag",
+]
 
 [verified]
 base = "fail"

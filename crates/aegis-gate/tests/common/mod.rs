@@ -144,6 +144,50 @@ impl Repo {
         env: Vec<(String, String)>,
         sandbox: Option<Sandbox>,
     ) -> GateReport {
+        self.gate_full(profile, repro, step_timeout, cancel, env, sandbox, &[])
+    }
+
+    /// The gate with `tests` declared as allowed test changes (#105).
+    pub fn gate_allowing(&self, profile: &ResolvedProfile, tests: &[&str]) -> GateReport {
+        self.gate_full(
+            profile,
+            None,
+            Duration::from_secs(600),
+            CancelToken::new(),
+            vec![],
+            None,
+            tests,
+        )
+    }
+
+    /// Commits what is in the tree on `main`: more of the base.
+    pub fn commit_base(&self, message: &str) {
+        git(&self.dir(), &["add", "-A"]);
+        git(
+            &self.dir(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-qm",
+                message,
+            ],
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn gate_full(
+        &self,
+        profile: &ResolvedProfile,
+        repro: Option<&Repro>,
+        step_timeout: Duration,
+        cancel: CancelToken,
+        env: Vec<(String, String)>,
+        sandbox: Option<Sandbox>,
+        allowed_tests: &[&str],
+    ) -> GateReport {
         let allowed = BTreeSet::new();
         let dir = self.dir();
         let work = self.work();
@@ -160,6 +204,7 @@ impl Repo {
             sandbox,
             fetch: None,
             build_cache: None,
+            allowed_tests: allowed_tests.iter().map(|t| (*t).to_owned()).collect(),
         })
         .unwrap()
     }

@@ -3,6 +3,8 @@
 
 mod common;
 
+use std::process::Command;
+
 use std::time::{Duration, Instant};
 
 use aegis_gate::{CancelToken, Repro, Skip, StepName, StepStatus};
@@ -311,6 +313,7 @@ fn work_dir_inside_the_repo_is_refused() {
         sandbox: None,
         fetch: None,
         build_cache: None,
+        allowed_tests: vec![],
     })
     .unwrap_err();
     assert!(
@@ -493,6 +496,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             sandbox: None,
             fetch: None,
             build_cache: None,
+            allowed_tests: vec![],
         })
     };
     #[cfg(unix)]
@@ -528,6 +532,117 @@ test = ["sh", "-c", "echo 'Running unittests src/lib.rs (target/debug/deps/fx-1)
     assert_eq!(test.status, StepStatus::Passed, "{report}");
     assert!(test.detail.contains("flaky"), "{}", test.detail);
     assert!(test.detail.contains("fx::flaky_one"), "{}", test.detail);
+}
+
+/// A harness whose one test, `shows-value`, compares `src/value.txt` with
+/// its reference `tests/ref/out.txt`; the update copies one onto the other
+/// (`$1` is the gate's regex of the declared tests). `extra` runs too.
+fn reference_profile(extra: &str) -> aegis_lang::ResolvedProfile {
+    let test = "echo 'Running src/t.rs (target/debug/deps/tests-1)'; \
+                if cmp -s src/value.txt tests/ref/out.txt; then echo '1 passed, 0 failed, 0 skipped'; \
+                else echo '❌ shows-value (tests/suite/a.typ:1)'; echo '0 passed, 1 failed, 0 skipped'; exit 1; fi";
+    profile(
+        Language::Rust,
+        &format!(
+            r#"
+[gate]
+format = ["true"]
+lint = ["true"]
+coverage = false
+test = ["sh", "-c", "{test}"]
+test_output = "libtest"
+test_failure = '^❌ (\S+)'
+test_finished = '^\d+ passed, \d+ failed, \d+ skipped$'
+update_references = ["sh", "-c", "echo \"$1\" > /dev/null; cp src/value.txt tests/ref/out.txt; {extra}", "update", "{{test}}"]
+reference_dirs = ["tests/ref"]
+"#
+        ),
+    )
+}
+
+fn repo_with_reference() -> Repo {
+    let repo = Repo::new("rust", &[]);
+    repo.write("src/value.txt", "old\n");
+    repo.write("tests/ref/out.txt", "old\n");
+    repo.commit_base("reference");
+    repo.write("src/value.txt", "new\n");
+    repo
+}
+
+#[test]
+fn a_declared_test_s_reference_is_updated_and_sent() {
+    let repo = repo_with_reference();
+    let report = repo.gate_allowing(&reference_profile("true"), &["shows-value"]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Passed, "{report}");
+    assert!(
+        test.detail.contains("updated the reference outputs of 1"),
+        "{}",
+        test.detail
+    );
+    assert!(test.detail.contains("tests/ref/out.txt"), "{}", test.detail);
+    assert_eq!(repo.read("tests/ref/out.txt"), "new\n");
+    // The gated tree, what goes into the PR, has the new reference.
+    let listed = Command::new("git")
+        .arg("-C")
+        .arg(repo.dir())
+        .args(["ls-tree", "-r", &report.tree, "tests/ref/out.txt"])
+        .output()
+        .unwrap();
+    let blob = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .nth(2)
+        .unwrap()
+        .to_owned();
+    let content = Command::new("git")
+        .arg("-C")
+        .arg(repo.dir())
+        .args(["cat-file", "blob", &blob])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&content.stdout), "new\n");
+    assert_eq!(
+        report.step(StepName::Integrity).unwrap().status,
+        StepStatus::Passed,
+        "{report}"
+    );
+}
+
+#[test]
+fn an_undeclared_test_whose_output_changed_still_fails() {
+    let repo = repo_with_reference();
+    let report = repo.gate_allowing(&reference_profile("true"), &["another-test"]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Failed, "{report}");
+    assert!(
+        test.detail.contains("tests::shows-value"),
+        "{}",
+        test.detail
+    );
+    assert_eq!(repo.read("tests/ref/out.txt"), "old\n");
+}
+
+#[test]
+fn an_update_that_writes_outside_the_reference_dirs_fails() {
+    let repo = repo_with_reference();
+    let report = repo.gate_allowing(&reference_profile("echo x >> src/lib.rs"), &["shows-value"]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Failed, "{report}");
+    assert!(
+        test.detail.contains("wrote outside tests/ref"),
+        "{}",
+        test.detail
+    );
+    assert!(test.detail.contains("src/lib.rs"), "{}", test.detail);
+}
+
+#[test]
+fn only_declared_tests_that_fail_are_updated_by_an_exact_regex() {
+    // `$1` of the profile's command, written where the update may write.
+    let repo = repo_with_reference();
+    let profile = reference_profile(r#"printf %s \"$1\" > tests/ref/regex.txt"#);
+    repo.gate_allowing(&profile, &["shows-value", "a.b"]);
+    assert_eq!(repo.read("tests/ref/regex.txt"), r"^(shows\-value)$");
 }
 
 #[test]
