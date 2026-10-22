@@ -34,6 +34,20 @@ pub struct GateOverrides {
     /// The line such a harness ends with, so its binary counts as finished
     /// without libtest's `test result:`. Needs `test_failure`.
     pub test_finished: Option<String>,
+    /// Rewrites the reference output (images, hashes) of the tests matched
+    /// by `{test}`, a regex `^(a|b)$` of the tests the agent declares as
+    /// allowed changes (#105). Needs `reference_dirs`.
+    pub update_references: Option<CommandTemplate>,
+    /// The only directories `update_references` may write.
+    #[serde(default)]
+    pub reference_dirs: Vec<String>,
+}
+
+/// How the gate updates the reference outputs of declared tests (#105).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceUpdate {
+    pub command: CommandTemplate,
+    pub dirs: Vec<String>,
 }
 
 /// How a test binary with its own harness reports (#104), checked when the
@@ -98,6 +112,7 @@ pub struct GatePlan {
     pub coverage: Step,
     pub test_output: Option<TestOutput>,
     pub harness: Option<CustomHarness>,
+    pub update_references: Option<ReferenceUpdate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +154,7 @@ impl Profile {
                 _ => o.test_output.or(self.gate.test_output),
             },
             harness: harness(o).map_err(invalid)?,
+            update_references: reference_update(o).map_err(invalid)?,
         };
         if gate.harness.is_some() && gate.test_output.is_none() {
             return Err(invalid(
@@ -222,6 +238,32 @@ impl Profile {
             image,
         })
     }
+}
+
+fn reference_update(o: &GateOverrides) -> Result<Option<ReferenceUpdate>, String> {
+    let Some(command) = &o.update_references else {
+        return match o.reference_dirs.is_empty() {
+            true => Ok(None),
+            false => Err("gate.reference_dirs needs gate.update_references".into()),
+        };
+    };
+    command
+        .check_placeholders(&[Placeholder::Test], &[Placeholder::Test])
+        .map_err(|e| format!("gate.update_references: {e}"))?;
+    if o.reference_dirs.is_empty() {
+        return Err("gate.update_references needs gate.reference_dirs".into());
+    }
+    for dir in &o.reference_dirs {
+        check_repo_path(dir).map_err(|e| format!("gate.reference_dirs: {e}"))?;
+    }
+    Ok(Some(ReferenceUpdate {
+        command: command.clone(),
+        dirs: o
+            .reference_dirs
+            .iter()
+            .map(|d| d.trim_end_matches('/').to_owned())
+            .collect(),
+    }))
 }
 
 fn harness(o: &GateOverrides) -> Result<Option<CustomHarness>, String> {
@@ -376,6 +418,40 @@ mod tests {
             rust.resolve(&overrides(r#"edit_format = ["rustfmt"]"#))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn reference_updates_need_a_test_regex_and_their_dirs() {
+        let rust = Profiles::builtin()
+            .unwrap()
+            .get(Language::Rust)
+            .unwrap()
+            .clone();
+        let r = rust
+            .resolve(&overrides(
+                r#"
+                [gate]
+                update_references = ["cargo", "test", "--test", "tests", "--", "--update", "{test}"]
+                reference_dirs = ["tests/ref/"]
+                "#,
+            ))
+            .unwrap();
+        assert_eq!(r.gate.update_references.unwrap().dirs, ["tests/ref"]);
+        assert_eq!(
+            rust.resolve(&ProfileOverrides::default())
+                .unwrap()
+                .gate
+                .update_references,
+            None
+        );
+        for bad in [
+            "[gate]\nupdate_references = [\"x\"]\nreference_dirs = [\"r\"]",
+            "[gate]\nupdate_references = [\"x\", \"{test}\"]",
+            "[gate]\nreference_dirs = [\"r\"]",
+            "[gate]\nupdate_references = [\"x\", \"{test}\"]\nreference_dirs = [\"../r\"]",
+        ] {
+            assert!(rust.resolve(&overrides(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

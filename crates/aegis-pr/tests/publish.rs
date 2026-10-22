@@ -105,6 +105,7 @@ fn gated(scratch: &Scratch, test_command: &str) -> (PathBuf, PathBuf, GateReport
         sandbox: None,
         fetch: None,
         build_cache: None,
+        allowed_tests: vec![],
     })
     .unwrap();
     (repo, fork, report)

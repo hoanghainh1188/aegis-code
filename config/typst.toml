@@ -60,6 +60,12 @@ edit_stdin = true
 [repo.overrides.gate]
 test_failure = '^❌ (\S+)'
 test_finished = '^\d+ passed, \d+ failed, \d+ skipped$'
+# A fix that changes what an existing test draws must update its reference
+# (an image in tests/ref/render, a line of hashes.txt); the agent cannot
+# write images. For the tests it declares as allowed changes, the gate runs
+# the harness's own --update, which may write tests/ref only (#105).
+update_references = ["cargo", "test", "--workspace", "--test", "tests", "--", "--update", "{test}"]
+reference_dirs = ["tests/ref"]
 
 [repo.fork]
 owner = "hoanghainh1188"

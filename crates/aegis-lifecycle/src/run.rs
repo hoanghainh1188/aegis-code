@@ -471,6 +471,11 @@ async fn gate(
         sandbox,
         fetch_step(cfg, profile),
         build_cache(cfg, profile),
+        answer
+            .allowed_test_changes
+            .iter()
+            .map(|c| c.test.clone())
+            .collect::<Vec<_>>(),
     );
     let report = tokio::task::spawn_blocking(move || {
         let (
@@ -484,6 +489,7 @@ async fn gate(
             sandbox,
             fetch,
             build_cache,
+            allowed_tests,
         ) = owned;
         run_gate(&GateRequest {
             repo: &repo,
@@ -498,6 +504,7 @@ async fn gate(
             sandbox,
             fetch,
             build_cache,
+            allowed_tests,
         })
     })
     .await

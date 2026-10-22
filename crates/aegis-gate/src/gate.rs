@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use aegis_lang::{Placeholder, ResolvedProfile, SkipReason, Step};
+use aegis_lang::{Placeholder, ReferenceUpdate, ResolvedProfile, SkipReason, Step};
 
 use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner};
@@ -61,6 +61,10 @@ pub struct GateRequest<'a> {
     /// Where the repo and the base copy start their build directories
     /// from; only the base copy refreshes it.
     pub build_cache: Option<BuildCache>,
+    /// Tests the agent declares as allowed changes (their expected result
+    /// had to change): the profile's `update_references` may rewrite their
+    /// reference output, and only theirs (#105).
+    pub allowed_tests: Vec<String>,
 }
 
 /// The profile's fetch command and where it may go.
@@ -80,6 +84,25 @@ struct Run<'a> {
     changes: Vec<Change>,
     ignored: Vec<String>,
     snapshot: Snapshot,
+    index: PathBuf,
+    /// What is checked; written again after a reference update.
+    tree: String,
+}
+
+/// `^(a|b)$` matching exactly `names`, regex characters escaped.
+fn exact_regex(names: &[&str]) -> String {
+    let escaped: Vec<String> = names
+        .iter()
+        .map(|n| {
+            n.chars()
+                .flat_map(|c| {
+                    let special = "\\.+*?()|[]{}^$#&-~".contains(c);
+                    special.then_some('\\').into_iter().chain([c])
+                })
+                .collect()
+        })
+        .collect();
+    format!("^({})$", escaped.join("|"))
 }
 
 /// Whether `id`, as read from test output, is the test named `test`.
@@ -456,6 +479,21 @@ impl Run<'_> {
             );
             return Ok(report(name, StepStatus::Passed, &ran, detail));
         }
+        // Every new failure is a test the agent says had to change: its
+        // reference output is rewritten, then all the tests run again.
+        let declared = |id: &String| self.req.allowed_tests.iter().any(|t| is_test(id, t));
+        if let Some(update) = self.req.profile.gate.update_references.clone()
+            && broken.iter().all(declared)
+        {
+            let names: Vec<&str> = self
+                .req
+                .allowed_tests
+                .iter()
+                .filter(|t| broken.iter().any(|id| is_test(id, t)))
+                .map(String::as_str)
+                .collect();
+            return self.update_references(&update, &names, &argv, &on_base, &ran);
+        }
         fail(
             &ran,
             format!(
@@ -465,6 +503,110 @@ impl Run<'_> {
                 tail(&again.log)
             ),
         )
+    }
+
+    /// Rewrites the reference output of `names` with the profile's command,
+    /// checks it wrote nothing outside `reference_dirs`, and runs the tests
+    /// once more: they must now fail only as on the base (#105).
+    fn update_references(
+        &mut self,
+        update: &ReferenceUpdate,
+        names: &[&str],
+        test_argv: &[String],
+        on_base: &BTreeSet<String>,
+        earlier: &[&Ran],
+    ) -> Result<StepReport, GateError> {
+        let name = StepName::Test;
+        let mut ran: Vec<&Ran> = earlier.to_vec();
+        let pattern = exact_regex(names);
+        let argv = update.command.render(&[(Placeholder::Test, &pattern)])?;
+        let updated = self.run_in(&argv, false, "update-references")?;
+        match updated.exit {
+            Exit::Cancelled => return Ok(StepReport::skipped(name, Skip::Cancelled)),
+            Exit::TimedOut | Exit::Signal => {
+                let why = format!(
+                    "updating the reference outputs {}:\n{}",
+                    exit_text(updated.exit),
+                    tail(&updated.log)
+                );
+                ran.push(&updated);
+                return Ok(report(name, StepStatus::Failed, &ran, why));
+            }
+            // A harness may exit non-zero after it updated what failed.
+            Exit::Code(_) => {}
+        }
+        let inside = |path: &str| {
+            update.dirs.iter().any(|d| {
+                path.strip_prefix(d.as_str())
+                    .is_some_and(|r| r.starts_with('/'))
+            })
+        };
+        let before: BTreeSet<String> = self.changes.iter().map(|c| c.path.clone()).collect();
+        let changes = git::changes(self.req.repo, &self.base, &self.index)?;
+        let mut written: BTreeSet<String> = self
+            .snapshot
+            .changed_since(self.req.repo)
+            .into_iter()
+            .collect();
+        written.extend(
+            changes
+                .iter()
+                .map(|c| c.path.clone())
+                .filter(|p| !before.contains(p)),
+        );
+        let outside: BTreeSet<String> = written.iter().filter(|p| !inside(p)).cloned().collect();
+        if !outside.is_empty() {
+            let why = format!(
+                "updating the reference outputs wrote outside {}:\n{}",
+                update.dirs.join(", "),
+                list(&outside)
+            );
+            ran.push(&updated);
+            return Ok(report(name, StepStatus::Failed, &ran, why));
+        }
+        // What is checked, and sent, now includes the new references.
+        self.changes = changes;
+        self.snapshot = Snapshot::take(
+            self.req.repo,
+            &git::files(self.req.repo, &self.index)?,
+            self.req.profile.coverage.as_ref().map(|c| c.path.as_str()),
+        );
+        self.tree = git::write_tree(self.req.repo, &self.index)?;
+
+        let after = self.run_in(test_argv, false, "test-after-update")?;
+        if after.exit == Exit::Cancelled {
+            return Ok(StepReport::skipped(name, Skip::Cancelled));
+        }
+        let format = self.req.profile.gate.test_output.expect("compared above");
+        let harness = self.req.profile.gate.harness.as_ref();
+        let failing = if after.exit.success() {
+            BTreeSet::new()
+        } else {
+            failing_tests_with(format, harness, &read_log(&after.log))
+        };
+        let still: BTreeSet<String> = failing.difference(on_base).cloned().collect();
+        let detail = format!(
+            "updated the reference outputs of {} declared tests:\n{}\nfiles:\n{}",
+            names.len(),
+            list(&names.iter().map(|n| (*n).to_owned()).collect()),
+            list(&written)
+        );
+        ran.push(&updated);
+        ran.push(&after);
+        if still.is_empty() {
+            return Ok(report(name, StepStatus::Passed, &ran, detail));
+        }
+        Ok(report(
+            name,
+            StepStatus::Failed,
+            &ran,
+            format!(
+                "{detail}\n\n{} tests still fail that pass on the base revision:\n{}\n\n{}",
+                still.len(),
+                list(&still),
+                tail(&after.log)
+            ),
+        ))
     }
 
     fn coverage(&self) -> Result<StepReport, GateError> {
@@ -582,6 +724,8 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         changes,
         ignored,
         snapshot,
+        index,
+        tree,
     };
     if let Some(cache) = &req.build_cache {
         cache.seed(req.repo)?;
@@ -608,6 +752,6 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         // Upstream code only; a failed refresh costs time, not correctness.
         let _ = cache.refresh_from(base.path());
     }
-    let base = run.base.clone();
+    let (tree, base) = (run.tree.clone(), run.base.clone());
     Ok(GateReport { steps, tree, base })
 }

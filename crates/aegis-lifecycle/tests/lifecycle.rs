@@ -690,6 +690,7 @@ fn eval_issue(scratch: &Scratch) -> aegis_lifecycle::EvalIssue {
         test_files: vec!["tests/hidden.rs".into()],
         hidden_tests: vec!["hidden_fourth_item".into()],
         hidden_known_failures: vec![],
+        changed_tests: vec![],
         body: issue().body,
     }
 }

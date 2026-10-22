@@ -97,6 +97,11 @@ impl Replay {
             .iter()
             .map(|f| json!({"location": f, "note": "the upstream fix"}))
             .collect();
+        // As an agent must: the tests whose reference output the fix
+        // changes, for the gate to update (#105).
+        allowed.extend(issue.changed_tests.iter().map(
+            |t| json!({"test": t, "reason": "the upstream fix changes its reference output"}),
+        ));
         let answer = json!({
             "status": "fixed",
             "cause": format!("Replay of {} (fix {}).", issue.url, issue.fix_commit),
