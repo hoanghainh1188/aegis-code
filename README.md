@@ -1,11 +1,6 @@
-```text
-    ___    ______ ____ _____ _____
-   /   |  / ____//  _// ___// ___/
-  / /| | / __/   / / / (_ //\__ \ 
- / ___ |/ /___ _/ / / /__//___/ / 
-/_/  |_/_____//___/ \___//____/  
- Autonomous Software Engineering Agent Platform
-```
+<p align="center">
+  <img src="assets/banner.svg" alt="Aegis Platform Banner" width="100%" />
+</p>
 
 # Aegis Platform (`aegis-code`)
 

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 200" width="100%" height="200">
+  <defs>
+    <!-- Background Card Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0f18" />
+      <stop offset="100%" stop-color="#05080e" />
+    </linearGradient>
+
+    <!-- Vibrant Cyan to Blue Neon Gradient for ASCII Art -->
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F5D4" />
+      <stop offset="50%" stop-color="#00BBF9" />
+      <stop offset="100%" stop-color="#4361EE" />
+    </linearGradient>
+
+    <!-- Border Glow Gradient -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.6" />
+      <stop offset="50%" stop-color="#00BBF9" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#4361EE" stop-opacity="0.4" />
+    </linearGradient>
+  </defs>
+
+  <style>
+    .ascii {
+      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, Menlo, Monaco, monospace;
+      font-size: 15px;
+      font-weight: 700;
+      fill: url(#cyanGrad);
+      letter-spacing: 1.5px;
+      white-space: pre;
+    }
+    .tagline {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      fill: #94A3B8;
+      letter-spacing: 2px;
+    }
+  </style>
+
+  <!-- Container Box with Rounded Corners and Glowing Border -->
+  <rect x="2" y="2" width="846" height="196" rx="12" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="1.5" />
+
+  <!-- ASCII Banner Art -->
+  <g transform="translate(145, 25)">
+    <text class="ascii">
+      <tspan x="0" y="22">    ___    ______ ____ _____ _____</tspan>
+      <tspan x="0" y="42">   /   |  / ____//  _// ___// ___/</tspan>
+      <tspan x="0" y="62">  / /| | / __/   / / / (_ //\__ \ </tspan>
+      <tspan x="0" y="82"> / ___ |/ /___ _/ / / /__//___/ / </tspan>
+      <tspan x="0" y="102">/_/  |_/_____//___/ \___//____/  </tspan>
+    </text>
+  </g>
+
+  <!-- Tagline Divider -->
+  <line x1="180" y1="145" x2="670" y2="145" stroke="#1E293B" stroke-width="1" />
+
+  <!-- Tagline Text -->
+  <text x="425" y="170" text-anchor="middle" class="tagline">
+    AUTONOMOUS SOFTWARE ENGINEERING AGENT PLATFORM
+  </text>
+</svg>
