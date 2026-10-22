@@ -784,7 +784,7 @@ where
             // With `open_prs` off the run ends where it would open the PR.
             return Ok(Ending {
                 outcome: Outcome::PrOpened,
-                reason: pr_url.is_none().then(|| "dry run: no PR opened".to_owned()),
+                reason: pr_url.is_none().then(|| "no PR opened".to_owned()),
                 pr_url,
             });
         }

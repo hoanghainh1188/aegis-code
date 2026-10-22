@@ -856,7 +856,7 @@ async fn a_dry_run_replays_the_upstream_fix_without_a_model_or_a_pr() {
         .unwrap();
     assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
     assert_eq!(report.pr_url, None);
-    assert_eq!(report.reason.as_deref(), Some("dry run: no PR opened"));
+    assert_eq!(report.reason.as_deref(), Some("no PR opened"));
     assert_eq!(report.hidden_tests_passed, Some(true));
     assert_eq!(report.cost_usd, 0.0);
     assert_eq!(fork_refs(&scratch), "", "nothing was pushed");
