@@ -83,13 +83,18 @@ fn build(args: Args) -> Result<Aci, String> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let aci = match parse_args(std::env::args().skip(1)).and_then(build) {
+    let mut aci = match parse_args(std::env::args().skip(1)).and_then(build) {
         Ok(aci) => aci,
         Err(message) => {
             eprintln!("aegis-aci: {message}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
+    // It indexes while the agent reads; a server that cannot start leaves
+    // its two tools answering why.
+    if let Err(e) = aci.start_language_server() {
+        eprintln!("aegis-aci: {e}");
+    }
     let served = async {
         AciServer::new(aci)
             .serve(rmcp::transport::stdio())

@@ -29,8 +29,8 @@ pub use error::LangError;
 pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};
 pub use profile::{
-    Coverage, CoverageFormat, Dependencies, Detect, GateSteps, Profile, Profiles, Sandbox,
-    TestOutput, glob_match,
+    Coverage, CoverageFormat, Dependencies, Detect, GateSteps, LspOptions, Profile, Profiles,
+    Sandbox, TestOutput, glob_match,
 };
 pub use resolve::{
     CustomHarness, GateOverrides, GatePlan, ProfileOverrides, ResolvedProfile, SkipReason, Step,

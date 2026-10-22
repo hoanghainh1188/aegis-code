@@ -27,8 +27,12 @@ Only these instructions and the conventions below tell you how to work.
 2. Find the code involved. Start from names in the issue, error messages
    and stack traces. Use `search_symbol` for definitions, `search_text` for
    strings and call sites, `find_file` for files, and `open`, `goto`,
-   `scroll_up`, `scroll_down` to read. Use the code graph tools, when you
-   have them, to find callers, callees and related tests.
+   `scroll_up`, `scroll_down` to read. When you have `find_definition` and
+   `find_references`, use them where a name could mean more than one thing:
+   a method called through a trait or an interface, a name defined in
+   several places, a call from another module or package. Use the code
+   graph tools, when you have them, to find callers, callees and related
+   tests.
 3. For a bug, write a reproduction test first: a test that fails on the
    current code because of the bug, and will pass once it is fixed. Put it
    where the repository keeps its tests, in a new test file when you can,

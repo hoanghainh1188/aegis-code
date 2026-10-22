@@ -13,7 +13,10 @@ use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
-use crate::{Aci, AciError, EditOutcome, EditRequest, redact};
+use crate::{Aci, AciError, EditOutcome, EditRequest, LookupAt, redact};
+
+/// The tools that need the profile's language server (#89).
+const LANGUAGE_SERVER_TOOLS: [&str; 2] = ["find_definition", "find_references"];
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SearchSymbolParams {
@@ -52,6 +55,20 @@ pub struct GotoParams {
     pub line: usize,
 }
 
+/// Where a name is: `file` and `line` with `column` or the `symbol` on that
+/// line, or a `symbol` that one definition has.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LookupParams {
+    /// File path relative to the repo root.
+    pub file: Option<String>,
+    /// 1-based line in `file`.
+    pub line: Option<usize>,
+    /// 1-based column of the name on that line, in characters.
+    pub column: Option<usize>,
+    /// The name, on `line` of `file`, or alone (`Type::method` for a method).
+    pub symbol: Option<String>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateFileParams {
     /// Path of the new file, relative to the repo root; missing
@@ -85,10 +102,18 @@ pub struct AciServer {
 }
 
 impl AciServer {
+    /// The tool list is fixed for the session: the language server's
+    /// tools are left out when the profile names none.
     pub fn new(aci: Aci) -> Self {
+        let mut tool_router = Self::tool_router();
+        if !aci.has_language_server() {
+            for name in LANGUAGE_SERVER_TOOLS {
+                tool_router.remove_route(name);
+            }
+        }
         Self {
             aci: Arc::new(Mutex::new(aci)),
-            tool_router: Self::tool_router(),
+            tool_router,
         }
     }
 
@@ -125,6 +150,15 @@ impl AciServer {
     }
 }
 
+fn lookup_at(p: &LookupParams) -> LookupAt<'_> {
+    LookupAt {
+        file: p.file.as_deref(),
+        line: p.line,
+        column: p.column,
+        symbol: p.symbol.as_deref(),
+    }
+}
+
 /// Every tool result passes here before it reaches the model (design §7).
 fn hide(result: Result<String, String>) -> Result<String, String> {
     let clean = |text: String| redact(&text).with_notice();
@@ -153,6 +187,34 @@ impl AciServer {
         Parameters(p): Parameters<SearchTextParams>,
     ) -> Result<String, String> {
         self.with_aci(move |aci| aci.search_text(&p.text, p.dir.as_deref()))
+            .await
+    }
+
+    #[tool(
+        description = "Go to the definition of a name, as the compiler resolves it (a \
+                          method called through a trait, one of several functions with the \
+                          same name). Give `file` and `line` with `column` or the `symbol` on \
+                          that line, or a `symbol` alone when one definition has it."
+    )]
+    async fn find_definition(
+        &self,
+        Parameters(p): Parameters<LookupParams>,
+    ) -> Result<String, String> {
+        self.with_aci(move |aci| aci.find_definition(lookup_at(&p)))
+            .await
+    }
+
+    #[tool(
+        description = "Find every use of a name, as the compiler resolves it, its \
+                          definition included: calls from other modules and crates, calls \
+                          through a trait. Same position as `find_definition`; at most 50 \
+                          listed."
+    )]
+    async fn find_references(
+        &self,
+        Parameters(p): Parameters<LookupParams>,
+    ) -> Result<String, String> {
+        self.with_aci(move |aci| aci.find_references(lookup_at(&p)))
             .await
     }
 
@@ -238,5 +300,44 @@ impl ServerHandler for AciServer {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Find, view and edit code in one repo. Paths are relative to the repo root.",
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aegis_lang::{Language, ProfileOverrides, Profiles};
+
+    use super::*;
+
+    fn tools(with_language_server: bool) -> Vec<String> {
+        let mut profile = Profiles::builtin()
+            .unwrap()
+            .get(Language::Rust)
+            .unwrap()
+            .resolve(&ProfileOverrides::default())
+            .unwrap();
+        if !with_language_server {
+            profile.profile.aci.lsp = None;
+        }
+        let aci = Aci::new(&std::env::temp_dir(), profile).unwrap();
+        let mut names: Vec<String> = AciServer::new(aci)
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_language_server_tools_come_only_with_a_language_server() {
+        let with = tools(true);
+        let without = tools(false);
+        for name in LANGUAGE_SERVER_TOOLS {
+            assert!(with.iter().any(|t| t == name), "{with:?}");
+            assert!(!without.iter().any(|t| t == name), "{without:?}");
+        }
+        assert_eq!(with.len(), without.len() + LANGUAGE_SERVER_TOOLS.len());
     }
 }

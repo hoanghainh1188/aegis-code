@@ -30,6 +30,10 @@ pub enum AciError {
     #[error("cannot run the formatter `{program}`: {message}")]
     Formatter { program: String, message: String },
 
+    /// The language server of `find_definition` / `find_references`.
+    #[error("{0}")]
+    LanguageServer(String),
+
     #[error("I/O error on `{path}`: {message}")]
     Io { path: String, message: String },
 

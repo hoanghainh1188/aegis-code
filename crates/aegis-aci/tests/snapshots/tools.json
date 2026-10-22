@@ -58,6 +58,48 @@
     "name": "edit"
   },
   {
+    "description": "Go to the definition of a name, as the compiler resolves it (a method called through a trait, one of several functions with the same name). Give `file` and `line` with `column` or the `symbol` on that line, or a `symbol` alone when one definition has it.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "column": {
+          "description": "1-based column of the name on that line, in characters.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "file": {
+          "description": "File path relative to the repo root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "description": "1-based line in `file`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "symbol": {
+          "description": "The name, on `line` of `file`, or alone (`Type::method` for a method).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "find_definition"
+  },
+  {
     "description": "Find files by name pattern. At most 50 results, otherwise asks to narrow.",
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -80,6 +122,48 @@
       "type": "object"
     },
     "name": "find_file"
+  },
+  {
+    "description": "Find every use of a name, as the compiler resolves it, its definition included: calls from other modules and crates, calls through a trait. Same position as `find_definition`; at most 50 listed.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "column": {
+          "description": "1-based column of the name on that line, in characters.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "file": {
+          "description": "File path relative to the repo root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "description": "1-based line in `file`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "symbol": {
+          "description": "The name, on `line` of `file`, or alone (`Type::method` for a method).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "find_references"
   },
   {
     "description": "Show the 100 lines around a line of the open file.",
