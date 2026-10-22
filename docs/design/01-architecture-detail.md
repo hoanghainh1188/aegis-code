@@ -13,9 +13,9 @@ Tài liệu này mô tả kiến trúc kỹ thuật của phần lõi (Phase 1 �
 | Thời gian build | Chưa đo — đo ở Phase 0 |
 | Ngôn ngữ platform | Rust, Cargo workspace (`crates/`) — xem [ADR 0001](../adr/0001-platform-in-rust.md) |
 | Agent harness | Tự làm bằng Rust; gọi model qua trait `ModelProvider` (Claude API qua HTTP, Bedrock qua AWS SDK for Rust) |
-| Chỉ mục repo | Codebase-Memory MCP |
+| Chỉ mục repo | Đã chọn Codebase-Memory MCP. Code hiện chưa dùng: ACI tìm theo AST và dựng module map bằng tree-sitter của profile (mục 3.2) |
 | Sandbox | Docker, mỗi profile một image (dựa trên image CI của repo nếu có), không có mạng ra ngoài; phụ thuộc lấy ở bước riêng qua proxy registry |
-| Sonar | Hỗ trợ cả SonarQube Server và SonarQube Cloud |
+| Sonar | Hỗ trợ cả SonarQube Server và SonarQube Cloud. Bước Sonar của gate chưa làm (#91); gate hiện ghi bước này là "bỏ qua" |
 | Đầu ra | Nhánh `agent/<issue-id>` + PR; người merge |
 
 **Hai cấu hình chạy:**
@@ -36,17 +36,17 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 | Router | Chọn model theo tầng và luật leo thang, kiểm soát ngân sách | Tự làm (`crates/aegis-router`) |
 | ACI tools | Tìm, xem, sửa code | Tự làm (`crates/aegis-aci`, MCP server Rust, dùng tree-sitter + language server theo profile) |
 | Language profile | Mọi phần phụ thuộc ngôn ngữ của repo đích: grammar, kiểm tra khi `edit`, bước gate, lockfile, sandbox, quy ước prompt | Tự làm (`crates/aegis-lang`, [ADR 0004](../adr/0004-multi-language-profiles.md)) |
-| Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn (SQLite index) |
-| Gate runner | Chạy linter, test, coverage, Sonar trong Docker | Tự làm (`crates/aegis-gate`) |
+| Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn (SQLite index). **Chưa nối:** đã đo ở #3, chưa crate nào gọi (mục 3.2) |
+| Gate runner | Chạy format, lint, test, coverage trong Docker; bước Sonar chưa làm (#91) | Tự làm (`crates/aegis-gate`) |
 | PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm (`crates/aegis-pr`) |
 | Ledger | Ghi log, token, chi phí cho từng issue | Tự làm (`crates/aegis-ledger`, trait ghi JSON / DB) |
-| Sonar batcher | Chia nhóm cảnh báo Sonar, gộp nhánh integration | Tự làm (`crates/aegis-sonar-batch`) |
+| Sonar batcher | Chia nhóm cảnh báo Sonar, gộp nhánh integration | Tự làm (`crates/aegis-sonar-batch`). **Chưa làm:** crate mới là khung rỗng (#17) |
 
 **Vòng lặp cho một issue:**
 
 1. Light đọc issue, phân loại, tóm tắt log đính kèm.
 2. Tạo nhánh `agent/<issue-id>` từ nhánh chính.
-3. Core tìm vị trí lỗi bằng ACI + Codebase-Memory.
+3. Core tìm vị trí lỗi bằng ACI và module map. Theo thiết kế còn có Codebase-Memory, nhưng chưa nối (mục 3.2).
 4. Core viết test tái hiện. Chạy để chắc là FAIL.
 5. Core viết bản vá.
 6. Gate runner chạy chuỗi kiểm chứng trong Docker (6 bước ở mục 6.1).
@@ -82,6 +82,18 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
 - Bổ sung language server của profile (`rust-analyzer`, `basedpyright`…) cho "đi tới định nghĩa" và "tìm chỗ dùng" khi đồ thị chưa đủ chính xác (Rust: macro, trait generic; Python: decorator, import động).
 - Việc của Phase 0: kiểm tra Codebase-Memory phân tích đúng các trường hợp trên ở repo Rust và repo Python thật (#3).
 
+**Trạng thái (22/10): đã đo, chưa nối vào code.**
+
+- Kết quả đo ở #3 ([số liệu](../measurements/2026-10-20-codebase-memory-accuracy.md)):
+  - **Python (scrapy):** CALLS, IMPORTS, INHERITS khớp hoàn toàn với grep. Đồ thị không thấy import động qua chuỗi đường dẫn (`load_object`, settings, `mock.patch`).
+  - **Rust (typst):** CALLS nối theo tên. Vì vậy `parse`, `abs` khớp nhầm sang hàm khác, còn lời gọi qua trait gần như không được nối. Đồ thị cũng không thấy impl do macro sinh ra. Muốn sửa chữ ký hàm hay trait thì phải kiểm lại bằng `rust-analyzer`.
+- Code hiện tại không gọi Codebase-Memory, cũng chưa gọi language server:
+  - `search_symbol`, `search_text`, `find_file` của ACI tìm bằng truy vấn symbol tree-sitter của profile (`aegis-lang`).
+  - Module map ở BP2 (mục 4.1) cũng dựng bằng tree-sitter: thư mục nguồn và các định nghĩa chính trong từng thư mục. Map dựng một lần cho mỗi repo và lưu vào file.
+  - Trường `aci.lsp` đã có trong profile nhưng ACI chưa dùng.
+- Hệ quả: agent không có công cụ "ai gọi hàm này" hay "test nào liên quan", và luật leo thang "lỗi trải trên ≥ 3 file" (mục 5.3) không có nguồn tín hiệu.
+- **Còn mở, chưa có issue:** nối Codebase-Memory qua MCP theo quyết định 3 của [ADR 0001](../adr/0001-platform-in-rust.md), dùng language server thay thế, hay giữ tree-sitter. Nên chốt sau lượt chạy model thật đầu tiên (#6): nếu ledger cho thấy agent định vị lỗi sai nhiều thì mới đáng làm.
+
 ### 3.3 Thu gọn lịch sử
 
 - Luôn giữ nguyên: suy nghĩ và hành động của agent ở mọi lượt.
@@ -96,6 +108,8 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
 - **Cảnh báo một vị trí:** tìm node AST chứa vị trí đó (hàm / impl). Gom các cảnh báo cùng node vào một nhóm. Mỗi nhóm là một phiên agent.
 - **Cảnh báo nhiều vị trí (luồng dữ liệu nguồn → lan truyền → điểm dùng):** mỗi luồng là một nhóm riêng.
 - Các nhóm chạy song song, mỗi nhóm một nhánh. Gộp ở mục 6.3.
+
+**Trạng thái (22/10): chưa làm (#17).** `aegis-sonar-batch` mới là khung rỗng. Issue được Light phân loại `kind = sonar` hiện dừng ngay sau bước phân loại, ghi lý do "Sonar issues go through the batching step (#17)". Bộ thử PoC chỉ có bug nên chưa bị ảnh hưởng.
 
 ## 4. Tầng 2 – Prompt caching
 
@@ -156,7 +170,7 @@ Light trả về JSON cố định:
 ```
 
 - `has_repro_info = false` → vẫn chạy, nhưng Core phải tự viết test tái hiện trước khi sửa.
-- `kind = sonar` → đi qua bước chia nhóm (mục 3.4).
+- `kind = sonar` → đi qua bước chia nhóm (mục 3.4). Bước này chưa làm, nên hiện nay issue dừng luôn ở đây.
 - Light không quyết định leo thang. Mọi issue bắt đầu ở Core.
 
 ### 5.3 Luật chuyển trạng thái
@@ -166,7 +180,7 @@ Light trả về JSON cố định:
 | Core | Gate qua hết | PR |
 | Core | `edit` bị từ chối 2 lần liên tiếp | Expert |
 | Core | Test tái hiện vẫn fail sau 2 bản vá liên tiếp | Expert |
-| Core | Codebase-Memory cho thấy lỗi trải trên ≥ 3 file | Expert |
+| Core | Codebase-Memory cho thấy lỗi trải trên ≥ 3 file (router có luật này nhưng chưa có nguồn tín hiệu, mục 3.2) | Expert |
 | Expert | Gate qua hết | PR |
 | Expert | Fail 2 lần | Dừng |
 | Bất kỳ | Chi phí cộng dồn > $4 hoặc > 20 lượt gọi model | Dừng |
@@ -194,12 +208,13 @@ Chạy tuần tự trong Docker. Bước nào fail thì dừng, trả log (đã 
 | 3. Test tái hiện | `cargo test <tên test tái hiện>` | Chuyển từ FAIL sang PASS |
 | 4. Test toàn bộ | `cargo test --workspace` | PASS như trên nhánh chính |
 | 5. Coverage | `cargo llvm-cov --workspace --lcov --output-path lcov.info` | Có file coverage |
-| 6. Sonar | `sonar-scanner` (nhập báo cáo linter + coverage) | Quality Gate "Sonar way" trên code mới |
+| 6. Sonar | `sonar-scanner` (nhập báo cáo linter + coverage) | Quality Gate "Sonar way" trên code mới. **Chưa làm (#91):** gate hiện luôn ghi "bỏ qua, chưa cấu hình" |
 
 - Profile Python dùng `ruff format --check`, `ruff check`, `pytest`, `coverage.py` (Cobertura). Profile .NET gộp bước Sonar vào bước build (SonarScanner for .NET).
 - Nếu build + test > 10 phút: bước 4 chỉ chạy phần bị sửa (`cargo test -p <crate>`, `pytest <thư mục>`) trong vòng lặp; chạy toàn bộ một lần trước khi mở PR.
 - Cache thư mục build và cache phụ thuộc của profile giữa các lần chạy (Rust: `target/` + registry Cargo).
 - Sonar Server và Sonar Cloud khác nhau ở URL, token, và khóa tổ chức (Cloud). Đặt trong file cấu hình.
+- Khi chưa có bước Sonar, một bản vá chỉ qua 3 trong 4 cổng ở Proposal §6. Phần chất lượng code mới chỉ được kiểm bằng lint ("không cảnh báo mới") và người duyệt. KPI đo trước khi có #91 phải ghi rõ điều này.
 
 ### 6.2 Golden Master cho code chưa có test
 
@@ -209,6 +224,8 @@ Chạy tuần tự trong Docker. Bước nào fail thì dừng, trả log (đã 
 4. Người duyệt xác nhận từng test trong danh sách đó.
 
 ### 6.3 Gộp nhiều bản vá (issue Sonar chia nhóm)
+
+Chưa làm, cùng với mục 3.4 (#17).
 
 1. Tạo nhánh `agent/integration-<batch-id>`.
 2. Gộp từng nhánh nhóm vào, mỗi lần một nhánh.
