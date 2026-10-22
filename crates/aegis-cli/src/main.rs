@@ -22,6 +22,7 @@ use aegis_ledger::{JsonFileLedger, PriceTable};
 use aegis_lifecycle::{IssueInput, IssueReport, LifecycleError, Platform, RunConfig, run_issue};
 use aegis_provider::Provider;
 
+mod banner;
 mod kpi;
 use tokio_util::sync::CancellationToken;
 
@@ -47,8 +48,15 @@ struct Args {
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
+    let first = args.next().ok_or("missing command")?;
+    if first == "--help" || first == "-h" || first == "help" {
+        return Ok(Args {
+            command: "help".to_string(),
+            ..Args::default()
+        });
+    }
     let mut parsed = Args {
-        command: args.next().ok_or("missing command")?,
+        command: first,
         ..Args::default()
     };
     while let Some(flag) = args.next() {
@@ -169,6 +177,10 @@ fn line(report: &IssueReport) -> String {
 }
 
 async fn main_inner(mut args: Args) -> Result<bool, String> {
+    if args.command == "help" {
+        banner::print_help();
+        return Ok(true);
+    }
     if !["run", "batch", "eval", "review", "report"].contains(&args.command.as_str()) {
         return Err(format!("unknown command `{}`", args.command));
     }
@@ -188,6 +200,12 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
     }
     let config = args.config.as_deref().ok_or("--config is required")?;
     let run = Arc::new(platform(config).await?);
+    banner::print_dashboard(
+        &config.display().to_string(),
+        &run.config.repo.key,
+        &run.config.repo.language.to_string(),
+        &run.config.models.core.id,
+    );
     let cancel = cancel_on_ctrl_c();
     match args.command.as_str() {
         "run" => {
@@ -282,7 +300,12 @@ async fn eval(run: &Arc<Run>, args: &Args, cancel: &CancellationToken) -> Result
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let args = match parse_args(std::env::args().skip(1)) {
+    let mut raw_args = std::env::args().skip(1).peekable();
+    if raw_args.peek().is_none() {
+        banner::print_help();
+        return ExitCode::SUCCESS;
+    }
+    let args = match parse_args(raw_args) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("aegis: {e}\n{USAGE}");
