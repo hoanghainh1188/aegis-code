@@ -1,8 +1,9 @@
 //! Runs the profile's `edit.format` command on one file, with a time limit
 //! and a cap on the output kept. No shell: the argv comes from the profile's
-//! command template.
+//! command template. The command either rewrites the file in place or, with
+//! `[edit] stdin`, reads it on stdin and prints it formatted (#88).
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -10,7 +11,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aegis_lang::{CommandTemplate, Placeholder};
+use aegis_lang::{CommandTemplate, MAX_SOURCE_BYTES, Placeholder};
 
 use crate::{AciError, FormatContainer};
 
@@ -31,8 +32,14 @@ fn host_user() -> String {
 
 /// `argv` in a fresh container of the profile's image with `root` as
 /// `/work`: no network, no capabilities, as the host user (so the file
-/// keeps its owner). Returns the command and the container's name.
-fn in_container(c: &FormatContainer, root: &Path, argv: &[String]) -> (Vec<String>, String) {
+/// keeps its owner); `-i` when the formatter reads stdin. Returns the
+/// command and the container's name.
+fn in_container(
+    c: &FormatContainer,
+    root: &Path,
+    argv: &[String],
+    interactive: bool,
+) -> (Vec<String>, String) {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let name = format!(
         "aegis-format-{}-{}",
@@ -60,6 +67,9 @@ fn in_container(c: &FormatContainer, root: &Path, argv: &[String]) -> (Vec<Strin
     ]
     .map(str::to_owned)
     .to_vec();
+    if interactive {
+        out.insert(2, "-i".to_owned());
+    }
     for (host, inside) in &c.mounts {
         out.extend(["--volume".to_owned(), format!("{host}:{inside}:ro")]);
     }
@@ -88,15 +98,19 @@ pub(crate) enum Failure {
 /// then dropped rather than blocking the edit.
 const PIPE_GRACE: Duration = Duration::from_secs(2);
 
-/// Reads up to [`MAX_OUTPUT_BYTES`] of `stream` on its own thread. The
-/// thread keeps draining the rest so the formatter never blocks on a full
-/// pipe, and is left behind if the pipe never closes.
-fn capture(stream: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
+/// The formatted file a stdin formatter may print: a source file's limit,
+/// and one more byte to tell a longer output.
+const MAX_FORMATTED_BYTES: u64 = MAX_SOURCE_BYTES as u64 + 1;
+
+/// Reads up to `limit` bytes of `stream` on its own thread. The thread
+/// keeps draining the rest so the formatter never blocks on a full pipe,
+/// and is left behind if the pipe never closes.
+fn capture(stream: Option<impl Read + Send + 'static>, limit: u64) -> mpsc::Receiver<Vec<u8>> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut buf = Vec::new();
         if let Some(s) = stream {
-            let mut limited = s.take(MAX_OUTPUT_BYTES);
+            let mut limited = s.take(limit);
             let _ = limited.read_to_end(&mut buf);
             let _ = sender.send(buf);
             let _ = std::io::copy(&mut limited.into_inner(), &mut std::io::sink());
@@ -126,19 +140,29 @@ fn wait(child: &mut Child, program: &str) -> Result<Option<std::process::ExitSta
     }
 }
 
+fn failed(message: impl Into<String>) -> Result<Result<Option<String>, Failure>, AciError> {
+    Ok(Err(Failure::Exit {
+        code: None,
+        message: message.into(),
+    }))
+}
+
 /// `relative` is the file's path from `root`; it is passed as `./path` so
-/// a name starting with `-` cannot read as an option.
+/// a name starting with `-` cannot read as an option. With `input` the
+/// formatter reads it on stdin, and its stdout is the formatted file
+/// (`Ok(Some(text))`); without, it rewrites the file (`Ok(None)`).
 pub(crate) fn run(
     command: &CommandTemplate,
     root: &Path,
     relative: &str,
     container: Option<&FormatContainer>,
-) -> Result<Result<(), Failure>, AciError> {
+    input: Option<&str>,
+) -> Result<Result<Option<String>, Failure>, AciError> {
     let argument = format!("./{relative}");
     let argv = command.render(&[(Placeholder::File, &argument)])?;
     let (argv, name) = match container {
         Some(c) => {
-            let (argv, name) = in_container(c, root, &argv);
+            let (argv, name) = in_container(c, root, &argv, input.is_some());
             (argv, Some((c.docker.clone(), name)))
         }
         None => (argv, None),
@@ -147,7 +171,11 @@ pub(crate) fn run(
     let mut child = Command::new(&program)
         .args(&argv[1..])
         .current_dir(root)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -155,8 +183,21 @@ pub(crate) fn run(
             program: program.clone(),
             message: e.to_string(),
         })?;
-    let stdout = capture(child.stdout.take());
-    let stderr = capture(child.stderr.take());
+    // On its own thread: a formatter that writes before it has read all of
+    // stdin would otherwise block on a full pipe, and us with it.
+    if let (Some(text), Some(mut pipe)) = (input, child.stdin.take()) {
+        let text = text.to_owned();
+        thread::spawn(move || {
+            let _ = pipe.write_all(text.as_bytes());
+        });
+    }
+    let out_limit = if input.is_some() {
+        MAX_FORMATTED_BYTES
+    } else {
+        MAX_OUTPUT_BYTES
+    };
+    let stdout = capture(child.stdout.take(), out_limit);
+    let stderr = capture(child.stderr.take(), MAX_OUTPUT_BYTES);
     let Some(status) = wait(&mut child, &program)? else {
         // Killing the client leaves the container running.
         if let Some((docker, name)) = &name {
@@ -169,7 +210,24 @@ pub(crate) fn run(
         return Ok(Err(Failure::TimedOut));
     };
     if status.success() {
-        return Ok(Ok(()));
+        let Some(text) = input else {
+            return Ok(Ok(None));
+        };
+        let Ok(out) = stdout.recv_timeout(PIPE_GRACE) else {
+            return failed("the formatter's output did not end");
+        };
+        if out.len() as u64 >= MAX_FORMATTED_BYTES {
+            return failed("the formatter printed more than a source file may hold");
+        }
+        // An empty file for a non-empty one is a formatter that printed
+        // nothing (a wrong flag), not a formatted file.
+        if out.is_empty() && !text.is_empty() {
+            return failed("the formatter printed nothing");
+        }
+        return match String::from_utf8(out) {
+            Ok(formatted) => Ok(Ok(Some(formatted))),
+            Err(_) => failed("the formatter printed text that is not UTF-8"),
+        };
     }
     let deadline = Instant::now() + PIPE_GRACE;
     let output = [stderr, stdout]

@@ -14,7 +14,11 @@ lsp = ["rust-analyzer"]
 
 [edit]
 # Chỉ format file vừa sửa. Edition mặc định 2021; repo khác edition thì ghi đè.
-format = ["rustfmt", "--edition", "2021", "{file}"]
+# Qua stdin: rustfmt nhận đường dẫn thì format luôn các file `mod` con mà file
+# đó khai báo; đọc stdin thì chỉ format nội dung đưa vào (#88). rustfmt.toml
+# vẫn được đọc từ thư mục gốc repo.
+format = ["rustfmt", "--edition", "2021", "--emit", "stdout"]
+stdin = true
 
 [gate]
 format = ["cargo", "fmt", "--all", "--check"]

@@ -3,7 +3,9 @@
 
 mod common;
 
-use aegis_aci::{EditOutcome, EditRequest, Hits, Rejection};
+use std::process::Command;
+
+use aegis_aci::{EditOutcome, EditRequest, FormatContainer, Hits, Rejection};
 use aegis_lang::{Language, ProfileOverrides, StepOverride};
 use common::{Scratch, profile, tool_available};
 
@@ -209,6 +211,134 @@ fn edit_of_a_file_with_out_of_line_modules_is_formatted() {
         .unwrap();
     assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
     assert_eq!(repo.read("src/shop.rs"), "mod till;\npub fn open() {}\n");
+}
+
+#[test]
+fn editing_a_parent_leaves_its_unformatted_child_modules_alone() {
+    // #88: rustfmt given a path also rewrites the files its `mod` lines
+    // declare; the profile hands it the edited file on stdin instead.
+    if !tool_available(&["rustfmt", "--version"]) {
+        return;
+    }
+    let repo = Scratch::fixture("rust");
+    repo.write("src/shop.rs", "mod till;\npub fn open() {}\n");
+    repo.write("src/shop/till.rs", "pub fn   ring( ){}\n");
+    let mut aci = repo.aci(rust());
+
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/shop.rs",
+            from: 2,
+            to: 2,
+            content: "pub fn open( ) {   }",
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    assert_eq!(repo.read("src/shop.rs"), "mod till;\npub fn open() {}\n");
+    assert_eq!(repo.read("src/shop/till.rs"), "pub fn   ring( ){}\n");
+}
+
+#[test]
+fn the_sandbox_formatter_reads_the_file_on_stdin_too() {
+    // The same edit, with rustfmt in the Rust image (`docker run -i`).
+    let image = Command::new("docker")
+        .args(["image", "inspect", "aegis-sandbox-rust"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !image {
+        assert!(
+            std::env::var("AEGIS_REQUIRE_DOCKER").as_deref() != Ok("1"),
+            "docker or the aegis-sandbox-rust image is missing"
+        );
+        return;
+    }
+    let repo = Scratch::fixture("rust");
+    repo.write("src/shop.rs", "mod till;\npub fn open() {}\n");
+    repo.write("src/shop/till.rs", "pub fn   ring( ){}\n");
+    let mut aci = repo.aci(rust()).with_format_container(FormatContainer {
+        docker: "docker".into(),
+        image: "aegis-sandbox-rust".into(),
+        mounts: vec![],
+    });
+
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/shop.rs",
+            from: 2,
+            to: 2,
+            content: "pub fn open( ) {   }",
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    assert_eq!(repo.read("src/shop.rs"), "mod till;\npub fn open() {}\n");
+    assert_eq!(repo.read("src/shop/till.rs"), "pub fn   ring( ){}\n");
+}
+
+fn stdin_formatter(argv: &[&str]) -> ProfileOverrides {
+    ProfileOverrides {
+        edit_format: Some(StepOverride::Run(
+            argv.iter()
+                .map(|s| (*s).to_owned())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )),
+        edit_stdin: Some(true),
+        ..ProfileOverrides::default()
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stdin_formatter_s_output_is_what_gets_written() {
+    let repo = Scratch::fixture("rust");
+    let overrides = stdin_formatter(&["sh", "-c", "cat; echo '// formatted'"]);
+    let mut aci = repo.aci(profile(Language::Rust, &overrides));
+
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/lib.rs",
+            from: 3,
+            to: 3,
+            content: "pub const MAX_ITEMS: usize = 4;",
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    let written = repo.read("src/lib.rs");
+    assert!(
+        written.contains("pub const MAX_ITEMS: usize = 4;"),
+        "{written}"
+    );
+    assert!(written.ends_with("// formatted\n"), "{written}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stdin_formatter_that_prints_nothing_does_not_empty_the_file() {
+    let repo = Scratch::fixture("rust");
+    let before = repo.read("src/lib.rs");
+    let mut aci = repo.aci(profile(Language::Rust, &stdin_formatter(&["true"])));
+
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/lib.rs",
+            from: 3,
+            to: 3,
+            content: "pub const MAX_ITEMS: usize = 4;",
+        })
+        .unwrap();
+    assert!(
+        matches!(
+            &outcome,
+            EditOutcome::Rejected {
+                reason: Rejection::Formatter { .. },
+                ..
+            }
+        ),
+        "{outcome}"
+    );
+    assert!(outcome.to_string().contains("printed nothing"), "{outcome}");
+    assert_eq!(repo.read("src/lib.rs"), before);
 }
 
 #[cfg(unix)]
