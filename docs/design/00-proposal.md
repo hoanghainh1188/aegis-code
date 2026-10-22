@@ -105,6 +105,8 @@ Lưu ý: con số 1–2k token chỉ là của phần bản đồ. Cả request 
 
 **Chọn cho PoC: Codebase-Memory MCP.** Repo > 100k dòng thì bản đồ RepoMap 1–2k token không đủ phủ. Truy vấn đồ thị gọi hàm qua MCP hợp hơn.
 
+**Trạng thái (22/10):** Codebase-Memory đã được đo trên repo đích (#3) nhưng chưa nối vào platform. Đồ thị đúng với Python, còn với Rust thì sai nhiều ở lời gọi qua trait và code do macro sinh. Hiện ACI tìm theo AST bằng tree-sitter, và prompt mang một module map cũng dựng bằng tree-sitter. Có nối đồ thị hay language server vào không thì chốt sau lượt chạy model thật đầu tiên (Thiết kế §3.2).
+
 **Bỏ khỏi phạm vi PoC:** SWEzze/OCD, SaraCoder, HGARena, InlineCoder. Đây là kỹ thuật nghiên cứu, chưa có công cụ dùng được ngay. InlineCoder còn dành cho sinh hàm mới, không phải sửa bug. Xem lại ở Phase 3 nếu cần.
 
 ## 4. Tầng 2 – Prompt caching
@@ -197,7 +199,7 @@ Bản vá chỉ tới tay người duyệt khi qua đủ 4 cổng dưới đây.
 2. **Test động (chạy trong Docker, không có mạng):**
    - Test tái hiện bug: phải chuyển từ FAIL sang PASS.
    - Toàn bộ test đang có: phải PASS như trước.
-3. **Sonar Quality Gate:** dùng mặc định "Sonar way" cho code mới — coverage ≥ 80%, trùng lặp ≤ 3%, không lỗi mới, hotspot bảo mật đã xem hết.
+3. **Sonar Quality Gate:** dùng mặc định "Sonar way" cho code mới — coverage ≥ 80%, trùng lặp ≤ 3%, không lỗi mới, hotspot bảo mật đã xem hết. *Chưa làm (#91): gate hiện bỏ qua bước này. Đầu vào là cảnh báo Sonar (chia nhóm, #17) cũng chưa làm.*
 4. **Người duyệt:** agent mở PR, kèm giải thích từng đoạn sửa. Người merge.
 
 **Cấu hình theo language profile ([ADR 0004](../adr/0004-multi-language-profiles.md)):**
