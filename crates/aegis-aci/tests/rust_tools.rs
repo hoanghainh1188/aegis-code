@@ -5,7 +5,7 @@ mod common;
 
 use std::process::Command;
 
-use aegis_aci::{EditOutcome, EditRequest, FormatContainer, Hits, Rejection};
+use aegis_aci::{EditOutcome, EditRequest, FormatContainer, Hits, LookupAt, Rejection};
 use aegis_lang::{Language, ProfileOverrides, StepOverride};
 use common::{Scratch, profile, tool_available};
 
@@ -272,6 +272,88 @@ fn the_sandbox_formatter_reads_the_file_on_stdin_too() {
     assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
     assert_eq!(repo.read("src/shop.rs"), "mod till;\npub fn open() {}\n");
     assert_eq!(repo.read("src/shop/till.rs"), "pub fn   ring( ){}\n");
+}
+
+fn sandbox_image_ready() -> bool {
+    let image = Command::new("docker")
+        .args(["image", "inspect", "aegis-sandbox-rust"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !image {
+        assert!(
+            std::env::var("AEGIS_REQUIRE_DOCKER").as_deref() != Ok("1"),
+            "docker or the aegis-sandbox-rust image is missing"
+        );
+    }
+    image
+}
+
+fn sandboxed(repo: &Scratch) -> aegis_aci::Aci {
+    let mut aci = repo.aci(rust()).with_format_container(FormatContainer {
+        docker: "docker".into(),
+        image: "aegis-sandbox-rust".into(),
+        mounts: vec![],
+    });
+    aci.start_language_server().unwrap();
+    aci
+}
+
+/// Waits out indexing: the tools say "still indexing" for up to 30 s each.
+fn retrying<T>(mut call: impl FnMut() -> Result<T, aegis_aci::AciError>) -> T {
+    for _ in 0..10 {
+        match call() {
+            Err(e) if e.to_string().contains("still indexing") => continue,
+            other => return other.unwrap(),
+        }
+    }
+    panic!("the language server never finished indexing");
+}
+
+#[test]
+fn references_follow_a_method_called_through_a_trait() {
+    // #89: `cart![1, 2].total()` calls `Priced::total` on a `Cart`, inside
+    // two macros; a name search cannot tell which `total` it is.
+    if !sandbox_image_ready() {
+        return;
+    }
+    let repo = Scratch::fixture("rust");
+    let mut aci = sandboxed(&repo);
+
+    let at_call = LookupAt {
+        file: Some("src/lib.rs"),
+        line: Some(53),
+        symbol: Some("total"),
+        ..LookupAt::default()
+    };
+    let definition = retrying(|| aci.find_definition(at_call));
+    let lines: Vec<usize> = definition.hits.iter().map(|h| h.line).collect();
+    assert_eq!(lines, [33], "{definition}");
+
+    let at_trait = LookupAt {
+        symbol: Some("Priced::total"),
+        ..LookupAt::default()
+    };
+    let references = retrying(|| aci.find_references(at_trait));
+    let lines: Vec<usize> = references.hits.iter().map(|h| h.line).collect();
+    assert_eq!(lines, [19, 33, 53], "{references}");
+
+    // A call the agent adds is seen without reopening anything.
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/lib.rs",
+            from: 34,
+            to: 34,
+            content: "        let _again = Cart::default().total();\n        self.items.iter().sum()",
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    let after = retrying(|| aci.find_references(at_trait));
+    let lines: Vec<usize> = after.hits.iter().map(|h| h.line).collect();
+    assert_eq!(lines, [19, 33, 34, 54], "{after}");
+    assert!(
+        after.to_string().contains("src/lib.rs:34: let _again"),
+        "{after}"
+    );
 }
 
 fn stdin_formatter(argv: &[&str]) -> ProfileOverrides {

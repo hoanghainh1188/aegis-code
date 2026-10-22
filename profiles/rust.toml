@@ -12,6 +12,15 @@ extensions = ["rs"]
 [aci]
 lsp = ["rust-analyzer"]
 
+# rust-analyzer không chạy `cargo check` mỗi lần lưu (đó là việc của gate, và
+# trên repo lớn nó build cả workspace), và build script / proc macro của nó
+# vào `target/rust-analyzer`, không tranh khoá `target/` với gate (#89).
+[aci.lsp_options]
+checkOnSave = false
+
+[aci.lsp_options.cargo]
+targetDir = true
+
 [edit]
 # Chỉ format file vừa sửa. Edition mặc định 2021; repo khác edition thì ghi đè.
 # Qua stdin: rustfmt nhận đường dẫn thì format luôn các file `mod` con mà file

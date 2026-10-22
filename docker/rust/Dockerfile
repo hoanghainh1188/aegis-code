@@ -9,7 +9,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates pkg-config libssl-dev g++ make \
  && rm -rf /var/lib/apt/lists/*
 
-RUN rustup component add rustfmt clippy llvm-tools-preview \
+# rust-analyzer (with rust-src, to read std and its macros): the ACI's
+# find_definition / find_references (#89). It runs
+# build scripts and proc macros while indexing, so it runs here, not on the
+# machine.
+RUN rustup component add rustfmt clippy llvm-tools-preview rust-analyzer rust-src \
  && cargo install --locked cargo-llvm-cov@0.9.1 cargo-deny@0.20.2 \
  && rm -rf /usr/local/cargo/registry /usr/local/cargo/git
 

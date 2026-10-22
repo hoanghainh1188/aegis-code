@@ -132,7 +132,9 @@ async fn tool_list_is_sorted_with_schemas() {
         [
             "create_file",
             "edit",
+            "find_definition",
             "find_file",
+            "find_references",
             "goto",
             "open",
             "scroll_down",

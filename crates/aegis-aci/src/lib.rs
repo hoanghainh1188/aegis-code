@@ -11,6 +11,8 @@
 mod edit;
 mod error;
 mod formatter;
+mod lsp;
+mod navigate;
 mod search;
 mod secrets;
 mod server;
@@ -24,6 +26,7 @@ use aegis_lang::ResolvedProfile;
 
 pub use edit::{CONTEXT, EditOutcome, EditRequest, Rejection, Snippet};
 pub use error::AciError;
+pub use navigate::{Lookup, LookupAt, LookupResult};
 pub use search::{FileHit, Hits, MAX_RESULTS, SearchResult, SymbolHit, TextHit};
 pub use secrets::{MARKER as REDACTED_MARKER, Redacted, redact};
 pub use server::AciServer;
@@ -37,6 +40,10 @@ pub use workspace::{FormatContainer, Workspace};
 pub struct Aci {
     workspace: Workspace,
     viewer: viewer::Viewer,
+    /// The profile's language server, once started.
+    lsp: Option<lsp::Lsp>,
+    /// Files written since the language server last saw them.
+    changed: lsp::Changed,
 }
 
 impl Aci {
@@ -44,6 +51,8 @@ impl Aci {
         Ok(Self {
             workspace: Workspace::new(root, profile)?,
             viewer: viewer::Viewer::default(),
+            lsp: None,
+            changed: lsp::Changed::default(),
         })
     }
 
@@ -53,6 +62,65 @@ impl Aci {
             workspace: self.workspace.with_format_container(container),
             ..self
         }
+    }
+
+    /// Whether the profile names a language server: `find_definition` and
+    /// `find_references` are offered only then.
+    pub fn has_language_server(&self) -> bool {
+        self.workspace.profile().profile.aci.lsp.is_some()
+    }
+
+    /// Starts the profile's language server, in the format container when
+    /// there is one, so it indexes while the agent reads the issue.
+    pub fn start_language_server(&mut self) -> Result<(), AciError> {
+        let Some(command) = self.workspace.profile().profile.aci.lsp.clone() else {
+            return Ok(());
+        };
+        let options = self
+            .workspace
+            .profile()
+            .profile
+            .aci
+            .lsp_options
+            .as_ref()
+            .map(|o| serde_json::to_value(&o.0))
+            .transpose()
+            .map_err(|e| AciError::LanguageServer(format!("aci.lsp_options: {e}")))?;
+        self.lsp = Some(lsp::Lsp::start(
+            command.argv(),
+            self.workspace.root(),
+            options,
+            self.workspace.format_container(),
+        )?);
+        Ok(())
+    }
+
+    /// The definitions of what is at `at`, by the language server.
+    pub fn find_definition(&mut self, at: LookupAt<'_>) -> Result<LookupResult, AciError> {
+        self.lookup(Lookup::Definition, at)
+    }
+
+    /// Where what is at `at` is used, its definition included.
+    pub fn find_references(&mut self, at: LookupAt<'_>) -> Result<LookupResult, AciError> {
+        self.lookup(Lookup::References, at)
+    }
+
+    fn lookup(&mut self, kind: Lookup, at: LookupAt<'_>) -> Result<LookupResult, AciError> {
+        let Some(server) = self.lsp.as_mut() else {
+            return Err(AciError::LanguageServer(
+                "no language server is running for this repo; use search_symbol".into(),
+            ));
+        };
+        server.ready(lsp::CALL_WAIT)?;
+        // The server reads files from disk only when it opens them: what the
+        // ACI wrote since goes to it first.
+        for path in self.changed.take() {
+            if let Some(text) = self.workspace.read_text(&path) {
+                let relative = self.workspace.display(&path);
+                server.sync(&relative, &text, self.workspace.profile().language().id())?;
+            }
+        }
+        navigate::lookup(&self.workspace, server, kind, at)
     }
 
     pub fn workspace(&self) -> &Workspace {
@@ -100,12 +168,19 @@ impl Aci {
 
     /// A new file; refused when it already exists or does not parse.
     pub fn create_file(&mut self, file: &str, content: &str) -> Result<EditOutcome, AciError> {
-        edit::create(&self.workspace, file, content)
+        let outcome = edit::create(&self.workspace, file, content)?;
+        if let EditOutcome::Applied(snippet) = &outcome {
+            self.changed
+                .mark(&self.workspace.root().join(&snippet.path));
+        }
+        Ok(outcome)
     }
 
     pub fn edit(&mut self, request: EditRequest<'_>) -> Result<EditOutcome, AciError> {
         let outcome = edit::edit(&self.workspace, request)?;
         if let EditOutcome::Applied(snippet) = &outcome {
+            self.changed
+                .mark(&self.workspace.root().join(&snippet.path));
             // The edit is written either way; a file that cannot be
             // re-read is closed, and the next scroll asks for `open`.
             self.viewer.reload(&self.workspace, &snippet.path);

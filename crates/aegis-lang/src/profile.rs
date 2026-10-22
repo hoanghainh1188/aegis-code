@@ -68,9 +68,21 @@ pub struct Detect {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Aci {
-    /// Language server, optional (ADR 0004 §1).
+    /// Language server, optional (ADR 0004 §1); speaks LSP on stdio.
     pub lsp: Option<CommandTemplate>,
+    /// The server's own settings, sent as `initializationOptions` (#89):
+    /// rust-analyzer's `checkOnSave = false`, so it does not build the repo.
+    #[serde(default)]
+    pub lsp_options: Option<LspOptions>,
 }
+
+/// A TOML table passed to the language server as JSON.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(transparent)]
+pub struct LspOptions(pub toml::Table);
+
+// The table holds settings, never NaN floats to compare.
+impl Eq for LspOptions {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
