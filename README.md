@@ -1,6 +1,15 @@
+```text
+    ___    ______ ____ _____ _____
+   /   |  / ____//  _// ___// ___/
+  / /| | / __/   / / / (_ //\__ \ 
+ / ___ |/ /___ _/ / / /__//___/ / 
+/_/  |_/_____//___/ \___//____/  
+ Autonomous Software Engineering Agent Platform
+```
+
 # Aegis Platform (`aegis-code`)
 
-> **Agentic Code Maintenance Platform:** Nền tảng tự động hóa bảo trì mã nguồn bằng AI Agent — tiếp nhận sự cố, phân tích ngữ cảnh, sinh bản vá an toàn và tạo Pull Request đã qua kiểm chứng nghiêm ngặt, chờ kỹ sư phê duyệt.
+> **Agentic Code Maintenance Platform:** Autonomous software maintenance powered by AI agents — ingest issues, analyze context, generate safe patches, and open verified Pull Requests for human review.
 
 [![Rust 2021](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![License: Proprietary](https://img.shields.io/badge/license-Internal-blue.svg)]()
@@ -8,137 +17,137 @@
 
 ---
 
-## 🎯 1. Bối Cảnh & Mục Tiêu Dự Án
+## 🎯 1. Context & Objectives
 
-### Bài toán thực tế
-Trong các dự án phần mềm quy mô lớn, việc bảo trì (sửa lỗi sản xuất, fix CI failures, xử lý cảnh báo SonarQube) tiêu tốn hàng nghìn giờ kỹ sư mỗi năm (~2–3 FTEs). Quá trình thủ công này thường gây mệt mỏi về ngữ cảnh (context fatigue), dễ sinh lỗi hồi quy (regression) và làm chậm tiến độ phát triển tính năng mới.
+### The Problem
+In large-scale software engineering projects, code maintenance (fixing production bugs, addressing CI failures, resolving SonarQube alerts) consumes thousands of engineering hours annually (~2–3 FTEs). This manual loop causes context fatigue, introduces regressions, and slows down feature delivery.
 
-### Tầm nhìn & Giải pháp
-Aegis chuyển đổi quy trình bảo trì thủ công sang mô hình **Tự động hóa hướng tác tử (Agentic SDLC)**:
-* AI Agent đảm nhận **80% khối lượng công việc lặp lại**: đọc hiểu ticket $\rightarrow$ định vị lỗi bằng đồ thị AST $\rightarrow$ viết test tái hiện $\rightarrow$ sinh bản vá $\rightarrow$ chạy toàn bộ test và Sonar trong sandbox $\rightarrow$ mở Pull Request hoàn chỉnh.
-* **Nguyên tắc "Human-in-the-loop" bất di bất dịch:** Agent **tuyệt đối không bao giờ tự merge**. Toàn bộ quyền quyết định cuối cùng luôn thuộc về kỹ sư con người. Thời gian review của kỹ sư giảm từ 3–5 giờ xuống còn 5–10 phút mỗi issue.
+### Vision & Solution
+Aegis transitions manual maintenance into an **Agentic SDLC**:
+* The AI Agent handles **80% of repetitive tasks**: understand tickets $\rightarrow$ locate root causes via AST graph $\rightarrow$ write reproducing tests $\rightarrow$ generate patches $\rightarrow$ verify via sandbox test suites and Sonar $\rightarrow$ open comprehensive Pull Requests.
+* **Strict "Human-in-the-loop" Principle:** The agent **never merges autonomously**. Final approval always rests with human engineers. Review time drops from 3–5 hours to 5–10 minutes per issue.
 
-### 3 Chỉ số KPI sống còn
-| Chỉ số | Ngưỡng mục tiêu | Ý nghĩa đo lường |
+### 3 Core KPIs
+| Metric | Target Threshold | Description |
 | :--- | :---: | :--- |
-| **Đúng** (Acceptance Rate) | $\ge 40\%$ | Tỉ lệ PR được kỹ sư chấp thuận merge với chỉnh sửa nhỏ ($\le 10$ dòng code). |
-| **Rẻ** (Cost Efficiency) | $\le \$4 - \$8$ / issue | Chi phí API trung bình cho mỗi issue (bao gồm cả các ca thất bại và phụ phí vùng). |
-| **An toàn** (Zero Regression) | $0\%$ lỗi hồi quy | Không bao giờ có PR làm vỡ test hiện có của dự án được phép gửi đến reviewer. |
+| **Acceptance Rate** | $\ge 40\%$ | Ratio of PRs accepted and merged by engineers with minor edits ($\le 10$ lines). |
+| **Cost Efficiency** | $\le \$4 - \$8$ / issue | Average model API cost per issue (including failed attempts and regional markups). |
+| **Zero Regression** | $0\%$ regressions | No PR that breaks existing tests is ever submitted to human reviewers. |
 
 ---
 
-## 🏛️ 2. Kiến Trúc Hệ Thống
+## 🏛️ 2. System Architecture
 
-Platform được xây dựng 100% bằng **Rust** theo cấu trúc Cargo Workspace ([ADR 0001](docs/adr/0001-platform-in-rust.md)), đảm bảo hiệu năng cao, an toàn bộ nhớ và đồng nhất ngôn ngữ với repo bảo trì mục tiêu.
+The platform is written 100% in **Rust** as a Cargo Workspace ([ADR 0001](docs/adr/0001-platform-in-rust.md)), providing high performance, memory safety, and cross-language consistency.
 
-### Sơ đồ luồng xử lý sự cố (4 Tầng kiểm soát)
+### Issue Lifecycle Flow (4 Control Layers)
 
 ```mermaid
 flowchart TD
-    Issue["Sự cố đầu vào: Jira / Backlog / CI / Sonar"] --> T1["TẦNG 1: LẤY ĐÚNG NGỮ CẢNH (ACI Tools + SQLite AST Graph)"]
-    T1 --> T2["TẦNG 2: PROMPT CACHING (4 Điểm ngắt BP1 → BP4)"]
-    T2 --> T3["TẦNG 3: ĐỊNH TUYẾN MODEL (Light → Core → Expert)"]
-    T3 --> T4["TẦNG 4: CỔNG KIỂM CHỨNG HỒI QUY (Docker Sandbox --network none)"]
+    Issue["Input Issue: Jira / Backlog / CI / Sonar"] --> T1["LAYER 1: CONTEXT RETRIEVAL (ACI Tools + SQLite AST Graph)"]
+    T1 --> T2["LAYER 2: PROMPT CACHING (4 Breakpoints BP1 → BP4)"]
+    T2 --> T3["LAYER 3: MODEL ROUTING (Light → Core → Expert)"]
+    T3 --> T4["LAYER 4: REGRESSION VERIFICATION GATE (Docker Sandbox --network none)"]
     
-    T4 -->|Vượt qua 6 bước Gate| PR["Tạo Pull Request (Mô tả diff + Golden Master + Chi phí)"]
-    T4 -->|Gate Fail < 2 lần| T3
-    T4 -->|Chạm trần: $4 hoặc 20 lượt hoặc Expert fail 2 lần| Stop["DỪNG CỨNG (Circuit Breaker) & Bàn giao kỹ sư"]
+    T4 -->|Passes 6-Step Gate| PR["Open Pull Request (Diff explanation + Golden Master + Cost)"]
+    T4 -->|Gate Fail < 2 times| T3
+    T4 -->|Threshold Reached: $4 or 20 calls or Expert fail 2 times| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]
 ```
 
-### Chi tiết 4 Tầng kiểm soát cốt lõi
-1. **Tầng 1 – Ngữ cảnh chuẩn xác (Context Engine):**
-   * Tìm theo AST bằng tree-sitter của từng language profile. Prompt kèm một module map sinh từ code. Thiết kế còn có truy vấn đồ thị quan hệ (`CALLS`, `IMPORTS`, `TESTS`) qua Codebase-Memory MCP và language server (`rust-analyzer`, `basedpyright`…), nhưng phần này chưa nối vào code ([Thiết kế §3.2](docs/design/01-architecture-detail.md)).
-   * Bộ công cụ ACI định lượng: Giới hạn mở đúng 100 dòng (SWE-agent standard), tìm kiếm tối đa 50 kết quả. Lệnh `edit` bắt buộc chạy qua linter kiểm tra cú pháp trước khi ghi lên đĩa.
-   * **Batch History Collapse:** Khi context vượt $60\%$ window, nén các output quan sát cũ thành `[Observation collapsed]` để bảo vệ cache và context, nhưng bảo toàn nguyên vẹn suy nghĩ (reasoning) của model.
-2. **Tầng 2 – Prompt Caching toán học:**
-   * Cố định thứ tự 4 điểm ngắt: `BP1` (Tools) $\rightarrow$ `BP2` (System prompt, conventions) $\rightarrow$ `BP3` (Issue context, repro test) $\rightarrow$ `BP4` (Lịch sử hội thoại động).
-   * Đảm bảo cấu trúc byte-stable (JSON key sorted, không chèn ngày giờ/session động vào BP1-BP2) để đạt **tỉ lệ đọc cache $\ge 70\%$** (tiết kiệm 90–95% chi phí input).
-3. **Tầng 3 – Phân cấp Model & Circuit Breaker:**
-   * **Light (`Haiku 5.5`):** Phân loại issue, tóm tắt log build/test, cắt ngắn stack trace.
-   * **Core (`Sonnet 5.5`):** Tìm lỗi, viết test tái hiện, sinh bản vá.
-   * **Expert (`Opus 5.5`):** Xử lý ca khó, lỗi kiến trúc hoặc trải trên $\ge 3$ files.
-   * **Luật dừng kinh tế:** Dừng ngay lập tức nếu tổng chi phí $> \$4$ hoặc vượt 20 lượt gọi model.
-4. **Tầng 4 – Cổng kiểm chứng 6 bước trong Docker:**
-   * Format $\rightarrow$ Lint $\rightarrow$ Test tái hiện (chứng minh FAIL $\rightarrow$ PASS) $\rightarrow$ Test toàn bộ $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate (bước Sonar chưa làm, #91). Lệnh của từng bước lấy từ language profile của repo (ví dụ Rust: `cargo fmt`, `cargo clippy`, `cargo llvm-cov`) — xem [ADR 0004](docs/adr/0004-multi-language-profiles.md).
-   * **Kỹ thuật Golden Master:** Với code legacy chưa có test, agent viết test ghi nhận hành vi hiện tại trước khi sửa; mọi thay đổi kết quả bắt buộc phải khai báo trong mục *"Test được phép đổi kết quả"* của PR.
+### Core Architecture Layers
+1. **Layer 1 – Context Engine:**
+   * Tree-sitter AST queries per language profile. The prompt includes a module map generated from source code. Relational graph queries (`CALLS`, `IMPORTS`, `TESTS`) via Codebase-Memory MCP and language servers (`rust-analyzer`, `basedpyright`, etc.) are designed in [Design §3.2](docs/design/01-architecture-detail.md).
+   * Bounded ACI toolset: opens exactly 100 lines at a time (SWE-agent standard) and caps search results at 50 entries. The `edit` tool verifies syntax with a linter before persisting changes to disk.
+   * **Batch History Collapse:** When context reaches $60\%$ of the window, older observation outputs collapse into `[Observation collapsed]` to protect cache efficiency while preserving the model's reasoning chain.
+2. **Layer 2 – Deterministic Prompt Caching:**
+   * Fixed 4-breakpoint hierarchy: `BP1` (Tools) $\rightarrow$ `BP2` (System prompt, conventions) $\rightarrow$ `BP3` (Issue context, repro test) $\rightarrow$ `BP4` (Dynamic conversation history).
+   * Byte-stable structure (sorted JSON keys, no dynamic timestamps/session IDs in BP1–BP2) achieving **$\ge 70\%$ cache hit rates** (saving 90–95% on input token costs).
+3. **Layer 3 – Model Hierarchy & Circuit Breaker:**
+   * **Light (`Haiku 5.5`):** Issue classification, build/test log summarization, stack trace pruning.
+   * **Core (`Sonnet 5.5`):** Root-cause localization, reproducing test creation, patch synthesis.
+   * **Expert (`Opus 5.5`):** Architecture refactoring, complex bugs across $\ge 3$ files.
+   * **Economic Circuit Breaker:** Halts execution immediately if cost exceeds $\$4$ or reaches 20 model calls.
+4. **Layer 4 – 6-Step Verification Gate in Docker:**
+   * Format $\rightarrow$ Lint $\rightarrow$ Repro Test (proves FAIL $\rightarrow$ PASS) $\rightarrow$ Full Test Suite $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate (Sonar pending, #91). Commands are loaded from the target repository's language profile (e.g. Rust: `cargo fmt`, `cargo clippy`, `cargo llvm-cov`) — see [ADR 0004](docs/adr/0004-multi-language-profiles.md).
+   * **Golden Master Technique:** For legacy code without test coverage, the agent writes characterization tests capturing existing behavior prior to patching; any modified output must be declared under *"Permitted Behavior Changes"* in the PR description.
 
-### Kiến trúc Dịch vụ Doanh nghiệp (Phase 2 Platform Service)
-Theo [ADR 0003](docs/adr/0003-platform-service-architecture.md), hệ thống hướng tới:
-* Single binary `aegis-server` (Axum) với các vai trò `--role api|worker|all`.
-* Hàng đợi công việc giao dịch (Transactional Job Queue) trực tiếp trên **PostgreSQL** qua `SELECT ... FOR UPDATE SKIP LOCKED` (ACID, chống trùng, trừ ngân sách nguyên tử, không cần Redis/SQS).
-* Giao diện Dashboard quản trị và review PR tinh gọn bằng server-rendered HTML (**Askama + htmx**), bảo mật với OIDC và AWS Secrets Manager.
+### Enterprise Service Architecture (Phase 2 Platform Service)
+As specified in [ADR 0003](docs/adr/0003-platform-service-architecture.md):
+* Single binary `aegis-server` (Axum) configurable via `--role api|worker|all`.
+* Transactional job queue on **PostgreSQL** using `SELECT ... FOR UPDATE SKIP LOCKED` (ACID-compliant, atomic budget deduplication, zero external Redis/SQS overhead).
+* Minimalist server-rendered dashboard (**Askama + htmx**) secured with OIDC and AWS Secrets Manager.
 
-### Rào giậu Bảo mật & Chủ quyền Dữ liệu
-* **Chủ quyền Dữ liệu Nhật Bản (Japan Data Residency):** Cấu hình khách hàng (`customer-jp.toml`) định tuyến qua AWS Bedrock vùng `ap-northeast-1` (Tokyo/Osaka). Crate `aegis-provider` tích hợp sẵn guard `ModelPolicy::JapanOnly` chặn đứng mọi request không có tiền tố `jp.`.
-* **Sandbox cách ly hoàn toàn mạng:** Container chạy `--network none`, không mount secret, file `.env` hay credentials.
-* **Phòng thủ Indirect Prompt Injection:** Coi toàn bộ comment mã nguồn, file README và issue description là dữ liệu không tin cậy.
-
----
-
-## ⚡ 3. Các Chức Năng Chính (Core Capabilities)
-
-* 📥 **Tiếp nhận sự cố đa kênh:** Hỗ trợ nhận diện ticket lỗi từ Jira, Backlog, webhook sự kiện CI thất bại (GitHub Actions, GitLab CI) và cảnh báo tĩnh từ SonarQube.
-* 🔍 **Tự động phân loại & Tóm tắt sự cố:** Model Light tự động phân tích stack trace, trích xuất crate/module khả nghi và trả về metadata có cấu trúc (`has_repro_info`, `suspected_crates`).
-* 🧪 **Viết Test tái hiện độc lập:** Tự động tạo test case tái hiện lỗi và kiểm chứng trạng thái **FAIL** trước khi bắt tay vào sửa code.
-* 🛠️ **Sinh bản vá có kiểm soát cú pháp:** Công cụ `edit` tự động chạy linter và kiểm tra cú pháp; từ chối ghi đè nếu bản vá gây lỗi biên dịch.
-* 📦 **Gom nhóm cảnh báo Sonar hàng loạt (Batching & Integration):** Phân cụm hàng chục cảnh báo theo AST node hoặc đường truyền dữ liệu (tainted dataflow), chạy trên các nhánh song song và merge tuần tự vào nhánh `agent/integration-<batch-id>`.
-* 🛡️ **Kiểm chứng hồi quy tự động:** Đảm bảo 100% test cũ của dự án vẫn pass và code mới đạt chuẩn Sonar way (coverage $\ge 80\%$, trùng lặp $\le 3\%$).
-* 📝 **Mở Pull Request chuẩn chỉnh:** Tự động sinh mô tả PR gồm: nguyên nhân gốc, chi tiết từng đoạn sửa, bằng chứng test tái hiện, bảng kiểm chứng Gate, danh sách Golden Master và bảng kê chi phí token.
-* 💰 **Hạch toán chi phí & Giám sát ngân sách thời gian thực:** Crate `aegis-ledger` ghi nhận chi tiết token, USD từng lượt gọi model/gate vào log JSON và DB, tự động ngắt nếu có nguy cơ vượt trần kinh tế.
+### Security & Data Governance
+* **Japan Data Residency:** Customer profiles (`customer-jp.toml`) route through AWS Bedrock in `ap-northeast-1` (Tokyo/Osaka). The `aegis-provider` crate enforces `ModelPolicy::JapanOnly`, rejecting any non-`jp.` endpoint.
+* **Network-Isolated Sandbox:** Containers execute with `--network none`, without mounting credentials, tokens, or `.env` files.
+* **Indirect Prompt Injection Defense:** All source code comments, README files, and issue descriptions are treated as untrusted user inputs.
 
 ---
 
-## 📂 4. Hiện Trạng Cấu Trúc Mã Nguồn
+## ⚡ 3. Core Capabilities
+
+* 📥 **Multi-Channel Ingestion:** Ingest issues from Jira, Backlog, CI failure webhooks (GitHub Actions, GitLab CI), and SonarQube static analysis alerts.
+* 🔍 **Automated Triage & Summarization:** Light model analyzes stack traces, identifies suspected modules/crates, and produces structured metadata (`has_repro_info`, `suspected_crates`).
+* 🧪 **Isolated Reproducing Tests:** Automatically synthesizes test cases and verifies their initial **FAIL** status before code changes begin.
+* 🛠️ **Syntax-Guarded Patching:** The `edit` tool runs linters and syntax checkers, rejecting edits that cause compilation failures.
+* 📦 **Sonar Batching & Integration:** Clusters related warnings by AST node or tainted dataflow, resolves them across parallel branches, and merges sequentially into `agent/integration-<batch-id>`.
+* 🛡️ **Regression Prevention:** Ensures 100% of existing tests pass and new code adheres to quality standards (coverage $\ge 80\%$, duplication $\le 3\%$).
+* 📝 **Structured Pull Requests:** Automatically composes PR descriptions with root cause analysis, change details, repro test evidence, verification gate results, Golden Master disclosures, and token cost breakdown.
+* 💰 **Cost Accounting & Budget Monitoring:** `aegis-ledger` logs per-call token counts and USD costs to JSON ledgers and database records, terminating runs before exceeding budget thresholds.
+
+---
+
+## 📂 4. Repository Structure
 
 ```
 crates/
-├── aegis-provider/       # [✔ ĐÃ XONG] ModelProvider: Claude API & Bedrock jp. (35 tests pass)
-├── aegis-orchestrator/   # [✔ ĐÃ XONG] Agent loop, session, batch collapse (23 tests pass)
-├── aegis-router/         # [🟡 Đang làm #10] Phân cấp Light/Core/Expert, luật leo thang & dừng
-├── aegis-aci/            # [🟡 Đang làm #7, #8] Bộ công cụ MCP thao tác code: search, open, edit
-├── aegis-gate/           # [🟡 Đang làm #11] Runner điều phối chuỗi kiểm chứng 6 bước trong Docker
-├── aegis-ledger/         # [🟡 Đang làm #9] Trait tính chi phí & ghi nhận ledger từng issue
-├── aegis-pr/             # [🟡 Đang làm #15] Quản lý nhánh agent/<id> và sinh mô tả PR
-├── aegis-sonar-batch/    # [⬜ Chưa làm #17] Gom cụm cảnh báo Sonar và merge integration branch (crate rỗng)
-└── aegis-cli/            # [🟡 Đang làm] Binary CLI entrypoint chạy 1 issue hoặc 1 batch
+├── aegis-provider/       # ModelProvider: Claude API & Bedrock jp.
+├── aegis-orchestrator/   # Agent loop, session state, batch collapse
+├── aegis-router/         # Light/Core/Expert hierarchy, escalation & stopping rules
+├── aegis-aci/            # MCP code manipulation tools: search, open, edit
+├── aegis-gate/           # 6-step Docker verification gate runner
+├── aegis-ledger/         # Cost calculation trait and per-issue ledger
+├── aegis-pr/             # Branch management and PR description generator
+├── aegis-sonar-batch/    # Sonar alert clustering and integration branch merge
+└── aegis-cli/            # CLI entrypoint to run single issues or batches
 ```
 
 ---
 
-## 🚀 5. Hướng Dẫn Bắt Đầu Nhanh
+## 🚀 5. Getting Started
 
-### Yêu cầu cài đặt
+### Prerequisites
 * Rust toolchain (1.80+)
-* Docker (phục vụ chạy test trong sandbox cách ly)
+* Docker (for isolated sandbox verification)
 
-### Kiểm thử mã nguồn
+### Testing & Verification
 ```bash
-# Kiểm tra định dạng code
+# Check code formatting
 cargo fmt --check
 
-# Kiểm tra linting với Clippy (toàn workspace và backend Bedrock)
+# Run linter checks (workspace and Bedrock backend)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p aegis-provider --all-targets --features bedrock -- -D warnings
 
-# Chạy toàn bộ test suites
+# Execute test suite
 cargo test --workspace
 cargo test -p aegis-provider --features bedrock
 ```
 
 ---
 
-## 🗺️ 6. Lộ Trình Phát Triển
+## 🗺️ 6. Roadmap
 
-* **Phase 0 – Chuẩn bị:** Thiết lập CI repo, dựng Docker sandbox, đo build CI, gom bộ 30–50 issue ([Proposal §9](docs/design/00-proposal.md)).
-* **Phase 1 – MVP / PoC:** Hoàn thiện các crate phần lõi và language profile Rust, Python; đo lường 3 KPI thực nghiệm trên một repo nội bộ mỗi ngôn ngữ ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md)).
-* **Phase 2 – Nền Tảng Dịch Vụ:** Profile TypeScript/JavaScript, Java, Go, C#/.NET; single binary `aegis-server` (Axum), PostgreSQL job queue, connectors (Jira/GitLab), Askama+htmx dashboard ([ADR 0003](docs/adr/0003-platform-service-architecture.md)).
-* **Phase 3 – Mở Rộng:** Kỹ thuật định vị lỗi nâng cao SBFL, nén ngữ cảnh sâu (SWEzze/SaraCoder), thêm ngôn ngữ ngoài 6 profile ban đầu.
+* **Phase 0 – Setup:** CI pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
+* **Phase 1 – MVP / PoC:** Core crates, Rust and Python profiles; empirical 3-KPI evaluation on target repositories ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md)).
+* **Phase 2 – Platform Service:** TypeScript/JavaScript, Java, Go, C#/.NET profiles; single binary `aegis-server` (Axum), PostgreSQL job queue, Jira/GitLab connectors, Askama+htmx dashboard ([ADR 0003](docs/adr/0003-platform-service-architecture.md)).
+* **Phase 3 – Advanced Scaling:** SBFL fault localization, deep context compression (SWEzze/SaraCoder), language support beyond the initial 6 profiles.
 
 ---
 
-## 📖 7. Tài Liệu Tham Chiếu & Quy Ước
+## 📖 7. References & Conventions
 
-* [Proposal Dự Án](docs/design/00-proposal.md) (Tài liệu định hướng chuẩn cao nhất)
-* [Chi Tiết Kỹ Thuật](docs/design/01-architecture-detail.md) (Đặc tả kỹ thuật phần lõi Phase 1)
-* [Các Quyết Định Kiến Trúc (ADRs)](docs/adr/)
-* [Quy Ước Phát Triển & Issue Workflow](CLAUDE.md) (Quy định nhánh, commit và pre-PR checks)
+* [Project Proposal](docs/design/00-proposal.md) (Foundational vision and requirements)
+* [Technical Architecture Specification](docs/design/01-architecture-detail.md) (Phase 1 core specification)
+* [Architectural Decision Records (ADRs)](docs/adr/)
+* [Development Conventions & Workflow](CLAUDE.md) (Branching, commit conventions, and pre-PR checks)
