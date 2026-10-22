@@ -4,7 +4,7 @@
 //! aegis run   --config config/poc.toml --issue scrapy/scrapy#6123
 //! aegis run   --config config/poc.toml --issue-file issue.md --id local-1
 //! aegis batch --config config/poc.toml --issues issues.txt
-//! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …]
+//! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …] [--no-pr]
 //! aegis eval  --config config/poc.toml --set eval/issues --replay --no-pr
 //! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
 //! aegis report --config config/poc.toml [--set eval/issues]
@@ -16,7 +16,8 @@
 //!
 //! `--replay` is the dry run of #104: no model, each issue's upstream fix
 //! written through the tools, runs `<id>-dry<n>` in their own ledger.
-//! `--no-pr` stops where the PR would be opened.
+//! `--no-pr` stops where the PR would be opened, with or without `--replay`
+//! (#111); the fork token is then not needed.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -107,8 +108,10 @@ fn parse_issue_ref(text: &str) -> Result<(String, String, u64), String> {
 
 type Run = Platform<Provider, JsonFileLedger>;
 
-async fn platform(config_path: &Path) -> Result<Run, String> {
-    let config = RunConfig::load(config_path).map_err(|e| e.to_string())?;
+/// The model's platform; no fork token unless PRs are opened.
+async fn platform(config_path: &Path, open_prs: bool) -> Result<Run, String> {
+    let mut config = RunConfig::load(config_path).map_err(|e| e.to_string())?;
+    config.run.open_prs = open_prs;
     let provider = Provider::from_config(&config.provider)
         .await
         .map_err(|e| e.to_string())?;
@@ -117,7 +120,11 @@ async fn platform(config_path: &Path) -> Result<Run, String> {
     finish_platform(config, provider, store, github_token)
 }
 
+/// Empty when the run opens no PR: nothing then talks to the fork.
 fn fork_token(config: &RunConfig) -> Result<String, String> {
+    if !config.run.open_prs {
+        return Ok(String::new());
+    }
     let token_env = &config.repo.fork.token_env;
     std::env::var(token_env).map_err(|_| format!("set {token_env} to a token for the fork"))
 }
@@ -130,11 +137,7 @@ fn replay_platform(
 ) -> Result<Platform<ReplayProvider, JsonFileLedger>, String> {
     let mut config = RunConfig::load(config_path).map_err(|e| e.to_string())?;
     config.run.open_prs = open_prs;
-    let github_token = if open_prs {
-        fork_token(&config)?
-    } else {
-        String::new()
-    };
+    let github_token = fork_token(&config)?;
     let store = JsonFileLedger::new(config.run.state_dir.join("ledger-replay"));
     finish_platform(config, ReplayProvider::default(), store, github_token)
 }
@@ -221,6 +224,15 @@ fn line(report: &IssueReport) -> String {
     )
 }
 
+/// `--replay` and `--no-pr` only change how `eval` ends; `run` and `batch`
+/// always open their PR.
+fn check_flags(args: &Args) -> Result<(), String> {
+    if (args.replay || args.no_pr) && args.command != "eval" {
+        return Err("--replay and --no-pr are for `aegis eval`".into());
+    }
+    Ok(())
+}
+
 async fn main_inner(mut args: Args) -> Result<bool, String> {
     if args.command == "help" {
         banner::print_help();
@@ -243,11 +255,9 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         println!("{text}");
         return Ok(true);
     }
+    check_flags(&args)?;
     let config = args.config.as_deref().ok_or("--config is required")?;
-    if args.replay || args.no_pr {
-        if args.command != "eval" || !args.replay {
-            return Err("--replay and --no-pr are for `aegis eval --replay`".into());
-        }
+    if args.replay {
         let run = Arc::new(replay_platform(config, !args.no_pr)?);
         return eval(&run, &args, &cancel_on_ctrl_c(), "dry", |run, issue| {
             let replay = Replay::of(issue, &run.config.repo.path).map_err(|e| e.to_string())?;
@@ -256,7 +266,7 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         })
         .await;
     }
-    let run = Arc::new(platform(config).await?);
+    let run = Arc::new(platform(config, !args.no_pr).await?);
     banner::print_dashboard(
         &config.display().to_string(),
         &run.config.repo.key,
@@ -415,6 +425,19 @@ mod tests {
         assert_eq!(args.command, "run");
         assert_eq!(args.issue.as_deref(), Some("a/b#1"));
         assert!(parse_args(["run", "--bogus"].into_iter().map(String::from)).is_err());
+    }
+
+    #[test]
+    fn no_pr_is_for_eval_with_or_without_replay() {
+        let check =
+            |argv: &[&str]| check_flags(&parse_args(argv.iter().map(|s| s.to_string())).unwrap());
+        assert!(check(&["eval", "--no-pr"]).is_ok());
+        assert!(check(&["eval", "--replay"]).is_ok());
+        assert!(check(&["eval", "--replay", "--no-pr"]).is_ok());
+        assert!(check(&["eval"]).is_ok());
+        for bad in [["run", "--no-pr"], ["batch", "--replay"]] {
+            assert!(check(&bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
