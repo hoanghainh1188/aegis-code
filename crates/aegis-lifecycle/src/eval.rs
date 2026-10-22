@@ -22,9 +22,16 @@ pub struct EvalIssue {
     pub title: String,
     pub base_commit: String,
     pub fix_commit: String,
+    /// What the fix changes besides tests; the dry run (#104) writes them.
+    #[serde(default)]
+    pub source_files: Vec<String>,
     #[serde(default)]
     pub test_files: Vec<String>,
     pub hidden_tests: Vec<String>,
+    /// Hidden tests that fail in the sandbox with the upstream fix too,
+    /// as the dry run found them (#104).
+    #[serde(default)]
+    pub hidden_known_failures: Vec<String>,
     #[serde(default)]
     pub body: String,
 }
@@ -83,11 +90,16 @@ pub fn hidden_command(template: &[String], tests: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The first `<id>-r<n>` the ledger has not seen, so a rerun never reuses
-/// a finished record.
-pub async fn next_run_id<S: LedgerStore>(store: &S, id: &str) -> Result<String, LifecycleError> {
+/// The first `<id>-<mark><n>` the ledger has not seen, so a rerun never
+/// reuses a finished record. Runs with a model are `r`, dry runs `dry`
+/// (#104), so their job dirs never meet.
+pub async fn next_run_id<S: LedgerStore>(
+    store: &S,
+    id: &str,
+    mark: &str,
+) -> Result<String, LifecycleError> {
     for n in 1.. {
-        let run = format!("{id}-r{n}");
+        let run = format!("{id}-{mark}{n}");
         let issue = IssueId::parse(run.clone())?;
         if store.events(&issue).await?.is_empty() {
             return Ok(run);
@@ -119,6 +131,7 @@ impl EvalIssue {
                 fix_commit: self.fix_commit.clone(),
                 test_files: self.test_files.clone(),
                 command: hidden_command(template, &self.hidden_tests),
+                known_failures: self.hidden_known_failures.clone(),
             }),
         })
     }

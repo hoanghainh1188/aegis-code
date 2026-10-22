@@ -44,6 +44,10 @@ pub struct RunSection {
     /// Open PRs as drafts; a person marks them ready.
     #[serde(default = "default_true")]
     pub draft_prs: bool,
+    /// Push and open the PR once the gate passes. Off for dry runs (#104):
+    /// the run ends where the PR would be opened, hidden tests included.
+    #[serde(default = "default_true")]
+    pub open_prs: bool,
     /// Run the gate in the profile's container image (#5), not on the
     /// machine.
     #[serde(default)]

@@ -6,20 +6,24 @@
 //! the same steps move into the sandbox container with #5. Sonar is
 //! reported as not configured until it has a server.
 
+mod build_cache;
 mod command;
 mod deps;
 mod egress;
 mod error;
 mod failures;
+mod findings;
 mod gate;
 mod git;
 mod integrity;
 mod report;
 mod sandbox;
 
+pub use build_cache::BuildCache;
 pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner};
 pub use egress::{Egress, EgressSession};
 pub use error::GateError;
+pub use failures::{DID_NOT_FINISH, failing_tests, failing_tests_with};
 pub use gate::{FetchStep, GateRequest, Repro, run_gate};
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus};
 pub use sandbox::{Sandbox, WORKDIR};

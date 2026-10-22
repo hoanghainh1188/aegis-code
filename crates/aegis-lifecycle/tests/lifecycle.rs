@@ -13,7 +13,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use aegis_lang::Profiles;
 use aegis_ledger::{IssueId, MemoryLedger, Outcome, PriceTable};
-use aegis_lifecycle::{IssueInput, IssueReport, Platform, RunConfig, run_issue};
+use aegis_lifecycle::{
+    IssueInput, IssueReport, Platform, Replay, ReplayProvider, RunConfig, run_issue,
+};
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, StopReason, Usage,
 };
@@ -684,8 +686,10 @@ fn eval_issue(scratch: &Scratch) -> aegis_lifecycle::EvalIssue {
         title: issue().title,
         base_commit: base,
         fix_commit: rev(&["rev-parse", "HEAD"]),
+        source_files: vec!["src/lib.rs".into()],
         test_files: vec!["tests/hidden.rs".into()],
         hidden_tests: vec!["hidden_fourth_item".into()],
+        hidden_known_failures: vec![],
         body: issue().body,
     }
 }
@@ -710,7 +714,7 @@ async fn an_eval_run_works_from_the_issue_base_and_passes_the_hidden_tests() {
     let server = github().await;
     let model = Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]);
     let p = platform(eval_config(&scratch, &server.uri()), model);
-    let run_id = aegis_lifecycle::next_run_id(&p.store, &eval.id)
+    let run_id = aegis_lifecycle::next_run_id(&p.store, &eval.id, "r")
         .await
         .unwrap();
     assert_eq!(run_id, "fixture-7-r1");
@@ -749,7 +753,7 @@ async fn an_eval_run_works_from_the_issue_base_and_passes_the_hidden_tests() {
     }
     // The next run of the same issue gets a new id.
     assert_eq!(
-        aegis_lifecycle::next_run_id(&p.store, &eval.id)
+        aegis_lifecycle::next_run_id(&p.store, &eval.id, "r")
             .await
             .unwrap(),
         "fixture-7-r2"
@@ -786,4 +790,74 @@ async fn a_patch_that_passes_the_gate_can_still_fail_the_hidden_tests() {
         .record(&IssueId::parse("fixture-7-r1").unwrap())
         .unwrap();
     assert_eq!(record.hidden_tests_passed, Some(false));
+    // What failed is kept for the dry run's `hidden_known_failures`.
+    let listed = aegis_lifecycle::job_dir(&p.config, "fixture-7-r1").join("hidden-failures.txt");
+    assert_eq!(
+        std::fs::read_to_string(listed).unwrap(),
+        "hidden::hidden_fourth_item\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hidden_tests_known_to_fail_with_the_real_fix_are_not_held_against_the_agent() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let eval = aegis_lifecycle::EvalIssue {
+        hidden_known_failures: vec!["hidden::hidden_fourth_item".into()],
+        ..eval_issue(&scratch)
+    };
+    let server = github().await;
+    // The same wrong patch: the only hidden test failing is a known one.
+    let wrong = call(
+        "t2",
+        "edit",
+        json!({"file": "src/lib.rs", "from": 24, "to": 27,
+               "content": "        self.items.push(price);\n        if self.items.len() > MAX_ITEMS {\n            return Err(CartError::Full);\n        }"}),
+    );
+    let model = Scripted::new(vec![create_repro("t1"), wrong, fixed_answer()], vec![]);
+    let p = platform(eval_config(&scratch, &server.uri()), model);
+
+    let job = eval.job(&p.config, "fixture-7-r1").unwrap();
+    let report = run_issue(Arc::clone(&p), job, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.hidden_tests_passed, Some(true), "{report:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dry_run_replays_the_upstream_fix_without_a_model_or_a_pr() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let eval = eval_issue(&scratch);
+    let mut config = eval_config(&scratch, "http://127.0.0.1:1");
+    config.run.open_prs = false;
+    let p = Arc::new(Platform {
+        config,
+        provider: ReplayProvider::default(),
+        store: MemoryLedger::new(),
+        prices: PriceTable::from_toml(PRICES).unwrap(),
+        profiles: Profiles::builtin().unwrap(),
+        github_token: String::new(),
+    });
+    p.provider
+        .start(Replay::of(&eval, &p.config.repo.path).unwrap());
+    let run_id = aegis_lifecycle::next_run_id(&p.store, &eval.id, "dry")
+        .await
+        .unwrap();
+    assert_eq!(run_id, "fixture-7-dry1");
+
+    let job = eval.job(&p.config, &run_id).unwrap();
+    let report = run_issue(Arc::clone(&p), job, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(report.pr_url, None);
+    assert_eq!(report.reason.as_deref(), Some("dry run: no PR opened"));
+    assert_eq!(report.hidden_tests_passed, Some(true));
+    assert_eq!(report.cost_usd, 0.0);
+    assert_eq!(fork_refs(&scratch), "", "nothing was pushed");
 }

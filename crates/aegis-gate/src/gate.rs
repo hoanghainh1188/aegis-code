@@ -15,9 +15,11 @@ use std::time::Duration;
 
 use aegis_lang::{Placeholder, ResolvedProfile, SkipReason, Step};
 
+use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner};
 use crate::egress::Egress;
-use crate::failures::failing_tests;
+use crate::failures::failing_tests_with;
+use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, tail};
@@ -56,6 +58,9 @@ pub struct GateRequest<'a> {
     /// Fetch the dependencies of a patch that changed them, once they pass
     /// the check (#66). Needs `sandbox`.
     pub fetch: Option<FetchStep>,
+    /// Where the repo and the base copy start their build directories
+    /// from; only the base copy refreshes it.
+    pub build_cache: Option<BuildCache>,
 }
 
 /// The profile's fetch command and where it may go.
@@ -154,7 +159,11 @@ impl Run<'_> {
     fn base_tree(&mut self) -> Result<&BaseTree, GateError> {
         if self.base_tree.is_none() {
             let path = self.work.join("base");
-            self.base_tree = Some(BaseTree::create(self.req.repo, &self.base, &path)?);
+            let tree = BaseTree::create(self.req.repo, &self.base, &path)?;
+            if let Some(cache) = &self.req.build_cache {
+                cache.seed(tree.path())?;
+            }
+            self.base_tree = Some(tree);
         }
         Ok(self.base_tree.as_ref().expect("just created"))
     }
@@ -172,23 +181,52 @@ impl Run<'_> {
             .run(argv, dir, &self.log(log), &[("TMPDIR", &tmp)])
     }
 
-    /// Format, lint, typecheck: the command must exit 0.
-    fn simple(&self, name: StepName, step: &Step) -> Result<StepReport, GateError> {
+    /// Format, lint, typecheck: the command exits 0, or it fails on the
+    /// base revision too and the patch adds no finding in the files it
+    /// changed ("no new warnings", design §6.1; #104).
+    fn simple(&mut self, name: StepName, step: &Step) -> Result<StepReport, GateError> {
         let command = match step {
             Step::Skipped(reason) => return Ok(StepReport::skipped(name, skip_of(*reason))),
             Step::Run(c) => c,
         };
-        let ran = self.run_in(&command.render(&[])?, false, name.id())?;
-        Ok(match ran.exit {
-            Exit::Cancelled => StepReport::skipped(name, Skip::Cancelled),
-            e if e.success() => report(name, StepStatus::Passed, &[&ran], String::new()),
-            e => report(
-                name,
-                StepStatus::Failed,
-                &[&ran],
-                format!("{}:\n{}", exit_text(e), tail(&ran.log)),
-            ),
-        })
+        let argv = command.render(&[])?;
+        let ran = self.run_in(&argv, false, name.id())?;
+        let failed = |ran: &[&Ran], why: String| report(name, StepStatus::Failed, ran, why);
+        match ran.exit {
+            Exit::Cancelled => return Ok(StepReport::skipped(name, Skip::Cancelled)),
+            e if e.success() => {
+                return Ok(report(name, StepStatus::Passed, &[&ran], String::new()));
+            }
+            Exit::Code(_) => {}
+            e => {
+                return Ok(failed(
+                    &[&ran],
+                    format!("{}:\n{}", exit_text(e), tail(&ran.log)),
+                ));
+            }
+        }
+        self.base_tree()?;
+        let base = self.run_in(&argv, true, &format!("{}-base", name.id()))?;
+        let both = [&ran, &base];
+        match base.exit {
+            Exit::Cancelled => return Ok(StepReport::skipped(name, Skip::Cancelled)),
+            Exit::Code(c) if c != 0 => {}
+            _ => {
+                let why = format!("{}:\n{}", exit_text(ran.exit), tail(&ran.log));
+                return Ok(failed(&both, why));
+            }
+        }
+        let changed: Vec<String> = self.changes.iter().map(|c| c.path.clone()).collect();
+        let new = new_findings(&read_log(&ran.log), &read_log(&base.log), &changed);
+        if new.is_empty() {
+            return Ok(report(name, StepStatus::Passed, &both, String::new()));
+        }
+        let why = format!(
+            "new findings in the changed files (the base revision fails too, without these):\n{}\n\n{}",
+            new.join("\n"),
+            tail(&ran.log)
+        );
+        Ok(failed(&both, why))
     }
 
     fn dependencies(&self) -> Result<StepReport, GateError> {
@@ -292,6 +330,7 @@ impl Run<'_> {
         }
         let base = base?;
         let ran = [&patched, &base];
+        let harness = self.req.profile.gate.harness.as_ref();
         let failed_on_base = match (base.exit, self.req.profile.gate.test_output) {
             (Exit::Cancelled, _) => return Ok(StepReport::skipped(name, Skip::Cancelled)),
             (Exit::TimedOut, _) => {
@@ -300,7 +339,7 @@ impl Run<'_> {
             }
             (e, _) if e.success() => false,
             // The test itself must fail there, not the build around it.
-            (_, Some(format)) => failing_tests(format, &read_log(&base.log))
+            (_, Some(format)) => failing_tests_with(format, harness, &read_log(&base.log))
                 .iter()
                 .any(|id| is_test(id, &repro.test)),
             (e, None) => matches!(e, Exit::Code(_)),
@@ -353,7 +392,8 @@ impl Run<'_> {
                 ),
             );
         };
-        let read = |ran: &Ran| failing_tests(format, &read_log(&ran.log));
+        let harness = self.req.profile.gate.harness.as_ref();
+        let read = |ran: &Ran| failing_tests_with(format, harness, &read_log(&ran.log));
         let failing = read(&patched);
         if failing.is_empty() {
             return fail(
@@ -394,13 +434,35 @@ impl Run<'_> {
             );
             return Ok(report(name, StepStatus::Passed, &[&patched, &base], detail));
         }
+        // A test that fails once and passes on the next run is flaky, not
+        // broken by the patch (#104): only failures of both runs count.
+        let again = self.run_in(&argv, false, "test-rerun")?;
+        if again.exit == Exit::Cancelled {
+            return Ok(StepReport::skipped(name, Skip::Cancelled));
+        }
+        let failing_again = if again.exit.success() {
+            BTreeSet::new()
+        } else {
+            read(&again)
+        };
+        let (broken, flaky): (BTreeSet<String>, BTreeSet<String>) =
+            new.into_iter().partition(|t| failing_again.contains(t));
+        let ran = [&patched, &base, &again];
+        if broken.is_empty() {
+            let detail = format!(
+                "{} tests failed once and passed when run again (flaky):\n{}",
+                flaky.len(),
+                list(&flaky)
+            );
+            return Ok(report(name, StepStatus::Passed, &ran, detail));
+        }
         fail(
-            &[&patched, &base],
+            &ran,
             format!(
                 "{} tests fail that pass on the base revision:\n{}\n\n{}",
-                new.len(),
-                list(&new),
-                tail(&patched.log)
+                broken.len(),
+                list(&broken),
+                tail(&again.log)
             ),
         )
     }
@@ -421,20 +483,21 @@ impl Run<'_> {
             std::fs::remove_file(p).map_err(|e| GateError::io(p, &e))?;
         }
         let ran = self.run_in(&command.render(&[])?, false, name.id())?;
+        let failed = |why: String| report(name, StepStatus::Failed, &[&ran], why);
         Ok(match (ran.exit, &path) {
             (Exit::Cancelled, _) => StepReport::skipped(name, Skip::Cancelled),
-            (e, _) if !e.success() => report(
-                name,
-                StepStatus::Failed,
-                &[&ran],
-                format!("{}:\n{}", exit_text(e), tail(&ran.log)),
-            ),
-            (_, Some(p)) if !p.exists() => report(
-                name,
-                StepStatus::Failed,
-                &[&ran],
-                format!("no coverage report at `{}`", p.display()),
-            ),
+            (e @ (Exit::TimedOut | Exit::Signal), _) => {
+                failed(format!("{}:\n{}", exit_text(e), tail(&ran.log)))
+            }
+            (e, Some(p)) if !p.exists() => failed(format!(
+                "no coverage report at `{}` ({}):\n{}",
+                p.display(),
+                exit_text(e),
+                tail(&ran.log)
+            )),
+            (e, None) if !e.success() => failed(format!("{}:\n{}", exit_text(e), tail(&ran.log))),
+            // The coverage run also runs the tests; their failures were
+            // judged against the base by the test step (#104).
             _ => report(name, StepStatus::Passed, &[&ran], String::new()),
         })
     }
@@ -520,6 +583,9 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         ignored,
         snapshot,
     };
+    if let Some(cache) = &req.build_cache {
+        cache.seed(req.repo)?;
+    }
     let mut steps = Vec::new();
     let mut stop: Option<Skip> = None;
     for name in StepName::ALL {
@@ -537,6 +603,10 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
             _ => None,
         };
         steps.push(step);
+    }
+    if let (Some(cache), Some(base)) = (&req.build_cache, &run.base_tree) {
+        // Upstream code only; a failed refresh costs time, not correctness.
+        let _ = cache.refresh_from(base.path());
     }
     let base = run.base.clone();
     Ok(GateReport { steps, tree, base })

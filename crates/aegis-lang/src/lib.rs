@@ -33,7 +33,8 @@ pub use profile::{
     TestOutput, glob_match,
 };
 pub use resolve::{
-    GateOverrides, GatePlan, ProfileOverrides, ResolvedProfile, SkipReason, Step, StepOverride,
+    CustomHarness, GateOverrides, GatePlan, ProfileOverrides, ResolvedProfile, SkipReason, Step,
+    StepOverride,
 };
 pub use symbols::{Symbol, SymbolKind, has_symbol_query, symbols, symbols_in};
 pub use syntax::{MAX_SOURCE_BYTES, SyntaxError, has_grammar, syntax_errors, syntax_errors_in};

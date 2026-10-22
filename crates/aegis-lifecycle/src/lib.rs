@@ -17,6 +17,7 @@ mod issue;
 mod job;
 mod light;
 mod publish;
+mod replay;
 mod run;
 
 pub use answer::{FinalAnswer, Status, parse_answer};
@@ -27,4 +28,5 @@ pub use config::{
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};
+pub use replay::{Replay, ReplayProvider};
 pub use run::{IssueReport, Platform, job_dir, run_issue};

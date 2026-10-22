@@ -174,7 +174,7 @@ fn write_formatted(
     let Some(command) = command else {
         return Ok(Ok(text.to_owned()));
     };
-    let result = formatter::run(command, ws.root(), &ws.display(path));
+    let result = formatter::run(command, ws.root(), &ws.display(path), ws.format_container());
     let rejection = match result {
         Ok(Ok(())) => return ws.read_named_text(path).map(Ok),
         Ok(Err(Failure::Exit { code, message })) => Rejection::Formatter { code, message },

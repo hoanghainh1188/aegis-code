@@ -22,7 +22,9 @@ lint = ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings
 repro_test = ["cargo", "test", "--workspace", "--", "--exact", "{test}"]
 test = ["cargo", "test", "--workspace", "--no-fail-fast"]
 test_output = "libtest"
-coverage = ["cargo", "llvm-cov", "--workspace", "--lcov", "--output-path", "lcov.info"]
+# --ignore-run-fail: the report is written even when a test fails; the test
+# step has judged the failures against the base already (#104).
+coverage = ["cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--lcov", "--output-path", "lcov.info"]
 
 [coverage]
 format = "lcov"

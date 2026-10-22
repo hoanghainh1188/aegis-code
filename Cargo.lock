@@ -9,6 +9,7 @@ dependencies = [
  "aegis-lang",
  "aegis-orchestrator",
  "aegis-provider",
+ "libc",
  "regex",
  "rmcp",
  "serde",
@@ -37,6 +38,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-lang",
  "libc",
+ "regex",
  "thiserror",
  "toml",
 ]
@@ -45,6 +47,7 @@ dependencies = [
 name = "aegis-lang"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "roxmltree",
  "serde",
  "serde_json",
