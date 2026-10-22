@@ -29,7 +29,7 @@ pub use secrets::{MARKER as REDACTED_MARKER, Redacted, redact};
 pub use server::AciServer;
 pub use summary::{load_or_create_summary, module_summary};
 pub use viewer::{WINDOW, Window};
-pub use workspace::Workspace;
+pub use workspace::{FormatContainer, Workspace};
 
 /// The tools of one agent session on one repo; `open` and the scroll tools
 /// share the file being viewed.
@@ -45,6 +45,14 @@ impl Aci {
             workspace: Workspace::new(root, profile)?,
             viewer: viewer::Viewer::default(),
         })
+    }
+
+    /// Runs the profile's formatter in `container` (see [`FormatContainer`]).
+    pub fn with_format_container(self, container: FormatContainer) -> Self {
+        Self {
+            workspace: self.workspace.with_format_container(container),
+            ..self
+        }
     }
 
     pub fn workspace(&self) -> &Workspace {

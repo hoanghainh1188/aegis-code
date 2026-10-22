@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    CancelToken, Egress, FetchStep, GateReport, GateRequest, Runner, Sandbox, StepName, StepStatus,
-    WORKDIR, run_gate,
+    BuildCache, CancelToken, Egress, FetchStep, GateReport, GateRequest, Runner, Sandbox, StepName,
+    StepStatus, WORKDIR, failing_tests_with, run_gate,
 };
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
@@ -185,6 +185,7 @@ where
 
 fn tool_specs(
     cfg: &RunConfig,
+    profile: &ResolvedProfile,
     tree: &Path,
     job_dir: &Path,
 ) -> Result<Vec<McpServerSpec>, LifecycleError> {
@@ -192,17 +193,34 @@ fn tool_specs(
     let text = toml::to_string(&cfg.repo.overrides)
         .map_err(|e| LifecycleError::Config(format!("repo.overrides: {e}")))?;
     std::fs::write(&overrides, text).map_err(|e| LifecycleError::io(&overrides, &e))?;
+    let mut args = vec![
+        "--repo".into(),
+        tree.display().to_string(),
+        "--language".into(),
+        cfg.repo.language.id().into(),
+        "--overrides".into(),
+        overrides.display().to_string(),
+    ];
+    // With the gate in containers, `edit`'s formatter runs there too: the
+    // machine needs no language tools (#104).
+    if let Some(sandbox) = sandbox(cfg, profile)? {
+        args.extend([
+            "--format-image".into(),
+            profile.image.clone(),
+            "--docker".into(),
+            cfg.run.docker.clone(),
+        ]);
+        for (host, inside) in &sandbox.mounts {
+            args.extend([
+                "--format-mount".into(),
+                format!("{}:{inside}", host.display()),
+            ]);
+        }
+    }
     let mut specs = vec![McpServerSpec {
         name: "aci".into(),
         program: cfg.aci_bin().display().to_string(),
-        args: vec![
-            "--repo".into(),
-            tree.display().to_string(),
-            "--language".into(),
-            cfg.repo.language.id().into(),
-            "--overrides".into(),
-            overrides.display().to_string(),
-        ],
+        args,
         cwd: None,
         env: vec![],
         tools: None,
@@ -258,7 +276,7 @@ where
     if let Some(why) = fetch_base(cfg, profile, tree.path(), &job_dir, cancel).await? {
         return Ok(Ending::stop(Outcome::StoppedSteps, why));
     }
-    let tools = McpTools::connect(&tool_specs(cfg, tree.path(), &job_dir)?).await?;
+    let tools = McpTools::connect(&tool_specs(cfg, profile, tree.path(), &job_dir)?).await?;
     let session = Session::new(
         system,
         Message::user_text(first_message),
@@ -295,6 +313,31 @@ fn model_spec(cfg: &RunConfig, tier: Tier) -> ModelSpec {
 /// The gate's container: the profile's image, and each cache directory
 /// outside the tree kept on the host under `state_dir/cache/<repo>/`, so it
 /// survives between jobs.
+/// The repo's build cache (`target/` for Rust), when the gate runs in a
+/// sandbox: every container sees the tree at the same `/work`, so a build
+/// started from another tree's directory is reused (#104). Directories the
+/// fetch step fills (a venv) are mounted, not cached here.
+fn build_cache(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<BuildCache> {
+    let deps = &profile.profile.dependencies.dirs;
+    let dirs: Vec<String> = profile
+        .profile
+        .sandbox
+        .cache_dirs
+        .iter()
+        .filter(|d| !d.starts_with('/') && !deps.contains(d))
+        .cloned()
+        .collect();
+    (cfg.run.sandbox && !dirs.is_empty()).then(|| BuildCache {
+        dir: cfg
+            .run
+            .state_dir
+            .join("cache")
+            .join(&cfg.repo.key)
+            .join("build"),
+        dirs,
+    })
+}
+
 /// The profile's fetch command and its egress, when the gate runs in a
 /// sandbox (#66). On the machine there is no cache to fetch into.
 fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
@@ -427,9 +470,21 @@ async fn gate(
         Duration::from_secs(cfg.run.step_timeout_s),
         sandbox,
         fetch_step(cfg, profile),
+        build_cache(cfg, profile),
     );
     let report = tokio::task::spawn_blocking(move || {
-        let (repo, base, profile, allowed, repro, work_dir, step_timeout, sandbox, fetch) = owned;
+        let (
+            repo,
+            base,
+            profile,
+            allowed,
+            repro,
+            work_dir,
+            step_timeout,
+            sandbox,
+            fetch,
+            build_cache,
+        ) = owned;
         run_gate(&GateRequest {
             repo: &repo,
             base: &base,
@@ -442,6 +497,7 @@ async fn gate(
             cancel: gate_cancel,
             sandbox,
             fetch,
+            build_cache,
         })
     })
     .await
@@ -547,7 +603,29 @@ async fn run_hidden(
     let ran = tokio::task::spawn_blocking(move || runner.run(&argv, &tree, &log, &[]))
         .await
         .map_err(|e| LifecycleError::Config(format!("the hidden tests did not finish: {e}")))??;
-    Ok((ran.exit.success(), ran.duration))
+    if ran.exit.success() {
+        return Ok((true, ran.duration));
+    }
+    // What failed, kept for the dry run to fill `hidden_known_failures`.
+    let failing = profile
+        .gate
+        .test_output
+        .map(|format| {
+            failing_tests_with(
+                format,
+                profile.gate.harness.as_ref(),
+                &std::fs::read_to_string(&ran.log).unwrap_or_default(),
+            )
+        })
+        .unwrap_or_default();
+    let listed = job_dir.join("hidden-failures.txt");
+    let text: String = failing.iter().map(|t| format!("{t}\n")).collect();
+    std::fs::write(&listed, text).map_err(|e| LifecycleError::io(&listed, &e))?;
+    let known = &hidden.known_failures;
+    let passed = matches!(ran.exit, aegis_gate::Exit::Code(_))
+        && !failing.is_empty()
+        && failing.iter().all(|t| known.contains(t));
+    Ok((passed, ran.duration))
 }
 
 fn gate_run(report: &GateReport, took: Duration) -> GateRun {
@@ -691,17 +769,23 @@ where
         if report.passed() {
             let (_, decision) = router.observe(Signal::GatePassed);
             debug_assert_eq!(decision, Decision::OpenPr);
-            let published =
-                publish(platform, ledger, profile, tree, issue, &answer, &report).await?;
+            let pr_url = if cfg.run.open_prs {
+                let published =
+                    publish(platform, ledger, profile, tree, issue, &answer, &report).await?;
+                Some(published.url)
+            } else {
+                None
+            };
             if let Some(hidden) = &issue.hidden {
                 let (passed, took) =
                     run_hidden(cfg, profile, tree, job_dir, hidden, cancel).await?;
                 ledger.hidden_tests(passed, took.as_secs_f64()).await?;
             }
+            // With `open_prs` off the run ends where it would open the PR.
             return Ok(Ending {
                 outcome: Outcome::PrOpened,
-                reason: None,
-                pr_url: Some(published.url),
+                reason: pr_url.is_none().then(|| "dry run: no PR opened".to_owned()),
+                pr_url,
             });
         }
 

@@ -43,6 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cancel: CancelToken::new(),
         sandbox: None,
         fetch: None,
+        build_cache: None,
     })?;
     println!("{report}");
     if !report.passed() {

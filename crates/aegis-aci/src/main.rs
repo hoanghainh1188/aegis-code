@@ -1,22 +1,28 @@
-//! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]`:
-//! serves the ACI tools for one repo over MCP on stdin/stdout. The
-//! overrides file holds the language part of the repo's `RepoConfig`
-//! ([`ProfileOverrides`]).
+//! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
+//! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]`:
+//! serves the ACI tools for
+//! one repo over MCP on stdin/stdout. The overrides file holds the language
+//! part of the repo's `RepoConfig` ([`ProfileOverrides`]). With
+//! `--format-image` the formatter of `edit` runs in that image.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use aegis_aci::{Aci, AciServer};
+use aegis_aci::{Aci, AciServer, FormatContainer};
 use aegis_lang::{Language, ProfileOverrides, Profiles};
 use rmcp::ServiceExt;
 
-const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]";
+const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
+       [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]";
 
 #[derive(Debug, Default)]
 struct Args {
     repo: Option<PathBuf>,
     language: Option<String>,
     overrides: Option<PathBuf>,
+    format_image: Option<String>,
+    docker: Option<String>,
+    format_mounts: Vec<(String, String)>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -27,6 +33,17 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--repo" => parsed.repo = Some(value()?.into()),
             "--language" => parsed.language = Some(value()?),
             "--overrides" => parsed.overrides = Some(value()?.into()),
+            "--format-image" => parsed.format_image = Some(value()?),
+            "--docker" => parsed.docker = Some(value()?),
+            "--format-mount" => {
+                let text = value()?;
+                let (host, inside) = text
+                    .rsplit_once(':')
+                    .ok_or_else(|| format!("--format-mount `{text}` is not <host>:<path>"))?;
+                parsed
+                    .format_mounts
+                    .push((host.to_owned(), inside.to_owned()));
+            }
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -52,7 +69,16 @@ fn build(args: Args) -> Result<Aci, String> {
     let profile = Profiles::builtin()
         .and_then(|p| p.get(language)?.resolve(&overrides))
         .map_err(|e| e.to_string())?;
-    Aci::new(&repo, profile).map_err(|e| e.to_string())
+    let aci = Aci::new(&repo, profile).map_err(|e| e.to_string())?;
+    Ok(match (args.format_image, args.docker) {
+        (Some(image), docker) => aci.with_format_container(FormatContainer {
+            docker: docker.unwrap_or_else(|| "docker".into()),
+            image,
+            mounts: args.format_mounts,
+        }),
+        (None, Some(_)) => return Err("--docker needs --format-image".into()),
+        (None, None) => aci,
+    })
 }
 
 #[tokio::main]

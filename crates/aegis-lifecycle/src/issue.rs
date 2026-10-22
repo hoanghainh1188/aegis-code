@@ -28,6 +28,10 @@ pub struct HiddenTests {
     pub test_files: Vec<String>,
     /// The command that runs them, placeholders already filled.
     pub command: Vec<String>,
+    /// Hidden tests that fail in the sandbox even with the real fix (they
+    /// need the network): found by the dry run (#104), not held against
+    /// the agent.
+    pub known_failures: Vec<String>,
 }
 
 /// Longest issue body sent to the model; the rest is cut.

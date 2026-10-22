@@ -48,6 +48,7 @@ Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` 
 | `fix_commit`, `fix_pr` | Bản sửa của người |
 | `source_files`, `test_files` | File mà bản sửa đổi |
 | `hidden_tests` | typst: tên test trong `tests/suite`; scrapy: file test cho pytest. Agent không bao giờ thấy |
+| `hidden_known_failures` | Tuỳ chọn. Hidden test fail trong sandbox kể cả với bản sửa thật (cần mạng, cần chương trình ngoài). Lượt chạy khô (#104) tìm ra; không tính là lỗi của agent |
 | `body` | Nội dung issue lúc lấy về, để lần chạy nào cũng đọc đúng một văn bản |
 | `[verified]` | Kết quả của `verify.py` |
 

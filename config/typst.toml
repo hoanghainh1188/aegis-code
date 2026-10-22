@@ -1,0 +1,69 @@
+# The PoC's Rust repo (#2, #4): typst, same models and budget as poc.toml.
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 3600
+# Gate steps in the Rust image, --network none (#5); dependencies come from
+# the fetch step behind the egress proxy (#66), build dirs from the repo's
+# cache (#104).
+sandbox = true
+
+# The Docker VM has 8 GB: typst's test binaries do not link with 12 jobs
+# and full debug info (#5).
+[run.sandbox_env]
+CARGO_BUILD_JOBS = "2"
+CARGO_PROFILE_DEV_DEBUG = "line-tables-only"
+CARGO_PROFILE_TEST_DEBUG = "line-tables-only"
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 20
+
+[repo]
+path = ".workspace/repos/typst"
+language = "rust"
+base = "main"
+key = "typst"
+# Hidden tests of eval runs (#98): eval/issues lists typst's by name, run by
+# its own test harness.
+hidden_test = ["cargo", "test", "--workspace", "--test", "tests", "--", "{tests_regex}"]
+
+# typst takes hayagriva, codex and typst-assets from git on GitHub: the
+# fetch step's proxy must let github.com through too (#66). The gate's
+# dependency check still refuses a git source the patch adds.
+# typst is edition 2024 (let chains); rustfmt on one file does not read it
+# from Cargo.toml.
+[repo.overrides]
+fetch_hosts = ["github.com"]
+edit_format = ["rustfmt", "--edition", "2024", "{file}"]
+
+# typst's suite (`tests`) has its own harness: `❌ <name> (<file>:<line>)`
+# per failing test, then `<n> passed, <n> failed, <n> skipped`. Read on top
+# of libtest, or a broken suite test looks like the base's (#104).
+[repo.overrides.gate]
+test_failure = '^❌ (\S+)'
+test_finished = '^\d+ passed, \d+ failed, \d+ skipped$'
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "typst"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

@@ -104,6 +104,7 @@ fn gated(scratch: &Scratch, test_command: &str) -> (PathBuf, PathBuf, GateReport
         cancel: CancelToken::new(),
         sandbox: None,
         fetch: None,
+        build_cache: None,
     })
     .unwrap();
     (repo, fork, report)

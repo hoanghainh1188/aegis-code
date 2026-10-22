@@ -28,6 +28,20 @@ pub struct GateOverrides {
     pub coverage: Option<StepOverride>,
     /// Output format of an overridden `test` command.
     pub test_output: Option<TestOutput>,
+    /// A test binary with its own harness (typst's `tests`): a regex whose
+    /// one group is a failing test's name, read on top of `test_output`.
+    pub test_failure: Option<String>,
+    /// The line such a harness ends with, so its binary counts as finished
+    /// without libtest's `test result:`. Needs `test_failure`.
+    pub test_finished: Option<String>,
+}
+
+/// How a test binary with its own harness reports (#104), checked when the
+/// profile is resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomHarness {
+    pub failure: String,
+    pub finished: Option<String>,
 }
 
 /// The language part of `RepoConfig` (#16, #24).
@@ -79,6 +93,7 @@ pub struct GatePlan {
     pub test: CommandTemplate,
     pub coverage: Step,
     pub test_output: Option<TestOutput>,
+    pub harness: Option<CustomHarness>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,7 +132,13 @@ impl Profile {
                 Some(StepOverride::Run(_)) => o.test_output,
                 _ => o.test_output.or(self.gate.test_output),
             },
+            harness: harness(o).map_err(invalid)?,
         };
+        if gate.harness.is_some() && gate.test_output.is_none() {
+            return Err(invalid(
+                "gate.test_failure reads on top of a test_output".into(),
+            ));
+        }
         check_gate(&GateSteps {
             format: gate.format.command().cloned(),
             lint: gate.lint.command().cloned(),
@@ -187,6 +208,28 @@ impl Profile {
     }
 }
 
+fn harness(o: &GateOverrides) -> Result<Option<CustomHarness>, String> {
+    let Some(failure) = &o.test_failure else {
+        return match o.test_finished {
+            Some(_) => Err("gate.test_finished needs gate.test_failure".into()),
+            None => Ok(None),
+        };
+    };
+    let groups = regex::Regex::new(failure)
+        .map_err(|e| format!("gate.test_failure: {e}"))?
+        .captures_len();
+    if groups != 2 {
+        return Err("gate.test_failure needs exactly one group: the test name".into());
+    }
+    if let Some(finished) = &o.test_finished {
+        regex::Regex::new(finished).map_err(|e| format!("gate.test_finished: {e}"))?;
+    }
+    Ok(Some(CustomHarness {
+        failure: failure.clone(),
+        finished: o.test_finished.clone(),
+    }))
+}
+
 /// A DNS name the proxy can match exactly: letters, digits, `-` and `.`.
 fn plain_host(host: &str) -> bool {
     !host.is_empty()
@@ -218,7 +261,7 @@ impl ResolvedProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CoverageFormat, Profiles};
+    use crate::{CoverageFormat, Language, Profiles, TestOutput};
 
     fn python() -> Profile {
         Profiles::builtin()
@@ -283,6 +326,33 @@ mod tests {
             let text = format!("fetch_hosts = [{bad:?}]");
             let err = python().resolve(&overrides(&text)).unwrap_err();
             assert!(err.to_string().contains("not a host name"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_custom_harness_is_read_on_top_of_libtest() {
+        let rust = Profiles::builtin()
+            .unwrap()
+            .get(Language::Rust)
+            .unwrap()
+            .clone();
+        let r = rust
+            .resolve(&overrides(
+                r#"
+                [gate]
+                test_failure = '^❌ (\S+) \('
+                test_finished = '^\d+ passed, \d+ failed'
+                "#,
+            ))
+            .unwrap();
+        assert_eq!(r.gate.test_output, Some(TestOutput::Libtest));
+        assert_eq!(r.gate.harness.unwrap().failure, r"^❌ (\S+) \(");
+        for bad in [
+            "[gate]\ntest_failure = '^❌ \\S+'",
+            "[gate]\ntest_failure = '('",
+            "[gate]\ntest_finished = 'x'",
+        ] {
+            assert!(rust.resolve(&overrides(bad)).is_err(), "{bad}");
         }
     }
 

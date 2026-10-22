@@ -21,10 +21,24 @@ fn plain_inside(path: &Path) -> bool {
     })
 }
 
+/// Where `edit.format` runs when the gate runs in containers (#104): the
+/// profile's image, so the machine needs no formatter and the repo's
+/// formatter config runs with no network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormatContainer {
+    pub docker: String,
+    pub image: String,
+    /// (host directory, path in the container), read-only: the gate's
+    /// dependency dirs, so the formatter is the version the gate checks
+    /// with (a repo's pinned one in its `.venv`).
+    pub mounts: Vec<(String, String)>,
+}
+
 #[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
     profile: ResolvedProfile,
+    container: Option<FormatContainer>,
     /// Directory names skipped when walking: `.git` and the profile's
     /// build caches (`target`, `.venv`…).
     skipped_dirs: Vec<String>,
@@ -52,8 +66,21 @@ impl Workspace {
         Ok(Self {
             root,
             profile,
+            container: None,
             skipped_dirs,
         })
+    }
+
+    /// Runs `edit.format` in `container` instead of on the machine.
+    pub fn with_format_container(self, container: FormatContainer) -> Self {
+        Self {
+            container: Some(container),
+            ..self
+        }
+    }
+
+    pub fn format_container(&self) -> Option<&FormatContainer> {
+        self.container.as_ref()
     }
 
     pub fn root(&self) -> &Path {

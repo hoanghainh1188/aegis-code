@@ -21,9 +21,14 @@ state_dir = ".workspace/state"
 pricing = "config/pricing.toml"
 step_timeout_s = 1800
 # Gate steps in docker/<profile> images, --network none (#5); dependencies
-# come from the fetch step behind the egress proxy (#66). To be turned on
-# with the first real-model run (#6).
-sandbox = false
+# come from the fetch step behind the egress proxy (#66).
+sandbox = true
+
+# tldextract (scrapy's cookie middleware) downloads the Public Suffix List on
+# first use; with no network it logs a warning into whichever test runs
+# first (#104). Empty: no download, its bundled list.
+[run.sandbox_env]
+TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS = ""
 
 [budget]
 max_cost_usd = 4.0
@@ -36,17 +41,44 @@ language = "python"
 base = "master"
 key = "scrapy"
 # Hidden tests of eval runs (#98): eval/issues lists scrapy's as files.
-hidden_test = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "{tests}"]
+# Without the tests that need the Internet, as in the gate.
+hidden_test = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not requires_internet", "{tests}"]
 
-# scrapy has no uv.lock: the fetch step (#66) installs it and its test
-# requirements (#2) into .venv through the egress proxy.
+# scrapy has no uv.lock: the fetch step (#66) installs it into .venv with
+# the test requirements its tox.ini lists at that commit, those of the
+# extra-deps env included (Pillow, boto3…: tests that need them are skipped
+# otherwise), through the egress proxy. `#` starts a comment in tox's deps;
+# `{[testenv]deps}` refers to another section and is read from it.
+# Also the ruff that .pre-commit-config.yaml pins at that commit: .venv/bin
+# comes first on PATH, so format and lint use it, not the image's newer one,
+# whose new rules the repo never ran (#104).
 [repo.overrides]
-fetch = ["sh", "-c", "uv venv -q --allow-existing .venv && uv pip install -q --python .venv/bin/python -e . attrs coverage pexpect psutil pyftpdlib pygments pytest pytest-cov pytest-rerunfailures pytest-timeout pytest-xdist sybil pytest-twisted"]
+fetch = ["sh", "-c", """uv venv -q --allow-existing .venv && python3 -c '
+import configparser
+c = configparser.ConfigParser(interpolation=None)
+c.read("tox.ini")
+envs = ["test-requirements", "testenv", "testenv:extra-deps"]
+lines = [l for e in envs if e in c for l in c[e].get("deps", "").splitlines()]
+deps = (l.split("#")[0].strip() for l in lines)
+deps = {d for d in deps if d and not d.startswith("{")}
+import re
+hooks = open(".pre-commit-config.yaml").read()
+ruff = re.search(r"ruff-pre-commit\\s*\\n\\s*rev:\\s*v?([\\w.]+)", hooks)
+if ruff:
+    deps.add("ruff==" + ruff.group(1))
+print("\\n".join(sorted(deps)))
+' > .venv/test-requirements.txt && uv pip install -q --python .venv/bin/python -e . -r .venv/test-requirements.txt"""]
 
 # From the measurements of #2: pytest in parallel, the venv's python on PATH.
+# Tests marked `requires_internet` cannot pass with no network and wait for
+# DNS to time out (10 minutes a run, #104), so they are left out.
 [repo.overrides.gate]
-test = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "scrapy", "tests", "--doctest-modules"]
+test = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "-m", "not requires_internet", "scrapy", "tests", "--doctest-modules"]
 test_output = "pytest"
+coverage = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "-m", "not requires_internet", "--cov=scrapy", "--cov-report=xml:coverage.xml", "scrapy", "tests", "--doctest-modules"]
+[repo.overrides.coverage]
+format = "cobertura"
+path = "coverage.xml"
 
 [repo.fork]
 owner = "hoanghainh1188"

@@ -5,6 +5,7 @@
 //! aegis run   --config config/poc.toml --issue-file issue.md --id local-1
 //! aegis batch --config config/poc.toml --issues issues.txt
 //! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …]
+//! aegis eval  --config config/poc.toml --set eval/issues --replay --no-pr
 //! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
 //! aegis report --config config/poc.toml [--set eval/issues]
 //! ```
@@ -12,15 +13,22 @@
 //! `issues.txt` has one `owner/repo#number` per line (`#` comments allowed).
 //! The fork token is read from the variable named by `repo.fork.token_env`.
 //! Ctrl-C cancels the running issue; its ledger keeps what was spent.
+//!
+//! `--replay` is the dry run of #104: no model, each issue's upstream fix
+//! written through the tools, runs `<id>-dry<n>` in their own ledger.
+//! `--no-pr` stops where the PR would be opened.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use aegis_lang::Profiles;
-use aegis_ledger::{JsonFileLedger, PriceTable};
-use aegis_lifecycle::{IssueInput, IssueReport, LifecycleError, Platform, RunConfig, run_issue};
-use aegis_provider::Provider;
+use aegis_ledger::{JsonFileLedger, Outcome, PriceTable};
+use aegis_lifecycle::{
+    EvalIssue, IssueInput, IssueReport, LifecycleError, Platform, Replay, ReplayProvider,
+    RunConfig, run_issue,
+};
+use aegis_provider::{ModelProvider, Provider};
 
 mod banner;
 mod kpi;
@@ -29,7 +37,7 @@ use tokio_util::sync::CancellationToken;
 const USAGE: &str = "usage:
   aegis run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
   aegis batch --config <file> --issues <file>
-  aegis eval  --config <file> --set <dir> [--only <id>]...
+  aegis eval  --config <file> --set <dir> [--only <id>]... [--replay] [--no-pr]
   aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
   aegis report --config <file> [--set <dir>]";
@@ -44,6 +52,8 @@ struct Args {
     issues: Option<PathBuf>,
     set: Option<PathBuf>,
     only: Vec<String>,
+    replay: bool,
+    no_pr: bool,
     review: kpi::ReviewArgs,
 }
 
@@ -69,6 +79,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--issues" => parsed.issues = Some(value()?.into()),
             "--set" => parsed.set = Some(value()?.into()),
             "--only" => parsed.only.push(value()?),
+            "--replay" => parsed.replay = true,
+            "--no-pr" => parsed.no_pr = true,
             "--verdict" => parsed.review.verdict = Some(value()?),
             "--lines" => parsed.review.lines = Some(value()?),
             "--minutes" => parsed.review.minutes = Some(value()?),
@@ -100,6 +112,39 @@ async fn platform(config_path: &Path) -> Result<Run, String> {
     let provider = Provider::from_config(&config.provider)
         .await
         .map_err(|e| e.to_string())?;
+    let github_token = fork_token(&config)?;
+    let store = JsonFileLedger::new(config.run.state_dir.join("ledger"));
+    finish_platform(config, provider, store, github_token)
+}
+
+fn fork_token(config: &RunConfig) -> Result<String, String> {
+    let token_env = &config.repo.fork.token_env;
+    std::env::var(token_env).map_err(|_| format!("set {token_env} to a token for the fork"))
+}
+
+/// The dry run's platform: the replay provider, its own ledger, and no
+/// fork token unless PRs are opened.
+fn replay_platform(
+    config_path: &Path,
+    open_prs: bool,
+) -> Result<Platform<ReplayProvider, JsonFileLedger>, String> {
+    let mut config = RunConfig::load(config_path).map_err(|e| e.to_string())?;
+    config.run.open_prs = open_prs;
+    let github_token = if open_prs {
+        fork_token(&config)?
+    } else {
+        String::new()
+    };
+    let store = JsonFileLedger::new(config.run.state_dir.join("ledger-replay"));
+    finish_platform(config, ReplayProvider::default(), store, github_token)
+}
+
+fn finish_platform<P>(
+    config: RunConfig,
+    provider: P,
+    store: JsonFileLedger,
+    github_token: String,
+) -> Result<Platform<P, JsonFileLedger>, String> {
     let prices = PriceTable::load(&config.run.pricing).map_err(|e| e.to_string())?;
     for model in [
         &config.models.light,
@@ -108,11 +153,8 @@ async fn platform(config_path: &Path) -> Result<Run, String> {
     ] {
         prices.price(&model.id).map_err(|e| e.to_string())?;
     }
-    let token_env = &config.repo.fork.token_env;
-    let github_token =
-        std::env::var(token_env).map_err(|_| format!("set {token_env} to a token for the fork"))?;
     Ok(Platform {
-        store: JsonFileLedger::new(config.run.state_dir.join("ledger")),
+        store,
         config,
         provider,
         prices,
@@ -135,11 +177,14 @@ async fn fetch(run: &Run, issue_ref: &str) -> Result<IssueInput, String> {
 }
 
 /// Runs one issue in its own task.
-async fn one(
-    run: &Arc<Run>,
+async fn one<P>(
+    run: &Arc<Platform<P, JsonFileLedger>>,
     issue: IssueInput,
     cancel: &CancellationToken,
-) -> Result<IssueReport, LifecycleError> {
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+{
     tokio::spawn(run_issue(Arc::clone(run), issue, cancel.clone()))
         .await
         .unwrap_or_else(|e| Err(LifecycleError::Config(format!("the job panicked: {e}"))))
@@ -199,6 +244,18 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         return Ok(true);
     }
     let config = args.config.as_deref().ok_or("--config is required")?;
+    if args.replay || args.no_pr {
+        if args.command != "eval" || !args.replay {
+            return Err("--replay and --no-pr are for `aegis eval --replay`".into());
+        }
+        let run = Arc::new(replay_platform(config, !args.no_pr)?);
+        return eval(&run, &args, &cancel_on_ctrl_c(), "dry", |run, issue| {
+            let replay = Replay::of(issue, &run.config.repo.path).map_err(|e| e.to_string())?;
+            run.provider.start(replay);
+            Ok(())
+        })
+        .await;
+    }
     let run = Arc::new(platform(config).await?);
     banner::print_dashboard(
         &config.display().to_string(),
@@ -252,7 +309,7 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
             }
             Ok(all_ok)
         }
-        "eval" => eval(&run, &args, &cancel).await,
+        "eval" => eval(&run, &args, &cancel, "r", |_, _| Ok(())).await,
         other => Err(format!("unknown command `{other}`")),
     }
 }
@@ -260,7 +317,16 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
 /// Runs the set's issues of the configured repo's language, one after the
 /// other, each under a new run id. Exit code 0 when every run opened a PR
 /// whose hidden tests pass.
-async fn eval(run: &Arc<Run>, args: &Args, cancel: &CancellationToken) -> Result<bool, String> {
+async fn eval<P>(
+    run: &Arc<Platform<P, JsonFileLedger>>,
+    args: &Args,
+    cancel: &CancellationToken,
+    mark: &str,
+    before: impl Fn(&Platform<P, JsonFileLedger>, &EvalIssue) -> Result<(), String>,
+) -> Result<bool, String>
+where
+    P: ModelProvider + Send + Sync + 'static,
+{
     let dir = args.set.as_deref().ok_or("--set is required")?;
     let set = aegis_lifecycle::load_set(dir).map_err(|e| e.to_string())?;
     let language = run.config.repo.language;
@@ -278,13 +344,18 @@ async fn eval(run: &Arc<Run>, args: &Args, cancel: &CancellationToken) -> Result
             println!("{}\tskipped\tcancelled", issue.id);
             continue;
         }
-        let run_id = aegis_lifecycle::next_run_id(&run.store, &issue.id)
+        let run_id = aegis_lifecycle::next_run_id(&run.store, &issue.id, mark)
             .await
             .map_err(|e| e.to_string())?;
         let job = issue.job(&run.config, &run_id).map_err(|e| e.to_string())?;
+        if let Err(e) = before(run, issue) {
+            println!("{run_id}\terror\t{e}");
+            continue;
+        }
         match one(run, job, cancel).await {
             Ok(report) => {
-                prs += usize::from(report.pr_url.is_some());
+                // Dry runs without PRs end at the same point.
+                prs += usize::from(report.outcome == Outcome::PrOpened);
                 hidden_ok += usize::from(report.hidden_tests_passed == Some(true));
                 println!("{}", line(&report));
             }
@@ -292,7 +363,7 @@ async fn eval(run: &Arc<Run>, args: &Args, cancel: &CancellationToken) -> Result
         }
     }
     println!(
-        "{} issues: {prs} PRs opened, {hidden_ok} with hidden tests passing",
+        "{} issues: {prs} passed the gate, {hidden_ok} with hidden tests passing",
         picked.len()
     );
     Ok(hidden_ok == picked.len())
@@ -360,5 +431,26 @@ mod tests {
             .resolve(&config.repo.profile_overrides().unwrap())
             .unwrap();
         assert!(profile.gate.test.argv().contains(&"-n".to_owned()));
+    }
+
+    #[test]
+    fn the_typst_config_loads() {
+        let config =
+            RunConfig::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/typst.toml"))
+                .unwrap();
+        assert_eq!(config.repo.key, "typst");
+        assert_eq!(config.run.sandbox_env["CARGO_BUILD_JOBS"], "2");
+        let profile = Profiles::builtin()
+            .unwrap()
+            .get(config.repo.language)
+            .unwrap()
+            .resolve(&config.repo.profile_overrides().unwrap())
+            .unwrap();
+        assert!(profile.fetch_hosts.contains(&"github.com".to_owned()));
+        assert_eq!(
+            profile.edit_format.command().unwrap().argv()[..3],
+            ["rustfmt", "--edition", "2024"]
+        );
+        assert!(profile.gate.harness.is_some());
     }
 }

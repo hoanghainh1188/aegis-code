@@ -5,13 +5,68 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use aegis_lang::{CommandTemplate, Placeholder};
 
-use crate::AciError;
+use crate::{AciError, FormatContainer};
+
+/// Where the tree is mounted in the format container, as in the gate's.
+const WORKDIR: &str = "/work";
+
+#[cfg(unix)]
+fn host_user() -> String {
+    // SAFETY: getuid and getgid cannot fail and touch no memory.
+    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+    format!("{uid}:{gid}")
+}
+
+#[cfg(not(unix))]
+fn host_user() -> String {
+    "1000:1000".to_owned()
+}
+
+/// `argv` in a fresh container of the profile's image with `root` as
+/// `/work`: no network, no capabilities, as the host user (so the file
+/// keeps its owner). Returns the command and the container's name.
+fn in_container(c: &FormatContainer, root: &Path, argv: &[String]) -> (Vec<String>, String) {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let name = format!(
+        "aegis-format-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let mut out: Vec<String> = [
+        c.docker.as_str(),
+        "run",
+        "--rm",
+        "--name",
+        &name,
+        "--network",
+        "none",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        &host_user(),
+        "--volume",
+        &format!("{}:{WORKDIR}", root.display()),
+        "--workdir",
+        WORKDIR,
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    for (host, inside) in &c.mounts {
+        out.extend(["--volume".to_owned(), format!("{host}:{inside}:ro")]);
+    }
+    out.push(c.image.clone());
+    out.extend(argv.iter().cloned());
+    (out, name)
+}
 
 /// A formatter still running after this long is killed.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(60);
@@ -77,9 +132,17 @@ pub(crate) fn run(
     command: &CommandTemplate,
     root: &Path,
     relative: &str,
+    container: Option<&FormatContainer>,
 ) -> Result<Result<(), Failure>, AciError> {
     let argument = format!("./{relative}");
     let argv = command.render(&[(Placeholder::File, &argument)])?;
+    let (argv, name) = match container {
+        Some(c) => {
+            let (argv, name) = in_container(c, root, &argv);
+            (argv, Some((c.docker.clone(), name)))
+        }
+        None => (argv, None),
+    };
     let program = argv[0].clone();
     let mut child = Command::new(&program)
         .args(&argv[1..])
@@ -95,6 +158,14 @@ pub(crate) fn run(
     let stdout = capture(child.stdout.take());
     let stderr = capture(child.stderr.take());
     let Some(status) = wait(&mut child, &program)? else {
+        // Killing the client leaves the container running.
+        if let Some((docker, name)) = &name {
+            let _ = Command::new(docker)
+                .args(["kill", name])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
         return Ok(Err(Failure::TimedOut));
     };
     if status.success() {

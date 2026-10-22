@@ -159,6 +159,7 @@ impl Repo {
             cancel,
             sandbox,
             fetch: None,
+            build_cache: None,
         })
         .unwrap()
     }

@@ -90,13 +90,15 @@ fn steps_have_no_network_and_no_host_environment() {
         return;
     }
     // `cargo test` sets CARGO_PKG_NAME here; the container must not see
-    // it, must see the request's env, and must not reach any host.
+    // it, must see the request's env, and must not reach any host. The
+    // probe only connects in the repo (the base copy has no `.git`), so a
+    // failure there is not excused by the base failing too.
     let probe = profile(
         Language::Rust,
         r#"
 [gate]
 format = ["sh", "-c", "test -z \"$CARGO_PKG_NAME\" && test \"$GATE_X\" = 1 && test \"$(id -u)\" != 0"]
-lint = ["bash", "-c", "exec 3<>/dev/tcp/1.1.1.1/443 && echo connected"]
+lint = ["bash", "-c", "test ! -e .git || exec 3<>/dev/tcp/1.1.1.1/443 && echo connected"]
 test = ["true"]
 coverage = false
 repro_test = false

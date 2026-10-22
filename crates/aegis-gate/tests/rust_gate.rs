@@ -104,7 +104,8 @@ fn a_new_test_failure_fails_the_gate_and_names_the_test() {
         "{}",
         test.detail
     );
-    assert_eq!(test.logs.len(), 2);
+    // The patched run, the base run, and the rerun that rules out a flake.
+    assert_eq!(test.logs.len(), 3);
     assert_eq!(
         report.step(StepName::Coverage).unwrap().status,
         StepStatus::Skipped(Skip::NotRun)
@@ -309,6 +310,7 @@ fn work_dir_inside_the_repo_is_refused() {
         cancel: CancelToken::new(),
         sandbox: None,
         fetch: None,
+        build_cache: None,
     })
     .unwrap_err();
     assert!(
@@ -490,6 +492,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             cancel: CancelToken::new(),
             sandbox: None,
             fetch: None,
+            build_cache: None,
         })
     };
     #[cfg(unix)]
@@ -505,10 +508,35 @@ fn repro_files_must_be_regular_files_in_the_repo() {
 }
 
 #[test]
+fn a_test_that_fails_once_and_then_passes_is_flaky_not_broken() {
+    // Fails the first time in the repo only (the base copy has no `.git`);
+    // the marker lives in the step's TMPDIR, outside the tree.
+    let flaky = profile(
+        Language::Rust,
+        r#"
+[gate]
+format = ["true"]
+lint = ["true"]
+coverage = false
+test_output = "libtest"
+test = ["sh", "-c", "echo 'Running unittests src/lib.rs (target/debug/deps/fx-1)'; if [ -e .git ] && [ ! -e \"$TMPDIR/ran\" ]; then touch \"$TMPDIR/ran\"; echo 'test flaky_one ... FAILED'; echo 'test result: FAILED. 0 passed; 1 failed'; exit 1; fi; echo 'test flaky_one ... ok'; echo 'test result: ok. 1 passed; 0 failed'"]
+"#,
+    );
+    let repo = Repo::new("rust", &[]);
+    let report = repo.gate(&flaky, None);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Passed, "{report}");
+    assert!(test.detail.contains("flaky"), "{}", test.detail);
+    assert!(test.detail.contains("fx::flaky_one"), "{}", test.detail);
+}
+
+#[test]
 fn the_log_keeps_the_order_of_stdout_and_stderr() {
     let mixed = profile(
         Language::Rust,
-        "[gate]\nformat = [\"sh\", \"-c\", \"for i in 1 2 3 4 5; do echo out$i; echo err$i >&2; done; exit 1\"]\n",
+        // Fails only in the repo, not in the base copy (no `.git` there),
+        // so the step reports the repo's log.
+        "[gate]\nformat = [\"sh\", \"-c\", \"for i in 1 2 3 4 5; do echo out$i; echo err$i >&2; done; test ! -e .git\"]\n",
     );
     let repo = Repo::new("rust", &[]);
     let report = repo.gate(&mixed, None);
