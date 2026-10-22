@@ -2,7 +2,9 @@
 # Nguồn: https://platform.claude.com/docs/en/about-claude/pricing
 # Đổi giá chỉ sửa file này; ledger không có giá nào trong code.
 #
-# Chưa tính: giá cao hơn của Haiku 5.5 khi prompt trên 100k token.
+# Haiku 5.5 tính giá theo độ dài prompt (#54): lượt gọi có prompt trên
+# 100.000 token (input + cache read + cache write) trả giá `long_prompt` cho
+# cả lượt, kể cả output. Hệ số cache giữ nguyên.
 
 # Phụ phí khi chạy qua Bedrock với profile vùng `jp.` (design §5.4).
 # Nhân vào toàn bộ chi phí của lượt gọi.
@@ -34,3 +36,8 @@ cache_read_multiplier = 0.05
 input = 0.10
 output = 0.50
 cache_read_multiplier = 0.10
+
+[models.claude-haiku-5-5.long_prompt]
+over_tokens = 100000
+input = 0.50
+output = 2.50
