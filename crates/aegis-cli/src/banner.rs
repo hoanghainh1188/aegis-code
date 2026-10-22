@@ -47,10 +47,7 @@ pub fn print_help() {
             "run",
             "Solve a single issue from GitHub (owner/repo#123) or local file",
         ),
-        (
-            "batch",
-            "Process a list of issues sequentially from a file",
-        ),
+        ("batch", "Process a list of issues sequentially from a file"),
         (
             "eval",
             "Run evaluation benchmarks on test sets (supports --replay & --no-pr)",
@@ -59,10 +56,7 @@ pub fn print_help() {
             "review",
             "Record manual review verdicts and KPI metrics for a run",
         ),
-        (
-            "report",
-            "Display KPI report and benchmark statistics",
-        ),
+        ("report", "Display KPI report and benchmark statistics"),
     ];
 
     for (name, desc) in commands {
