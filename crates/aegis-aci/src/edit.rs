@@ -174,9 +174,22 @@ fn write_formatted(
     let Some(command) = command else {
         return Ok(Ok(text.to_owned()));
     };
-    let result = formatter::run(command, ws.root(), &ws.display(path), ws.format_container());
+    // A stdin formatter sees only this file's text; one given the path may
+    // follow it to others (rustfmt and `mod`, #88).
+    let input = profile.edit_stdin.then_some(text);
+    let result = formatter::run(
+        command,
+        ws.root(),
+        &ws.display(path),
+        ws.format_container(),
+        input,
+    );
     let rejection = match result {
-        Ok(Ok(())) => return ws.read_named_text(path).map(Ok),
+        Ok(Ok(None)) => return ws.read_named_text(path).map(Ok),
+        Ok(Ok(Some(formatted))) => {
+            write(path, &formatted)?;
+            return Ok(Ok(formatted));
+        }
         Ok(Err(Failure::Exit { code, message })) => Rejection::Formatter { code, message },
         Ok(Err(Failure::TimedOut)) => Rejection::Formatter {
             code: None,

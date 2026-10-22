@@ -77,6 +77,12 @@ pub struct Aci {
 pub struct Edit {
     /// Formatter run on the edited file, with `{file}`.
     pub format: Option<CommandTemplate>,
+    /// The formatter reads the file on stdin and prints it formatted on
+    /// stdout; `{file}` is then optional (a name hint). rustfmt given a
+    /// path also rewrites the `mod` files it declares; given stdin it
+    /// formats that file only (#88).
+    #[serde(default)]
+    pub stdin: bool,
 }
 
 /// Gate steps in order (Thiết kế §6.1). Only `test` is mandatory.
@@ -250,7 +256,12 @@ impl Profile {
             field("aci.lsp", c, &[], &[])?;
         }
         if let Some(c) = &self.edit.format {
-            field("edit.format", c, &[Placeholder::File], &[Placeholder::File])?;
+            let required: &[Placeholder] = if self.edit.stdin {
+                &[]
+            } else {
+                &[Placeholder::File]
+            };
+            field("edit.format", c, &[Placeholder::File], required)?;
         }
         check_gate(&self.gate)?;
         if self.gate.coverage.is_some() != self.coverage.is_some() {
@@ -720,7 +731,7 @@ mod tests {
             "gate.test",
         );
         rejects(
-            &t.replace("\"2021\", \"{file}\"", "\"2021\", \"{fiel}\""),
+            &t.replace("\"stdout\"]", "\"stdout\", \"{fiel}\"]"),
             "unknown placeholder",
         );
         rejects(

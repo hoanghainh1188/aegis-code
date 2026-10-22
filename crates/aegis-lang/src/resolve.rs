@@ -51,6 +51,10 @@ pub struct ProfileOverrides {
     #[serde(default)]
     pub gate: GateOverrides,
     pub edit_format: Option<StepOverride>,
+    /// Whether the repo's `edit_format` reads stdin (see `[edit] stdin`).
+    /// Without it an overridden command takes `{file}`, the profile's keeps
+    /// the profile's mode.
+    pub edit_stdin: Option<bool>,
     pub fetch: Option<StepOverride>,
     /// Hosts added to the profile's `fetch_hosts`, e.g. `github.com` for a
     /// repo with git dependencies.
@@ -101,6 +105,8 @@ pub struct ResolvedProfile {
     pub profile: Profile,
     pub gate: GatePlan,
     pub edit_format: Step,
+    /// `edit_format` reads the file on stdin and prints it on stdout.
+    pub edit_stdin: bool,
     pub fetch: Step,
     /// The profile's `fetch_hosts` and the repo's, in that order.
     pub fetch_hosts: Vec<String>,
@@ -166,8 +172,17 @@ impl Profile {
         };
 
         let edit_format = step(&self.edit.format, &overrides.edit_format).map_err(invalid)?;
+        let edit_stdin = match &overrides.edit_format {
+            Some(StepOverride::Run(_)) => overrides.edit_stdin.unwrap_or(false),
+            _ => overrides.edit_stdin.unwrap_or(self.edit.stdin),
+        };
         if let Some(c) = edit_format.command() {
-            c.check_placeholders(&[Placeholder::File], &[Placeholder::File])
+            let required: &[Placeholder] = if edit_stdin {
+                &[]
+            } else {
+                &[Placeholder::File]
+            };
+            c.check_placeholders(&[Placeholder::File], required)
                 .map_err(|e| invalid(format!("edit_format: {e}")))?;
         }
         let fetch = step(&self.dependencies.fetch, &overrides.fetch).map_err(invalid)?;
@@ -199,6 +214,7 @@ impl Profile {
             profile: self.clone(),
             gate,
             edit_format,
+            edit_stdin,
             fetch,
             fetch_hosts,
             audit,
@@ -330,6 +346,39 @@ mod tests {
     }
 
     #[test]
+    fn a_stdin_formatter_needs_no_file_and_an_override_names_its_mode() {
+        let rust = Profiles::builtin()
+            .unwrap()
+            .get(Language::Rust)
+            .unwrap()
+            .clone();
+        let r = rust.resolve(&ProfileOverrides::default()).unwrap();
+        assert!(r.edit_stdin);
+        assert_eq!(
+            r.edit_format.command().unwrap().argv(),
+            ["rustfmt", "--edition", "2021", "--emit", "stdout"]
+        );
+        // A repo's own command takes `{file}` unless it says it reads stdin.
+        let own = rust
+            .resolve(&overrides(r#"edit_format = ["rustfmt", "{file}"]"#))
+            .unwrap();
+        assert!(!own.edit_stdin);
+        let piped = rust
+            .resolve(&overrides(
+                r#"
+                edit_format = ["rustfmt", "--edition", "2024", "--emit", "stdout"]
+                edit_stdin = true
+                "#,
+            ))
+            .unwrap();
+        assert!(piped.edit_stdin);
+        assert!(
+            rust.resolve(&overrides(r#"edit_format = ["rustfmt"]"#))
+                .is_err()
+        );
+    }
+
+    #[test]
     fn a_custom_harness_is_read_on_top_of_libtest() {
         let rust = Profiles::builtin()
             .unwrap()
@@ -437,6 +486,10 @@ mod tests {
             ),
             ("[gate]\nlint = [\"ruff\", \"{test}\"]\n", "not allowed"),
             ("edit_format = [\"black\"]\n", "must contain `{file}`"),
+            (
+                "edit_format = [\"black\"]\nedit_stdin = false\n",
+                "must contain `{file}`",
+            ),
             ("image = \" \"\n", "image must not contain whitespace"),
             (
                 "image = \"--privileged\"\n",

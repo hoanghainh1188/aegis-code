@@ -47,10 +47,12 @@ hidden_test = ["cargo", "test", "--workspace", "--test", "tests", "--", "{tests_
 # fetch step's proxy must let github.com through too (#66). The gate's
 # dependency check still refuses a git source the patch adds.
 # typst is edition 2024 (let chains); rustfmt on one file does not read it
-# from Cargo.toml.
+# from Cargo.toml. On stdin, like the profile's, so it leaves `mod` files
+# alone (#88).
 [repo.overrides]
 fetch_hosts = ["github.com"]
-edit_format = ["rustfmt", "--edition", "2024", "{file}"]
+edit_format = ["rustfmt", "--edition", "2024", "--emit", "stdout"]
+edit_stdin = true
 
 # typst's suite (`tests`) has its own harness: `❌ <name> (<file>:<line>)`
 # per failing test, then `<n> passed, <n> failed, <n> skipped`. Read on top

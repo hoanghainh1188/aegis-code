@@ -451,6 +451,7 @@ mod tests {
             profile.edit_format.command().unwrap().argv()[..3],
             ["rustfmt", "--edition", "2024"]
         );
+        assert!(profile.edit_stdin);
         assert!(profile.gate.harness.is_some());
     }
 }

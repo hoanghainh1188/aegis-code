@@ -4,7 +4,9 @@
 
 mod common;
 
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use aegis_lang::{
     AllowList, CommandTemplate, Language, Placeholder, ProfileOverrides, Profiles, ResolvedProfile,
@@ -81,13 +83,15 @@ fn format_step_fails_on_unformatted_code() {
 }
 
 #[test]
-fn edit_format_formats_only_the_edited_file() {
+fn edit_format_formats_only_the_text_it_is_given() {
+    // The profile's formatter reads the file on stdin (#88): it cannot
+    // reach the `mod` files the text declares.
     let profile = rust();
+    assert!(profile.edit_stdin);
     let ws = Workspace::new("rust");
     let lib = ws.repo().join("src/lib.rs");
-    let messy = "pub fn   messy( a:u32 )->u32{a+1}\n";
-    std::fs::write(ws.repo().join("src/extra.rs"), messy).unwrap();
     let before_lib = std::fs::read_to_string(&lib).unwrap();
+    let messy = "mod lib;\npub fn   messy( a:u32 )->u32{a+1}\n";
 
     assert!(syntax_errors(Language::Rust, messy).unwrap().is_empty());
     let argv = profile
@@ -96,10 +100,26 @@ fn edit_format_formats_only_the_edited_file() {
         .unwrap()
         .render(&[(Placeholder::File, "src/extra.rs")])
         .unwrap();
-    ws.run_ok("edit.format", &argv);
+    let mut child = Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(ws.repo())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("rustfmt must be installed");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(messy.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
 
-    let formatted = std::fs::read_to_string(ws.repo().join("src/extra.rs")).unwrap();
-    assert_eq!(formatted, "pub fn messy(a: u32) -> u32 {\n    a + 1\n}\n");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "mod lib;\npub fn messy(a: u32) -> u32 {\n    a + 1\n}\n"
+    );
     assert_eq!(std::fs::read_to_string(&lib).unwrap(), before_lib);
 }
 
