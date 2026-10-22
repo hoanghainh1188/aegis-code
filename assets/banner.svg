@@ -43,13 +43,13 @@
   <rect x="2" y="2" width="846" height="196" rx="12" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="1.5" />
 
   <!-- ASCII Banner Art -->
-  <g transform="translate(145, 25)">
+  <g transform="translate(195, 25)">
     <text class="ascii">
-      <tspan x="0" y="22">    ___    ______ ____ _____ _____</tspan>
-      <tspan x="0" y="42">   /   |  / ____//  _// ___// ___/</tspan>
-      <tspan x="0" y="62">  / /| | / __/   / / / (_ //\__ \ </tspan>
-      <tspan x="0" y="82"> / ___ |/ /___ _/ / / /__//___/ / </tspan>
-      <tspan x="0" y="102">/_/  |_/_____//___/ \___//____/  </tspan>
+      <tspan x="0" y="22">    ___     ______   ______    ____   _____</tspan>
+      <tspan x="0" y="42">   /   |   / ____/  / ____/   /  _/  / ___/</tspan>
+      <tspan x="0" y="62">  / /| |  / __/    / / __     / /    \__ \ </tspan>
+      <tspan x="0" y="82"> / ___ | / /___   / /_/ /   _/ /    ___/ / </tspan>
+      <tspan x="0" y="102">/_/  |_|/_____/   \____/   /___/   /____/  </tspan>
     </text>
   </g>
 
