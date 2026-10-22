@@ -1,3 +1,12 @@
+```text
+    ___    ______ ____ _____ _____
+   /   |  / ____//  _// ___// ___/
+  / /| | / __/   / / / (_ //\__ \ 
+ / ___ |/ /___ _/ / / /__//___/ / 
+/_/  |_/_____//___/ \___//____/  
+ Autonomous Software Engineering Agent Platform
+```
+
 # Aegis Platform (`aegis-code`)
 
 > **Agentic Code Maintenance Platform:** Nền tảng tự động hóa bảo trì mã nguồn bằng AI Agent — tiếp nhận sự cố, phân tích ngữ cảnh, sinh bản vá an toàn và tạo Pull Request đã qua kiểm chứng nghiêm ngặt, chờ kỹ sư phê duyệt.
