@@ -115,8 +115,13 @@ fn exact_regex(names: &[&str]) -> String {
     format!("^({})$", escaped.join("|"))
 }
 
-/// Whether `id`, as read from test output, is the test named `test`.
+/// Whether `id`, as read from test output, is the test named `test`. A
+/// parametrized pytest case `<test>[<params>]` is one of its cases (#133).
 fn is_test(id: &str, test: &str) -> bool {
+    let id = match id.split_once('[') {
+        Some((name, _)) if id.ends_with(']') => name,
+        _ => id,
+    };
     id == test || id.ends_with(&format!("::{test}"))
 }
 
@@ -898,4 +903,32 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
     }
     let (tree, base) = (run.tree.clone(), run.base.clone());
     Ok(GateReport { steps, tree, base })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_test_is_matched_by_its_full_name_or_its_last_parts() {
+        let test = "tests/test_x.py::test_y";
+        assert!(is_test("tests/test_x.py::test_y", test));
+        assert!(is_test("tests/test_x.py::test_y", "test_y"));
+        assert!(is_test("tests/test_x.py::TestX::test_y", "TestX::test_y"));
+        assert!(!is_test("tests/test_x.py::test_y2", test));
+        assert!(!is_test("tests/test_x.py::test_y2", "test_y"));
+    }
+
+    #[test]
+    fn a_parametrized_case_is_one_of_its_cases() {
+        let test = "tests/test_x.py::test_y";
+        assert!(is_test(
+            "tests/test_x.py::test_y[http://u:80@h:80/p-x]",
+            test
+        ));
+        assert!(is_test("tests/test_x.py::test_y[a::b]", "test_y"));
+        assert!(!is_test("tests/test_x.py::test_y2[1]", test));
+        // Brackets that do not end the id are part of the name.
+        assert!(!is_test("tests/test_x.py::test_y[1]::more", test));
+    }
 }
