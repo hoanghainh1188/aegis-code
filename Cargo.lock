@@ -93,6 +93,8 @@ dependencies = [
  "aegis-pr",
  "aegis-provider",
  "aegis-router",
+ "aegis-sonar-batch",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",
@@ -162,6 +164,14 @@ dependencies = [
 [[package]]
 name = "aegis-sonar-batch"
 version = "0.1.0"
+dependencies = [
+ "aegis-gate",
+ "aegis-lang",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
 
 [[package]]
 name = "aho-corasick"

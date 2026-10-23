@@ -25,9 +25,11 @@ use aegis_orchestrator::{
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Decision, Router, Signal, Spent};
+use aegis_sonar_batch::{Author, commit_tree};
 use tokio_util::sync::CancellationToken;
 
 use crate::answer::{FinalAnswer, Status, parse_answer};
+use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_edits};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
@@ -72,20 +74,38 @@ pub struct IssueReport {
 }
 
 /// How the work on an issue ended, before the ledger closes it.
-struct Ending {
-    outcome: Outcome,
-    reason: Option<String>,
-    pr_url: Option<String>,
+pub(crate) struct Ending {
+    pub outcome: Outcome,
+    pub reason: Option<String>,
+    pub pr_url: Option<String>,
+    /// [`Finish::Keep`]: the commit of the tree the gate passed.
+    pub kept: Option<Kept>,
 }
 
 impl Ending {
-    fn stop(outcome: Outcome, reason: impl Into<String>) -> Self {
+    pub(crate) fn stop(outcome: Outcome, reason: impl Into<String>) -> Self {
         Self {
             outcome,
             reason: Some(reason.into()),
             pr_url: None,
+            kept: None,
         }
     }
+}
+
+/// A Sonar group's passing patch, committed on its base (#17).
+#[derive(Debug, Clone)]
+pub(crate) struct Kept {
+    pub commit: String,
+    pub answer: FinalAnswer,
+}
+
+/// What a passing gate leads to.
+pub(crate) enum Finish {
+    /// The PR (design §2 step 7).
+    Publish,
+    /// A commit in the clone, merged later with the batch's other groups.
+    Keep(Author),
 }
 
 /// Runs one issue. `cancel` is checked before every model call and stops a
@@ -169,18 +189,24 @@ where
             .await?;
     }
     ledger.classified(class.kind).await?;
-    if class.needs_sonar_batching() {
-        return Ok(Ending::stop(
-            Outcome::StoppedSteps,
-            "Sonar issues go through the batching step (#17)",
-        ));
-    }
     let profile = platform
         .profiles
         .get(cfg.repo.language)?
         .resolve(&cfg.repo.profile_overrides()?)?;
+    if class.needs_sonar_batching() {
+        return sonar_batch(platform, ledger, &profile, issue, cancel).await;
+    }
     let first = issue.first_message(&class.summary, class.has_repro_info);
-    work(platform, ledger, &profile, issue, first, cancel).await
+    work(
+        platform,
+        ledger,
+        &profile,
+        issue,
+        first,
+        &Finish::Publish,
+        cancel,
+    )
+    .await
 }
 
 fn tool_specs(
@@ -239,12 +265,13 @@ fn tool_specs(
 }
 
 /// Steps 2–10 on the job's own worktree.
-async fn work<P, S>(
+pub(crate) async fn work<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
     profile: &ResolvedProfile,
     issue: &IssueInput,
     first_message: String,
+    finish: &Finish,
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>
 where
@@ -259,14 +286,7 @@ where
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     let tree = Worktree::create(&cfg.repo.path, &base, &job_dir.join("repo"))?;
 
-    // BP2 is the same for every issue of the repo (design §4.4).
-    let clone = Workspace::new(&cfg.repo.path, profile.clone())?;
-    let map_path = cfg
-        .run
-        .state_dir
-        .join("maps")
-        .join(format!("{}.md", cfg.repo.key));
-    let map = load_or_create_summary(&clone, &map_path)?;
+    let map = module_map(cfg, profile)?;
     let system = system_blocks(&RepoPrompt {
         language_conventions: profile.profile.conventions(),
         repo_conventions: cfg.repo.conventions.as_deref(),
@@ -292,12 +312,28 @@ where
         tree.path(),
         &base,
         &job_dir,
+        finish,
         cancel,
     )
     .await;
     tools.shutdown().await;
     drop(tree);
     result
+}
+
+/// The repo's module map, made once and kept under the state dir. BP2 is
+/// the same for every issue of the repo (design §4.4).
+pub(crate) fn module_map(
+    cfg: &RunConfig,
+    profile: &ResolvedProfile,
+) -> Result<String, LifecycleError> {
+    let clone = Workspace::new(&cfg.repo.path, profile.clone())?;
+    let map_path = cfg
+        .run
+        .state_dir
+        .join("maps")
+        .join(format!("{}.md", cfg.repo.key));
+    Ok(load_or_create_summary(&clone, &map_path)?)
 }
 
 fn model_spec(cfg: &RunConfig, tier: Tier) -> ModelSpec {
@@ -340,7 +376,7 @@ fn build_cache(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<BuildCache>
 
 /// The Sonar step of the configuration, its scanner cache under the
 /// state dir, shared by the repo's jobs.
-fn sonar_step(cfg: &RunConfig) -> Result<Option<SonarStep>, LifecycleError> {
+pub(crate) fn sonar_step(cfg: &RunConfig) -> Result<Option<SonarStep>, LifecycleError> {
     let Some(sonar) = &cfg.sonar else {
         return Ok(None);
     };
@@ -449,7 +485,7 @@ fn allowed_packages(cfg: &RunConfig) -> Result<BTreeSet<String>, LifecycleError>
 
 /// The gate on the job's tree, off the async runtime; `cancel` stops it.
 #[allow(clippy::too_many_arguments)]
-async fn gate(
+pub(crate) async fn gate(
     cfg: &RunConfig,
     profile: &ResolvedProfile,
     tree: &Path,
@@ -650,7 +686,7 @@ async fn run_hidden(
     Ok((passed, ran.duration))
 }
 
-fn gate_run(report: &GateReport, took: Duration) -> GateRun {
+pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
     GateRun {
         passed: report.passed(),
         failed_step: report
@@ -674,6 +710,7 @@ async fn drive<P, S>(
     tree: &Path,
     base: &str,
     job_dir: &Path,
+    finish: &Finish,
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>
 where
@@ -791,6 +828,21 @@ where
         if report.passed() {
             let (_, decision) = router.observe(Signal::GatePassed);
             debug_assert_eq!(decision, Decision::OpenPr);
+            if let Finish::Keep(author) = finish {
+                let commit = commit_tree(
+                    &cfg.repo.path,
+                    &report.tree,
+                    &report.base,
+                    &format!("Sonar group {}", issue.id),
+                    author,
+                )?;
+                return Ok(Ending {
+                    outcome: Outcome::PrOpened,
+                    reason: None,
+                    pr_url: None,
+                    kept: Some(Kept { commit, answer }),
+                });
+            }
             let pr_url = if cfg.run.open_prs {
                 let published =
                     publish(platform, ledger, profile, tree, issue, &answer, &report).await?;
@@ -808,6 +860,7 @@ where
                 outcome: Outcome::PrOpened,
                 reason: pr_url.is_none().then(|| "no PR opened".to_owned()),
                 pr_url,
+                kept: None,
             });
         }
 

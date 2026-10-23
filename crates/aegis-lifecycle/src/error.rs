@@ -29,6 +29,9 @@ pub enum LifecycleError {
     Pr(#[from] aegis_pr::PrError),
 
     #[error(transparent)]
+    Batch(#[from] aegis_sonar_batch::BatchError),
+
+    #[error(transparent)]
     Tools(#[from] aegis_orchestrator::McpToolsError),
 
     #[error("I/O error on `{path}`: {message}")]

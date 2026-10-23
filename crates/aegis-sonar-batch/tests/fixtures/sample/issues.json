@@ -1,0 +1,64 @@
+{
+  "total": 5,
+  "p": 1,
+  "ps": 100,
+  "paging": {"pageIndex": 1, "pageSize": 100, "total": 5},
+  "issues": [
+    {
+      "key": "AX-load-open",
+      "rule": "python:S5713",
+      "severity": "MAJOR",
+      "component": "sample:pkg/store.py",
+      "line": 5,
+      "textRange": {"startLine": 5, "endLine": 5, "startOffset": 11, "endOffset": 21},
+      "flows": [],
+      "message": "Use a \"with\" statement so the file is closed."
+    },
+    {
+      "key": "AX-load-unused",
+      "rule": "python:S1481",
+      "severity": "MINOR",
+      "component": "sample:pkg/store.py",
+      "line": 6,
+      "textRange": {"startLine": 6, "endLine": 6, "startOffset": 4, "endOffset": 10},
+      "flows": [],
+      "message": "Remove the unused local variable \"unused\"."
+    },
+    {
+      "key": "AX-get-unused",
+      "rule": "python:S1481",
+      "severity": "MINOR",
+      "component": "sample:pkg/store.py",
+      "line": 19,
+      "textRange": {"startLine": 19, "endLine": 19, "startOffset": 8, "endOffset": 13},
+      "flows": [],
+      "message": "Remove the unused local variable \"value\"."
+    },
+    {
+      "key": "AX-save-path",
+      "rule": "pythonsecurity:S2083",
+      "severity": "BLOCKER",
+      "component": "sample:pkg/store.py",
+      "line": 12,
+      "textRange": {"startLine": 12, "endLine": 12, "startOffset": 9, "endOffset": 23},
+      "flows": [
+        {"locations": [
+          {"component": "sample:pkg/store.py", "textRange": {"startLine": 12, "endLine": 12}, "msg": "Sink: the path is opened."},
+          {"component": "sample:pkg/store.py", "textRange": {"startLine": 11, "endLine": 11}, "msg": "The path flows into \"tmp\"."},
+          {"component": "sample:pkg/store.py", "textRange": {"startLine": 10, "endLine": 10}, "msg": "Source: \"path\" comes from the caller."}
+        ]}
+      ],
+      "message": "Change this code to not construct the path from user-controlled data."
+    },
+    {
+      "key": "AX-shout-doc",
+      "rule": "python:S1720",
+      "severity": "INFO",
+      "component": "sample:pkg/util.py",
+      "line": 1,
+      "textRange": {"startLine": 1, "endLine": 1, "startOffset": 4, "endOffset": 9},
+      "flows": [],
+      "message": "Add a docstring to this function."
+    }
+  ]
+}

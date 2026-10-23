@@ -475,3 +475,49 @@ fn the_token_stays_out_of_debug_output() {
     let text = format!("{:?}", fx.step("https://sonarcloud.io"));
     assert!(!text.contains(TOKEN), "{text}");
 }
+
+#[test]
+fn reads_the_open_issues_page_by_page_with_their_flows() {
+    let server = Server::start();
+    let issue = |key: String| {
+        json!({"key": key, "rule": "rust:S1", "component": "proj:src/lib.rs", "line": 3,
+               "message": "m", "textRange": {"startLine": 3, "endLine": 4},
+               "flows": [{"locations": [{"component": "proj:src/a.rs",
+                   "textRange": {"startLine": 9, "endLine": 9}, "msg": "source"}]}]})
+    };
+    for page in 1..=2u32 {
+        let count = if page == 1 { api::MAX_ISSUES } else { 30 };
+        let issues: Vec<_> = (0..count).map(|i| issue(format!("K{page}-{i}"))).collect();
+        server.mount(
+            Mock::given(method("GET"))
+                .and(path("/api/issues/search"))
+                .and(query_param("componentKeys", "proj"))
+                .and(query_param("resolved", "false"))
+                .and(query_param("p", page.to_string().as_str()))
+                .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    json!({"paging": {"total": api::MAX_ISSUES + 30}, "issues": issues}),
+                )),
+        );
+    }
+    let fx = Fixture::new();
+    let step = fx.step(&server.mock.uri());
+
+    let (all, total) = open_issues(&step, 1000).unwrap();
+    assert_eq!(
+        (all.len(), total),
+        (api::MAX_ISSUES + 30, (api::MAX_ISSUES + 30) as u64)
+    );
+    assert_eq!(all[api::MAX_ISSUES].key, "K2-0");
+    assert_eq!(
+        all[0].text_range,
+        Some(TextRange {
+            start_line: 3,
+            end_line: 4
+        })
+    );
+    assert_eq!(all[0].flows[0].locations[0].msg.as_deref(), Some("source"));
+
+    let (some, total) = open_issues(&step, 10).unwrap();
+    assert_eq!((some.len(), total), (10, (api::MAX_ISSUES + 30) as u64));
+}

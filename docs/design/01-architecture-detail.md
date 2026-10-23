@@ -40,7 +40,7 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 | Gate runner | Chạy format, lint, test, coverage, Sonar trong Docker (Sonar: #91) | Tự làm (`crates/aegis-gate`) |
 | PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm (`crates/aegis-pr`) |
 | Ledger | Ghi log, token, chi phí cho từng issue | Tự làm (`crates/aegis-ledger`, trait ghi JSON / DB) |
-| Sonar batcher | Chia nhóm cảnh báo Sonar, gộp nhánh integration | Tự làm (`crates/aegis-sonar-batch`). **Chưa làm:** crate mới là khung rỗng (#17) |
+| Sonar batcher | Chia nhóm cảnh báo Sonar, gộp nhánh integration | Tự làm (`crates/aegis-sonar-batch`, #17; lifecycle chạy các nhóm trong `aegis-lifecycle`) |
 
 **Vòng lặp cho một issue:**
 
@@ -109,7 +109,13 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
 - **Cảnh báo nhiều vị trí (luồng dữ liệu nguồn → lan truyền → điểm dùng):** mỗi luồng là một nhóm riêng.
 - Các nhóm chạy song song, mỗi nhóm một nhánh. Gộp ở mục 6.3.
 
-**Trạng thái (22/10): chưa làm (#17).** `aegis-sonar-batch` mới là khung rỗng. Issue được Light phân loại `kind = sonar` hiện dừng ngay sau bước phân loại, ghi lý do "Sonar issues go through the batching step (#17)". Bộ thử PoC chỉ có bug nên chưa bị ảnh hưởng.
+**Cách làm (#17):**
+
+- Danh sách cảnh báo là response của `/api/issues/search`: lấy từ khối ` ```json ` trong issue, không có thì đọc tối đa 100 issue đang mở của project trên server ở mục `[sonar]`. Không có cả hai thì issue dừng, ghi lý do.
+- Node AST lấy bằng query symbol của profile (`aegis_lang::symbols_in`, cùng query với `search_symbol` của ACI): hàm hoặc method nhỏ nhất chứa dòng cảnh báo. Không có hàm thì lấy impl / class / trait / module nhỏ nhất. Không có cả hai, hoặc file không đọc được, thì gom theo file.
+- Cảnh báo có `flows` (vị trí phụ) là cảnh báo luồng dữ liệu, mỗi cái một nhóm.
+- Mỗi batch chạy tối đa 8 nhóm. Nhóm vượt hạn được ghi "chưa sửa" trong PR.
+- Mỗi nhóm là một phiên Core/Expert như issue bug, từ base, trên worktree riêng, ledger riêng `<issue>-<nhóm>`. Vì vậy trần $4 / 20 lượt tính **cho từng nhóm**. Qua gate thì cây đã kiểm được commit vào clone làm đầu nhánh của nhóm, không mở PR. Ledger của issue nhận lại lượt gọi model và lượt gate của các nhóm. Chỉ ledger của issue kết thúc, nên KPI đếm cả batch là một issue.
 
 ## 4. Tầng 2 – Prompt caching
 
@@ -170,7 +176,7 @@ Light trả về JSON cố định:
 ```
 
 - `has_repro_info = false` → vẫn chạy, nhưng Core phải tự viết test tái hiện trước khi sửa.
-- `kind = sonar` → đi qua bước chia nhóm (mục 3.4). Bước này chưa làm, nên hiện nay issue dừng luôn ở đây.
+- `kind = sonar` → đi qua bước chia nhóm (mục 3.4) và gộp nhánh (mục 6.3).
 - Light không quyết định leo thang. Mọi issue bắt đầu ở Core.
 
 ### 5.3 Luật chuyển trạng thái
@@ -232,13 +238,18 @@ Chạy tuần tự trong Docker. Bước nào fail thì dừng, trả log (đã 
 
 ### 6.3 Gộp nhiều bản vá (issue Sonar chia nhóm)
 
-Chưa làm, cùng với mục 3.4 (#17).
+`aegis_sonar_batch::integrate` (#17); batch id là id của issue.
 
 1. Tạo nhánh `agent/integration-<batch-id>`.
 2. Gộp từng nhánh nhóm vào, mỗi lần một nhánh.
 3. Sau mỗi lần gộp, chạy lại gate runner.
 4. Xung đột hoặc gate fail → bỏ nhánh vừa gộp, chạy lại nhóm đó riêng trên nhánh integration mới.
 5. Gộp xong hết → mở một PR cho cả batch.
+
+- Chạy lại chỉ một lần. Lần chạy lại vẫn xung đột hoặc gate vẫn fail thì bỏ nhóm. Phiên của nhóm dừng ngay từ đầu (ngân sách, agent dừng) thì cũng bỏ nhóm, không chạy lại. PR ghi nhóm nào đã sửa, nhóm nào đã chạy lại và nhóm nào bị bỏ kèm lý do.
+- Gate sau mỗi lần gộp so với base ban đầu, không có test tái hiện, và được phép đổi các test mà các nhóm đã khai. Gate cả batch không qua lần nào thì issue dừng, không mở PR.
+- PR là một commit của cây đã qua gate cuối cùng trên base, đẩy lên `agent/integration-<batch-id>` của fork, như PR của issue bug.
+- Đã kiểm bằng test: batch mẫu 5 cảnh báo Python có xung đột, gate fail và nhóm dừng (`crates/aegis-sonar-batch/tests/sample_batch.rs`, phiên và gate giả), cùng một issue Sonar 2 nhóm chạy hết vòng đời với gate Rust thật (`crates/aegis-lifecycle/tests/sonar_batch.rs`, model theo kịch bản). Chưa chạy với model thật và server Sonar thật.
 
 ### 6.4 Mẫu PR
 

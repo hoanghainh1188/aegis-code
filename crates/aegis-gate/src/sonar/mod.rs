@@ -26,6 +26,7 @@ use crate::command::{Exit, Ran, Runner};
 use crate::report::{Skip, StepName, StepReport, StepStatus, tail};
 
 use api::{Api, Condition, Issues, QualityGate, Waited};
+pub use api::{Flow, FlowLocation, Issue as SonarIssue, TextRange};
 use scanner::PullRequest;
 
 /// Issues listed for the agent; the rest are counted.
@@ -163,6 +164,14 @@ fn verdict(gate: &QualityGate, issues: &Issues, dashboard: &str) -> (StepStatus,
     }
     text.push(format!("dashboard: {dashboard}"));
     (status, text.join("\n"))
+}
+
+/// Open issues of the step's project, at most `limit`, with the total the
+/// server counts: the warnings a Sonar batch works through (#17).
+pub fn open_issues(step: &SonarStep, limit: usize) -> Result<(Vec<SonarIssue>, u64), GateError> {
+    let api = Api::new(&step.url, &step.token, step.organization.as_deref())?;
+    let found = api.open_issues(&step.project_key, limit)?;
+    Ok((found.issues, found.total))
 }
 
 pub(crate) fn run(step: &SonarStep, cx: &Context<'_>) -> Result<StepReport, GateError> {
