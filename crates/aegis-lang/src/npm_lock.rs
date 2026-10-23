@@ -46,7 +46,7 @@ fn invalid(message: impl Into<String>) -> LangError {
 }
 
 /// npm package names: optional `@scope/`, then lower-case URL-safe text.
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     let part = |p: &str| {
         !p.is_empty()
             && !p.starts_with('.')
@@ -133,7 +133,7 @@ pub(crate) fn package_lock(text: &str) -> Result<Vec<LockedDependency>, LangErro
     Ok(out)
 }
 
-fn dep(name: String, version: String, source: String) -> LockedDependency {
+pub(crate) fn dep(name: String, version: String, source: String) -> LockedDependency {
     LockedDependency {
         name,
         version,
@@ -145,20 +145,65 @@ fn dep(name: String, version: String, source: String) -> LockedDependency {
 /// `https://registry.npmjs.org/<name>/-/<base>-<version>.tgz`, with no
 /// encoding, dot segments, backslashes, query or fragment that a URL parser
 /// would turn into another path.
-fn is_npm_tarball(name: &str, version: &str, resolved: &str) -> bool {
+pub(crate) fn is_npm_tarball(name: &str, version: &str, resolved: &str) -> bool {
     let base = name.rsplit('/').next().unwrap_or(name);
     let expected = format!("{NPM}/{name}/-/{base}-{version}.tgz");
     !version.is_empty() && resolved == expected && !resolved.contains(['%', '\\', '?', '#'])
+}
+
+fn is_archive(path: &str) -> bool {
+    [".tgz", ".tar.gz", ".tar", ".zip"]
+        .iter()
+        .any(|ext| path.to_ascii_lowercase().ends_with(ext))
+}
+
+/// `rel` resolved against `base`, both relative to the repo root, when the
+/// result stays inside the repo (`"."` for the root itself).
+pub(crate) fn join_in_repo(base: &str, rel: &str) -> Option<String> {
+    let odd = |p: &str| p.starts_with(['/', '~']) || p.contains(['\\', ':']);
+    if odd(base) || odd(rel) {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for seg in base.split('/').chain(rel.split('/')) {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
+    })
+}
+
+/// Source of a local package at `path`, relative to the repo directory
+/// `base`. `None` (repo code) for a directory inside the repo that is not
+/// under `node_modules`; a packed tarball or anything outside the repo is a
+/// third-party package.
+pub(crate) fn local_source(base: Option<&str>, path: &str) -> Option<String> {
+    match base.and_then(|b| join_in_repo(b, path)) {
+        Some(p) if !is_archive(path) && !p.split('/').any(|s| s == "node_modules") => None,
+        _ => Some(format!("path+{path}")),
+    }
+}
+
+/// Splits `name@spec`, where a scoped name starts with `@`.
+pub(crate) fn split_name(text: &str) -> Option<(&str, &str)> {
+    let from = usize::from(text.starts_with('@'));
+    let at = text[from..].find('@')? + from;
+    Some((&text[..at], &text[at + 1..]))
 }
 
 /// `None` for a `file:` directory inside the repo.
 fn source_of(name: &str, version: &str, resolved: &str) -> Result<Option<String>, String> {
     if let Some(path) = resolved.strip_prefix("file:") {
         // A packed tarball is a third-party package, even inside the repo.
-        let archive = [".tgz", ".tar.gz", ".tar", ".zip"]
-            .iter()
-            .any(|ext| path.to_ascii_lowercase().ends_with(ext));
-        return Ok((archive || !in_repo(path)).then(|| format!("path+{path}")));
+        return Ok((is_archive(path) || !in_repo(path)).then(|| format!("path+{path}")));
     }
     if let Some(rest) = resolved.strip_prefix("git+") {
         return Ok(Some(format!("git+{rest}")));

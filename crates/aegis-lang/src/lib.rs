@@ -17,11 +17,13 @@ mod lockfile;
 mod maven_lock;
 mod npm_lock;
 mod nuget_lock;
+mod pnpm_lock;
 mod profile;
 mod python_lock;
 mod resolve;
 mod symbols;
 mod syntax;
+mod yarn_lock;
 
 pub use command::{CommandTemplate, Placeholder};
 pub use deps::{DependencyViolation, LockedDependency, ViolationKind, new_dependency_violations};

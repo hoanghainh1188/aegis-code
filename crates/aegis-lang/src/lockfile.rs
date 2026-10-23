@@ -9,6 +9,7 @@ use serde::Deserialize;
 use crate::profile::glob_match;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
 use crate::{go_lock, maven_lock, npm_lock, nuget_lock, python_lock};
+use crate::{pnpm_lock, yarn_lock};
 
 /// MSBuild files that can add packages or package sources.
 const MSBUILD_FILES: &[&str] = &[
@@ -50,6 +51,8 @@ pub fn read_lockfile(
         (Language::Python, "poetry.lock") => python_lock::poetry_lock(text),
         (Language::Go, "go.mod") => go_lock::go_mod(text),
         (Language::TypeScript, "package-lock.json") => npm_lock::package_lock(text),
+        (Language::TypeScript, "pnpm-lock.yaml") => pnpm_lock::pnpm_lock(text),
+        (Language::TypeScript, "yarn.lock") => yarn_lock::yarn_lock(text),
         (Language::Java, "pom.xml") => maven_lock::pom_xml(text),
         (Language::Java, "extensions.xml") => maven_lock::maven_extensions(text),
         (Language::CSharp, "packages.lock.json") => nuget_lock::packages_lock(text),
