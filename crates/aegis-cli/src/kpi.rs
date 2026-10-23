@@ -2,6 +2,7 @@
 //! into the ledger, and the Proposal §8 KPIs out of it. Neither needs the
 //! model provider.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use aegis_ledger::{
@@ -124,18 +125,24 @@ async fn records<S: LedgerStore>(store: &S) -> Result<Vec<IssueRecord>, String> 
     Ok(out)
 }
 
-/// Whether `record` is a run of one of `ids` (run ids are `<eval id>-r<n>`).
-fn run_of(record: &IssueRecord, ids: &[String]) -> bool {
+/// The eval id and run number of `record` when it is a run of one of
+/// `ids` (run ids are `<eval id>-r<n>`).
+fn run_of<'a>(record: &IssueRecord, ids: &'a [String]) -> Option<(&'a str, u32)> {
     let id = record.issue_id.as_str().to_ascii_lowercase();
-    ids.iter().any(|i| {
-        id.strip_prefix(i.as_str())
-            .and_then(|rest| rest.strip_prefix("-r"))
-            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    ids.iter().find_map(|i| {
+        let n = id.strip_prefix(i.as_str())?.strip_prefix("-r")?;
+        let n = if n.bytes().all(|b| b.is_ascii_digit()) {
+            n.parse().ok()?
+        } else {
+            return None;
+        };
+        Some((i.as_str(), n))
     })
 }
 
-/// The KPIs of all runs. When `set` names the eval set, only its runs
-/// count, in total and per language: other runs in the ledger (a live API
+/// The KPIs of all runs. When `set` names the eval set, only the latest
+/// run of each of its issues counts, in total and per language: a rerun
+/// replaces the run before it, and other runs in the ledger (a live API
 /// check, a manual `aegis run`) would skew the PoC's numbers.
 pub async fn report<S: LedgerStore>(store: &S, set: Option<&Path>) -> Result<String, String> {
     let records = records(store).await?;
@@ -151,10 +158,18 @@ pub async fn report<S: LedgerStore>(store: &S, set: Option<&Path>) -> Result<Str
             .collect()
     };
     let in_set = |ids: &[String]| -> Vec<&IssueRecord> {
-        records.iter().filter(|r| run_of(r, ids)).collect()
+        let mut latest: BTreeMap<&str, (u32, &IssueRecord)> = BTreeMap::new();
+        for record in &records {
+            if let Some((id, n)) = run_of(record, ids)
+                && latest.get(id).is_none_or(|(seen, _)| n > *seen)
+            {
+                latest.insert(id, (n, record));
+            }
+        }
+        latest.into_values().map(|(_, record)| record).collect()
     };
     let mut out = format!(
-        "## All runs of the set\n{}",
+        "## Latest run of each issue in the set\n{}",
         Kpi::from_records(in_set(&ids_of(None)))
     );
     let mut languages: Vec<_> = issues.iter().map(|i| i.language).collect();
@@ -276,7 +291,10 @@ mod tests {
         };
         for (id, cost, outcome) in [
             ("typst-7541-r1", 1.0, Outcome::PrOpened),
-            ("scrapy-7604-r1", 3.0, Outcome::StoppedBudget),
+            // Rerun: r10 replaces r2 and r9, whatever the ledger's order.
+            ("scrapy-7604-r10", 3.0, Outcome::StoppedBudget),
+            ("scrapy-7604-r2", 9.0, Outcome::PrOpened),
+            ("scrapy-7604-r9", 9.0, Outcome::PrOpened),
             // Not runs of the set: a live check, and another issue whose id
             // only starts like one of the set's.
             ("TYPST-8850-R1X", 9.0, Outcome::StoppedSteps),
@@ -298,12 +316,12 @@ mod tests {
         let set = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval/issues");
         let text = report(&store, Some(&set)).await.unwrap();
         assert!(
-            text.starts_with("## All runs of the set\n2 runs, 1 PRs opened"),
+            text.starts_with("## Latest run of each issue in the set\n2 runs, 1 PRs opened"),
             "{text}"
         );
         assert!(text.contains("| $2.00 |"), "{text}");
         let all = report(&store, None).await.unwrap();
-        assert!(all.starts_with("## All runs\n4 runs"), "{all}");
+        assert!(all.starts_with("## All runs\n6 runs"), "{all}");
         assert!(text.contains("## rust\n1 runs, 1 PRs opened"), "{text}");
         assert!(text.contains("## python\n1 runs, 0 PRs opened"), "{text}");
         assert!(
