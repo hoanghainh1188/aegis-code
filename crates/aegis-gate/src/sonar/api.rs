@@ -83,8 +83,13 @@ struct GateResponse {
     project_status: QualityGate,
 }
 
+/// One issue as `/api/issues/search` returns it; the Sonar batch (#17)
+/// reads the same type.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(crate) struct Issue {
+#[serde(rename_all = "camelCase")]
+pub struct Issue {
+    #[serde(default)]
+    pub key: String,
     pub rule: String,
     #[serde(default)]
     pub severity: Option<String>,
@@ -93,6 +98,37 @@ pub(crate) struct Issue {
     #[serde(default)]
     pub line: Option<u64>,
     pub message: String,
+    #[serde(default)]
+    pub text_range: Option<TextRange>,
+    /// Secondary locations; a data-flow issue has one flow per path from
+    /// source to sink.
+    #[serde(default)]
+    pub flows: Vec<Flow>,
+}
+
+/// 1-based lines, inclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextRange {
+    pub start_line: u64,
+    pub end_line: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Flow {
+    #[serde(default)]
+    pub locations: Vec<FlowLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowLocation {
+    /// `<project key>:<path>`.
+    pub component: String,
+    #[serde(default)]
+    pub text_range: Option<TextRange>,
+    #[serde(default)]
+    pub msg: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,6 +282,37 @@ impl Api {
         Ok(Issues {
             total,
             issues: r.issues,
+        })
+    }
+
+    /// Open issues of the project's main branch, page by page, at most
+    /// `limit`.
+    pub(crate) fn open_issues(&self, project_key: &str, limit: usize) -> Result<Issues, GateError> {
+        let size = MAX_ISSUES.to_string();
+        let mut issues = Vec::new();
+        let mut total = 0;
+        for page in 1.. {
+            let page = page.to_string();
+            let r: IssuesResponse = self.get(
+                "/api/issues/search",
+                &[
+                    ("componentKeys", project_key),
+                    ("resolved", "false"),
+                    ("ps", size.as_str()),
+                    ("p", page.as_str()),
+                ],
+            )?;
+            total = r.paging.map(|p| p.total).or(r.total).unwrap_or(0);
+            let got = r.issues.len();
+            issues.extend(r.issues);
+            if got == 0 || issues.len() >= limit || issues.len() as u64 >= total {
+                break;
+            }
+        }
+        issues.truncate(limit);
+        Ok(Issues {
+            total: total.max(issues.len() as u64),
+            issues,
         })
     }
 }

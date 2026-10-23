@@ -9,6 +9,7 @@
 //! (ADR 0003).
 
 mod answer;
+mod batch;
 mod checks;
 mod config;
 mod error;

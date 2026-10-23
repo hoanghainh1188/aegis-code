@@ -85,6 +85,23 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::GateRun(run)).await
     }
 
+    /// Adds the cost-bearing events of a run done for this issue under
+    /// another id (a Sonar group's session, #17): model calls, gate runs
+    /// and redactions. Prices stay as they were recorded.
+    pub async fn absorb(&mut self, events: &[LedgerEvent]) -> Result<(), LedgerError> {
+        for event in events {
+            if matches!(
+                event,
+                LedgerEvent::ModelCall { .. }
+                    | LedgerEvent::GateRun(_)
+                    | LedgerEvent::SecretsRedacted { .. }
+            ) {
+                self.push(event.clone()).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// The first outcome is final. Calling again (for example to retry
     /// after `save_record` failed) only saves the record.
     pub async fn finished(
@@ -290,6 +307,42 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, LedgerError::UnknownModel(_)));
         assert!(store.events(&issue()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn absorbs_the_cost_of_a_run_under_another_id() {
+        let store = MemoryLedger::new();
+        let prices = PriceTable::from_toml(PRICES).unwrap();
+        let group = IssueId::parse("GH-9-g1").unwrap();
+        let mut sub = IssueLedger::open(&store, &prices, false, group.clone())
+            .await
+            .unwrap();
+        sub.classified(IssueKind::Sonar).await.unwrap();
+        sub.model_call(Tier::Core, "claude-sonnet-5-5", &usage(1_000_000, 0, 0, 0))
+            .await
+            .unwrap();
+        sub.gate_run(GateRun {
+            passed: true,
+            failed_step: None,
+            duration_s: 3.0,
+        })
+        .await
+        .unwrap();
+
+        let mut ledger = IssueLedger::open(&store, &prices, false, issue())
+            .await
+            .unwrap();
+        ledger.classified(IssueKind::Sonar).await.unwrap();
+        ledger
+            .absorb(&store.events(&group).await.unwrap())
+            .await
+            .unwrap();
+        let record = ledger.record();
+        assert_usd(record.cost_usd, 2.0);
+        assert_eq!(record.model_calls, 1);
+        assert_eq!(record.gate_runs.len(), 1);
+        assert_eq!(record.kind, Some(IssueKind::Sonar));
+        assert_eq!(store.events(&issue()).await.unwrap().len(), 3);
     }
 
     #[tokio::test]
