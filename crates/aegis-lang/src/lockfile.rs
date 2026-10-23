@@ -6,6 +6,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::maven_tree::{self, GRADLE_TREE, MAVEN_TREE};
 use crate::profile::glob_match;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
 use crate::{go_lock, maven_lock, npm_lock, nuget_lock, python_lock};
@@ -67,6 +68,8 @@ pub fn read_lockfile(
         (Language::Java, name @ ("gradle.lockfile" | "buildscript-gradle.lockfile")) => {
             maven_lock::gradle_lockfile(name, text)
         }
+        (Language::Java, MAVEN_TREE) => maven_tree::maven_tree(text),
+        (Language::Java, GRADLE_TREE) => maven_tree::gradle_dependencies(text),
         (Language::Python, name) if glob_match("requirements*.txt", name) => {
             python_lock::requirements(name, text)
         }

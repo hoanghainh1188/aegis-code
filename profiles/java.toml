@@ -39,9 +39,11 @@ format = "jacoco"
 path = "target/site/jacoco/jacoco.xml"
 
 [dependencies]
-manifests = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties"]
-# Maven không có lockfile: pom.xml cho phụ thuộc khai báo trực tiếp; cây đã
-# resolve là #80.
+# libs.versions.toml: version catalog của Gradle, đổi phiên bản mà không chạm
+# build script.
+manifests = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties", "*.versions.toml"]
+# Maven không có lockfile: pom.xml cho phụ thuộc khai báo trực tiếp,
+# [dependencies.tree] cho phụ thuộc bắc cầu.
 lockfiles = ["pom.xml", "extensions.xml", "gradle.lockfile", "buildscript-gradle.lockfile"]
 official_source = "https://repo.maven.apache.org/maven2"
 fetch = [
@@ -75,6 +77,28 @@ protected = [
     "gradlew",
     "gradlew.bat",
 ]
+
+# Cây phụ thuộc đã resolve (#80), vì pom.xml không cho thấy phụ thuộc bắc
+# cầu. Gate chạy lệnh trong container lấy phụ thuộc, qua proxy, cho nhánh
+# chính và cho bản vá, rồi so như lockfile trước khi fetch.
+# dependency:tree chỉ tải pom, không tải jar của phụ thuộc. `{output}` là file
+# ngoài cây repo; appendOutput gộp cây của mọi module.
+# Repo Gradle không bật locking ghi đè `tree` trong RepoConfig, liệt kê từng
+# project (`gradle dependencies` chỉ in một project):
+#   [tree]
+#   file = "gradle-dependencies.txt"
+#   command = ["sh", "-c", "gradle -q dependencies :core:dependencies > {output}"]
+#   on_change = ["*.versions.toml", "gradle.properties", "gradle.lockfile"]
+# Repo Gradle đã lock mọi phụ thuộc thì đặt `tree = false`.
+[dependencies.tree]
+file = "maven-dependency-tree.txt"
+command = [
+    "mvn", "-B", "-q",
+    "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:tree",
+    "-DoutputFile={output}",
+    "-DappendOutput=true",
+]
+on_change = ["pom.xml", "extensions.xml"]
 
 [sandbox]
 image = "aegis-sandbox-java"

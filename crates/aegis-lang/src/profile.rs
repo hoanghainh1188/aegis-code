@@ -174,6 +174,25 @@ pub struct Dependencies {
     /// optionally `{licenses}`. Needs network (license data from deps.dev),
     /// so it runs with the fetch step (#66), not in the offline gate.
     pub audit: Option<CommandTemplate>,
+    /// The resolved dependency tree, for builds that lock nothing (Maven,
+    /// #80): compared before and after the patch like a lockfile.
+    #[serde(default)]
+    pub tree: Option<DependencyTree>,
+}
+
+/// A command that writes the resolved dependency tree to `{output}`. The
+/// gate runs it in the fetch container (#66) on the base and on the patch,
+/// before fetching, and reads both with the lockfile reader for `file`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyTree {
+    /// Names the format, as [`crate::read_lockfile`] knows it
+    /// (`maven-dependency-tree.txt`).
+    pub file: String,
+    pub command: CommandTemplate,
+    /// File name patterns whose change needs the tree, such as `pom.xml`.
+    /// Manifests listed here may change without a lockfile.
+    pub on_change: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -302,6 +321,9 @@ impl Profile {
         if let Some(c) = &self.dependencies.audit {
             check_audit(c).map_err(|e| format!("dependencies.audit: {e}"))?;
         }
+        if let Some(t) = &self.dependencies.tree {
+            check_tree(self.language, t).map_err(|e| format!("dependencies.tree: {e}"))?;
+        }
         if let Some(bad) = self
             .dependencies
             .protected
@@ -401,6 +423,20 @@ pub(crate) fn check_audit(c: &CommandTemplate) -> Result<(), String> {
         &[Placeholder::Lockfile, Placeholder::Licenses],
         &[Placeholder::Lockfile],
     )
+}
+
+pub(crate) fn check_tree(language: Language, tree: &DependencyTree) -> Result<(), String> {
+    tree.command
+        .check_placeholders(&[Placeholder::Output], &[Placeholder::Output])?;
+    if let Err(LangError::UnsupportedLockfile { .. }) =
+        crate::read_lockfile(language, &tree.file, "")
+    {
+        return Err(format!("no reader for `{}`", tree.file));
+    }
+    if tree.on_change.is_empty() || tree.on_change.iter().any(|p| p.is_empty()) {
+        return Err("on_change must list file name patterns".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {

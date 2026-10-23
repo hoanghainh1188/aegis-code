@@ -6,7 +6,7 @@
 //! parent, since plugins and extensions are code that runs at build time.
 //! Extra `<repositories>` change every coordinate's source, like extra
 //! indexes for Python. Transitive dependencies need a resolved tree from
-//! Maven itself (#80). Fails closed on what it cannot read.
+//! Maven itself (`maven_tree`, #80). Fails closed on what it cannot read.
 
 use std::collections::{BTreeMap, BTreeSet};
 

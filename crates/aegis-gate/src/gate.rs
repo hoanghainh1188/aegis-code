@@ -13,11 +13,14 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use aegis_lang::{Placeholder, ReferenceUpdate, ResolvedProfile, SkipReason, Step};
+use aegis_lang::{
+    DependencyTree, Placeholder, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
+    new_dependency_violations, read_lockfile,
+};
 
 use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner};
-use crate::egress::Egress;
+use crate::egress::{Egress, EgressSession};
 use crate::failures::failing_tests_with;
 use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
@@ -26,6 +29,9 @@ use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, tail};
 use crate::sandbox::Sandbox;
 use crate::sonar::{self, SonarStep};
 use crate::{GateError, deps};
+
+/// Where the fetch container writes the resolved dependency tree (#80).
+const TREE_DIR: &str = "/aegis-tree";
 
 /// Failing tests listed for the agent; the rest are counted.
 const MAX_LISTED_TESTS: usize = 20;
@@ -178,7 +184,7 @@ fn read_log(path: &Path) -> String {
     String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned()
 }
 
-impl Run<'_> {
+impl<'a> Run<'a> {
     fn log(&self, name: &str) -> PathBuf {
         self.logs.join(format!("{name}.log"))
     }
@@ -256,8 +262,24 @@ impl Run<'_> {
         Ok(failed(&both, why))
     }
 
-    fn dependencies(&self) -> Result<StepReport, GateError> {
+    /// The dependency tree to resolve for this patch: the profile has one,
+    /// the patch changes a file of its `on_change`, and the gate has the
+    /// fetch container to resolve it in.
+    fn tree(&self) -> Option<&'a DependencyTree> {
+        let req: &'a GateRequest<'a> = self.req;
+        let tree = req.profile.tree.as_ref()?;
+        (req.fetch.is_some() && req.sandbox.is_some())
+            .then_some(tree)
+            .filter(|t| {
+                self.changes
+                    .iter()
+                    .any(|c| deps::matches_any(&t.on_change, &c.path))
+            })
+    }
+
+    fn dependencies(&mut self) -> Result<StepReport, GateError> {
         let name = StepName::Dependencies;
+        let tree = self.tree();
         let checked = deps::check(
             &self.req.profile.profile,
             self.req.repo,
@@ -265,46 +287,147 @@ impl Run<'_> {
             &self.changes,
             &self.ignored,
             self.req.allowed,
+            tree.map_or(&[], |t| t.on_change.as_slice()),
         )?;
         Ok(match checked {
             None => StepReport::skipped(name, Skip::NoDependencyChange),
-            Some(Ok(())) => self.fetch_checked()?,
+            Some(Ok(())) => self.fetch_checked(tree)?,
             Some(Err(why)) => report(name, StepStatus::Failed, &[], why),
         })
     }
 
-    /// The patch's dependencies passed the check: fetch them through the
-    /// egress proxy into the caches the later steps read (#66). Without a
-    /// sandbox there is nothing to fetch into, and the step just passes.
-    fn fetch_checked(&self) -> Result<StepReport, GateError> {
+    /// The patch's dependencies passed the check: compare the resolved
+    /// trees when there is one (#80), then fetch them through the egress
+    /// proxy into the caches the later steps read (#66). Without a sandbox
+    /// there is nothing to fetch into, and the step just passes.
+    fn fetch_checked(&mut self, tree: Option<&DependencyTree>) -> Result<StepReport, GateError> {
         let name = StepName::Dependencies;
-        let (Some(fetch), Some(sandbox)) = (&self.req.fetch, &self.req.sandbox) else {
+        let req: &GateRequest<'_> = self.req;
+        let (Some(fetch), Some(sandbox)) = (&req.fetch, &req.sandbox) else {
             return Ok(report(name, StepStatus::Passed, &[], String::new()));
         };
         let session = fetch.egress.start()?;
-        let ran = session.fetch(
+        let mut ran = Vec::new();
+        if let Some(tree) = tree
+            && let Some(failed) = self.compare_trees(tree, &session, sandbox, &mut ran)?
+        {
+            return Ok(failed);
+        }
+        let fetched = session.fetch(
             sandbox,
             &fetch.command,
-            self.req.repo,
+            req.repo,
             &self.log("fetch"),
-            self.req.step_timeout,
-            self.req.cancel.clone(),
+            req.step_timeout,
+            req.cancel.clone(),
         )?;
-        Ok(match ran.exit {
+        ran.push(fetched);
+        let all: Vec<&Ran> = ran.iter().collect();
+        let fetched = ran.last().expect("just pushed");
+        Ok(match fetched.exit {
             Exit::Cancelled => StepReport::skipped(name, Skip::Cancelled),
-            e if e.success() => report(name, StepStatus::Passed, &[&ran], String::new()),
+            e if e.success() => report(name, StepStatus::Passed, &all, String::new()),
             e => report(
                 name,
                 StepStatus::Failed,
-                &[&ran],
+                &all,
                 format!(
                     "fetching the new dependencies failed ({}):\n{}\n\nproxy:\n{}",
                     exit_text(e),
-                    tail(&ran.log),
+                    tail(&fetched.log),
                     session.log()
                 ),
             ),
         })
+    }
+
+    /// Resolves the dependency tree on the base and on the patch, in the
+    /// fetch container, and rejects what the patch adds like a lockfile
+    /// change. Resolving downloads only what the tree needs to be known
+    /// (poms for Maven), not the new dependencies themselves. `Some` is
+    /// the step's report when it does not pass.
+    fn compare_trees(
+        &mut self,
+        tree: &DependencyTree,
+        session: &EgressSession,
+        sandbox: &Sandbox,
+        ran: &mut Vec<Ran>,
+    ) -> Result<Option<StepReport>, GateError> {
+        let name = StepName::Dependencies;
+        let base_dir = self.base_tree()?.path().to_path_buf();
+        let mut trees = Vec::new();
+        for (side, dir) in [("base", base_dir.as_path()), ("patch", self.req.repo)] {
+            let out = self.work.join(format!("tree-{side}"));
+            // A fresh directory: the command may append to the file.
+            if out.exists() {
+                std::fs::remove_dir_all(&out).map_err(|e| GateError::io(&out, &e))?;
+            }
+            std::fs::create_dir_all(&out).map_err(|e| GateError::io(&out, &e))?;
+            let mut resolver = sandbox.clone();
+            resolver.mounts.push((out.clone(), TREE_DIR.to_owned()));
+            let inside = format!("{TREE_DIR}/{}", tree.file);
+            let argv = tree.command.render(&[(Placeholder::Output, &inside)])?;
+            let r = session.fetch(
+                &resolver,
+                &argv,
+                dir,
+                &self.log(&format!("tree-{side}")),
+                self.req.step_timeout,
+                self.req.cancel.clone(),
+            )?;
+            let exit = r.exit;
+            ran.push(r);
+            let all: Vec<&Ran> = ran.iter().collect();
+            let which = if side == "base" {
+                "on the base revision"
+            } else {
+                "with the patch"
+            };
+            match exit {
+                Exit::Cancelled => return Ok(Some(StepReport::skipped(name, Skip::Cancelled))),
+                e if !e.success() => {
+                    let last = ran.last().expect("just pushed");
+                    let why = format!(
+                        "resolving the dependency tree {which} failed ({}):\n{}\n\nproxy:\n{}",
+                        exit_text(e),
+                        tail(&last.log),
+                        session.log()
+                    );
+                    return Ok(Some(report(name, StepStatus::Failed, &all, why)));
+                }
+                _ => {}
+            }
+            let file = out.join(&tree.file);
+            let read = std::fs::read_to_string(&file)
+                .map_err(|e| e.to_string())
+                .and_then(|text| {
+                    read_lockfile(self.req.profile.profile.language, &tree.file, &text)
+                        .map_err(|e| e.to_string())
+                });
+            match read {
+                Ok(deps) => trees.push(deps),
+                Err(e) => {
+                    let why = format!("the dependency tree {which} cannot be read: {e}");
+                    return Ok(Some(report(name, StepStatus::Failed, &all, why)));
+                }
+            }
+        }
+        let violations = new_dependency_violations(
+            &trees[0],
+            &trees[1],
+            self.req.allowed,
+            &self.req.profile.profile.dependencies.official_source,
+        );
+        if violations.is_empty() {
+            return Ok(None);
+        }
+        let why = violations
+            .iter()
+            .map(|v| format!("dependency tree: {v}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let all: Vec<&Ran> = ran.iter().collect();
+        Ok(Some(report(name, StepStatus::Failed, &all, why)))
     }
 
     /// The reproduction test passes with the patch and fails on the base
