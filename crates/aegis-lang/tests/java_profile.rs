@@ -172,3 +172,69 @@ fn adding_a_dependency_or_repository_is_blocked() {
     assert_eq!(v.len(), 2, "every coordinate now comes from another source");
     assert!(v.iter().all(|v| v.kind == ViolationKind::UnofficialSource));
 }
+
+// "Xong khi" of #80: a patch bumping an allowed dependency that pulls in an
+// unknown transitive artifact is blocked, through the resolved tree.
+#[test]
+fn a_bump_pulling_in_an_unknown_transitive_artifact_is_blocked() {
+    let profile = java();
+    let tree = profile.tree.as_ref().unwrap();
+    assert!(tree.on_change.iter().any(|p| p == "pom.xml"));
+    let before = "example:fixture-java:jar:0.1.0
+\\- org.junit.jupiter:junit-jupiter:jar:5.11.4:test
+   +- org.junit.jupiter:junit-jupiter-api:jar:5.11.4:test
+   |  \\- org.opentest4j:opentest4j:jar:1.3.0:test
+   \\- org.junit.jupiter:junit-jupiter-engine:jar:5.11.4:test
+";
+    let after = before.replace("5.11.4", "5.12.0").replace(
+        "   |  \\- org.opentest4j:opentest4j:jar:1.3.0:test\n",
+        "   |  +- org.opentest4j:opentest4j:jar:1.3.0:test\n   |  \\- com.evil:telemetry:jar:0.1:test\n",
+    );
+    let allowed = AllowList::from_toml("allowed = [\"org.junit.jupiter:junit-jupiter\"]").unwrap();
+    let check = |after: &str| {
+        profile
+            .profile
+            .dependency_violations(&tree.file, Some(before), after, &allowed)
+            .unwrap()
+    };
+    assert!(
+        check(&before.replace("5.11.4", "5.12.0")).is_empty(),
+        "a plain bump passes"
+    );
+    let v = check(&after);
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(v[0].dependency.name, "com.evil:telemetry");
+    assert_eq!(v[0].kind, ViolationKind::NotAllowed);
+}
+
+/// The profile's tree command on the fixture, with Maven itself.
+#[test]
+fn maven_writes_a_tree_the_reader_reads() {
+    if !tools() {
+        return;
+    }
+    let profile = java();
+    let tree = profile.tree.as_ref().unwrap();
+    let ws = Workspace::new("java");
+    let output = ws.repo().with_file_name(&tree.file);
+    let output = output.to_str().unwrap();
+    ws.run_ok(
+        "tree",
+        &tree
+            .command
+            .render(&[(Placeholder::Output, output)])
+            .unwrap(),
+    );
+    let deps = read_lockfile(
+        Language::Java,
+        &tree.file,
+        &std::fs::read_to_string(output).unwrap(),
+    )
+    .unwrap();
+    let names: Vec<_> = deps.iter().map(|d| d.name.as_str()).collect();
+    assert!(
+        names.contains(&"org.junit.jupiter:junit-jupiter-api"),
+        "{names:?}"
+    );
+    assert!(!names.iter().any(|n| n.starts_with("example:")));
+}

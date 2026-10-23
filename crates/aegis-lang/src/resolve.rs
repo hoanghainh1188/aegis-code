@@ -4,9 +4,10 @@
 
 use serde::Deserialize;
 
-use crate::profile::{check_audit, check_gate, check_image, check_repo_path};
+use crate::profile::{check_audit, check_gate, check_image, check_repo_path, check_tree};
 use crate::{
-    CommandTemplate, Coverage, GateSteps, LangError, Language, Placeholder, Profile, TestOutput,
+    CommandTemplate, Coverage, DependencyTree, GateSteps, LangError, Language, Placeholder,
+    Profile, TestOutput,
 };
 
 /// A command from the repo, or `false` to turn the step off.
@@ -14,6 +15,15 @@ use crate::{
 #[serde(untagged)]
 pub enum StepOverride {
     Run(CommandTemplate),
+    Enabled(bool),
+}
+
+/// The repo's own dependency tree command (Gradle instead of Maven), or
+/// `false` when the repo locks every dependency (`gradle.lockfile`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum TreeOverride {
+    Run(DependencyTree),
     Enabled(bool),
 }
 
@@ -75,6 +85,7 @@ pub struct ProfileOverrides {
     #[serde(default)]
     pub fetch_hosts: Vec<String>,
     pub audit: Option<StepOverride>,
+    pub tree: Option<TreeOverride>,
     /// Required when the coverage command is overridden.
     pub coverage: Option<Coverage>,
     pub image: Option<String>,
@@ -126,6 +137,9 @@ pub struct ResolvedProfile {
     /// The profile's `fetch_hosts` and the repo's, in that order.
     pub fetch_hosts: Vec<String>,
     pub audit: Step,
+    /// Resolved before and after the patch when it changes a file of
+    /// `on_change` (#80).
+    pub tree: Option<DependencyTree>,
     pub coverage: Option<Coverage>,
     pub image: String,
 }
@@ -219,6 +233,14 @@ impl Profile {
         if let Some(c) = audit.command() {
             check_audit(c).map_err(|e| invalid(format!("audit: {e}")))?;
         }
+        let tree = match &overrides.tree {
+            None | Some(TreeOverride::Enabled(true)) => self.dependencies.tree.clone(),
+            Some(TreeOverride::Enabled(false)) => None,
+            Some(TreeOverride::Run(t)) => {
+                check_tree(self.language, t).map_err(|e| invalid(format!("tree: {e}")))?;
+                Some(t.clone())
+            }
+        };
         let image = match &overrides.image {
             Some(i) => {
                 check_image(i).map_err(|e| invalid(format!("image {e}")))?;
@@ -234,6 +256,7 @@ impl Profile {
             fetch,
             fetch_hosts,
             audit,
+            tree,
             coverage,
             image,
         })
@@ -530,6 +553,51 @@ mod tests {
             err.to_string().contains("must contain `{lockfile}`"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn java_resolves_its_tree_and_a_repo_can_replace_or_drop_it() {
+        let java = Profiles::builtin()
+            .unwrap()
+            .get(Language::Java)
+            .unwrap()
+            .clone();
+        let r = java.resolve(&ProfileOverrides::default()).unwrap();
+        let tree = r.tree.unwrap();
+        assert_eq!(tree.file, "maven-dependency-tree.txt");
+        let argv = tree
+            .command
+            .render(&[(Placeholder::Output, "/aegis-tree/maven-dependency-tree.txt")])
+            .unwrap();
+        assert!(argv.contains(&"-DoutputFile=/aegis-tree/maven-dependency-tree.txt".to_owned()));
+
+        let gradle = r#"
+            [tree]
+            file = "gradle-dependencies.txt"
+            command = ["sh", "-c", "gradle -q dependencies > {output}"]
+            on_change = ["*.versions.toml"]
+        "#;
+        let r = java.resolve(&overrides(gradle)).unwrap();
+        assert_eq!(r.tree.unwrap().file, "gradle-dependencies.txt");
+        assert_eq!(java.resolve(&overrides("tree = false")).unwrap().tree, None);
+        assert!(
+            java.resolve(&overrides("tree = true"))
+                .unwrap()
+                .tree
+                .is_some()
+        );
+        assert!(
+            python()
+                .resolve(&ProfileOverrides::default())
+                .unwrap()
+                .tree
+                .is_none()
+        );
+
+        let err = |text: &str| java.resolve(&overrides(text)).unwrap_err().to_string();
+        assert!(err(&gradle.replace("gradle-dependencies", "deps")).contains("no reader"));
+        assert!(err(&gradle.replace(" > {output}", "")).contains("must contain `{output}`"));
+        assert!(err(&gradle.replace("\"*.versions.toml\"", "")).contains("on_change"));
     }
 
     #[test]

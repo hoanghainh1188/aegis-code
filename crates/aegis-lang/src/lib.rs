@@ -15,6 +15,7 @@ mod grammar;
 mod language;
 mod lockfile;
 mod maven_lock;
+mod maven_tree;
 mod npm_lock;
 mod nuget_lock;
 mod profile;
@@ -29,12 +30,12 @@ pub use error::LangError;
 pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};
 pub use profile::{
-    Coverage, CoverageFormat, Dependencies, Detect, GateSteps, LspOptions, Profile, Profiles,
-    Sandbox, Sonar, SonarScanner, TestOutput, glob_match,
+    Coverage, CoverageFormat, Dependencies, DependencyTree, Detect, GateSteps, LspOptions, Profile,
+    Profiles, Sandbox, Sonar, SonarScanner, TestOutput, glob_match,
 };
 pub use resolve::{
     CustomHarness, GateOverrides, GatePlan, ProfileOverrides, ReferenceUpdate, ResolvedProfile,
-    SkipReason, Step, StepOverride,
+    SkipReason, Step, StepOverride, TreeOverride,
 };
 pub use symbols::{Symbol, SymbolKind, has_symbol_query, symbols, symbols_in};
 pub use syntax::{MAX_SOURCE_BYTES, SyntaxError, has_grammar, syntax_errors, syntax_errors_in};

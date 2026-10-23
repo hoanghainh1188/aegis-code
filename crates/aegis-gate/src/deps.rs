@@ -1,7 +1,9 @@
 //! Step 0 of design §6.1: a patch that touches dependencies must only add
 //! allowed packages from the official source. Fails closed: a protected
 //! build-config path, a lockfile the reader cannot read, or a manifest
-//! changed without its lockfile all fail the step.
+//! changed without its lockfile all fail the step. A manifest the resolved
+//! dependency tree covers (#80) may change alone: the gate compares the
+//! trees next.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -15,7 +17,7 @@ fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-fn matches_any(patterns: &[String], path: &str) -> bool {
+pub(crate) fn matches_any(patterns: &[String], path: &str) -> bool {
     patterns.iter().any(|p| glob_match(p, file_name(path)))
 }
 
@@ -30,7 +32,8 @@ fn matters(profile: &Profile, path: &str) -> bool {
 
 /// `Ok(None)` when no manifest, lockfile or protected path changed;
 /// `Ok(Some(Err(reason)))` when the step fails. `ignored` are the paths
-/// git ignores in the patched tree.
+/// git ignores in the patched tree. `tree` are the `on_change` patterns of
+/// the dependency tree the gate resolves after this check, if it does.
 pub fn check(
     profile: &Profile,
     repo: &Path,
@@ -38,6 +41,7 @@ pub fn check(
     changes: &[Change],
     ignored: &[String],
     allowed: &BTreeSet<String>,
+    tree: &[String],
 ) -> Result<Option<Result<(), String>>, GateError> {
     let nested: Vec<&str> = changes
         .iter()
@@ -82,6 +86,9 @@ pub fn check(
         .collect();
     if lockfiles.is_empty() && manifests.is_empty() {
         return Ok(None);
+    }
+    if lockfiles.is_empty() && manifests.iter().all(|p| matches_any(tree, p)) {
+        return Ok(Some(Ok(())));
     }
     if lockfiles.is_empty() {
         return Ok(Some(Err(format!(

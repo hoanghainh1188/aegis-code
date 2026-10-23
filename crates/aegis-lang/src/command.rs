@@ -19,10 +19,18 @@ pub enum Placeholder {
     Lockfile,
     /// Allowed licenses, comma-separated (`dependencies.audit`).
     Licenses,
+    /// File the resolved dependency tree is written to (`dependencies.tree`).
+    Output,
 }
 
 impl Placeholder {
-    const ALL: [Self; 4] = [Self::File, Self::Test, Self::Lockfile, Self::Licenses];
+    const ALL: [Self; 5] = [
+        Self::File,
+        Self::Test,
+        Self::Lockfile,
+        Self::Licenses,
+        Self::Output,
+    ];
 
     pub fn token(self) -> &'static str {
         match self {
@@ -30,6 +38,7 @@ impl Placeholder {
             Self::Test => "{test}",
             Self::Lockfile => "{lockfile}",
             Self::Licenses => "{licenses}",
+            Self::Output => "{output}",
         }
     }
 
@@ -39,6 +48,7 @@ impl Placeholder {
             Self::Test => "test",
             Self::Lockfile => "lockfile",
             Self::Licenses => "licenses",
+            Self::Output => "output",
         }
     }
 
