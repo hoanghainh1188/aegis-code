@@ -213,8 +213,64 @@ fn fixture_lockfile_is_all_npm_and_adding_a_package_is_blocked() {
         .unwrap();
     assert_eq!(v.len(), 1);
     assert_eq!(v[0].dependency.name, "left-pad");
-    assert!(matches!(
-        read_lockfile(Language::TypeScript, "yarn.lock", ""),
-        Err(aegis_lang::LangError::UnsupportedLockfile { .. })
-    ));
+}
+
+/// "Xong khi" of #78: the pnpm and Yarn fixtures lock the same tree as the
+/// npm one, all from the registry, and a patch adding `left-pad` is blocked
+/// unless the allow-list names it.
+fn blocks_left_pad(fixture_dir: &str, lockfile: &str, add_left_pad: fn(&str) -> String) {
+    let profile = typescript().profile;
+    let lock = std::fs::read_to_string(fixture(fixture_dir).join(lockfile)).unwrap();
+    let deps = read_lockfile(Language::TypeScript, lockfile, &lock).unwrap();
+    assert!(deps.len() > 50, "real dependency tree");
+    assert!(
+        deps.iter()
+            .all(|d| d.source == profile.dependencies.official_source),
+        "{deps:#?}"
+    );
+    assert!(deps.iter().any(|d| d.name == "typescript-eslint"));
+    assert!(profile.touches_dependencies(&[lockfile]));
+
+    let after = add_left_pad(&lock);
+    let v = profile
+        .dependency_violations(lockfile, Some(&lock), &after, &AllowList::default())
+        .unwrap();
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(v[0].dependency.name, "left-pad");
+    let allowed = AllowList::from_toml("allowed = [\"left-pad\"]").unwrap();
+    assert!(
+        profile
+            .dependency_violations(lockfile, Some(&lock), &after, &allowed)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn pnpm_fixture_is_all_npm_and_adding_a_package_is_blocked() {
+    blocks_left_pad("typescript-pnpm", "pnpm-lock.yaml", |lock| {
+        assert!(lock.contains("\nsnapshots:\n"));
+        lock.replace(
+            "\nsnapshots:\n",
+            "\n  left-pad@1.3.0:\n    resolution: {integrity: sha512-x}\n\nsnapshots:\n",
+        )
+    });
+}
+
+#[test]
+fn yarn_v1_fixture_is_all_npm_and_adding_a_package_is_blocked() {
+    blocks_left_pad("typescript-yarn", "yarn.lock", |lock| {
+        format!(
+            "{lock}\nleft-pad@^1.3.0:\n  version \"1.3.0\"\n  resolved \"https://registry.yarnpkg.com/left-pad/-/left-pad-1.3.0.tgz#5b8a3a7765dfe001261dde915589e782f8c94d1e\"\n"
+        )
+    });
+}
+
+#[test]
+fn yarn_berry_fixture_is_all_npm_and_adding_a_package_is_blocked() {
+    blocks_left_pad("typescript-berry", "yarn.lock", |lock| {
+        format!(
+            "{lock}\n\"left-pad@npm:^1.3.0\":\n  version: 1.3.0\n  resolution: \"left-pad@npm:1.3.0\"\n  languageName: node\n  linkType: hard\n"
+        )
+    });
 }

@@ -34,8 +34,8 @@ path = "coverage/lcov.info"
 
 [dependencies]
 manifests = ["package.json"]
-# Mới đọc được package-lock.json (v2, v3); pnpm-lock.yaml và yarn.lock báo
-# "chưa hỗ trợ" nên gate dừng, không cho qua.
+# Đọc được package-lock.json (v2, v3), pnpm-lock.yaml (v9) và yarn.lock
+# (Yarn 1 và Berry); phiên bản lockfile khác thì báo lỗi, gate không cho qua.
 lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
 official_source = "https://registry.npmjs.org"
 fetch = ["npm", "ci", "--ignore-scripts"]
