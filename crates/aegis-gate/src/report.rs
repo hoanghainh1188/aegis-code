@@ -57,7 +57,7 @@ pub enum Skip {
     DisabledByRepo,
     NoDependencyChange,
     NoReproTest,
-    /// Sonar has no server configured yet.
+    /// The request names no Sonar server.
     NotConfigured,
     /// An earlier step failed.
     NotRun,

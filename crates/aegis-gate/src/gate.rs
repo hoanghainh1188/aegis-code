@@ -24,6 +24,7 @@ use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, tail};
 use crate::sandbox::Sandbox;
+use crate::sonar::{self, SonarStep};
 use crate::{GateError, deps};
 
 /// Failing tests listed for the agent; the rest are counted.
@@ -65,6 +66,9 @@ pub struct GateRequest<'a> {
     /// had to change): the profile's `update_references` may rewrite their
     /// reference output, and only theirs (#105).
     pub allowed_tests: Vec<String>,
+    /// The Sonar server and project (#91); `None` skips the step as not
+    /// configured.
+    pub sonar: Option<SonarStep>,
 }
 
 /// The profile's fetch command and where it may go.
@@ -660,6 +664,23 @@ impl Run<'_> {
         report(name, StepStatus::Failed, &[], why)
     }
 
+    fn sonar(&self) -> Result<StepReport, GateError> {
+        let Some(step) = &self.req.sonar else {
+            return Ok(StepReport::skipped(StepName::Sonar, Skip::NotConfigured));
+        };
+        sonar::run(
+            step,
+            &sonar::Context {
+                repo: self.req.repo,
+                base: self.req.base,
+                tree: &self.tree,
+                profile: &self.req.profile.profile,
+                runner: &self.runner,
+                logs: &self.logs,
+            },
+        )
+    }
+
     fn step(&mut self, name: StepName) -> Result<StepReport, GateError> {
         let gate = &self.req.profile.gate;
         match name {
@@ -671,7 +692,7 @@ impl Run<'_> {
             StepName::ReproTest => self.repro(),
             StepName::Test => self.test(),
             StepName::Coverage => self.coverage(),
-            StepName::Sonar => Ok(StepReport::skipped(name, Skip::NotConfigured)),
+            StepName::Sonar => self.sonar(),
         }
     }
 }

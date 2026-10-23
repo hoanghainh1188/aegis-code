@@ -63,7 +63,7 @@ flowchart TD
    * **Expert (`Opus 5.5`):** Architecture refactoring, complex bugs across $\ge 3$ files.
    * **Economic Circuit Breaker:** Halts execution immediately if cost exceeds $\$4$ or reaches 20 model calls.
 4. **Layer 4 – 6-Step Verification Gate in Docker:**
-   * Format $\rightarrow$ Lint $\rightarrow$ Repro Test (proves FAIL $\rightarrow$ PASS) $\rightarrow$ Full Test Suite $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate (Sonar pending, #91). Commands are loaded from the target repository's language profile (e.g. Rust: `cargo fmt`, `cargo clippy`, `cargo llvm-cov`) — see [ADR 0004](docs/adr/0004-multi-language-profiles.md).
+   * Format $\rightarrow$ Lint $\rightarrow$ Repro Test (proves FAIL $\rightarrow$ PASS) $\rightarrow$ Full Test Suite $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate (when `[sonar]` is configured, #91). Commands are loaded from the target repository's language profile (e.g. Rust: `cargo fmt`, `cargo clippy`, `cargo llvm-cov`) — see [ADR 0004](docs/adr/0004-multi-language-profiles.md).
    * **Golden Master Technique:** For legacy code without test coverage, the agent writes characterization tests capturing existing behavior prior to patching; any modified output must be declared under *"Permitted Behavior Changes"* in the PR description.
 
 ### Enterprise Service Architecture (Phase 2 Platform Service)

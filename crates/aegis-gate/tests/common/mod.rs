@@ -205,6 +205,7 @@ impl Repo {
             fetch: None,
             build_cache: None,
             allowed_tests: allowed_tests.iter().map(|t| (*t).to_owned()).collect(),
+            sonar: None,
         })
         .unwrap()
     }

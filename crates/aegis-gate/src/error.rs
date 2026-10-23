@@ -19,6 +19,12 @@ pub enum GateError {
     #[error("invalid gate request: {0}")]
     InvalidRequest(String),
 
+    /// The Sonar server could not judge the patch: unreachable, refused
+    /// the token, failed the analysis, did not finish in time, or has no
+    /// quality gate. Not the patch's fault, so not a failed step.
+    #[error("Sonar: {0}")]
+    Sonar(String),
+
     #[error(transparent)]
     Lang(#[from] LangError),
 }

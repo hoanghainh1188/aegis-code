@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    BuildCache, CancelToken, Egress, FetchStep, GateReport, GateRequest, Runner, Sandbox, StepName,
-    StepStatus, WORKDIR, failing_tests_with, run_gate,
+    BuildCache, CancelToken, Egress, FetchStep, GateReport, GateRequest, Runner, Sandbox,
+    SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
 };
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
@@ -338,6 +338,17 @@ fn build_cache(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<BuildCache>
     })
 }
 
+/// The Sonar step of the configuration, its scanner cache under the
+/// state dir, shared by the repo's jobs.
+fn sonar_step(cfg: &RunConfig) -> Result<Option<SonarStep>, LifecycleError> {
+    let Some(sonar) = &cfg.sonar else {
+        return Ok(None);
+    };
+    let cache = cfg.run.state_dir.join("cache").join("sonar");
+    std::fs::create_dir_all(&cache).map_err(|e| LifecycleError::io(&cache, &e))?;
+    sonar.step(Some(cache)).map(Some)
+}
+
 /// The profile's fetch command and its egress, when the gate runs in a
 /// sandbox (#66). On the machine there is no cache to fetch into.
 fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
@@ -449,6 +460,7 @@ async fn gate(
 ) -> Result<GateReport, LifecycleError> {
     let allowed = allowed_packages(cfg)?;
     let sandbox = sandbox(cfg, profile)?;
+    let sonar = sonar_step(cfg)?;
     let gate_cancel = CancelToken::new();
     // Stops the gate when the job is cancelled, and when this future is
     // dropped (a server aborting the job).
@@ -476,6 +488,7 @@ async fn gate(
             .iter()
             .map(|c| c.test.clone())
             .collect::<Vec<_>>(),
+        sonar,
     );
     let report = tokio::task::spawn_blocking(move || {
         let (
@@ -490,6 +503,7 @@ async fn gate(
             fetch,
             build_cache,
             allowed_tests,
+            sonar,
         ) = owned;
         run_gate(&GateRequest {
             repo: &repo,
@@ -505,6 +519,7 @@ async fn gate(
             fetch,
             build_cache,
             allowed_tests,
+            sonar,
         })
     })
     .await

@@ -30,7 +30,7 @@ pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};
 pub use profile::{
     Coverage, CoverageFormat, Dependencies, Detect, GateSteps, LspOptions, Profile, Profiles,
-    Sandbox, TestOutput, glob_match,
+    Sandbox, Sonar, SonarScanner, TestOutput, glob_match,
 };
 pub use resolve::{
     CustomHarness, GateOverrides, GatePlan, ProfileOverrides, ReferenceUpdate, ResolvedProfile,

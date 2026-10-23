@@ -200,7 +200,7 @@ Bản vá chỉ tới tay người duyệt khi qua đủ 4 cổng dưới đây.
 2. **Test động (chạy trong Docker, không có mạng):**
    - Test tái hiện bug: phải chuyển từ FAIL sang PASS.
    - Toàn bộ test đang có: phải PASS như trước.
-3. **Sonar Quality Gate:** dùng mặc định "Sonar way" cho code mới — coverage ≥ 80%, trùng lặp ≤ 3%, không lỗi mới, hotspot bảo mật đã xem hết. *Chưa làm (#91): gate hiện bỏ qua bước này. Đầu vào là cảnh báo Sonar (chia nhóm, #17) cũng chưa làm.*
+3. **Sonar Quality Gate:** dùng mặc định "Sonar way" cho code mới — coverage ≥ 80%, trùng lặp ≤ 3%, không lỗi mới, hotspot bảo mật đã xem hết. *Gate chạy bước này khi cấu hình có `[sonar]` (#91); không có thì ghi "bỏ qua, chưa cấu hình". Chưa kiểm với server Sonar thật. Đầu vào là cảnh báo Sonar (chia nhóm, #17) chưa làm.*
 4. **Người duyệt:** agent mở PR, kèm giải thích từng đoạn sửa. Người merge.
 
 **Cấu hình theo language profile ([ADR 0004](../adr/0004-multi-language-profiles.md)):**
