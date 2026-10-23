@@ -324,6 +324,33 @@ async fn two_rejected_edits_escalate_to_expert_with_the_history() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn core_reading_for_fifteen_calls_without_a_patch_escalates_to_expert() {
+    let scratch = repo_with_bug();
+    let reads = (1..=15)
+        .map(|n| call(&format!("t{n}"), "search_symbol", json!({"name": "Cart"})))
+        .collect();
+    let model = Scripted::new(
+        reads,
+        vec![vec![ContentBlock::text(
+            r#"{"status": "stopped", "stop_reason": "needs a design decision"}"#,
+        )]],
+    );
+    let p = platform(config(&scratch, "http://127.0.0.1:1", 40), model);
+
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(
+        report.reason.as_deref(),
+        Some("agent stopped: needs a design decision")
+    );
+    let core = p.provider.requests_for("core");
+    let expert = p.provider.requests_for("expert");
+    assert_eq!((core.len(), expert.len()), (15, 1));
+    // Expert sees the issue and Core's 15 calls with their results.
+    assert_eq!(expert[0].messages.len(), 31);
+    assert_eq!(report.model_calls, 16);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_call_budget_stops_the_job() {
     let scratch = repo_with_bug();
     let model = Scripted::new(

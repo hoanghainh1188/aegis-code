@@ -778,7 +778,15 @@ where
                 Some(Halt::Budget(stop)) => {
                     return Ok(Ending::stop(stop.outcome(), stop.to_string()));
                 }
-                Some(Halt::Escalate(_)) => {
+                Some(Halt::Escalate(reason)) => {
+                    if router.tier() == Tier::Core {
+                        // Not an edit rule, which `fold_edits` already applied:
+                        // Core used its calls without a patch.
+                        let calls = ledger.record().model_calls;
+                        let (next, decision) = router.observe(Signal::ModelCalls { calls });
+                        debug_assert_eq!(decision, Decision::Escalate(reason));
+                        router = next;
+                    }
                     first_expert_call = true;
                     continue;
                 }

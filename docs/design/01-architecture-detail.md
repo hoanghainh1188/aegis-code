@@ -115,7 +115,7 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
 - Node AST lấy bằng query symbol của profile (`aegis_lang::symbols_in`, cùng query với `search_symbol` của ACI): hàm hoặc method nhỏ nhất chứa dòng cảnh báo. Không có hàm thì lấy impl / class / trait / module nhỏ nhất. Không có cả hai, hoặc file không đọc được, thì gom theo file.
 - Cảnh báo có `flows` (vị trí phụ) là cảnh báo luồng dữ liệu, mỗi cái một nhóm.
 - Mỗi batch chạy tối đa 8 nhóm. Nhóm vượt hạn được ghi "chưa sửa" trong PR.
-- Mỗi nhóm là một phiên Core/Expert như issue bug, từ base, trên worktree riêng, ledger riêng `<issue>-<nhóm>`. Vì vậy trần $4 / 20 lượt tính **cho từng nhóm**. Qua gate thì cây đã kiểm được commit vào clone làm đầu nhánh của nhóm, không mở PR. Ledger của issue nhận lại lượt gọi model và lượt gate của các nhóm. Chỉ ledger của issue kết thúc, nên KPI đếm cả batch là một issue.
+- Mỗi nhóm là một phiên Core/Expert như issue bug, từ base, trên worktree riêng, ledger riêng `<issue>-<nhóm>`. Vì vậy trần $4 / 40 lượt tính **cho từng nhóm**. Qua gate thì cây đã kiểm được commit vào clone làm đầu nhánh của nhóm, không mở PR. Ledger của issue nhận lại lượt gọi model và lượt gate của các nhóm. Chỉ ledger của issue kết thúc, nên KPI đếm cả batch là một issue.
 
 ## 4. Tầng 2 – Prompt caching
 
@@ -187,11 +187,14 @@ Light trả về JSON cố định:
 | Core | `edit` bị từ chối 2 lần liên tiếp | Expert |
 | Core | Test tái hiện vẫn fail sau 2 bản vá liên tiếp | Expert |
 | Core | Codebase-Memory cho thấy lỗi trải trên ≥ 3 file (router có luật này nhưng chưa có nguồn tín hiệu, mục 3.2) | Expert |
+| Core | Đã dùng 15 lượt gọi mà chưa có bản vá nào tới test tái hiện hay gate (#127) | Expert |
 | Expert | Gate qua hết | PR |
 | Expert | Fail 2 lần | Dừng |
-| Bất kỳ | Chi phí cộng dồn > $4 hoặc > 20 lượt gọi model | Dừng |
+| Bất kỳ | Chi phí cộng dồn > $4 hoặc > 40 lượt gọi model | Dừng |
 
-Khi chuyển sang Expert, giữ toàn bộ lịch sử. Lượt gọi Light không tính vào giới hạn 20.
+Khi chuyển sang Expert, giữ toàn bộ lịch sử. Lượt gọi Light không tính vào giới hạn 40.
+
+Giới hạn ban đầu là 20 lượt. Lượt chạy 10 issue đầu của bộ thử (#18, đo ngày 2026-10-23) cho thấy trần $4 không bao giờ chạm (cao nhất $0.54), còn 6/10 issue dừng vì hết 20 lượt. Ca qua gate nộp bản vá đầu sau 7–13 lượt, ca fail sau 17–18 lượt hoặc không nộp. Vì vậy nâng lên 40 lượt và thêm luật 15 lượt chưa có bản vá (#127).
 
 ### 5.4 Tính ngân sách
 
@@ -296,7 +299,7 @@ Ledger ghi một bản ghi JSON cho mỗi issue. Bảng KPI trong Proposal (mụ
 | `issue_id`, `kind` | Issue và loại (bug / ci\_failure / sonar) | Phân nhóm kết quả |
 | `outcome` | `pr_opened` / `stopped_budget` / `stopped_steps` / `stopped_expert_fail` | Tỉ lệ thành công |
 | `tiers_used` | Ví dụ `["light", "core", "expert"]` | Tỉ lệ phải lên Expert |
-| `model_calls` | Số lượt gọi Core + Expert | Giới hạn 20 lượt |
+| `model_calls` | Số lượt gọi Core + Expert | Giới hạn 40 lượt |
 | `tokens` | input / output / cache\_write / cache\_read theo từng model | Tỉ lệ đọc cache |
 | `cost_usd` | Tổng tiền (đã gồm phụ phí vùng nếu có) | Chi phí / issue |
 | `gate_runs` | Số lần chạy gate, bước fail mỗi lần | Tìm điểm nghẽn |

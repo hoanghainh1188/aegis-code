@@ -1,6 +1,6 @@
 //! What may end a model loop before its next call (ADR 0003, design
 //! §5.3–§5.4): a cancel from outside, the job's budget, or edits rejected
-//! often enough to escalate. The loop only sees a reason string; the
+//! often enough, or Core reading on without a patch, to escalate. The loop only sees a reason string; the
 //! lifecycle reads the structured [`Halt`] back.
 
 use std::sync::Mutex;
@@ -71,10 +71,15 @@ impl JobCheck {
         if let Some(stop) = self.budget.evaluate(turns) {
             return Some(Halt::Budget(stop));
         }
-        if self.router.tier() == Tier::Core
-            && let (_, Decision::Escalate(reason)) = fold_edits(self.router, turns)
-        {
-            return Some(Halt::Escalate(reason));
+        if self.router.tier() == Tier::Core {
+            let (router, decision) = fold_edits(self.router, turns);
+            if let Decision::Escalate(reason) = decision {
+                return Some(Halt::Escalate(reason));
+            }
+            let calls = self.budget.model_calls(turns);
+            if let (_, Decision::Escalate(reason)) = router.observe(Signal::ModelCalls { calls }) {
+                return Some(Halt::Escalate(reason));
+            }
         }
         None
     }

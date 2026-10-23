@@ -46,7 +46,7 @@ flowchart TD
     
     T4 -->|Passes 6-Step Gate| PR["Open Pull Request (Diff explanation + Golden Master + Cost)"]
     T4 -->|Gate Fail < 2 times| T3
-    T4 -->|Threshold Reached: $4 or 20 calls or Expert fail 2 times| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]
+    T4 -->|Threshold Reached: $4 or 40 calls or Expert fail 2 times| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]
 ```
 
 ### Core Architecture Layers

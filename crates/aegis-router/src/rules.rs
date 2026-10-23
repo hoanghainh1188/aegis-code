@@ -1,6 +1,6 @@
 //! Escalation and stop rules, Core → Expert → PR / stop (design §5.3).
 //!
-//! The budget row ("any tier, > $4 or > 20 calls") is checked before every
+//! The budget row ("any tier, > $4 or > 40 calls") is checked before every
 //! model call by [`crate::BudgetCheck`]; this module covers the other rows.
 
 use std::fmt;
@@ -16,6 +16,9 @@ pub struct EscalationRules {
     pub repro_failures: u32,
     /// Files the fault spans (from Codebase-Memory) that escalate.
     pub spread_files: usize,
+    /// Core/Expert calls the job may use before Core's first patch; Core
+    /// still reading code past this escalates (#127).
+    pub calls_without_patch: u32,
     /// Failed Expert attempts before stopping.
     pub expert_failures: u32,
 }
@@ -26,6 +29,7 @@ impl Default for EscalationRules {
             edit_rejections: 2,
             repro_failures: 2,
             spread_files: 3,
+            calls_without_patch: 15,
             expert_failures: 2,
         }
     }
@@ -48,6 +52,10 @@ pub enum Signal {
     },
     GatePassed,
     GateFailed,
+    /// The job has used this many Core/Expert calls so far.
+    ModelCalls {
+        calls: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +63,7 @@ pub enum EscalationReason {
     EditsRejected,
     ReproStillFails,
     FaultSpread { files: usize },
+    NoPatch { calls: u32 },
 }
 
 impl fmt::Display for EscalationReason {
@@ -63,6 +72,7 @@ impl fmt::Display for EscalationReason {
             Self::EditsRejected => f.write_str("edits rejected by the linter twice in a row"),
             Self::ReproStillFails => f.write_str("repro test still fails after two patches"),
             Self::FaultSpread { files } => write!(f, "fault spans {files} files"),
+            Self::NoPatch { calls } => write!(f, "no patch after {calls} calls"),
         }
     }
 }
@@ -110,6 +120,8 @@ pub struct Router {
     expert_failures: u32,
     /// The current Expert attempt already counted as failed.
     attempt_failed: bool,
+    /// A patch reached the repro test or the gate.
+    patched: bool,
 }
 
 impl Router {
@@ -121,6 +133,7 @@ impl Router {
             repro_failures: 0,
             expert_failures: 0,
             attempt_failed: false,
+            patched: false,
         }
     }
 
@@ -130,9 +143,15 @@ impl Router {
     }
 
     pub fn observe(self, signal: Signal) -> (Self, Decision) {
-        match self.tier {
-            Tier::Expert => self.observe_expert(signal),
-            Tier::Light | Tier::Core => self.observe_core(signal),
+        let patched = self.patched
+            || matches!(
+                signal,
+                Signal::PatchTested { .. } | Signal::GatePassed | Signal::GateFailed
+            );
+        let this = Self { patched, ..self };
+        match this.tier {
+            Tier::Expert => this.observe_expert(signal),
+            Tier::Light | Tier::Core => this.observe_core(signal),
         }
     }
 
@@ -185,6 +204,10 @@ impl Router {
                 self.escalate(EscalationReason::FaultSpread { files })
             }
             Signal::FaultSpread { .. } => (self, Decision::Continue),
+            Signal::ModelCalls { calls } if !self.patched && calls >= rules.calls_without_patch => {
+                self.escalate(EscalationReason::NoPatch { calls })
+            }
+            Signal::ModelCalls { .. } => (self, Decision::Continue),
         }
     }
 
@@ -213,9 +236,10 @@ impl Router {
                 Decision::Continue,
             ),
             Signal::GateFailed => self.expert_failure(false),
-            Signal::EditRejected | Signal::EditAccepted | Signal::FaultSpread { .. } => {
-                (self, Decision::Continue)
-            }
+            Signal::EditRejected
+            | Signal::EditAccepted
+            | Signal::FaultSpread { .. }
+            | Signal::ModelCalls { .. } => (self, Decision::Continue),
         }
     }
 
@@ -352,6 +376,40 @@ mod tests {
             Decision::Escalate(EscalationReason::FaultSpread { files: 3 })
         );
         assert_eq!(router.tier(), Tier::Expert);
+    }
+
+    // §5.3 row: Core, 15 calls without a patch → Expert (#127).
+    #[test]
+    fn core_without_a_patch_after_fifteen_calls_escalates() {
+        let (router, d) = run(Router::default(), &[Signal::ModelCalls { calls: 14 }]);
+        assert_eq!((router.tier(), d[0]), (Tier::Core, Decision::Continue));
+
+        let (router, d) = run(Router::default(), &[Signal::ModelCalls { calls: 15 }]);
+        assert_eq!(
+            d[0],
+            Decision::Escalate(EscalationReason::NoPatch { calls: 15 })
+        );
+        assert_eq!(router.tier(), Tier::Expert);
+    }
+
+    #[test]
+    fn a_tested_patch_turns_the_call_rule_off() {
+        for first in [
+            Signal::GateFailed,
+            Signal::PatchTested { repro_passes: true },
+        ] {
+            let (router, d) = run(
+                Router::default(),
+                &[first, Signal::ModelCalls { calls: 30 }],
+            );
+            assert_eq!((router.tier(), d[1]), (Tier::Core, Decision::Continue));
+        }
+    }
+
+    #[test]
+    fn expert_ignores_the_call_rule() {
+        let (router, d) = run(expert(), &[Signal::ModelCalls { calls: 30 }]);
+        assert_eq!((router.tier(), d[0]), (Tier::Expert, Decision::Continue));
     }
 
     // §5.3 row: Expert, gate passes → PR.
