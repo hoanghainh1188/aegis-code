@@ -32,7 +32,7 @@ TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS = ""
 
 [budget]
 max_cost_usd = 4.0
-max_model_calls = 20
+max_model_calls = 40
 
 # Target repo of the PoC (#2): a clone of the fork, each job gets a worktree.
 [repo]

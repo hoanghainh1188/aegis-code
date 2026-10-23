@@ -1,4 +1,4 @@
-//! Tier selection Light/Core/Expert, escalation and stop rules, $4 / 20-call budget (design §5).
+//! Tier selection Light/Core/Expert, escalation and stop rules, $4 / 40-call budget (design §5).
 //!
 //! Everything is passed in as values (ADR 0003): this crate never reads
 //! `config/*.toml` or the environment.

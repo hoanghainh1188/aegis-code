@@ -32,7 +32,7 @@ CARGO_PROFILE_TEST_DEBUG = "line-tables-only"
 
 [budget]
 max_cost_usd = 4.0
-max_model_calls = 20
+max_model_calls = 40
 
 [repo]
 path = ".workspace/repos/typst"

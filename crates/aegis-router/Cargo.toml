@@ -1,6 +1,6 @@
 [package]
 name = "aegis-router"
-description = "Tier selection Light/Core/Expert, escalation and stop rules, $4 / 20-call budget (design §5)."
+description = "Tier selection Light/Core/Expert, escalation and stop rules, $4 / 40-call budget (design §5)."
 version.workspace = true
 edition.workspace = true
 publish = false

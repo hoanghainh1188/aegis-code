@@ -1,4 +1,4 @@
-//! The $4 / 20-call cap, checked before every model call (design §5.3, §5.4).
+//! The $4 / 40-call cap, checked before every model call (design §5.3, §5.4).
 
 use std::fmt;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ impl Default for BudgetLimits {
     fn default() -> Self {
         Self {
             max_cost_usd: 4.0,
-            max_model_calls: 20,
+            max_model_calls: 40,
         }
     }
 }
@@ -139,8 +139,7 @@ impl BudgetCheck {
             Err(model) => return Some(BudgetStop::Unpriced { model }),
         };
         if self.tier.counts_as_model_call() {
-            let this_loop = u32::try_from(turns.len()).unwrap_or(u32::MAX);
-            let calls = self.prior.model_calls.saturating_add(this_loop);
+            let calls = self.model_calls(turns);
             if calls >= self.limits.max_model_calls {
                 return Some(BudgetStop::Calls {
                     calls,
@@ -161,6 +160,16 @@ impl BudgetCheck {
             next_estimate_usd,
             limit_usd: self.limits.max_cost_usd,
         })
+    }
+
+    /// Core/Expert calls of the whole job once `turns` are made; Light
+    /// calls do not count.
+    pub fn model_calls(&self, turns: &[TurnRecord]) -> u32 {
+        if !self.tier.counts_as_model_call() {
+            return self.prior.model_calls;
+        }
+        let this_loop = u32::try_from(turns.len()).unwrap_or(u32::MAX);
+        self.prior.model_calls.saturating_add(this_loop)
     }
 
     fn turn_costs(&self, turns: &[TurnRecord]) -> Result<Vec<f64>, String> {
@@ -249,27 +258,27 @@ mod tests {
         assert_eq!(check(Tier::Core, Spent::default()).evaluate(&[]), None);
     }
 
-    // §5.3 row "any tier, > 20 calls": the 21st Core/Expert call is refused,
+    // §5.3 row "any tier, > 40 calls": the 41st Core/Expert call is refused,
     // counting calls of earlier loops (Core before Expert).
     #[test]
-    fn stops_at_twenty_calls_across_loops() {
-        let expert = check(Tier::Expert, spent(0.0, 18));
+    fn stops_at_forty_calls_across_loops() {
+        let expert = check(Tier::Expert, spent(0.0, 38));
         assert_eq!(expert.evaluate(&[sonnet(0.01)]), None);
         let stop = expert.evaluate(&[sonnet(0.01), sonnet(0.01)]).unwrap();
         assert_eq!(
             stop,
             BudgetStop::Calls {
-                calls: 20,
-                limit: 20
+                calls: 40,
+                limit: 40
             }
         );
         assert_eq!(stop.outcome(), Outcome::StoppedSteps);
     }
 
-    // §5.3: Light calls do not count towards the 20.
+    // §5.3: Light calls do not count towards the 40.
     #[test]
     fn light_calls_are_not_counted() {
-        let light = check(Tier::Light, spent(0.0, 20));
+        let light = check(Tier::Light, spent(0.0, 40));
         let turns: Vec<_> = (0..5).map(|_| turn("claude-haiku-5-5", 1_000)).collect();
         assert_eq!(light.evaluate(&turns), None);
     }
@@ -393,8 +402,8 @@ mod tests {
 
     #[test]
     fn stop_check_reports_a_readable_reason() {
-        let reason = check(Tier::Core, spent(0.0, 20)).check(&[]).unwrap();
-        assert_eq!(reason, "reached 20 Core/Expert calls (limit 20)");
+        let reason = check(Tier::Core, spent(0.0, 40)).check(&[]).unwrap();
+        assert_eq!(reason, "reached 40 Core/Expert calls (limit 40)");
     }
 
     #[test]

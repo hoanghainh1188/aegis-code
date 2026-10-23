@@ -28,7 +28,7 @@ Chi tiết cách làm nằm ở tab Thiết kế kỹ thuật.
 | --- | --- |
 | Claude API / Bedrock (AWS SDK for Rust) | Vòng lặp agent, đặt điểm ngắt cache, thu gọn lịch sử |
 | Codebase-Memory MCP, tree-sitter, language server theo ngôn ngữ | Bộ công cụ ACI (MCP server), language profile |
-| Docker, image CI, Sonar | Luật leo thang model + trần $4 / 20 bước |
+| Docker, image CI, Sonar | Luật leo thang model + trần $4 / 40 bước |
 |  | Cổng kiểm chứng: test Docker + Sonar + người duyệt |
 |  | Kết nối luồng ticket/PR của khách |
 |  | Đo KPI và chi phí |
@@ -176,16 +176,17 @@ Mọi issue bắt đầu ở tầng Core. Chỉ leo lên Expert khi có lý do c
 | Core | Sonnet 5.5 | Opus 5.5, effort thấp |
 | Expert | Opus 5.5 | Opus 5.5, effort cao |
 
-**Luật leo thang Core → Expert (gặp 1 trong 3):**
+**Luật leo thang Core → Expert (gặp 1 trong 4):**
 
 1. Lệnh sửa bị linter từ chối 2 lần liên tiếp.
 2. Test tái hiện vẫn fail sau 2 bản vá liên tiếp.
 3. Lỗi trải trên ≥ 3 file.
+4. Đã dùng 15 bước mà chưa có bản vá nào để thử.
 
 **Luật dừng (giao cho người):**
 
 - Expert thử 2 lần vẫn fail.
-- Hoặc vượt 20 bước.
+- Hoặc vượt 40 bước.
 - Hoặc vượt $4 cho issue đó.
 
 Lý do có trần: ca thành công thường xong nhanh và rẻ, ca thất bại thì kéo dài và tốn gấp đôi. Dừng sớm là cách tiết kiệm lớn nhất.
@@ -300,7 +301,7 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 | --- | --- |
 | Khách không cho gửi code ra API | Hỏi ở Phase 0; phương án: endpoint theo vùng hoặc model local |
 | Repo không chạy test tự động được | Chọn repo khác cho PoC; không cố gượng |
-| Agent sửa đi sửa lại, đốt tiền | Trần $4 + 20 bước + luật dừng ở mục 5 |
+| Agent sửa đi sửa lại, đốt tiền | Trần $4 + 40 bước + luật dừng ở mục 5 |
 | Xây lớp dịch vụ khi lõi chưa tốt | Đo KPI bắt buộc cuối Phase 1; theo dõi KPI liên tục trên dashboard ở Phase 2 (ADR 0002) |
 | Golden Master khóa luôn con bug | Đánh dấu test "được phép đổi", người duyệt xác nhận |
 | Cache miss do prompt thay đổi | Cố định thứ tự; theo dõi tỉ lệ đọc cache (mục 8) |
