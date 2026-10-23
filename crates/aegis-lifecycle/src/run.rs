@@ -18,10 +18,12 @@ use aegis_gate::{
     SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
 };
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
-use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier};
+use aegis_ledger::{
+    GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
+};
 use aegis_orchestrator::{
-    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, run_loop,
-    system_blocks,
+    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, TurnRecord,
+    run_loop, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Decision, Router, Signal, Spent};
@@ -334,6 +336,18 @@ pub(crate) fn module_map(
         .join("maps")
         .join(format!("{}.md", cfg.repo.key));
     Ok(load_or_create_summary(&clone, &map_path)?)
+}
+
+/// The ledger's view of the tools of `turn` (#129).
+fn tool_calls(turn: &TurnRecord) -> Vec<ToolCall> {
+    turn.tool_calls
+        .iter()
+        .map(|c| ToolCall {
+            name: c.name.clone(),
+            is_error: c.is_error,
+            target: c.target.clone(),
+        })
+        .collect()
 }
 
 fn model_spec(cfg: &RunConfig, tier: Tier) -> ModelSpec {
@@ -752,6 +766,7 @@ where
         for turn in &outcome.turns {
             let cost = ledger.model_call(tier, &turn.model, &turn.usage).await?;
             dearest_call_usd = dearest_call_usd.max(cost);
+            ledger.tool_calls(tier, tool_calls(turn)).await?;
         }
         let (after_edits, _) = fold_edits(router, &outcome.turns);
         if after_edits.tier() != router.tier() {

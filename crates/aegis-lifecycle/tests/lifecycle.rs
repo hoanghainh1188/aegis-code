@@ -13,7 +13,9 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use aegis_lang::Profiles;
-use aegis_ledger::{IssueId, MemoryLedger, Outcome, PriceTable};
+use aegis_ledger::{
+    IssueId, LedgerEvent, LedgerStore, MemoryLedger, Outcome, PriceTable, Tier, ToolCall,
+};
 use aegis_lifecycle::{
     IssueInput, IssueReport, Platform, Replay, ReplayProvider, RunConfig, run_issue,
 };
@@ -348,6 +350,31 @@ async fn core_reading_for_fifteen_calls_without_a_patch_escalates_to_expert() {
     // Expert sees the issue and Core's 15 calls with their results.
     assert_eq!(expert[0].messages.len(), 31);
     assert_eq!(report.model_calls, 16);
+    // The ledger shows what Core spent those calls on (#129); Expert's
+    // answer called no tool, so it has no entry.
+    let events = p
+        .store
+        .events(&IssueId::parse("fixture-7").unwrap())
+        .await
+        .unwrap();
+    let tools: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            LedgerEvent::ToolCalls { tier, calls } => Some((*tier, calls.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools.len(), 15);
+    let (tier, calls) = &tools[0];
+    assert_eq!(*tier, Tier::Core);
+    assert_eq!(
+        calls,
+        &[ToolCall {
+            name: "search_symbol".into(),
+            is_error: false,
+            target: Some("Cart".into()),
+        }]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

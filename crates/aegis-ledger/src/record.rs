@@ -177,6 +177,11 @@ pub enum LedgerEvent {
         tokens: TokenCounts,
         cost_usd: f64,
     },
+    /// The tools the model called in the model call just before (#129).
+    ToolCalls {
+        tier: Tier,
+        calls: Vec<ToolCall>,
+    },
     GateRun(GateRun),
     /// Secret values hidden from the model in tool output or input text
     /// (design §7).
@@ -200,7 +205,7 @@ impl LedgerEvent {
     /// event could not be read back, so stores refuse such events.
     pub(crate) fn ensure_finite(&self) -> Result<(), LedgerError> {
         let fields: &[(&'static str, f64)] = match self {
-            Self::Classified { .. } | Self::SecretsRedacted { .. } => &[],
+            Self::Classified { .. } | Self::SecretsRedacted { .. } | Self::ToolCalls { .. } => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
@@ -212,6 +217,18 @@ impl LedgerEvent {
             None => Ok(()),
         }
     }
+}
+
+/// One tool call, by name and target: what the agent looked at or changed,
+/// never the content it wrote or read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub name: String,
+    pub is_error: bool,
+    /// `file:line`, `file:from-to`, a symbol, a search text or a file
+    /// pattern, cut short by whoever records it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -294,6 +311,7 @@ impl IssueRecord {
                 self.cost_usd += cost_usd;
             }
             LedgerEvent::GateRun(run) => self.gate_runs.push(run.clone()),
+            LedgerEvent::ToolCalls { .. } => {}
             LedgerEvent::HiddenTests { passed, .. } => self.hidden_tests_passed = Some(*passed),
             LedgerEvent::SecretsRedacted { count } => {
                 self.secrets_redacted = self.secrets_redacted.saturating_add(*count);

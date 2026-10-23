@@ -34,6 +34,36 @@ pub trait ToolExecutor {
 pub struct ToolCallRecord {
     pub name: String,
     pub is_error: bool,
+    /// What the call looked at or changed, from its input (see `target`).
+    pub target: Option<String>,
+}
+
+/// Longest [`ToolCallRecord::target`], in characters.
+const TARGET_MAX: usize = 120;
+
+/// The file (with its line or line range), symbol, search text or file
+/// pattern a tool call is about; never the content it writes (#129).
+fn target(input: &Value) -> Option<String> {
+    let text = |key| input.get(key).and_then(Value::as_str);
+    let number = |key| input.get(key).and_then(Value::as_u64);
+    let place = match (text("file"), number("line"), number("from"), number("to")) {
+        (Some(file), _, Some(from), Some(to)) => Some(format!("{file}:{from}-{to}")),
+        (Some(file), Some(line), _, _) => Some(format!("{file}:{line}")),
+        (Some(file), None, _, _) => Some(file.to_owned()),
+        (None, Some(line), _, _) => Some(format!(":{line}")),
+        (None, None, _, _) => None,
+    };
+    let named = ["symbol", "name", "text", "pattern"]
+        .into_iter()
+        .find_map(text);
+    let joined = match (place, named) {
+        (Some(place), Some(named)) => format!("{place} {named}"),
+        (Some(place), None) => place,
+        (None, Some(named)) => named.to_owned(),
+        (None, None) => return None,
+    };
+    let dir = text("dir").map_or(String::new(), |d| format!(" in {d}"));
+    Some(format!("{joined}{dir}").chars().take(TARGET_MAX).collect())
 }
 
 /// One model call, as the router and ledger need to see it.
@@ -382,6 +412,7 @@ where
         records.push(ToolCallRecord {
             name: call.name.clone(),
             is_error: outcome.is_error,
+            target: target(&call.input),
         });
         results.push(ContentBlock::ToolResult {
             tool_use_id: call.id.clone(),
@@ -394,7 +425,41 @@ where
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+
+    #[test]
+    fn a_tool_call_target_names_what_it_is_about_not_what_it_writes() {
+        let cases = [
+            (json!({"file": "a.py", "line": 12}), Some("a.py:12")),
+            (
+                json!({"file": "a.py", "from": 3, "to": 9, "content": "secret = 1"}),
+                Some("a.py:3-9"),
+            ),
+            (
+                json!({"file": "t.py", "content": "def test(): ..."}),
+                Some("t.py"),
+            ),
+            (json!({"line": 40}), Some(":40")),
+            (json!({"name": "Request"}), Some("Request")),
+            (
+                json!({"file": "a.py", "line": 5, "symbol": "parse"}),
+                Some("a.py:5 parse"),
+            ),
+            (
+                json!({"text": "max_retry", "dir": "scrapy"}),
+                Some("max_retry in scrapy"),
+            ),
+            (json!({"pattern": "test_*.py"}), Some("test_*.py")),
+            (json!({}), None),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(target(&input).as_deref(), expected, "{input}");
+        }
+        let long = target(&json!({"text": "x".repeat(500)})).unwrap();
+        assert_eq!(long.chars().count(), TARGET_MAX);
+    }
 
     #[test]
     fn max_model_calls_stops_at_limit() {

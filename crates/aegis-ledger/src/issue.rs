@@ -4,7 +4,7 @@ use aegis_provider::Usage;
 
 use crate::{
     GateRun, IssueId, IssueKind, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome,
-    PriceTable, Review, Tier, TokenCounts,
+    PriceTable, Review, Tier, TokenCounts, ToolCall,
 };
 
 /// Prices each model call, appends every event to the store before
@@ -68,6 +68,18 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         Ok(cost_usd)
     }
 
+    /// The tools of the model call just recorded; nothing for none.
+    pub async fn tool_calls(
+        &mut self,
+        tier: Tier,
+        calls: Vec<ToolCall>,
+    ) -> Result<(), LedgerError> {
+        if calls.is_empty() {
+            return Ok(());
+        }
+        self.push(LedgerEvent::ToolCalls { tier, calls }).await
+    }
+
     /// Secret values hidden from the model; nothing is recorded for zero.
     pub async fn secrets_redacted(&mut self, count: u32) -> Result<(), LedgerError> {
         if count == 0 {
@@ -86,13 +98,14 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
     }
 
     /// Adds the cost-bearing events of a run done for this issue under
-    /// another id (a Sonar group's session, #17): model calls, gate runs
-    /// and redactions. Prices stay as they were recorded.
+    /// another id (a Sonar group's session, #17): model calls and their
+    /// tools, gate runs and redactions. Prices stay as they were recorded.
     pub async fn absorb(&mut self, events: &[LedgerEvent]) -> Result<(), LedgerError> {
         for event in events {
             if matches!(
                 event,
                 LedgerEvent::ModelCall { .. }
+                    | LedgerEvent::ToolCalls { .. }
                     | LedgerEvent::GateRun(_)
                     | LedgerEvent::SecretsRedacted { .. }
             ) {
@@ -239,6 +252,54 @@ mod tests {
         assert_eq!(saved.gate_runs.len(), 2);
         assert_eq!(saved.outcome, Some(Outcome::PrOpened));
         assert_eq!(store.events(&issue()).await.unwrap().len(), 7);
+    }
+
+    #[tokio::test]
+    async fn tool_calls_are_logged_but_leave_the_record_alone() {
+        let store = MemoryLedger::new();
+        let prices = PriceTable::from_toml(PRICES).unwrap();
+        let mut ledger = IssueLedger::open(&store, &prices, false, issue())
+            .await
+            .unwrap();
+        ledger
+            .model_call(Tier::Core, "claude-sonnet-5-5", &usage(1_000, 10, 0, 0))
+            .await
+            .unwrap();
+        let before = ledger.record().clone();
+        let open = ToolCall {
+            name: "open".into(),
+            is_error: false,
+            target: Some("scrapy/http/request.py:120".into()),
+        };
+        ledger.tool_calls(Tier::Core, vec![]).await.unwrap();
+        ledger
+            .tool_calls(Tier::Core, vec![open.clone()])
+            .await
+            .unwrap();
+
+        assert_eq!(ledger.record(), &before);
+        let events = store.events(&issue()).await.unwrap();
+        assert_eq!(events.len(), 2, "no event for a call without tools");
+        assert_eq!(
+            events[1],
+            LedgerEvent::ToolCalls {
+                tier: Tier::Core,
+                calls: vec![open],
+            }
+        );
+        let json = serde_json::to_string(&events[1]).unwrap();
+        assert!(
+            json.starts_with(r#"{"event":"tool_calls","tier":"core","calls":[{"name":"open""#),
+            "{json}"
+        );
+        let untargeted: LedgerEvent = serde_json::from_str(
+            r#"{"event":"tool_calls","tier":"expert","calls":[{"name":"scroll_down","is_error":false}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            untargeted,
+            LedgerEvent::ToolCalls { calls, .. } if calls[0].target.is_none()
+        ));
     }
 
     #[tokio::test]

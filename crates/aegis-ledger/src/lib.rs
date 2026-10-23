@@ -17,6 +17,6 @@ pub use kpi::Kpi;
 pub use pricing::{LongPrompt, ModelPrice, PriceTable};
 pub use record::{
     GateRun, IssueId, IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier,
-    TokenCounts,
+    TokenCounts, ToolCall,
 };
 pub use store::{JsonFileLedger, LedgerStore, MemoryLedger};
