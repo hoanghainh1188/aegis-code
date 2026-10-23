@@ -15,7 +15,7 @@ Tài liệu này mô tả kiến trúc kỹ thuật của phần lõi (Phase 1 �
 | Agent harness | Tự làm bằng Rust; gọi model qua trait `ModelProvider` (Claude API qua HTTP, Bedrock qua AWS SDK for Rust) |
 | Chỉ mục repo | Đã chọn Codebase-Memory MCP. Code hiện chưa dùng: ACI tìm theo AST và dựng module map bằng tree-sitter của profile (mục 3.2) |
 | Sandbox | Docker, mỗi profile một image (dựa trên image CI của repo nếu có), không có mạng ra ngoài; phụ thuộc lấy ở bước riêng qua proxy registry |
-| Sonar | Hỗ trợ cả SonarQube Server và SonarQube Cloud. Bước Sonar của gate chưa làm (#91); gate hiện ghi bước này là "bỏ qua" |
+| Sonar | Hỗ trợ cả SonarQube Server và SonarQube Cloud. Bước Sonar của gate chạy khi cấu hình có `[sonar]` (#91), không thì ghi "bỏ qua" |
 | Đầu ra | Nhánh `agent/<issue-id>` + PR; người merge |
 
 **Hai cấu hình chạy:**
@@ -37,7 +37,7 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 | ACI tools | Tìm, xem, sửa code | Tự làm (`crates/aegis-aci`, MCP server Rust, dùng tree-sitter + language server theo profile) |
 | Language profile | Mọi phần phụ thuộc ngôn ngữ của repo đích: grammar, kiểm tra khi `edit`, bước gate, lockfile, sandbox, quy ước prompt | Tự làm (`crates/aegis-lang`, [ADR 0004](../adr/0004-multi-language-profiles.md)) |
 | Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn (SQLite index). **Chưa nối:** đã đo ở #3, chưa crate nào gọi (mục 3.2) |
-| Gate runner | Chạy format, lint, test, coverage trong Docker; bước Sonar chưa làm (#91) | Tự làm (`crates/aegis-gate`) |
+| Gate runner | Chạy format, lint, test, coverage, Sonar trong Docker (Sonar: #91) | Tự làm (`crates/aegis-gate`) |
 | PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm (`crates/aegis-pr`) |
 | Ledger | Ghi log, token, chi phí cho từng issue | Tự làm (`crates/aegis-ledger`, trait ghi JSON / DB) |
 | Sonar batcher | Chia nhóm cảnh báo Sonar, gộp nhánh integration | Tự làm (`crates/aegis-sonar-batch`). **Chưa làm:** crate mới là khung rỗng (#17) |
@@ -208,13 +208,20 @@ Chạy tuần tự trong Docker. Bước nào fail thì dừng, trả log (đã 
 | 3. Test tái hiện | `cargo test <tên test tái hiện>` | Chuyển từ FAIL sang PASS |
 | 4. Test toàn bộ | `cargo test --workspace` | PASS như trên nhánh chính |
 | 5. Coverage | `cargo llvm-cov --workspace --lcov --output-path lcov.info` | Có file coverage |
-| 6. Sonar | `sonar-scanner` (nhập báo cáo linter + coverage) | Quality Gate "Sonar way" trên code mới. **Chưa làm (#91):** gate hiện luôn ghi "bỏ qua, chưa cấu hình" |
+| 6. Sonar | `sonar-scanner` (nhập báo cáo linter + coverage) | Quality Gate "Sonar way" trên code mới (#91). Không có `[sonar]` trong cấu hình thì "bỏ qua, chưa cấu hình" |
 
 - Profile Python dùng `ruff format --check`, `ruff check`, `pytest`, `coverage.py` (Cobertura). Profile .NET gộp bước Sonar vào bước build (SonarScanner for .NET).
 - Nếu build + test > 10 phút: bước 4 chỉ chạy phần bị sửa (`cargo test -p <crate>`, `pytest <thư mục>`) trong vòng lặp; chạy toàn bộ một lần trước khi mở PR.
 - Cache thư mục build và cache phụ thuộc của profile giữa các lần chạy (Rust: `target/` + registry Cargo).
-- Sonar Server và Sonar Cloud khác nhau ở URL, token, và khóa tổ chức (Cloud). Đặt trong file cấu hình.
-- Khi chưa có bước Sonar, một bản vá chỉ qua 3 trong 4 cổng ở Proposal §6. Phần chất lượng code mới chỉ được kiểm bằng lint ("không cảnh báo mới") và người duyệt. KPI đo trước khi có #91 phải ghi rõ điều này.
+- Sonar Server và Sonar Cloud khác nhau ở URL, token, và khóa tổ chức (Cloud). Đặt trong mục `[sonar]` của file cấu hình; token đọc từ biến môi trường `token_env`, chỉ đưa cho lệnh scanner và Web API, không vào môi trường của bước khác (#91).
+- Bước Sonar (#91):
+  1. Scanner đọc thuộc tính từ file gate tự viết (`[sonar.properties]` của profile, rồi của cấu hình, rồi của gate: URL, project, PR), không đọc `sonar-project.properties` của repo: bản vá không tự loại file của mình khỏi phân tích hay đổi server nhận token được.
+  2. Mặc định phân tích bản vá như một pull request vào nhánh gốc (key `aegis-<12 ký tự đầu của tree>`), Quality Gate chấm phần code đổi. Cần SonarQube Cloud hoặc Server từ Developer Edition. Community Build đặt `pull_request = false`: phân tích nhánh chính, chấm theo new-code period của project.
+  3. Chạy trong sandbox: scanner chạy trong image riêng (mặc định `sonarsource/sonar-scanner-cli`) có mạng `network` (mặc định `bridge`) để tới server; scanner không chạy code của bản vá. Profile .NET: `dotnet sonarscanner begin` → `[sonar] build` của profile (trong sandbox không mạng, không token) → `end`.
+  4. Chờ background task qua `api/ce/task` (hạn `wait_s`, nhận tín hiệu huỷ), kiểm task đúng project và PR, đọc `api/qualitygates/project_status` và issue mới (`api/issues/search`).
+  5. Quality Gate fail hoặc scanner fail → bước fail, agent nhận các điều kiện fail và tối đa 20 issue mới. Server không tới được, từ chối token, phân tích lỗi, quá hạn, hoặc project không có Quality Gate → lỗi gate (`GateError::Sonar`), job dừng: agent không sửa được những lỗi này.
+- Chưa kiểm với server Sonar thật: test dùng scanner giả và server giả (wiremock). Còn mở: SCM trong container (file `.git` của worktree trỏ ra ngoài `/work`), cách SonarScanner for .NET đọc `SONAR_TOKEN`.
+- KPI đo khi cấu hình chưa có `[sonar]`: bản vá chỉ qua 3 trong 4 cổng ở Proposal §6, phần chất lượng code mới chỉ được kiểm bằng lint ("không cảnh báo mới") và người duyệt. Báo cáo KPI phải ghi rõ điều này.
 
 ### 6.2 Golden Master cho code chưa có test
 

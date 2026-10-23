@@ -151,6 +151,20 @@ impl Runner {
         log: &Path,
         extra: &[(&str, &str)],
     ) -> Result<Ran, GateError> {
+        self.run_with_secrets(argv, dir, log, extra, &[])
+    }
+
+    /// [`Self::run`], with `secrets` added to this command's environment
+    /// only. In a container they pass by name through the `docker`
+    /// client's environment, never on a command line or in the log.
+    pub(crate) fn run_with_secrets(
+        &self,
+        argv: &[String],
+        dir: &Path,
+        log: &Path,
+        extra: &[(&str, &str)],
+        secrets: &[(&str, &str)],
+    ) -> Result<Ran, GateError> {
         let started = Instant::now();
         let file = File::create(log).map_err(|e| GateError::io(log, &e))?;
         let file = Arc::new(Mutex::new(file));
@@ -164,13 +178,17 @@ impl Runner {
             Some((sandbox, name)) => {
                 let mut inner = Sandbox::clone(sandbox);
                 inner.env.extend(self.env.iter().cloned());
-                let wrapped = inner.wrap(name, argv, dir);
+                let names: Vec<&str> = secrets.iter().map(|(k, _)| *k).collect();
+                let wrapped = inner.wrap(name, argv, dir, &names);
                 let mut c = Command::new(&wrapped[0]);
-                c.args(&wrapped[1..]).env_clear().envs(
-                    CLIENT_ENV
-                        .iter()
-                        .filter_map(|k| Some((*k, std::env::var_os(k)?))),
-                );
+                c.args(&wrapped[1..])
+                    .env_clear()
+                    .envs(
+                        CLIENT_ENV
+                            .iter()
+                            .filter_map(|k| Some((*k, std::env::var_os(k)?))),
+                    )
+                    .envs(secrets.iter().copied());
                 c
             }
             None => {
@@ -183,7 +201,8 @@ impl Runner {
                             .filter_map(|k| Some((*k, std::env::var_os(k)?))),
                     )
                     .envs(self.env.iter().cloned())
-                    .envs(extra.iter().copied());
+                    .envs(extra.iter().copied())
+                    .envs(secrets.iter().copied());
                 c
             }
         };

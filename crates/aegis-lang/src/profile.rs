@@ -187,7 +187,24 @@ pub struct Sandbox {
 #[serde(deny_unknown_fields)]
 pub struct Sonar {
     #[serde(default)]
+    pub scanner: SonarScanner,
+    /// Build run between `begin` and `end` of [`SonarScanner::Dotnet`],
+    /// in the gate's sandbox; required for it, refused otherwise.
+    #[serde(default)]
+    pub build: Option<CommandTemplate>,
+    #[serde(default)]
     pub properties: BTreeMap<String, String>,
+}
+
+/// How the gate's Sonar step analyses the repo (design §6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SonarScanner {
+    /// SonarScanner CLI (`sonar-scanner`) on the tree as it is.
+    #[default]
+    Cli,
+    /// SonarScanner for .NET: `begin`, the profile's build, `end`.
+    Dotnet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
@@ -305,6 +322,16 @@ impl Profile {
         }
         if let Some(c) = &self.coverage {
             check_repo_path(&c.path).map_err(|e| format!("coverage.path: {e}"))?;
+        }
+        match (self.sonar.scanner, &self.sonar.build) {
+            (SonarScanner::Dotnet, None) => {
+                return Err("sonar.build is required with scanner = \"dotnet\"".into());
+            }
+            (SonarScanner::Cli, Some(_)) => {
+                return Err("sonar.build only goes with scanner = \"dotnet\"".into());
+            }
+            (_, Some(c)) => field("sonar.build", c, &[], &[])?,
+            (_, None) => {}
         }
         Ok(())
     }
@@ -575,6 +602,28 @@ mod tests {
             py.sonar.properties["sonar.python.coverage.reportPaths"],
             "coverage.xml"
         );
+        assert_eq!(py.sonar.scanner, SonarScanner::Cli);
+    }
+
+    #[test]
+    fn dotnet_runs_sonar_around_its_build() {
+        let cs = builtin().get(Language::CSharp).unwrap().clone();
+        assert_eq!(cs.sonar.scanner, SonarScanner::Dotnet);
+        assert!(cs.sonar.build.is_some());
+        let rust = builtin().get(Language::Rust).unwrap().clone();
+        assert_eq!(rust.sonar.scanner, SonarScanner::Cli);
+        assert!(rust.sonar.build.is_none());
+    }
+
+    #[test]
+    fn sonar_build_goes_with_the_dotnet_scanner_only() {
+        let rust = include_str!("../../../profiles/rust.toml");
+        let cli_with_build = format!("{rust}\n[sonar]\nbuild = [\"cargo\", \"build\"]\n");
+        let err = Profile::from_toml("t", &cli_with_build).unwrap_err();
+        assert!(err.to_string().contains("sonar.build only"), "{err}");
+        let dotnet_without = format!("{rust}\n[sonar]\nscanner = \"dotnet\"\n");
+        let err = Profile::from_toml("t", &dotnet_without).unwrap_err();
+        assert!(err.to_string().contains("sonar.build is required"), "{err}");
     }
 
     #[test]

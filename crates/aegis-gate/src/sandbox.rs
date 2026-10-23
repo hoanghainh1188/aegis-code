@@ -67,8 +67,17 @@ pub(crate) fn container_name() -> String {
 }
 
 impl Sandbox {
-    /// `docker run …` for `argv` with `dir` as `/work`.
-    pub(crate) fn wrap(&self, name: &str, argv: &[String], dir: &Path) -> Vec<String> {
+    /// `docker run …` for `argv` with `dir` as `/work`. `pass` names
+    /// variables the container takes from the `docker` client's own
+    /// environment, so their values (secrets) never appear on its command
+    /// line.
+    pub(crate) fn wrap(
+        &self,
+        name: &str,
+        argv: &[String],
+        dir: &Path,
+        pass: &[&str],
+    ) -> Vec<String> {
         let mut out = vec![
             self.docker.clone(),
             "run".into(),
@@ -98,6 +107,10 @@ impl Sandbox {
         for (key, value) in &self.env {
             out.push("--env".into());
             out.push(format!("{key}={value}"));
+        }
+        for key in pass {
+            out.push("--env".into());
+            out.push((*key).to_owned());
         }
         out.push(self.image.clone());
         out.extend(argv.iter().cloned());
@@ -135,13 +148,14 @@ mod tests {
             "n",
             &["cargo".into(), "test".into()],
             Path::new("/jobs/7/repo"),
+            &["SONAR_TOKEN"],
         );
         let text = argv.join(" ");
         for expected in [
             "docker run --rm --name n --network none --cap-drop ALL --security-opt no-new-privileges",
             "--volume /jobs/7/repo:/work --workdir /work",
             "--volume /state/cache/registry:/usr/local/cargo/registry:ro",
-            "--env GATE_X=1 aegis-sandbox-rust cargo test",
+            "--env GATE_X=1 --env SONAR_TOKEN aegis-sandbox-rust cargo test",
         ] {
             assert!(text.contains(expected), "{text}");
         }

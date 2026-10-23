@@ -314,6 +314,7 @@ fn work_dir_inside_the_repo_is_refused() {
         fetch: None,
         build_cache: None,
         allowed_tests: vec![],
+        sonar: None,
     })
     .unwrap_err();
     assert!(
@@ -497,6 +498,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             fetch: None,
             build_cache: None,
             allowed_tests: vec![],
+            sonar: None,
         })
     };
     #[cfg(unix)]

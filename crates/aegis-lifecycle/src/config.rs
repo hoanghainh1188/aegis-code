@@ -24,6 +24,10 @@ pub struct RunConfig {
     pub identity: IdentityConfig,
     #[serde(default)]
     pub codebase_memory: Option<ExtraServer>,
+    /// The gate's Sonar step (#91); without it the step is skipped as not
+    /// configured.
+    #[serde(default)]
+    pub sonar: Option<SonarConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -179,6 +183,61 @@ pub struct IdentityConfig {
     pub email: String,
 }
 
+/// SonarQube Server or SonarQube Cloud (design §6.1): they differ in
+/// `url`, the token and `organization` (Cloud only).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SonarConfig {
+    pub url: String,
+    /// Variable holding the analysis token; read when the gate runs and
+    /// given to the scanner and the Web API only.
+    pub token_env: String,
+    #[serde(default)]
+    pub organization: Option<String>,
+    pub project_key: String,
+    /// Analyse each patch as a pull request into `repo.base` (Cloud,
+    /// Server Developer Edition and up). Off for the Community Build: the
+    /// quality gate then reads the project's new-code period.
+    #[serde(default = "default_true")]
+    pub pull_request: bool,
+    #[serde(default = "default_scanner")]
+    pub scanner: Vec<String>,
+    /// Image of the scanner in sandbox runs; the default is the CLI
+    /// scanner's, `""` takes the profile's (needed by the .NET scanner).
+    #[serde(default = "default_scanner_image")]
+    pub scanner_image: String,
+    /// Docker network of the scanner's container, the way to the server.
+    #[serde(default = "default_sonar_network")]
+    pub network: String,
+    #[serde(default = "default_sonar_wait")]
+    pub wait_s: u64,
+    #[serde(default = "default_sonar_poll")]
+    pub poll_s: u64,
+    /// Added after the profile's `[sonar.properties]`.
+    #[serde(default)]
+    pub properties: std::collections::BTreeMap<String, String>,
+}
+
+fn default_scanner() -> Vec<String> {
+    vec!["sonar-scanner".into()]
+}
+
+fn default_scanner_image() -> String {
+    "sonarsource/sonar-scanner-cli".into()
+}
+
+fn default_sonar_network() -> String {
+    "bridge".into()
+}
+
+fn default_sonar_wait() -> u64 {
+    600
+}
+
+fn default_sonar_poll() -> u64 {
+    3
+}
+
 /// Another MCP server whose tools the agent gets (Codebase-Memory).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -189,6 +248,59 @@ pub struct ExtraServer {
     #[serde(default)]
     pub env: Vec<(String, String)>,
     pub tools: Vec<String>,
+}
+
+impl SonarConfig {
+    fn check(&self) -> Result<(), LifecycleError> {
+        let bad = |m: String| Err(LifecycleError::Config(format!("sonar: {m}")));
+        if !(self.url.starts_with("https://") || self.url.starts_with("http://")) {
+            return bad(format!(
+                "url `{}` must start with https:// or http://",
+                self.url
+            ));
+        }
+        if self.project_key.trim().is_empty() || self.scanner.is_empty() {
+            return bad("project_key and scanner must not be empty".into());
+        }
+        if self
+            .organization
+            .as_deref()
+            .is_some_and(|o| o.trim().is_empty())
+        {
+            return bad("organization must not be empty when set".into());
+        }
+        if self.poll_s == 0 {
+            return bad("poll_s must be at least 1".into());
+        }
+        Ok(())
+    }
+
+    /// The gate's step, with the token read now from `token_env`.
+    pub fn step(&self, cache: Option<PathBuf>) -> Result<aegis_gate::SonarStep, LifecycleError> {
+        let token = std::env::var(&self.token_env)
+            .ok()
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| {
+                LifecycleError::Config(format!(
+                    "sonar: the token variable `{}` is not set",
+                    self.token_env
+                ))
+            })?;
+        Ok(aegis_gate::SonarStep {
+            url: self.url.clone(),
+            token,
+            organization: self.organization.clone(),
+            project_key: self.project_key.clone(),
+            pull_request: self.pull_request,
+            scanner: self.scanner.clone(),
+            image: (!self.scanner_image.is_empty()).then(|| self.scanner_image.clone()),
+            network: self.network.clone(),
+            cache,
+            properties: self.properties.clone(),
+            wait: std::time::Duration::from_secs(self.wait_s),
+            poll: std::time::Duration::from_secs(self.poll_s),
+        })
+    }
 }
 
 impl RunConfig {
@@ -207,6 +319,9 @@ impl RunConfig {
                 "repo.key `{}` must be letters, digits, `-` or `_`",
                 config.repo.key
             )));
+        }
+        if let Some(sonar) = &config.sonar {
+            sonar.check()?;
         }
         Ok(config)
     }
@@ -250,5 +365,77 @@ impl RunConfig {
                 .and_then(|p| p.parent().map(|d| d.join("aegis-aci")))
                 .unwrap_or_else(|| PathBuf::from("aegis-aci"))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const POC: &str = include_str!("../../../config/poc.toml");
+
+    fn with_sonar(table: &str) -> Result<RunConfig, LifecycleError> {
+        RunConfig::from_toml(&format!("{POC}\n[sonar]\n{table}"))
+    }
+
+    #[test]
+    fn sonar_cloud_and_server_differ_in_url_token_and_organization() {
+        let cloud = with_sonar(
+            r#"url = "https://sonarcloud.io"
+token_env = "SONAR_TOKEN"
+organization = "acme"
+project_key = "acme_scrapy""#,
+        )
+        .unwrap()
+        .sonar
+        .unwrap();
+        assert_eq!(cloud.organization.as_deref(), Some("acme"));
+        assert!(cloud.pull_request);
+        assert_eq!(cloud.scanner, vec!["sonar-scanner"]);
+        let server = with_sonar(
+            r#"url = "https://sonar.example.com"
+token_env = "SONAR_TOKEN"
+project_key = "scrapy"
+pull_request = false"#,
+        )
+        .unwrap()
+        .sonar
+        .unwrap();
+        assert_eq!(server.organization, None);
+        assert!(!server.pull_request);
+    }
+
+    #[test]
+    fn sonar_settings_are_checked() {
+        for bad in [
+            "url = \"sonar.example.com\"\ntoken_env = \"T\"\nproject_key = \"p\"",
+            "url = \"https://s\"\ntoken_env = \"T\"\nproject_key = \"\"",
+            "url = \"https://s\"\ntoken_env = \"T\"\nproject_key = \"p\"\norganization = \"\"",
+            "url = \"https://s\"\ntoken_env = \"T\"\nproject_key = \"p\"\npoll_s = 0",
+        ] {
+            assert!(with_sonar(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_sonar_token_is_read_from_its_variable() {
+        let cfg = with_sonar(
+            r#"url = "https://s"
+token_env = "AEGIS_TEST_SURELY_UNSET_SONAR_TOKEN"
+project_key = "p""#,
+        )
+        .unwrap()
+        .sonar
+        .unwrap();
+        let err = cfg.step(None).unwrap_err().to_string();
+        assert!(err.contains("AEGIS_TEST_SURELY_UNSET_SONAR_TOKEN"), "{err}");
+        // Any variable that is set will do to see it read.
+        let cfg = SonarConfig {
+            token_env: "PATH".into(),
+            ..cfg
+        };
+        let step = cfg.step(None).unwrap();
+        assert_eq!(step.token, std::env::var("PATH").unwrap());
+        assert_eq!(step.image.as_deref(), Some("sonarsource/sonar-scanner-cli"));
     }
 }

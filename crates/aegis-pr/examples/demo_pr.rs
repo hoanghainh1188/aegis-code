@@ -45,6 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fetch: None,
         build_cache: None,
         allowed_tests: vec![],
+        sonar: None,
     })?;
     println!("{report}");
     if !report.passed() {

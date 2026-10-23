@@ -85,6 +85,15 @@ owner = "hoanghainh1188"
 name = "scrapy"
 token_env = "GITHUB_TOKEN"
 
+# Sonar step of the gate (#91), off until a server exists. Cloud needs
+# `organization`; a Server leaves it out. `pull_request = false` for the
+# Community Build (no pull request analysis).
+# [sonar]
+# url = "https://sonarcloud.io"
+# token_env = "SONAR_TOKEN"
+# organization = "hoanghainh1188"
+# project_key = "hoanghainh1188_scrapy"
+
 [identity]
 name = "aegis-bot"
 email = "aegis-bot@users.noreply.github.com"
