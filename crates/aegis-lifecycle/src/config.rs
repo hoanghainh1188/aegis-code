@@ -251,4 +251,28 @@ impl RunConfig {
                 .unwrap_or_else(|| PathBuf::from("aegis-aci"))
         })
     }
+
+    /// Fails unless [`Self::aci_bin`] is a file, saying where it looked and
+    /// how to build it. Checked before any issue starts: without it every
+    /// issue stops at its first step and still lands in the ledger (#113).
+    pub fn check_aci_bin(&self) -> Result<(), LifecycleError> {
+        let bin = self.aci_bin();
+        if bin.is_file() {
+            return Ok(());
+        }
+        let (from, build) = if self.run.aci_bin.is_some() {
+            ("`run.aci_bin` in the config", "cargo build -p aegis-aci")
+        } else if bin.parent().and_then(Path::file_name) == Some("release".as_ref()) {
+            (
+                "the default, next to `aegis`",
+                "cargo build --release -p aegis-aci",
+            )
+        } else {
+            ("the default, next to `aegis`", "cargo build -p aegis-aci")
+        };
+        Err(LifecycleError::Config(format!(
+            "no `aegis-aci` at `{}` ({from}); build it with `{build}` or set `run.aci_bin`",
+            bin.display()
+        )))
+    }
 }

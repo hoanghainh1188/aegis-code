@@ -148,6 +148,8 @@ fn finish_platform<P>(
     store: JsonFileLedger,
     github_token: String,
 ) -> Result<Platform<P, JsonFileLedger>, String> {
+    // Before the first issue, so a missing ACI writes nothing to the ledger.
+    config.check_aci_bin().map_err(|e| e.to_string())?;
     let prices = PriceTable::load(&config.run.pricing).map_err(|e| e.to_string())?;
     for model in [
         &config.models.light,
@@ -438,6 +440,35 @@ mod tests {
         for bad in [["run", "--no-pr"], ["batch", "--replay"]] {
             assert!(check(&bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_missing_aci_stops_the_command_before_the_ledger() {
+        let state = std::env::temp_dir().join(format!("aegis-no-aci-{}", std::process::id()));
+        let poc = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/poc.toml");
+        let mut config = RunConfig::load(&poc).unwrap();
+        config.run.state_dir = state.clone();
+        config.run.pricing =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/pricing.toml");
+        let missing = state.join("no-such-aegis-aci");
+        config.run.aci_bin = Some(missing.clone());
+        let store = JsonFileLedger::new(state.join("ledger"));
+        let err = finish_platform(
+            config.clone(),
+            ReplayProvider::default(),
+            store,
+            String::new(),
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains(&missing.display().to_string()), "{err}");
+        assert!(err.contains("`run.aci_bin`"), "{err}");
+        assert!(err.contains("cargo build -p aegis-aci"), "{err}");
+        assert!(!state.exists());
+
+        // Any file will do: the check only looks for it.
+        config.run.aci_bin = Some(std::env::current_exe().unwrap());
+        assert!(config.check_aci_bin().is_ok());
     }
 
     #[test]

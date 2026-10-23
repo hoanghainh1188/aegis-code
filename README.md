@@ -115,6 +115,13 @@ crates/
 * Rust toolchain (1.80+)
 * Docker (for isolated sandbox verification)
 
+### Build
+`aegis` starts `aegis-aci` from its own directory, so build both:
+```bash
+cargo build --release -p aegis-cli -p aegis-aci
+```
+Elsewhere, point `run.aci_bin` in the config at it.
+
 ### Testing & Verification
 ```bash
 # Check code formatting
