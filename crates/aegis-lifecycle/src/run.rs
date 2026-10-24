@@ -785,10 +785,14 @@ where
             dearest_call_usd = dearest_call_usd.max(cost);
             ledger.tool_calls(tier, tool_calls(turn)).await?;
         }
-        let (after_edits, _) = fold_tools(router, &outcome.turns);
+        let (after_edits, decision) = fold_tools(router, &outcome.turns);
         if after_edits.tier() != router.tier() {
             // Escalated on the loop's last turn: Expert takes over from here.
             first_expert_call = true;
+            if let Decision::Escalate(reason) = decision {
+                let calls = ledger.record().model_calls;
+                ledger.escalated(reason.to_string(), calls).await?;
+            }
         }
         router = after_edits;
         session = outcome.session;
@@ -816,6 +820,7 @@ where
                     let (next, decision) = router.observe(Signal::ModelCalls { calls });
                     debug_assert_eq!(decision, Decision::RemindTest { calls });
                     router = next;
+                    ledger.test_reminded(tier, calls).await?;
                     session = session.with_user_text(test_reminder(calls));
                     continue;
                 }
@@ -827,6 +832,7 @@ where
                         let (next, decision) = router.observe(Signal::ModelCalls { calls });
                         debug_assert_eq!(decision, Decision::Escalate(reason));
                         router = next;
+                        ledger.escalated(reason.to_string(), calls).await?;
                     }
                     first_expert_call = true;
                     continue;
@@ -937,8 +943,10 @@ where
         if let Decision::Stop(reason) = decision {
             return Ok(Ending::stop(reason.outcome(), reason.to_string()));
         }
-        if let Decision::Escalate(_) = decision {
+        if let Decision::Escalate(reason) = decision {
             first_expert_call = true;
+            let calls = ledger.record().model_calls;
+            ledger.escalated(reason.to_string(), calls).await?;
         }
         if cancel.is_cancelled() {
             return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));

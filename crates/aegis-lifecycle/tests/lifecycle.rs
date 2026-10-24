@@ -390,6 +390,29 @@ async fn two_rejected_edits_escalate_to_expert_with_the_history() {
     assert_eq!(expert[0].messages.len(), 5);
     assert_eq!(expert[0].system, core[0].system);
     assert_eq!(fork_refs(&scratch), "");
+    assert_eq!(
+        router_events(&p.store).await,
+        [LedgerEvent::Escalated {
+            reason: "edits rejected by the linter twice in a row".into(),
+            calls: 2,
+        }]
+    );
+}
+
+/// The router's reminders and escalations in the ledger of fixture-7 (#148).
+async fn router_events(store: &MemoryLedger) -> Vec<LedgerEvent> {
+    store
+        .events(&IssueId::parse("fixture-7").unwrap())
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| {
+            matches!(
+                e,
+                LedgerEvent::TestReminded { .. } | LedgerEvent::Escalated { .. }
+            )
+        })
+        .collect()
 }
 
 /// The reminder of #144, as the model reads it.
@@ -432,6 +455,13 @@ async fn eight_calls_without_a_test_run_remind_the_agent_once() {
     assert_eq!(last.role, Role::User);
     assert!(matches!(last.content[0], ContentBlock::ToolResult { .. }));
     assert_eq!(core[8].messages.len(), core[7].messages.len() + 2);
+    assert_eq!(
+        router_events(&p.store).await,
+        [LedgerEvent::TestReminded {
+            tier: Tier::Core,
+            calls: 8,
+        }]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -459,6 +489,20 @@ async fn core_reading_for_fifteen_calls_without_a_patch_escalates_to_expert() {
     // Expert sees the issue and Core's 15 calls with their results.
     assert_eq!(expert[0].messages.len(), 31);
     assert_eq!(report.model_calls, 16);
+    // Reminded at 8 calls, escalated at 15 without a patch (#148).
+    assert_eq!(
+        router_events(&p.store).await,
+        [
+            LedgerEvent::TestReminded {
+                tier: Tier::Core,
+                calls: 8,
+            },
+            LedgerEvent::Escalated {
+                reason: "no patch after 15 calls".into(),
+                calls: 15,
+            },
+        ]
+    );
     // The ledger shows what Core spent those calls on (#129); Expert's
     // answer called no tool, so it has no entry.
     let events = p

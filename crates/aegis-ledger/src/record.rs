@@ -182,6 +182,18 @@ pub enum LedgerEvent {
         tier: Tier,
         calls: Vec<ToolCall>,
     },
+    /// The router reminded the agent to write and run its reproduction
+    /// test after `calls` Core/Expert calls without a test run (#144).
+    TestReminded {
+        tier: Tier,
+        calls: u32,
+    },
+    /// The router moved the job from Core to Expert after `calls`
+    /// Core/Expert calls; `reason` is the router's (design §5.4).
+    Escalated {
+        reason: String,
+        calls: u32,
+    },
     GateRun(GateRun),
     /// Secret values hidden from the model in tool output or input text
     /// (design §7).
@@ -205,7 +217,11 @@ impl LedgerEvent {
     /// event could not be read back, so stores refuse such events.
     pub(crate) fn ensure_finite(&self) -> Result<(), LedgerError> {
         let fields: &[(&'static str, f64)] = match self {
-            Self::Classified { .. } | Self::SecretsRedacted { .. } | Self::ToolCalls { .. } => &[],
+            Self::Classified { .. }
+            | Self::SecretsRedacted { .. }
+            | Self::ToolCalls { .. }
+            | Self::TestReminded { .. }
+            | Self::Escalated { .. } => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
@@ -311,7 +327,9 @@ impl IssueRecord {
                 self.cost_usd += cost_usd;
             }
             LedgerEvent::GateRun(run) => self.gate_runs.push(run.clone()),
-            LedgerEvent::ToolCalls { .. } => {}
+            LedgerEvent::ToolCalls { .. }
+            | LedgerEvent::TestReminded { .. }
+            | LedgerEvent::Escalated { .. } => {}
             LedgerEvent::HiddenTests { passed, .. } => self.hidden_tests_passed = Some(*passed),
             LedgerEvent::SecretsRedacted { count } => {
                 self.secrets_redacted = self.secrets_redacted.saturating_add(*count);
