@@ -13,8 +13,9 @@ These apply unless the repository's own conventions below say otherwise.
 - Keep public APIs stable: do not rename or change the signature of a `pub`
   item unless the issue asks for it.
 - Unit tests go in the `#[cfg(test)] mod tests` of the file they test;
-  tests of the public API go in the crate's `tests/` directory. A
-  reproduction test is easiest to run when it lives in its own file under
+  tests of the public API go in the crate's `tests/` directory. The
+  reproduction test is the exception: never put it in a `#[cfg(test)]` module
+  of a file your fix changes. Put it in its own file under the crate's
   `tests/` with a unique name, for example `tests/issue_regression.rs`.
 - The reproduction test is run as
   `cargo test --workspace -- --exact <name>`; give it a name that is unique

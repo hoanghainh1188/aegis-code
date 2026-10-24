@@ -430,6 +430,16 @@ pull_request = false"#,
     }
 
     #[test]
+    fn the_poc_repos_say_where_the_reproduction_test_goes() {
+        let typst = include_str!("../../../config/typst.toml");
+        for (toml, place) in [(POC, "tests/test_"), (typst, "tests/suite/")] {
+            let repo = RunConfig::from_toml(toml).unwrap().repo;
+            let conventions = repo.conventions.unwrap_or_default();
+            assert!(conventions.contains(place), "{}: {conventions}", repo.key);
+        }
+    }
+
+    #[test]
     fn sonar_settings_are_checked() {
         for bad in [
             "url = \"sonar.example.com\"\ntoken_env = \"T\"\nproject_key = \"p\"",
