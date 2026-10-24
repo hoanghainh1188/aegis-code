@@ -34,6 +34,7 @@ async fn repo(s: &Store) -> i64 {
         default_branch: "main".into(),
         language: "rust".into(),
         mode: RepoMode::Poc,
+        max_concurrent_jobs: 1,
         config: json!({}),
     })
     .await
