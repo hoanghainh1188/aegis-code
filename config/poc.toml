@@ -43,6 +43,16 @@ key = "scrapy"
 # Hidden tests of eval runs (#98): eval/issues lists scrapy's as files.
 # Without the tests that need the Internet, as in the gate.
 hidden_test = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not requires_internet", "{tests}"]
+# Where the agent puts its reproduction test (#140): the gate copies only
+# the test's files onto the base.
+conventions = """
+- Put the reproduction test in a new file `tests/test_<module>_<topic>.py`,
+  named after the module you fix, never in the module itself. Use the
+  helpers `tests/` already has (`tests/mockserver`, `tests/spiders.py`,
+  `scrapy.utils.test`) instead of writing new ones.
+- Report its pytest id, `tests/test_<module>_<topic>.py::test_name`, and
+  that file as its only file.
+"""
 
 # scrapy has no uv.lock: the fetch step (#66) installs it into .venv with
 # the test requirements its tox.ini lists at that commit, those of the

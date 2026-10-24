@@ -157,6 +157,76 @@ fn a_reproduction_test_that_passes_without_the_fix_fails() {
     );
 }
 
+/// The reproduction test written inside the source file the fix changes
+/// (typst-6822 in #18).
+const INLINE_REPRO: &str = "
+#[cfg(test)]
+mod issue_tests {
+    use super::*;
+
+    #[test]
+    fn fourth_item_is_refused() {
+        let mut cart = cart![1, 2, 3];
+        assert_eq!(cart.add(4), Err(CartError::Full));
+    }
+}
+";
+
+fn inline_repro(files: &[&str]) -> Repro {
+    Repro {
+        test: "issue_tests::fourth_item_is_refused".into(),
+        files: files.iter().map(|f| f.to_string()).collect(),
+    }
+}
+
+#[test]
+fn a_reproduction_test_missing_from_the_base_is_said_not_to_run() {
+    if !ready() {
+        return;
+    }
+    let repo = Repo::new("rust", &[BUG]);
+    repo.replace(BUG.0, BUG.2, BUG.1);
+    repo.write(BUG.0, &(repo.read(BUG.0) + INLINE_REPRO));
+
+    let report = repo.gate(
+        &profile(Language::Rust, FAKE_COVERAGE),
+        Some(&inline_repro(&[])),
+    );
+    let step = report.step(StepName::ReproTest).unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{report}");
+    assert!(
+        step.detail
+            .contains("`issue_tests::fourth_item_is_refused` did not run on the base revision")
+            && step.detail.contains("(none)")
+            && step.detail.contains("a file that holds only tests"),
+        "{}",
+        step.detail
+    );
+}
+
+#[test]
+fn a_reproduction_file_that_holds_the_fix_is_named() {
+    if !ready() {
+        return;
+    }
+    let repo = Repo::new("rust", &[BUG]);
+    repo.replace(BUG.0, BUG.2, BUG.1);
+    repo.write(BUG.0, &(repo.read(BUG.0) + INLINE_REPRO));
+
+    let report = repo.gate(
+        &profile(Language::Rust, FAKE_COVERAGE),
+        Some(&inline_repro(&[BUG.0])),
+    );
+    let step = report.step(StepName::ReproTest).unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{report}");
+    assert!(
+        step.detail.contains("also passes on the base revision")
+            && step.detail.contains("The patch also changes `src/lib.rs`"),
+        "{}",
+        step.detail
+    );
+}
+
 #[test]
 fn unformatted_code_stops_the_gate_at_format() {
     if !ready() {

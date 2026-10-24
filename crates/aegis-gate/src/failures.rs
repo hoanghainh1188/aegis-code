@@ -62,6 +62,24 @@ pub fn failing_tests_with(
     }
 }
 
+/// Every test a run reports, whatever its result, when the format names
+/// them all: libtest's `test <name> ... <result>`. `None` for pytest, whose
+/// output names only the tests that fail.
+pub fn ran_tests(format: TestOutput, output: &str) -> Option<BTreeSet<String>> {
+    match format {
+        TestOutput::Libtest => Some(
+            output
+                .lines()
+                .map(str::trim)
+                .filter_map(|l| l.strip_prefix("test "))
+                .filter_map(|l| l.split_once(" ..."))
+                .map(|(name, _)| name.to_owned())
+                .collect(),
+        ),
+        TestOutput::Pytest => None,
+    }
+}
+
 /// Stands for the tests of a run that stopped before reporting (a crash,
 /// an abort, `exit()` in a test): they count as failing.
 pub const DID_NOT_FINISH: &str = "<did not finish>";
@@ -172,6 +190,29 @@ fn pytest(output: &str) -> BTreeSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn libtest_lists_every_test_it_ran() {
+        let out = "\
+$ cargo test --workspace -- --exact issue_tests::refuses
+     Running unittests src/lib.rs (target/debug/deps/cart-1a2b3c)
+running 2 tests
+test issue_tests::refuses ... ok
+test tests::slow ... ignored
+test result: ok. 1 passed; 0 failed; 1 ignored
+     Running tests/extra.rs (target/debug/deps/extra-9f8e)
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out
+";
+        assert_eq!(
+            ran_tests(TestOutput::Libtest, out)
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["issue_tests::refuses", "tests::slow"]
+        );
+        assert_eq!(ran_tests(TestOutput::Pytest, "1 passed in 0.1s"), None);
+    }
 
     #[test]
     fn libtest_names_failures_by_binary() {

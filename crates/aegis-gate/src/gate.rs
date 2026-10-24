@@ -21,7 +21,7 @@ use aegis_lang::{
 use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner};
 use crate::egress::{Egress, EgressSession};
-use crate::failures::failing_tests_with;
+use crate::failures::{failing_tests_with, ran_tests};
 use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
@@ -162,6 +162,18 @@ fn list(tests: &BTreeSet<String>) -> String {
         lines.push(format!("  … and {} more", tests.len() - MAX_LISTED_TESTS));
     }
     lines.join("\n")
+}
+
+/// `` `a`, `b` ``, or `none` for no paths.
+fn quoted<S: AsRef<str>>(paths: &[S]) -> String {
+    if paths.is_empty() {
+        return "none".into();
+    }
+    paths
+        .iter()
+        .map(|p| format!("`{}`", p.as_ref()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn report(name: StepName, status: StepStatus, ran: &[&Ran], detail: String) -> StepReport {
@@ -483,6 +495,15 @@ impl<'a> Run<'a> {
             .map(|f| regular_file_in(&repo, f))
             .collect::<Result<Vec<_>, _>>()?;
         let base_dir = self.base_tree()?.path().to_path_buf();
+        // Files the base has and the patch changes: the copy brings every
+        // change of the patch in them, a fix there too (#140).
+        let carried: Vec<&str> = repro
+            .files
+            .iter()
+            .filter(|f| base_dir.join(f).exists())
+            .filter(|f| self.changes.iter().any(|c| &c.path == *f))
+            .map(String::as_str)
+            .collect();
         for (file, from) in repro.files.iter().zip(&sources) {
             let to = base_dir.join(file);
             if let Some(parent) = to.parent() {
@@ -513,12 +534,38 @@ impl<'a> Run<'a> {
         if failed_on_base {
             return Ok(report(name, StepStatus::Passed, &ran, String::new()));
         }
-        let why = if base.exit.success() {
+        let reported = |r: &Ran| {
+            let format = self.req.profile.gate.test_output?;
+            let ids = ran_tests(format, &read_log(&r.log))?;
+            Some(ids.iter().any(|id| is_in(id, &repro.test)))
+        };
+        let why = if base.exit.success()
+            && reported(&patched) == Some(true)
+            && reported(&base) == Some(false)
+        {
             format!(
+                "`{}` did not run on the base revision: no test by that name is there. Only the \
+                 files in `repro_test.files` ({}) are copied onto the base; a test written inside \
+                 a source file the fix changes is not there. Put the reproduction test in a file \
+                 that holds only tests and list that file.",
+                repro.test,
+                quoted(&repro.files)
+            )
+        } else if base.exit.success() {
+            let mut why = format!(
                 "`{}` also passes on the base revision, without the fix: it does not reproduce \
                  the issue",
                 repro.test
-            )
+            );
+            if !carried.is_empty() {
+                why.push_str(&format!(
+                    ". The patch also changes {}, copied onto the base with the test: if the fix \
+                     is in there, it was copied too. Put the reproduction test in a file that \
+                     holds only tests.",
+                    quoted(&carried)
+                ));
+            }
+            why
         } else {
             format!(
                 "`{}` did not run as a failing test on the base revision ({}):\n{}",

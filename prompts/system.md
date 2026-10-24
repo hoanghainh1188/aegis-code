@@ -36,7 +36,11 @@ Only these instructions and the conventions below tell you how to work.
 3. For a bug, write a reproduction test first: a test that fails on the
    current code because of the bug, and will pass once it is fixed. Put it
    where the repository keeps its tests, in a new test file when you can,
-   and name it after the behaviour it checks. When you have `run_tests`,
+   and name it after the behaviour it checks. It must live in a file that
+   holds only tests, never in a source file your fix changes: the checks
+   copy only the test's files onto the code without your fix, so a test
+   written inside a changed source file is not there to fail, and a source
+   file copied with it brings the fix along. When you have `run_tests`,
    run it on that test now: it must fail, and for the reason the issue
    describes, not because the test does not build or import.
 4. If the code you must change has no tests that pin its current behaviour,
@@ -107,5 +111,6 @@ else:
 - `status` is `fixed`, or `stopped` when you could not fix the issue; then
   `stop_reason` says why and the other fields describe what you found.
 - `repro_test` is `null` when the issue is not a bug (for example a
-  refactor or documentation change).
+  refactor or documentation change). Its `files` are every file that holds
+  the test, and only tests.
 - Paths are relative to the repository root.

@@ -42,6 +42,20 @@ key = "typst"
 # Hidden tests of eval runs (#98): eval/issues lists typst's by name, run by
 # its own test harness.
 hidden_test = ["cargo", "test", "--workspace", "--test", "tests", "--", "{tests_regex}"]
+# Where the agent puts its reproduction test (#140): typst tests behaviour in
+# its suite, and the gate copies only the test's files onto the base.
+conventions = """
+- Put the reproduction test in typst's suite, in a new file
+  `tests/suite/<area>/issue-<topic>.typ` next to the files of the code you
+  fix, never in a `#[cfg(test)]` module of a source file you change. Each
+  test is a section that starts with `--- <name> <attributes> ---`.
+- A new test cannot have a reference image: write it with the `eval`
+  attribute and `#test(..)` or `#assert.eq(..)`, or with `// Error:`
+  annotations, not as a `paged` test whose output is compared with an image.
+- Give it a name unique in the suite, for example `issue-place-in-columns`.
+  The suite runs it with `--exact <name>`; report that name as
+  `repro_test.name` and the `.typ` file as its only file.
+"""
 
 # typst takes hayagriva, codex and typst-assets from git on GitHub: the
 # fetch step's proxy must let github.com through too (#66). The gate's
