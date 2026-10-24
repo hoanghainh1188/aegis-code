@@ -105,6 +105,39 @@ fn a_parametrized_reproduction_test_is_matched_by_its_name() {
     assert_eq!(step.status, StepStatus::Passed, "{report}");
 }
 
+/// The agent may name a whole class: its tests fail on the base as
+/// `<class>::<test>[<params>]` (#136).
+const CLASS_REPRO_TEST: &str = "import pytest
+
+from cart import CartFullError, cart_of
+
+
+class TestFourthItem:
+    @pytest.mark.parametrize(\"extra\", [4, 5])
+    def test_is_refused(self, extra):
+        cart = cart_of(1, 2, 3)
+        with pytest.raises(CartFullError):
+            cart.add(extra)
+";
+
+#[test]
+fn a_reproduction_class_is_matched_by_the_tests_in_it() {
+    if !ready() {
+        return;
+    }
+    let repo = Repo::new("python", &[BUG]);
+    repo.replace(BUG.0, BUG.2, BUG.1);
+    repo.write("tests/test_fourth.py", CLASS_REPRO_TEST);
+    let repro = Repro {
+        test: "tests/test_fourth.py::TestFourthItem".into(),
+        files: vec!["tests/test_fourth.py".into()],
+    };
+
+    let report = repo.gate(&profile(Language::Python, FAKE_COVERAGE), Some(&repro));
+    let step = report.step(StepName::ReproTest).unwrap();
+    assert_eq!(step.status, StepStatus::Passed, "{report}");
+}
+
 #[test]
 fn new_failures_are_told_from_ones_the_base_has() {
     if !ready() {
