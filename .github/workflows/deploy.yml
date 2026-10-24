@@ -1,0 +1,274 @@
+# Đóng gói và triển khai (#33). Cách dùng: docs/runbook/README.md.
+#
+# - PR và main: kiểm OpenTofu (fmt, tflint, validate, plan không cần AWS)
+#   và build image aegis-server.
+# - main, khi đã có tài khoản AWS (biến AWS_IMAGE_ROLE_ARN): đẩy image
+#   server và sandbox lên ECR, tag = SHA của commit.
+# - Chạy tay (workflow_dispatch): `plan`, `apply` hoặc `deploy` một môi
+#   trường. `apply` và `deploy` chạy trong GitHub environment cùng tên, có
+#   người duyệt. AWS chỉ qua OIDC của GitHub; không có khóa lâu dài.
+name: Deploy
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/tofu/**'
+      - 'docker/server/**'
+      - 'docker/python/**'
+      - 'docker/rust/**'
+      - '.dockerignore'
+      - '.github/workflows/deploy.yml'
+      - 'crates/**'
+      - 'Cargo.lock'
+      - 'config/**'
+      - 'profiles/**'
+      - 'prompts/**'
+      - 'policies/**'
+      - '.sqlx/**'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/tofu/**'
+      - 'docker/server/**'
+      - 'docker/python/**'
+      - 'docker/rust/**'
+      - '.dockerignore'
+      - '.github/workflows/deploy.yml'
+      - 'crates/**'
+      - 'Cargo.lock'
+      - 'config/**'
+      - 'profiles/**'
+      - 'prompts/**'
+      - 'policies/**'
+      - '.sqlx/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Môi trường
+        type: choice
+        options: [staging, customer-jp]
+      action:
+        description: "plan: xem thay đổi hạ tầng; apply: plan rồi áp dụng; deploy: chạy image theo tag (rollback = tag trước)"
+        type: choice
+        options: [plan, apply, deploy]
+      image_tag:
+        description: "deploy: tag image (SHA commit trên main)"
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment || github.ref }}
+  # Không hủy giữa chừng một apply hay deploy.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TOFU_VERSION: 1.10.7
+  TFLINT_VERSION: v0.59.1
+  AWS_REGION: ap-northeast-1
+
+jobs:
+  tofu-check:
+    name: tofu fmt / tflint / validate / plan (offline)
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - run: deploy/tofu/check.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  image:
+    name: image aegis-server
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && vars.AWS_IMAGE_ROLE_ARN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - if: env.PUBLISH == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_IMAGE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - if: env.PUBLISH == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/server/Dockerfile
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ env.PUBLISH == 'true' && format('{0}/aegis-server:{1}', steps.ecr.outputs.registry, github.sha) || 'aegis-server:ci' }}
+          cache-from: type=gha,scope=aegis-server
+          cache-to: type=gha,mode=max,scope=aegis-server
+          load: ${{ env.PUBLISH != 'true' }}
+      - name: Smoke test (không root, có aegis-aci, git, docker)
+        if: env.PUBLISH != 'true'
+        run: |
+          docker run --rm --entrypoint sh aegis-server:ci -c \
+            'test "$(id -u)" = 10001 && command -v aegis-server aegis-aci git docker'
+
+  sandbox-images:
+    name: image sandbox ${{ matrix.profile }}
+    if: github.event_name == 'push' && vars.AWS_IMAGE_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        profile: [python, rust]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_IMAGE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker/${{ matrix.profile }}
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/aegis-sandbox-${{ matrix.profile }}:${{ github.sha }}
+          cache-from: type=gha,scope=sandbox-${{ matrix.profile }}
+          cache-to: type=gha,mode=max,scope=sandbox-${{ matrix.profile }}
+
+  plan:
+    name: plan ${{ inputs.environment }}
+    if: github.event_name == 'workflow_dispatch' && inputs.action != 'deploy'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: deploy/tofu/envs/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      # Giá trị thật của môi trường (không bí mật: tài khoản, tên miền,
+      # ECR…) nằm ở biến repo TOFU_TFVARS_<MÔI TRƯỜNG>, không trong git.
+      - name: tfvars
+        env:
+          TFVARS: ${{ inputs.environment == 'staging' && vars.TOFU_TFVARS_STAGING || vars.TOFU_TFVARS_CUSTOMER_JP }}
+        run: |
+          test -n "$TFVARS" || { echo "::error::chưa đặt biến TOFU_TFVARS cho ${{ inputs.environment }}"; exit 1; }
+          printf '%s\n' "$TFVARS" > env.auto.tfvars
+      - run: >
+          tofu init -input=false
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=${{ inputs.environment }}/terraform.tfstate"
+          -backend-config="region=${{ env.AWS_REGION }}"
+      # -lock=false: role plan chỉ đọc; apply giữ khóa.
+      - run: tofu plan -input=false -lock=false -out=tfplan | tee plan.txt
+      - run: |
+          { echo '```'; tail -n 200 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: deploy/tofu/envs/${{ inputs.environment }}/tfplan
+          retention-days: 1
+
+  apply:
+    name: apply ${{ inputs.environment }}
+    needs: plan
+    if: inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    # Người duyệt của environment xem plan ở job trước rồi mới cho chạy.
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: deploy/tofu/envs/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: deploy/tofu/envs/${{ inputs.environment }}
+      - name: tfvars
+        env:
+          TFVARS: ${{ inputs.environment == 'staging' && vars.TOFU_TFVARS_STAGING || vars.TOFU_TFVARS_CUSTOMER_JP }}
+        run: printf '%s\n' "$TFVARS" > env.auto.tfvars
+      - run: >
+          tofu init -input=false
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=${{ inputs.environment }}/terraform.tfstate"
+          -backend-config="region=${{ env.AWS_REGION }}"
+      # Áp đúng plan đã duyệt; state đổi từ lúc plan thì tofu từ chối.
+      - run: tofu apply -input=false tfplan
+
+  deploy:
+    name: deploy ${{ inputs.environment }} @ ${{ inputs.image_tag }}
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NAME: ${{ inputs.environment }}
+      TAG: ${{ inputs.image_tag }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Image tồn tại
+        run: |
+          test -n "$TAG" || { echo "::error::cần image_tag"; exit 1; }
+          aws ecr describe-images --repository-name aegis-server --image-ids imageTag="$TAG" >/dev/null
+      - name: Ghi tag, chạy aegis-deploy trên máy qua SSM
+        run: |
+          previous=$(aws ssm get-parameter --name "/aegis/$NAME/image_tag" --query Parameter.Value --output text)
+          echo "Tag trước: $previous (rollback: chạy lại deploy với tag này)" >> "$GITHUB_STEP_SUMMARY"
+          instance=$(aws ec2 describe-instances \
+            --filters "Name=tag:aegis:deployment,Values=$NAME" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          test "$instance" != None
+          aws ssm put-parameter --name "/aegis/$NAME/image_tag" --value "$TAG" --overwrite >/dev/null
+          command=$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
+            --comment "aegis-deploy $TAG" --timeout-seconds 900 \
+            --parameters "commands=[\"/usr/local/bin/aegis-deploy $TAG\"]" \
+            --query Command.CommandId --output text)
+          aws ssm wait command-executed --command-id "$command" --instance-id "$instance" || true
+          aws ssm get-command-invocation --command-id "$command" --instance-id "$instance" \
+            --query '[Status, StandardOutputContent, StandardErrorContent]' --output text
+          status=$(aws ssm get-command-invocation --command-id "$command" --instance-id "$instance" --query Status --output text)
+          if [ "$status" != Success ]; then
+            echo "::error::deploy $TAG: $status. Tag trong SSM vẫn là $TAG; rollback: chạy deploy với $previous"
+            exit 1
+          fi
