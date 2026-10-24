@@ -1,0 +1,30 @@
+[package]
+name = "aegis-store"
+description = "Durable platform state in PostgreSQL: repos, jobs, runs and the ledger (ADR 0003, #22)."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+aegis-ledger = { path = "../aegis-ledger" }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+serde = "1.0.229"
+serde_json = "1.0.154"
+sqlx = { version = "0.9.0", default-features = false, features = [
+    "chrono",
+    "json",
+    "macros",
+    "migrate",
+    "postgres",
+    "runtime-tokio",
+    "tls-rustls-aws-lc-rs",
+] }
+thiserror = "2.0.21"
+
+[features]
+# `testing::test_db` for this crate's tests and those of its users.
+testing = []
+
+[dev-dependencies]
+aegis-store = { path = ".", features = ["testing"] }
+tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread"] }

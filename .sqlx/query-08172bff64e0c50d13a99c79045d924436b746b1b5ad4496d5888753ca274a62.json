@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT ledger_key FROM ledger_events\n                 WHERE ledger_key > $1 ORDER BY ledger_key LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ledger_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ledger_events",
+            "name": "ledger_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "08172bff64e0c50d13a99c79045d924436b746b1b5ad4496d5888753ca274a62"
+}

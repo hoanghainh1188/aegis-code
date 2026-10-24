@@ -215,7 +215,7 @@ pub enum LedgerEvent {
 impl LedgerEvent {
     /// JSON has no NaN or infinity: serde_json would write `null` and the
     /// event could not be read back, so stores refuse such events.
-    pub(crate) fn ensure_finite(&self) -> Result<(), LedgerError> {
+    pub fn ensure_finite(&self) -> Result<(), LedgerError> {
         let fields: &[(&'static str, f64)] = match self {
             Self::Classified { .. }
             | Self::SecretsRedacted { .. }

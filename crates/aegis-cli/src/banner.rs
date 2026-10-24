@@ -57,6 +57,10 @@ pub fn print_help() {
             "Record manual review verdicts and KPI metrics for a run",
         ),
         ("report", "Display KPI report and benchmark statistics"),
+        (
+            "ledger",
+            "Copy the JSON ledger into PostgreSQL (import) or back (export)",
+        ),
     ];
 
     for (name, desc) in commands {

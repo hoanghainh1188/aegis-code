@@ -1,6 +1,7 @@
 //! Where ledger events and records are kept (ADR 0003). The issue
-//! lifecycle only sees [`LedgerStore`]; JSON files in `runs/` are one
-//! implementation, Postgres comes in Phase 2 (#22).
+//! lifecycle only sees [`LedgerStore`]; JSON files are one implementation,
+//! Postgres (`aegis-store`, #22) the other. [`copy_ledger`] moves a ledger
+//! between them.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -194,6 +195,52 @@ fn parse_events(path: &Path, text: &str) -> Result<Vec<LedgerEvent>, LedgerError
             })
         })
         .collect()
+}
+
+/// What [`copy_ledger`] did, by issue.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyReport {
+    /// New in the target, or with events added at its end.
+    pub copied: Vec<IssueId>,
+    /// Already the same in the target.
+    pub unchanged: Vec<IssueId>,
+}
+
+/// Copies every issue's events from `from` into `to`, then saves the
+/// record they fold into. Safe to run again: an issue whose events in `to`
+/// are the same as in `from`, or the start of them (an earlier copy that
+/// stopped, or a ledger that grew since), only gets what is missing, and
+/// its record is saved again in case that copy stopped before it. An issue
+/// whose events differ is an error, before anything of it is written.
+/// Nothing else may write the same issues while it runs.
+pub async fn copy_ledger<F, T>(from: &F, to: &T) -> Result<CopyReport, LedgerError>
+where
+    F: LedgerStore + Sync,
+    T: LedgerStore + Sync,
+{
+    let mut report = CopyReport::default();
+    for issue in from.issues().await? {
+        let events = from.events(&issue).await?;
+        let have = to.events(&issue).await?;
+        if !events.starts_with(&have) {
+            return Err(LedgerError::Store(format!(
+                "{issue}: the target's {} events are not the start of the source's {}",
+                have.len(),
+                events.len()
+            )));
+        }
+        for event in &events[have.len()..] {
+            to.append(&issue, event).await?;
+        }
+        to.save_record(&IssueRecord::from_events(issue.clone(), &events))
+            .await?;
+        if have.len() == events.len() {
+            report.unchanged.push(issue);
+        } else {
+            report.copied.push(issue);
+        }
+    }
+    Ok(report)
 }
 
 /// In-memory store for tests of code that writes to the ledger.
@@ -401,6 +448,47 @@ mod tests {
         let record = IssueRecord::from_events(issue(), &[classified()]);
         store.save_record(&record).await.unwrap();
         assert_eq!(store.record(&issue()), Some(record));
+    }
+
+    #[tokio::test]
+    async fn copy_resumes_skips_and_refuses_a_diverging_ledger() {
+        let from = MemoryLedger::new();
+        let other = IssueId::parse("GH-8").unwrap();
+        for event in [classified(), finished()] {
+            from.append(&issue(), &event).await.unwrap();
+        }
+        from.append(&other, &classified()).await.unwrap();
+        let root = temp_root();
+        let to = JsonFileLedger::new(&root);
+        to.append(&issue(), &classified()).await.unwrap();
+
+        let report = copy_ledger(&from, &to).await.unwrap();
+        assert_eq!(report.copied, vec![issue(), other.clone()]);
+        assert_eq!(
+            to.events(&issue()).await.unwrap(),
+            vec![classified(), finished()],
+            "the missing tail only"
+        );
+        let saved = std::fs::read_to_string(to.record_path(&issue())).unwrap();
+        let saved: IssueRecord = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved.outcome, Some(Outcome::StoppedSteps));
+
+        // A copy that stopped between the last event and the record.
+        std::fs::remove_file(to.record_path(&issue())).unwrap();
+        let again = copy_ledger(&from, &to).await.unwrap();
+        assert_eq!(again.unchanged, vec![issue(), other.clone()]);
+        assert!(again.copied.is_empty());
+        assert!(
+            to.record_path(&issue()).exists(),
+            "the record is saved again"
+        );
+
+        let diverged = MemoryLedger::new();
+        diverged.append(&other, &finished()).await.unwrap();
+        let err = copy_ledger(&diverged, &to).await.unwrap_err();
+        assert!(matches!(err, LedgerError::Store(_)), "{err}");
+        assert_eq!(to.events(&other).await.unwrap(), vec![classified()]);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

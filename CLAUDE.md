@@ -28,4 +28,6 @@ cargo test -p aegis-provider --features bedrock
 cargo deny check
 ```
 
+Test của `aegis-store` và test chạy issue trên nó cần PostgreSQL: đặt `AEGIS_TEST_DATABASE_URL` (vd. `postgres://postgres:aegis@localhost:5432/postgres`), thiếu thì test bỏ qua. Đổi truy vấn hay migration của `aegis-store` thì chạy lại `cargo sqlx prepare --workspace` với `DATABASE_URL` trỏ tới DB đã migrate và commit `.sqlx/`; CI kiểm tra bằng `--check`.
+
 Commit theo Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`).

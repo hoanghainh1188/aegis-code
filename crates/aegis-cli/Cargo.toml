@@ -15,9 +15,13 @@ aegis-ledger = { path = "../aegis-ledger" }
 aegis-lifecycle = { path = "../aegis-lifecycle" }
 aegis-pr = { path = "../aegis-pr" }
 aegis-provider = { path = "../aegis-provider" }
+aegis-store = { path = "../aegis-store" }
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "signal"] }
 tokio-util = "0.7.20"
 
 [features]
 # Bedrock backend for config/customer-jp.toml.
 bedrock = ["aegis-provider/bedrock"]
+
+[dev-dependencies]
+aegis-store = { path = "../aegis-store", features = ["testing"] }

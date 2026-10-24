@@ -65,6 +65,20 @@ pub struct RunSection {
     /// Image the egress proxy of the fetch step runs in; any with Python 3.
     #[serde(default = "default_egress_image")]
     pub egress_image: String,
+    /// Where the ledger is kept (#22). The database's URL is not part of
+    /// the configuration: the command that opens it gets it from outside.
+    #[serde(default)]
+    pub ledger: LedgerBackend,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LedgerBackend {
+    /// `<state_dir>/ledger/<id>.events.jsonl` and `<id>.json`.
+    #[default]
+    Json,
+    /// `aegis-store`'s PostgreSQL tables.
+    Postgres,
 }
 
 fn default_egress_image() -> String {

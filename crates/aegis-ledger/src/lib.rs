@@ -19,4 +19,4 @@ pub use record::{
     GateRun, IssueId, IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier,
     TokenCounts, ToolCall,
 };
-pub use store::{JsonFileLedger, LedgerStore, MemoryLedger};
+pub use store::{CopyReport, JsonFileLedger, LedgerStore, MemoryLedger, copy_ledger};

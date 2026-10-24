@@ -32,6 +32,10 @@ pub enum LedgerError {
 
     #[error("could not encode ledger entry: {0}")]
     Encode(String),
+
+    /// A database-backed store failed (`aegis-store`, #22).
+    #[error("ledger store: {0}")]
+    Store(String),
 }
 
 impl LedgerError {

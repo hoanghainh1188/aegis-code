@@ -25,5 +25,6 @@ tokio-util = "0.7.20"
 toml = "1.1.8"
 
 [dev-dependencies]
+aegis-store = { path = "../aegis-store", features = ["testing"] }
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "time"] }
 wiremock = "0.6.5"
