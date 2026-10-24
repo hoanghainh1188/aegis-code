@@ -140,7 +140,10 @@ async fn run(args: Args) -> Result<(), String> {
         .ok_or_else(|| format!("{DATABASE_URL}: not loaded"))?;
     let store = Store::connect(url.expose())
         .await
-        .map_err(|e| format!("{DATABASE_URL}: {e}"))?;
+        .map_err(|e| format!("{DATABASE_URL}: {e}"))?
+        .with_budget(config.budget_rules())
+        .await
+        .map_err(|e| format!("[budget]: {e}"))?;
     let shutdown = on_shutdown_signal();
     let mut parts: JoinSet<Result<(), String>> = JoinSet::new();
     let refresh = secrets::keep_fresh(

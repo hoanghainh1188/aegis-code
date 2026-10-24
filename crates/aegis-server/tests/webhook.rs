@@ -35,6 +35,7 @@ fn config() -> WebhookConfig {
         label: "aegis".into(),
         burst: 100,
         per_minute: 600,
+        notifier: None,
     }
 }
 

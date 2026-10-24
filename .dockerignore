@@ -1,0 +1,11 @@
+# Build context of docker/server/Dockerfile: only what the build copies.
+target/
+.workspace/
+runs/
+.git/
+.claude/
+.env
+.env.*
+deploy/
+docs/
+eval/

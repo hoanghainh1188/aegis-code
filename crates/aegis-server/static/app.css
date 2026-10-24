@@ -15,6 +15,8 @@
   --fail-wash: #f8e4e1;
   --accent: #2741a8;
   --track: #e8e3d6;
+  --warn: #8a5a00;
+  --warn-wash: #f6ead0;
 
   --font-text: "Avenir Next", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-num: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
@@ -43,6 +45,8 @@
     --fail-wash: #3a1b18;
     --accent: #9fb0ff;
     --track: #2b2a23;
+    --warn: #e3b55a;
+    --warn-wash: #33290f;
   }
 }
 
@@ -112,6 +116,7 @@ tbody tr:hover { background: var(--paper); }
 .num { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.ok { color: var(--pass); background: var(--pass-wash); }
 td.bad { color: var(--fail); background: var(--fail-wash); }
+td.warn { color: var(--warn); background: var(--warn-wash); }
 dd.ok, strong.ok { color: var(--pass); }
 dd.bad, strong.bad { color: var(--fail); }
 .empty { color: var(--ink-soft); font-style: italic; }
@@ -124,6 +129,14 @@ dd.bad, strong.bad { color: var(--fail); }
 .bars .bar.ok { fill: var(--pass); }
 .bars .bar.bad { fill: var(--fail); }
 .bars .threshold { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 2; }
+
+.spend { width: 8rem; height: 0.9rem; display: block; }
+.spend .track { fill: var(--track); }
+.spend .bar { fill: var(--ink-soft); }
+.spend .bar.ok { fill: var(--pass); }
+.spend .bar.warn { fill: var(--warn); }
+.spend .bar.bad { fill: var(--fail); }
+.spend .threshold { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 2 2; }
 
 .status { font: 600 0.75rem var(--font-num); padding: 0.1em 0.5em; border: 1px solid currentColor; white-space: nowrap; }
 .s-done { color: var(--pass); }

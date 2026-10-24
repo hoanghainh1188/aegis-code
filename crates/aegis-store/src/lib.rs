@@ -1,13 +1,14 @@
 //! Durable platform state in PostgreSQL (ADR 0003 §2, #22): repos, jobs,
 //! their runs, the job queue, webhook deliveries, and the ledger behind
 //! [`aegis_ledger::LedgerStore`]; users, sessions, roles and the audit log
-//! (#29).
+//! (#29); repos' monthly budgets (#31).
 //!
 //! Queries are checked against the schema at compile time; `.sqlx/` at the
 //! workspace root lets the crate build without a database. Every list is
 //! paged ([`Page`]).
 
 mod audit;
+mod budget;
 mod deliveries;
 mod error;
 mod jobs;
@@ -23,11 +24,13 @@ mod users;
 pub mod testing;
 
 use std::str::FromStr;
+use std::sync::Arc;
 
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 pub use audit::{Actor, AuditEntry};
+pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use error::StoreError;
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
@@ -47,6 +50,9 @@ const MAX_CONNECTIONS: u32 = 10;
 #[derive(Debug, Clone)]
 pub struct Store {
     pool: PgPool,
+    /// How monthly budgets apply (#31); [`BudgetRules::default`] until
+    /// [`Store::with_budget`].
+    budget: Arc<BudgetRules>,
 }
 
 impl Store {
@@ -62,7 +68,10 @@ impl Store {
             .connect_with(options)
             .await?;
         MIGRATOR.run(&pool).await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            budget: Arc::default(),
+        })
     }
 
     /// New connections use `url` (a rotated password, #30); open ones

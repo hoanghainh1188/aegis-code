@@ -14,6 +14,10 @@ pub enum StoreError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    /// The repo's monthly budget is spent (#31): the reason, to show.
+    #[error("{0}")]
+    BudgetSpent(String),
+
     #[error("invalid {field}: {message}")]
     Invalid {
         field: &'static str,

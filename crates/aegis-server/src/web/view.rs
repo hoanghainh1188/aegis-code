@@ -4,6 +4,7 @@
 use aegis_ledger::{
     CACHE_READ_MIN, COST_PER_ISSUE_MAX, IssueRecord, Kpi, REVIEW_MINUTES_MAX, Tier,
 };
+use aegis_store::{BudgetRules, BudgetState, RepoBudget};
 
 /// `50% (1/2)`, or `—` with nothing to divide by.
 pub fn pct(part: usize, whole: usize) -> String {
@@ -105,9 +106,79 @@ impl KpiRow {
     }
 }
 
+/// One row of the monthly budgets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BudgetRow {
+    pub label: String,
+    pub spent: String,
+    pub cap: String,
+    pub left: String,
+    pub capped: bool,
+    /// Share of the cap used, `82%`.
+    pub used: String,
+    /// Bar length in 0–100 units, capped at 100.
+    pub bar: u32,
+    pub state: &'static str,
+    pub class: &'static str,
+}
+
+impl BudgetRow {
+    pub fn new(budget: &RepoBudget, rules: &BudgetRules) -> Self {
+        let share = budget.monthly_usd.map(|cap| {
+            if cap > 0.0 {
+                budget.spent_usd / cap
+            } else {
+                1.0
+            }
+        });
+        let (state, class) = match budget.state(rules) {
+            BudgetState::Unlimited => ("Không giới hạn", "na"),
+            BudgetState::Ok => ("Ổn", "ok"),
+            BudgetState::Warn => ("Gần chạm trần", "warn"),
+            BudgetState::Spent => ("Hết: không nhận job mới", "bad"),
+        };
+        Self {
+            label: budget.slug.clone(),
+            spent: dollars(budget.spent_usd),
+            cap: budget.monthly_usd.map_or("—".into(), dollars),
+            left: budget.left_usd().map_or("—".into(), dollars),
+            capped: budget.monthly_usd.is_some(),
+            used: share.map_or("—".into(), |s| format!("{:.0}%", s * 100.0)),
+            bar: share.map_or(0, |s| (s * 100.0).round().clamp(0.0, 100.0) as u32),
+            state,
+            class,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aegis_store::RepoId;
+
+    #[test]
+    fn budgets_read_as_spent_of_cap() {
+        let rules = BudgetRules::default();
+        let budget = |monthly_usd, spent_usd| RepoBudget {
+            repo_id: RepoId(1),
+            slug: "typst".into(),
+            monthly_usd,
+            spent_usd,
+        };
+        let row = BudgetRow::new(&budget(Some(50.0), 41.0), &rules);
+        assert_eq!((row.used.as_str(), row.bar, row.class), ("82%", 82, "warn"));
+        assert_eq!(row.left, "$9.00");
+        let row = BudgetRow::new(&budget(Some(50.0), 70.0), &rules);
+        assert_eq!(
+            (row.bar, row.class, row.left.as_str()),
+            (100, "bad", "$0.00")
+        );
+        let row = BudgetRow::new(&budget(None, 12.0), &rules);
+        assert_eq!(
+            (row.cap.as_str(), row.capped, row.class),
+            ("—", false, "na")
+        );
+    }
 
     #[test]
     fn values_read_like_the_report() {

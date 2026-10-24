@@ -52,6 +52,15 @@ api_requests_per_minute = 120
 # issuer = "https://login.example.com/realms/acme"
 # client_id = "aegis"
 
+# Each repo's monthly cap is set through the API (`PUT
+# /api/v1/repos/{id}/budget`, maintainer or admin); a repo with less than
+# `worker.max_cost_usd` left of its month gets no new job (#31).
+[budget]
+# Where a month begins.
+time_zone = "UTC"
+# The dashboard warns from this share of a cap.
+warn_ratio = 0.8
+
 [worker]
 # Jobs this process runs at once. A repo's own limit is
 # `repos.max_concurrent_jobs`, over all workers.
