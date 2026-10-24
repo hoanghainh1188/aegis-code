@@ -2,7 +2,9 @@
 //! worktree and gate containers, with the job's ledger in PostgreSQL. Each
 //! job runs with its repo's configuration from the `repos` table: the
 //! mode's provider and models, the repo's own image, Sonar project,
-//! allow-list and budget (#24, #162).
+//! allow-list and budget (#24, #162). Its secrets (the mode's API key,
+//! the fork's and Sonar's tokens) come from the server's store (#30), as
+//! they are when the attempt starts.
 //!
 //! Every attempt of a job writes to the same ledger (`jobs.ledger_key`),
 //! so the router's budget counts what earlier attempts spent: the cap is
@@ -20,6 +22,7 @@ use aegis_lifecycle::{
     IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, run_issue,
 };
 use aegis_provider::Provider;
+use aegis_secrets::{Secret, Secrets};
 use aegis_store::{Claim, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -132,12 +135,12 @@ struct ModeRuntime {
 }
 
 impl ModeRuntime {
-    async fn new(mode: &ModeConfig) -> Result<Self, String> {
+    async fn new(mode: &ModeConfig, secrets: &Secrets) -> Result<Self, String> {
         let prices = PriceTable::load(&mode.run.pricing).map_err(|e| e.to_string())?;
         for model in [&mode.models.light, &mode.models.core, &mode.models.expert] {
             prices.price(&model.id).map_err(|e| e.to_string())?;
         }
-        let provider = Provider::from_config(&mode.provider)
+        let provider = Provider::from_config_with_secrets(&mode.provider, secrets)
             .await
             .map_err(|e| e.to_string())?;
         Ok(Self { provider, prices })
@@ -149,17 +152,19 @@ pub struct LifecycleRunner {
     store: Store,
     ledger: RunLedger,
     profiles: Profiles,
+    secrets: Secrets,
     poc: Option<ModeRuntime>,
     customer_jp: Option<ModeRuntime>,
 }
 
 impl LifecycleRunner {
     /// The provider and prices of each configured mode, checked now: a
-    /// mode that cannot run fails the start, not its jobs.
-    pub async fn new(store: Store, modes: Modes) -> Result<Self, String> {
-        let runtime = |mode: Option<ModeConfig>| async move {
+    /// mode that cannot run (its API key missing from `secrets`) fails the
+    /// start, not its jobs.
+    pub async fn new(store: Store, modes: Modes, secrets: Secrets) -> Result<Self, String> {
+        let runtime = |mode: Option<ModeConfig>| async {
             match mode {
-                Some(m) => ModeRuntime::new(&m).await.map(Some),
+                Some(m) => ModeRuntime::new(&m, &secrets).await.map(Some),
                 None => Ok(None),
             }
         };
@@ -174,6 +179,7 @@ impl LifecycleRunner {
             ledger: RunLedger::new(store.ledger()),
             store,
             profiles: Profiles::builtin().map_err(|e| e.to_string())?,
+            secrets,
             poc,
             customer_jp,
         })
@@ -187,9 +193,22 @@ impl LifecycleRunner {
         .ok_or_else(|| Attempt::Rejected(format!("no configuration for mode `{}`", mode.as_str())))
     }
 
+    /// Secret `name` for repo `slug`'s job: `Rejected` when the store has
+    /// none, `Infra` when it cannot be read.
+    async fn secret(&self, slug: &str, what: &str, name: &str) -> Result<Secret, Attempt> {
+        match self.secrets.get_or_load(name).await {
+            Ok(Some(secret)) => Ok(secret),
+            Ok(None) => Err(Attempt::Rejected(format!(
+                "repo `{slug}`: no secret {name} ({what}) in {}",
+                self.secrets.source()
+            ))),
+            Err(e) => Err(Attempt::Infra(e.to_string())),
+        }
+    }
+
     async fn attempt(&self, claim: &Claim, cancel: CancellationToken) -> Result<Attempt, Attempt> {
         let job = &claim.job;
-        let RepoRun { repo, config } = self.configs.resolve(job.repo_id).await?;
+        let RepoRun { repo, mut config } = self.configs.resolve(job.repo_id).await?;
         let runtime = self.runtime(repo.mode)?;
         config
             .check_aci_bin()
@@ -226,16 +245,16 @@ impl LifecycleRunner {
             });
         }
         let github_token = if config.run.open_prs {
-            let env = &config.repo.fork.token_env;
-            std::env::var(env).map_err(|_| {
-                Attempt::Rejected(format!(
-                    "repo `{}`: set {env} to a token for its fork",
-                    repo.slug
-                ))
-            })?
+            let name = &config.repo.fork.token_env;
+            let token = self.secret(&repo.slug, "the fork's token", name).await?;
+            token.expose().to_owned()
         } else {
             String::new()
         };
+        if let Some(sonar) = &mut config.sonar {
+            let name = &sonar.token_env;
+            sonar.token = Some(self.secret(&repo.slug, "Sonar's token", name).await?);
+        }
         let issue = issue(claim, &config.repo.fork.api, &github_token).await?;
         let platform = Arc::new(Platform {
             config,

@@ -14,6 +14,7 @@ aegis-orchestrator = { path = "../aegis-orchestrator" }
 aegis-pr = { path = "../aegis-pr" }
 aegis-provider = { path = "../aegis-provider" }
 aegis-router = { path = "../aegis-router" }
+aegis-secrets = { path = "../aegis-secrets" }
 aegis-sonar-batch = { path = "../aegis-sonar-batch" }
 aegis-store = { path = "../aegis-store" }
 futures = "0.3.34"

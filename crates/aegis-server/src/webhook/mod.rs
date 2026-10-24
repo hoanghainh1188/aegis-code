@@ -4,13 +4,16 @@
 //! branch), and its job is written with the delivery's ID in one
 //! transaction; the answer comes right after, the worker runs the job.
 //!
-//! - `POST /webhooks/github`: `X-Hub-Signature-256` with the secret in
+//! - `POST /webhooks/github`: `X-Hub-Signature-256` with the secret
 //!   `AEGIS_GITHUB_WEBHOOK_SECRET`; events `issues` and `workflow_run`.
-//! - `POST /webhooks/gitlab`: `X-Gitlab-Token` equal to
+//! - `POST /webhooks/gitlab`: `X-Gitlab-Token` equal to the secret
 //!   `AEGIS_GITLAB_WEBHOOK_TOKEN`; events `Issue Hook` and `Pipeline Hook`.
 //!
-//! An endpoint whose secret is unset answers 404. The label is
-//! `AEGIS_WEBHOOK_LABEL` (`aegis` by default). Secrets move to #30.
+//! Both from the server's secret store (#30), as they are at the time of
+//! the delivery: a rotated secret is used once read, and a delivery that
+//! does not verify makes the store read it again (at most every 30 s). An
+//! endpoint whose secret is not in the store answers 404. The label is
+//! `AEGIS_WEBHOOK_LABEL` (`aegis` by default), not a secret.
 //!
 //! A verified delivery is still untrusted (design §7): only the repo's
 //! URL and path and the issue or run number are read from it.
@@ -23,6 +26,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use aegis_ledger::IssueId;
+use aegis_secrets::Secrets;
 use aegis_store::{Delivered, JobSource, NewDelivery, NewJob, Store, StoreError, WebhookSource};
 use axum::body::Bytes;
 use axum::extract::State;
@@ -35,6 +39,7 @@ use serde_json::{Value, json};
 use crate::api::default_ledger_key;
 use events::{Kind, Skip, Wanted};
 
+pub use aegis_secrets::Secret;
 pub use notify::{COMMENT_TOKEN_ENV, GITHUB_API_ENV, GitHubNotifier, status_comment};
 
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
@@ -44,35 +49,10 @@ pub const LABEL_ENV: &str = "AEGIS_WEBHOOK_LABEL";
 const DEFAULT_LABEL: &str = "aegis";
 const MAX_HEADER_LEN: usize = 128;
 
-/// A secret from the environment; never printed.
-#[derive(Clone)]
-pub struct Secret(String);
-
-impl Secret {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// `None` when unset or empty.
-    pub fn from_env(name: &str) -> Option<Self> {
-        std::env::var(name).ok().filter(|v| !v.is_empty()).map(Self)
-    }
-
-    pub(crate) fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Secret(…)")
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct WebhookConfig {
-    pub github_secret: Option<Secret>,
-    pub gitlab_token: Option<Secret>,
+    /// Where [`GITHUB_SECRET_ENV`] and [`GITLAB_TOKEN_ENV`] are read.
+    pub secrets: Secrets,
     /// The label that asks for a job when put on an issue.
     pub label: String,
     /// Deliveries taken at once, over both endpoints…
@@ -82,10 +62,11 @@ pub struct WebhookConfig {
 }
 
 impl WebhookConfig {
+    /// The secrets of the server's store ([`crate::secrets::installed`]),
+    /// the label from the environment.
     pub fn from_env() -> Self {
         Self {
-            github_secret: Secret::from_env(GITHUB_SECRET_ENV),
-            gitlab_token: Secret::from_env(GITLAB_TOKEN_ENV),
+            secrets: crate::secrets::installed(),
             label: std::env::var(LABEL_ENV)
                 .ok()
                 .filter(|l| !l.is_empty())
@@ -191,16 +172,18 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 }
 
 /// The checks before the body is read; the delivery ID and event when
-/// they pass.
-fn admit<'a>(
+/// they pass. A delivery that does not verify with the secret as read last
+/// is checked again with the secret read now, if it changed (rotation).
+async fn admit<'a>(
     hooks: &Hooks,
-    secret: Option<&Secret>,
-    verified: impl FnOnce(&Secret) -> bool,
+    secret_name: &str,
+    verified: impl Fn(&Secret) -> bool,
     headers: &'a HeaderMap,
     id_header: &str,
     event_header: &str,
 ) -> Result<(&'a str, &'a str), Refusal> {
-    let Some(secret) = secret else {
+    let secrets = &hooks.config.secrets;
+    let Some(secret) = secrets.get(secret_name) else {
         return Err(refuse(
             StatusCode::NOT_FOUND,
             "not_found",
@@ -214,13 +197,16 @@ fn admit<'a>(
             "too many deliveries",
         ));
     }
-    if !verified(secret) {
-        tracing::warn!("webhook delivery with a bad signature");
-        return Err(refuse(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "bad signature",
-        ));
+    if !verified(&secret) {
+        let rotated = secrets.refresh_after_auth_failure(secret_name).await;
+        if !rotated.as_ref().is_some_and(&verified) {
+            tracing::warn!("webhook delivery with a bad signature");
+            return Err(refuse(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "bad signature",
+            ));
+        }
     }
     match (header(headers, id_header), header(headers, event_header)) {
         (Some(id), Some(event)) => Ok((id, event)),
@@ -236,12 +222,13 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> 
     let signature = header(&headers, "x-hub-signature-256");
     let admitted = admit(
         &hooks,
-        hooks.config.github_secret.as_ref(),
+        GITHUB_SECRET_ENV,
         |s| verify::github(s.expose().as_bytes(), &body, signature),
         &headers,
         "x-github-delivery",
         "x-github-event",
-    );
+    )
+    .await;
     let (id, event) = match admitted {
         Ok(admitted) => admitted,
         Err(refusal) => return refusal.into_response(),
@@ -254,12 +241,13 @@ async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> 
     let token = header(&headers, "x-gitlab-token");
     let admitted = admit(
         &hooks,
-        hooks.config.gitlab_token.as_ref(),
+        GITLAB_TOKEN_ENV,
         |s| verify::gitlab(s.expose().as_bytes(), token),
         &headers,
         "x-gitlab-event-uuid",
         "x-gitlab-event",
-    );
+    )
+    .await;
     let (id, event) = match admitted {
         Ok(admitted) => admitted,
         Err(refusal) => return refusal.into_response(),
@@ -386,7 +374,7 @@ mod tests {
     #[test]
     fn secrets_are_not_printed() {
         let config = WebhookConfig {
-            github_secret: Some(Secret::new("hunter2")),
+            secrets: Secrets::fixed([(GITHUB_SECRET_ENV, "hunter2")]),
             ..WebhookConfig::from_env()
         };
         assert!(!format!("{config:?}").contains("hunter2"));

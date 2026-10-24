@@ -1,0 +1,21 @@
+[package]
+name = "aegis-secrets"
+description = "The one place secrets are read: AWS Secrets Manager, or the environment for dev and tests; checked at start, refreshed while running (ADR 0003 §6, #30)."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+aws-config = { version = "1.13.0", optional = true }
+# Như aegis-provider: tắt `rustls` mặc định, nó kéo hyper 0.14 + rustls 0.21 có advisory (#42).
+aws-sdk-secretsmanager = { version = "1.123.0", optional = true, default-features = false, features = ["default-https-client", "rt-tokio"] }
+thiserror = "2.0.21"
+tracing = "0.1.44"
+
+[features]
+# AWS Secrets Manager; the server always has it, the CLI does not need it.
+aws = ["dep:aws-config", "dep:aws-sdk-secretsmanager"]
+
+[dev-dependencies]
+tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6.5"

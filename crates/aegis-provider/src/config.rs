@@ -1,6 +1,7 @@
 //! Provider section of the run configuration (design §1: the two run
 //! configurations differ only in config files, never in code).
 
+use aegis_secrets::Secrets;
 use serde::Deserialize;
 
 use crate::claude_api::{ClaudeApi, DEFAULT_API_KEY_ENV};
@@ -10,6 +11,8 @@ use crate::{ModelPolicy, ModelProvider, ProviderError, Request, Response};
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProviderConfig {
     ClaudeApi {
+        /// The key's name: the variable for the CLI, the secret's name for
+        /// the server (#30).
         #[serde(default = "default_api_key_env")]
         api_key_env: String,
         #[serde(default)]
@@ -36,13 +39,39 @@ pub enum Provider {
 }
 
 impl Provider {
+    /// The API key from the environment (the CLI).
     pub async fn from_config(config: &ProviderConfig) -> Result<Self, ProviderError> {
+        Self::build(config, None).await
+    }
+
+    /// The API key from `secrets`, read now and again when rotated (the
+    /// server, #30). Bedrock needs none: its credentials are the role's.
+    pub async fn from_config_with_secrets(
+        config: &ProviderConfig,
+        secrets: &Secrets,
+    ) -> Result<Self, ProviderError> {
+        Self::build(config, Some(secrets)).await
+    }
+
+    async fn build(
+        config: &ProviderConfig,
+        secrets: Option<&Secrets>,
+    ) -> Result<Self, ProviderError> {
         match config {
             ProviderConfig::ClaudeApi {
                 api_key_env,
                 base_url,
             } => {
-                let api = ClaudeApi::from_env(api_key_env)?;
+                let api = match secrets {
+                    Some(secrets) => {
+                        secrets
+                            .require(&[api_key_env])
+                            .await
+                            .map_err(|e| ProviderError::Config(e.to_string()))?;
+                        ClaudeApi::from_secret(secrets, api_key_env)?
+                    }
+                    None => ClaudeApi::from_env(api_key_env)?,
+                };
                 Ok(Self::ClaudeApi(match base_url {
                     Some(url) => api.with_base_url(url.as_str())?,
                     None => api,
@@ -149,6 +178,18 @@ mod tests {
         };
         let err = Provider::from_config(&config).await.unwrap_err();
         assert!(matches!(err, ProviderError::Config(_)));
+    }
+
+    #[tokio::test]
+    async fn a_missing_secret_key_fails_by_name() {
+        let config = ProviderConfig::ClaudeApi {
+            api_key_env: "ANTHROPIC_API_KEY".into(),
+            base_url: None,
+        };
+        let err = Provider::from_config_with_secrets(&config, &Secrets::none())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ANTHROPIC_API_KEY"), "{err}");
     }
 
     #[cfg(not(feature = "bedrock"))]
