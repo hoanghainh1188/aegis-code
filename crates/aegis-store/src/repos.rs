@@ -1,4 +1,4 @@
-use crate::types::RepoMode;
+use crate::types::{RepoMode, count};
 use crate::{NewRepo, Page, PageOf, Repo, RepoId, Store, StoreError};
 
 const MAX_SLUG_LEN: usize = 128;
@@ -33,6 +33,7 @@ struct RepoRow {
     default_branch: String,
     language: String,
     mode: String,
+    max_concurrent_jobs: i32,
     config: serde_json::Value,
     created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -48,6 +49,7 @@ impl TryFrom<RepoRow> for Repo {
             default_branch: row.default_branch,
             language: row.language,
             mode: RepoMode::decode("repos.mode", &row.mode)?,
+            max_concurrent_jobs: count("repos.max_concurrent_jobs", row.max_concurrent_jobs)?,
             config: row.config,
             created_at: row.created_at,
         })
@@ -57,16 +59,24 @@ impl TryFrom<RepoRow> for Repo {
 impl Store {
     pub async fn create_repo(&self, repo: &NewRepo) -> Result<Repo, StoreError> {
         check_slug(&repo.slug)?;
+        let max_jobs = i32::try_from(repo.max_concurrent_jobs)
+            .ok()
+            .filter(|n| *n >= 1)
+            .ok_or_else(|| StoreError::Invalid {
+                field: "max_concurrent_jobs",
+                message: format!("{}: from 1 to {}", repo.max_concurrent_jobs, i32::MAX),
+            })?;
         sqlx::query_as!(
             RepoRow,
-            "INSERT INTO repos (slug, url, default_branch, language, mode, config)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, slug, url, default_branch, language, mode, config, created_at",
+            "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
             repo.slug,
             repo.url,
             repo.default_branch,
             repo.language,
             repo.mode.as_str(),
+            max_jobs,
             repo.config,
         )
         .fetch_one(&self.pool)
@@ -78,7 +88,7 @@ impl Store {
     pub async fn repo(&self, id: RepoId) -> Result<Option<Repo>, StoreError> {
         sqlx::query_as!(
             RepoRow,
-            "SELECT id, slug, url, default_branch, language, mode, config, created_at
+            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
              FROM repos WHERE id = $1",
             id.0,
         )
@@ -91,7 +101,7 @@ impl Store {
     pub async fn repo_by_slug(&self, slug: &str) -> Result<Option<Repo>, StoreError> {
         sqlx::query_as!(
             RepoRow,
-            "SELECT id, slug, url, default_branch, language, mode, config, created_at
+            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
              FROM repos WHERE slug = $1",
             slug,
         )
@@ -105,7 +115,7 @@ impl Store {
     pub async fn list_repos(&self, page: Page) -> Result<PageOf<Repo>, StoreError> {
         let rows = sqlx::query_as!(
             RepoRow,
-            "SELECT id, slug, url, default_branch, language, mode, config, created_at
+            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
              FROM repos WHERE $1::bigint IS NULL OR id > $1
              ORDER BY id LIMIT $2",
             page.cursor(),

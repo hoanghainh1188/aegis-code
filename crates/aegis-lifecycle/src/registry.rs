@@ -1,0 +1,493 @@
+//! Many repos (#24): each registered repo (`aegis-store`'s `repos`) runs
+//! with the configuration of its mode, `poc` or `customer-jp`, and its own
+//! settings: language profile and overrides, Docker image, Sonar project,
+//! allow-list, license and advisory policy, conventions for the prompt.
+//! [`Modes::run_config`] puts the two together into the [`RunConfig`] of
+//! one repo's jobs; nothing else is shared between repos.
+
+use std::path::Path;
+
+use aegis_lang::Language;
+use aegis_ledger::Tier;
+use aegis_provider::ProviderConfig;
+use aegis_router::ModelsConfig;
+use aegis_store::{NewRepo, Repo, RepoId, RepoMode, Store};
+use serde::{Deserialize, Serialize};
+
+use crate::LifecycleError;
+use crate::config::{
+    BudgetSection, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig, RunSection,
+    SonarConfig,
+};
+
+/// Bedrock in Tokyo for `customer-jp` (design §1, §7).
+const JAPAN_REGION: &str = "ap-northeast-1";
+const JAPAN_PROFILE_PREFIX: &str = "jp.";
+
+/// What a run configuration (`config/poc.toml`, `config/customer-jp.toml`)
+/// gives every repo of its mode. Its `[repo]` and `[sonar]` are for CLI
+/// runs of one repo and are left out: a registered repo brings its own.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModeConfig {
+    pub provider: ProviderConfig,
+    pub models: ModelsConfig,
+    pub run: RunSection,
+    #[serde(default)]
+    pub budget: BudgetSection,
+    pub identity: IdentityConfig,
+    #[serde(default)]
+    pub codebase_memory: Option<ExtraServer>,
+}
+
+impl ModeConfig {
+    pub fn from_toml(text: &str) -> Result<Self, LifecycleError> {
+        let mut table: toml::Table =
+            toml::from_str(text).map_err(|e| LifecycleError::Config(e.to_string()))?;
+        table.remove("repo");
+        table.remove("sonar");
+        table
+            .try_into()
+            .map_err(|e: toml::de::Error| LifecycleError::Config(e.to_string()))
+    }
+
+    /// Reads `path`; relative paths in it are taken from `base`.
+    pub fn load(path: &Path, base: &Path) -> Result<Self, LifecycleError> {
+        let text = std::fs::read_to_string(path).map_err(|e| LifecycleError::io(path, &e))?;
+        let mut mode = Self::from_toml(&text)?;
+        for p in [&mut mode.run.state_dir, &mut mode.run.pricing] {
+            if p.is_relative() {
+                *p = base.join(&*p);
+            }
+        }
+        if let Some(p) = mode.run.aci_bin.as_mut().filter(|p| p.is_relative()) {
+            *p = base.join(&*p);
+        }
+        Ok(mode)
+    }
+
+    /// The `customer-jp` guard (design §7): Bedrock in Tokyo with the
+    /// `jp.` check on, and a `jp.` inference profile for every tier, so a
+    /// customer repo cannot be sent anywhere else by a wrong line.
+    pub fn check(&self, mode: RepoMode) -> Result<(), LifecycleError> {
+        match mode {
+            RepoMode::Poc => Ok(()),
+            RepoMode::CustomerJp => self.check_japan_only(),
+        }
+    }
+
+    fn check_japan_only(&self) -> Result<(), LifecycleError> {
+        let refuse = |why: String| Err(LifecycleError::Config(format!("customer-jp: {why}")));
+        match &self.provider {
+            ProviderConfig::Bedrock {
+                region,
+                require_jp_profile: true,
+            } if region == JAPAN_REGION => {}
+            ProviderConfig::Bedrock { region, .. } if region != JAPAN_REGION => {
+                return refuse(format!("Bedrock region `{region}`, not `{JAPAN_REGION}`"));
+            }
+            ProviderConfig::Bedrock { .. } => {
+                return refuse("`require_jp_profile` must be true".into());
+            }
+            ProviderConfig::ClaudeApi { .. } => {
+                return refuse(format!("the provider must be Bedrock in `{JAPAN_REGION}`"));
+            }
+        }
+        for tier in [Tier::Light, Tier::Core, Tier::Expert] {
+            let id = &self.models.for_tier(tier).id;
+            if !id.starts_with(JAPAN_PROFILE_PREFIX) {
+                return refuse(format!(
+                    "model `{id}` of {tier:?} is not a `{JAPAN_PROFILE_PREFIX}` inference profile"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A repo's own settings, kept in `repos.config`. The columns (URL, main
+/// branch, language, mode, `max_concurrent_jobs`) are in [`Repo`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepoSettings {
+    /// The repo maintainers' conventions, added to the system prompt.
+    #[serde(default)]
+    pub conventions: Option<String>,
+    /// The gate's image, in place of the language profile's; wins over an
+    /// `image` in `overrides`.
+    #[serde(default)]
+    pub image: Option<String>,
+    /// Overrides of the language profile, as `[repo.overrides]`.
+    #[serde(default)]
+    pub overrides: toml::Table,
+    /// Packages a patch may add to this repo.
+    #[serde(default)]
+    pub allowed_packages: Vec<String>,
+    /// Licenses its dependencies may have; `policies/licenses.toml` when
+    /// unset.
+    #[serde(default)]
+    pub licenses: Option<Vec<String>>,
+    #[serde(default)]
+    pub ignored_advisories: Vec<String>,
+    #[serde(default)]
+    pub hidden_test: Option<Vec<String>>,
+    /// This repo's budget, in place of its mode's.
+    #[serde(default)]
+    pub budget: Option<BudgetSection>,
+    /// Its Sonar project; no Sonar step without it.
+    #[serde(default)]
+    pub sonar: Option<SonarConfig>,
+    pub fork: ForkConfig,
+}
+
+/// What registering a repo takes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoSpec {
+    pub slug: String,
+    pub url: String,
+    pub default_branch: String,
+    pub language: Language,
+    pub mode: RepoMode,
+    pub max_concurrent_jobs: u32,
+    pub settings: RepoSettings,
+}
+
+/// A registered repo with the configuration its jobs run with.
+#[derive(Debug, Clone)]
+pub struct RepoRun {
+    pub repo: Repo,
+    pub config: RunConfig,
+}
+
+impl RepoRun {
+    /// Applied by the queue (#23) on top of its global `max_workers`.
+    pub fn max_concurrent_jobs(&self) -> u32 {
+        self.repo.max_concurrent_jobs
+    }
+}
+
+/// The configuration of each mode. A mode without one has no repos.
+#[derive(Debug, Clone, Default)]
+pub struct Modes {
+    pub poc: Option<ModeConfig>,
+    pub customer_jp: Option<ModeConfig>,
+}
+
+impl Modes {
+    /// Fails if the `customer-jp` configuration does not pass its guard,
+    /// before any repo uses it.
+    pub fn new(
+        poc: Option<ModeConfig>,
+        customer_jp: Option<ModeConfig>,
+    ) -> Result<Self, LifecycleError> {
+        if let Some(jp) = &customer_jp {
+            jp.check(RepoMode::CustomerJp)?;
+        }
+        Ok(Self { poc, customer_jp })
+    }
+
+    fn mode(&self, mode: RepoMode) -> Result<&ModeConfig, LifecycleError> {
+        let config = match mode {
+            RepoMode::Poc => self.poc.as_ref(),
+            RepoMode::CustomerJp => self.customer_jp.as_ref(),
+        };
+        let config = config.ok_or_else(|| {
+            LifecycleError::Config(format!("no configuration for mode `{}`", mode.as_str()))
+        })?;
+        // Again here: `Modes` has public fields.
+        config.check(mode)?;
+        Ok(config)
+    }
+
+    /// The configuration of `repo`'s jobs. Its clone is
+    /// `<state_dir>/repos/<slug>`; module maps, caches and the
+    /// Codebase-Memory index are under its slug.
+    pub fn run_config(&self, repo: &Repo) -> Result<RunConfig, LifecycleError> {
+        self.build(
+            &repo.slug,
+            &repo.default_branch,
+            &repo.language,
+            repo.mode,
+            &repo.config,
+        )
+    }
+
+    fn build(
+        &self,
+        slug: &str,
+        default_branch: &str,
+        language: &str,
+        mode: RepoMode,
+        config: &serde_json::Value,
+    ) -> Result<RunConfig, LifecycleError> {
+        let in_repo = |e: String| LifecycleError::Config(format!("repo `{slug}`: {e}"));
+        let mode = self.mode(mode)?;
+        let settings: RepoSettings =
+            serde_json::from_value(config.clone()).map_err(|e| in_repo(e.to_string()))?;
+        let language: Language = serde_json::from_value(serde_json::Value::String(language.into()))
+            .map_err(|e| in_repo(format!("language: {e}")))?;
+        let mut overrides = settings.overrides;
+        if let Some(image) = settings.image {
+            overrides.insert("image".into(), toml::Value::String(image));
+        }
+        let path = mode.run.state_dir.join("repos").join(slug);
+        RunConfig {
+            provider: mode.provider.clone(),
+            models: mode.models.clone(),
+            run: mode.run.clone(),
+            budget: settings.budget.unwrap_or(mode.budget),
+            repo: RepoConfig {
+                path,
+                language,
+                base: default_branch.to_owned(),
+                key: slug.to_owned(),
+                conventions: settings.conventions,
+                overrides,
+                allowed_packages: None,
+                allowed_package_names: settings.allowed_packages,
+                licenses: settings.licenses,
+                ignored_advisories: settings.ignored_advisories,
+                hidden_test: settings.hidden_test,
+                fork: settings.fork,
+            },
+            identity: mode.identity.clone(),
+            codebase_memory: mode.codebase_memory.clone(),
+            sonar: settings.sonar,
+        }
+        .check()
+        .map_err(|e| match e {
+            LifecycleError::Config(message) => in_repo(message),
+            other => other,
+        })
+    }
+
+    /// The repo `id` and its configuration, for the worker that runs its
+    /// jobs (#23).
+    pub async fn repo_run(&self, store: &Store, id: RepoId) -> Result<RepoRun, LifecycleError> {
+        let repo = store
+            .repo(id)
+            .await?
+            .ok_or_else(|| LifecycleError::Config(format!("no repo with id {}", id.0)))?;
+        let config = self.run_config(&repo)?;
+        Ok(RepoRun { repo, config })
+    }
+
+    /// Registers a repo, refused unless its configuration can be built
+    /// now: a `customer-jp` repo needs a `customer-jp` mode that passes the
+    /// guard.
+    pub async fn register(&self, store: &Store, spec: &RepoSpec) -> Result<Repo, LifecycleError> {
+        let new = NewRepo {
+            slug: spec.slug.clone(),
+            url: spec.url.clone(),
+            default_branch: spec.default_branch.clone(),
+            language: spec.language.id().to_owned(),
+            mode: spec.mode,
+            max_concurrent_jobs: spec.max_concurrent_jobs,
+            config: serde_json::to_value(&spec.settings)
+                .map_err(|e| LifecycleError::Config(format!("repo `{}`: {e}", spec.slug)))?,
+        };
+        // As it will be read back, before anything is written.
+        self.build(
+            &new.slug,
+            &new.default_branch,
+            &new.language,
+            new.mode,
+            &new.config,
+        )?;
+        Ok(store.create_repo(&new).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const POC: &str = include_str!("../../../config/poc.toml");
+    const JP: &str = include_str!("../../../config/customer-jp.toml");
+
+    fn modes() -> Modes {
+        Modes::new(
+            Some(ModeConfig::from_toml(POC).unwrap()),
+            Some(ModeConfig::from_toml(JP).unwrap()),
+        )
+        .unwrap()
+    }
+
+    fn settings() -> serde_json::Value {
+        serde_json::json!({
+            "fork": { "owner": "me", "name": "app", "token_env": "GITHUB_TOKEN" }
+        })
+    }
+
+    fn repo(slug: &str, mode: RepoMode, config: serde_json::Value) -> Repo {
+        Repo {
+            id: RepoId(1),
+            slug: slug.into(),
+            url: format!("https://github.com/me/{slug}"),
+            default_branch: "main".into(),
+            language: "python".into(),
+            mode,
+            max_concurrent_jobs: 1,
+            config,
+            created_at: Default::default(),
+        }
+    }
+
+    fn jp_with(edit: impl FnOnce(&mut ModeConfig)) -> ModeConfig {
+        let mut jp = ModeConfig::from_toml(JP).unwrap();
+        edit(&mut jp);
+        jp
+    }
+
+    #[test]
+    fn the_shipped_customer_config_passes_the_guard_and_the_poc_one_does_not() {
+        let jp = ModeConfig::from_toml(JP).unwrap();
+        jp.check(RepoMode::CustomerJp).unwrap();
+        let poc = ModeConfig::from_toml(POC).unwrap();
+        poc.check(RepoMode::Poc).unwrap();
+        let err = poc.check(RepoMode::CustomerJp).unwrap_err().to_string();
+        assert!(err.contains("must be Bedrock"), "{err}");
+    }
+
+    #[test]
+    fn the_guard_refuses_any_way_out_of_japan() {
+        type Edit = fn(&mut ModeConfig);
+        let cases: [(Edit, &str); 4] = [
+            (
+                |m| m.models.core.id = "anthropic.claude-sonnet-5-5".into(),
+                "of Core",
+            ),
+            (
+                |m| m.models.light.id = "global.anthropic.claude-haiku-5-5".into(),
+                "of Light",
+            ),
+            (
+                |m| {
+                    m.provider = ProviderConfig::Bedrock {
+                        region: JAPAN_REGION.into(),
+                        require_jp_profile: false,
+                    }
+                },
+                "require_jp_profile",
+            ),
+            (
+                |m| {
+                    m.provider = ProviderConfig::Bedrock {
+                        region: "us-east-1".into(),
+                        require_jp_profile: true,
+                    }
+                },
+                "us-east-1",
+            ),
+        ];
+        for (edit, why) in cases {
+            let jp = jp_with(edit);
+            let err = jp.check(RepoMode::CustomerJp).unwrap_err().to_string();
+            assert!(err.contains(why), "{why}: {err}");
+            // Refused before any repo uses it, and again if set by hand.
+            assert!(Modes::new(None, Some(jp.clone())).is_err());
+            let by_hand = Modes {
+                poc: None,
+                customer_jp: Some(jp),
+            };
+            let customer = repo("customer", RepoMode::CustomerJp, settings());
+            assert!(by_hand.run_config(&customer).is_err(), "{why}");
+        }
+    }
+
+    #[test]
+    fn each_repo_runs_with_its_modes_provider_and_its_own_settings() {
+        let modes = modes();
+        let mut own = settings();
+        own["image"] = "registry.local/app-ci:3.12".into();
+        own["allowed_packages"] = serde_json::json!(["attrs"]);
+        own["licenses"] = serde_json::json!(["MIT"]);
+        own["budget"] = serde_json::json!({ "max_cost_usd": 2.0, "max_model_calls": 20 });
+        own["conventions"] = "Tests go in tests/.".into();
+        own["sonar"] = serde_json::json!({
+            "url": "https://sonar.example.jp", "token_env": "SONAR_TOKEN", "project_key": "jp_app"
+        });
+        let internal = modes
+            .run_config(&repo("scrapy", RepoMode::Poc, settings()))
+            .unwrap();
+        let customer = modes
+            .run_config(&repo("app.jp", RepoMode::CustomerJp, own))
+            .unwrap();
+
+        assert!(matches!(
+            internal.provider,
+            ProviderConfig::ClaudeApi { .. }
+        ));
+        assert_eq!(internal.models.core.id, "claude-sonnet-5-5");
+        assert!(internal.sonar.is_none());
+        assert!(matches!(
+            customer.provider,
+            ProviderConfig::Bedrock {
+                require_jp_profile: true,
+                ..
+            }
+        ));
+        assert!(customer.models.core.id.starts_with("jp."));
+
+        assert_eq!(internal.repo.key, "scrapy");
+        assert_eq!(customer.repo.key, "app.jp");
+        assert!(customer.repo.path.ends_with("state-jp/repos/app.jp"));
+        assert_eq!(customer.repo.base, "main");
+        assert_eq!(customer.repo.language, Language::Python);
+        let overrides = customer.repo.profile_overrides().unwrap();
+        assert_eq!(
+            overrides.image.as_deref(),
+            Some("registry.local/app-ci:3.12")
+        );
+        assert_eq!(customer.repo.allowed_package_names, ["attrs"]);
+        assert_eq!(
+            customer.repo.licenses.as_deref(),
+            Some(&["MIT".to_owned()][..])
+        );
+        assert_eq!(customer.budget.max_cost_usd, 2.0);
+        assert_eq!(internal.budget.max_cost_usd, 4.0);
+        assert_eq!(customer.sonar.unwrap().project_key, "jp_app");
+        assert!(internal.repo.conventions.is_none());
+    }
+
+    #[test]
+    fn a_repo_without_its_modes_configuration_or_with_bad_settings_is_refused() {
+        let only_poc = Modes::new(Some(ModeConfig::from_toml(POC).unwrap()), None).unwrap();
+        let err = only_poc
+            .run_config(&repo("app", RepoMode::CustomerJp, settings()))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no configuration for mode `customer-jp`"),
+            "{err}"
+        );
+
+        let modes = modes();
+        let mut unknown = settings();
+        unknown["imag"] = "typo".into();
+        let mut no_language = repo("app", RepoMode::Poc, settings());
+        no_language.language = "cobol".into();
+        let mut bad_override = settings();
+        bad_override["overrides"] = serde_json::json!({ "no_such_step": ["true"] });
+        for bad in [
+            repo("app", RepoMode::Poc, unknown),
+            repo("app", RepoMode::Poc, serde_json::json!({})),
+            no_language,
+            repo("app", RepoMode::Poc, bad_override),
+        ] {
+            let err = modes.run_config(&bad).unwrap_err().to_string();
+            assert!(err.contains("repo `app`"), "{err}");
+        }
+    }
+
+    #[test]
+    fn settings_survive_the_round_trip_through_the_config_column() {
+        let mut value = settings();
+        value["overrides"] = serde_json::json!({ "gate": { "test": ["pytest", "-q"] } });
+        value["hidden_test"] = serde_json::json!(["pytest", "{tests}"]);
+        let parsed: RepoSettings = serde_json::from_value(value).unwrap();
+        let back: RepoSettings =
+            serde_json::from_value(serde_json::to_value(&parsed).unwrap()).unwrap();
+        assert_eq!(back, parsed);
+    }
+}

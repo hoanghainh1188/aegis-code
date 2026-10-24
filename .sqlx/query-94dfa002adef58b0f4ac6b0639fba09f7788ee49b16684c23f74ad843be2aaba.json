@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, url, default_branch, language, mode, config, created_at\n             FROM repos WHERE $1::bigint IS NULL OR id > $1\n             ORDER BY id LIMIT $2",
+  "query": "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)\n             VALUES ($1, $2, $3, $4, $5, $6, $7)\n             RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "max_concurrent_jobs",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "max_concurrent_jobs"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "config",
         "type_info": "Jsonb",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -94,8 +105,13 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Int8"
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -106,8 +122,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "efa5c3b43dfb86fd2de3793c5d3a2192116f850988d5c34702173fd06054f899"
+  "hash": "94dfa002adef58b0f4ac6b0639fba09f7788ee49b16684c23f74ad843be2aaba"
 }

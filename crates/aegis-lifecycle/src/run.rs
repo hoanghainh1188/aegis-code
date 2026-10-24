@@ -211,6 +211,10 @@ where
     .await
 }
 
+/// In the Codebase-Memory server's `args` and `env`: the repo's index
+/// directory under the state dir.
+const INDEX_DIR: &str = "{index_dir}";
+
 fn tool_specs(
     cfg: &RunConfig,
     profile: &ResolvedProfile,
@@ -263,12 +267,18 @@ fn tool_specs(
         tools: None,
     }];
     if let Some(cbm) = &cfg.codebase_memory {
+        // Each repo keeps its own index (#24), which the server updates
+        // from the files' hashes itself.
+        let index = cfg.run.state_dir.join("index").join(&cfg.repo.key);
+        std::fs::create_dir_all(&index).map_err(|e| LifecycleError::io(&index, &e))?;
+        let index = index.display().to_string();
+        let fill = |v: &String| v.replace(INDEX_DIR, &index);
         specs.push(McpServerSpec {
             name: "codebase-memory".into(),
             program: cbm.program.clone(),
-            args: cbm.args.clone(),
+            args: cbm.args.iter().map(fill).collect(),
             cwd: None,
-            env: cbm.env.clone(),
+            env: cbm.env.iter().map(|(k, v)| (k.clone(), fill(v))).collect(),
             tools: Some(cbm.tools.clone()),
         });
     }
@@ -297,7 +307,7 @@ where
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     let tree = Worktree::create(&cfg.repo.path, &base, &job_dir.join("repo"))?;
 
-    let map = module_map(cfg, profile)?;
+    let map = module_map(cfg, profile, tree.path(), &base)?;
     let system = system_blocks(&RepoPrompt {
         language_conventions: profile.profile.conventions(),
         repo_conventions: cfg.repo.conventions.as_deref(),
@@ -340,19 +350,26 @@ where
     result
 }
 
-/// The repo's module map, made once and kept under the state dir. BP2 is
-/// the same for every issue of the repo (design §4.4).
+/// The module map of the repo at `base`, made from the job's fresh
+/// checkout `tree` and kept under the state dir by the digest of the files
+/// the profile reads. BP2 is the same for every issue at the same files
+/// (design §4.4); a new base that changes one of them makes a new map
+/// (#24).
 pub(crate) fn module_map(
     cfg: &RunConfig,
     profile: &ResolvedProfile,
+    tree: &Path,
+    base: &str,
 ) -> Result<String, LifecycleError> {
-    let clone = Workspace::new(&cfg.repo.path, profile.clone())?;
+    let digest = job::files_digest(&cfg.repo.path, base, |p| profile.profile.owns_file(p))?;
+    let checkout = Workspace::new(tree, profile.clone())?;
     let map_path = cfg
         .run
         .state_dir
         .join("maps")
-        .join(format!("{}.md", cfg.repo.key));
-    Ok(load_or_create_summary(&clone, &map_path)?)
+        .join(&cfg.repo.key)
+        .join(format!("{digest}.md"));
+    Ok(load_or_create_summary(&checkout, &map_path)?)
 }
 
 /// The ledger's view of the tools of `turn` (#129).
@@ -506,12 +523,16 @@ fn sandbox(cfg: &RunConfig, profile: &ResolvedProfile) -> Result<Option<Sandbox>
     }))
 }
 
+/// The policy file's packages and the repo's own.
 fn allowed_packages(cfg: &RunConfig) -> Result<BTreeSet<String>, LifecycleError> {
+    let own = cfg.repo.allowed_package_names.iter().cloned();
     let Some(path) = &cfg.repo.allowed_packages else {
-        return Ok(BTreeSet::new());
+        return Ok(own.collect());
     };
     let text = std::fs::read_to_string(path).map_err(|e| LifecycleError::io(path, &e))?;
-    Ok(AllowList::from_toml(&text)?.names().clone())
+    let mut names = AllowList::from_toml(&text)?.names().clone();
+    names.extend(own);
+    Ok(names)
 }
 
 /// The gate on the job's tree, off the async runtime; `cancel` stops it.

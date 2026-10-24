@@ -6,7 +6,8 @@
 //!
 //! Backends are chosen with enums (`aegis_provider::Provider`, ledger
 //! stores), not trait objects, and the job's future is `Send + 'static`
-//! (ADR 0003).
+//! (ADR 0003). Each registered repo runs with its mode's configuration and
+//! its own settings ([`Modes`], #24).
 
 mod answer;
 mod batch;
@@ -18,6 +19,7 @@ mod issue;
 mod job;
 mod light;
 mod publish;
+mod registry;
 mod replay;
 mod run;
 
@@ -25,10 +27,11 @@ pub use answer::{FinalAnswer, Status, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
     BudgetSection, ExtraServer, ForkConfig, IdentityConfig, LedgerBackend, RepoConfig, RunConfig,
-    RunSection,
+    RunSection, SonarConfig,
 };
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};
+pub use registry::{ModeConfig, Modes, RepoRun, RepoSettings, RepoSpec};
 pub use replay::{Replay, ReplayProvider};
 pub use run::{IssueReport, Platform, job_dir, run_issue};

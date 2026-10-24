@@ -18,16 +18,19 @@ use aegis_ledger::{
     PriceTable, Tier, ToolCall, copy_ledger,
 };
 use aegis_lifecycle::{
-    IssueInput, IssueReport, Platform, Replay, ReplayProvider, RunConfig, run_issue,
+    IssueInput, IssueReport, ModeConfig, Modes, Platform, Replay, ReplayProvider, RepoSettings,
+    RepoSpec, RunConfig, run_issue,
 };
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, Role, StopReason, Usage,
 };
+use aegis_store::RepoMode;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use common::{
-    BUG_FROM, BUG_TO, PRICES, Scratch, config, fork_refs, git, github, repo_with_bug, tools_ready,
+    BUG_FROM, BUG_TO, PRICES, Scratch, aci_bin, config, fork_refs, git, github, repo_with_bug,
+    tools_ready,
 };
 
 /// Core and Expert follow scripts; Light answers by the job its system
@@ -79,7 +82,8 @@ impl ModelProvider for Scripted {
     async fn send(&self, request: &Request) -> Result<Response, ProviderError> {
         self.requests.lock().unwrap().push(request.clone());
         let system = request.system.concat();
-        let content = match request.model.as_str() {
+        // A customer-jp repo's models are `jp.` profiles of the same tiers.
+        let content = match request.model.trim_start_matches("jp.") {
             "light" if system.contains("You triage") => vec![ContentBlock::text(
                 r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item."}"#,
             )],
@@ -159,11 +163,19 @@ fn issue() -> IssueInput {
 }
 
 fn platform(config: RunConfig, model: Scripted) -> Arc<Platform<Scripted, MemoryLedger>> {
+    platform_priced(config, model, PRICES)
+}
+
+fn platform_priced(
+    config: RunConfig,
+    model: Scripted,
+    prices: &str,
+) -> Arc<Platform<Scripted, MemoryLedger>> {
     Arc::new(Platform {
         config,
         provider: model,
         store: MemoryLedger::new(),
-        prices: PriceTable::from_toml(PRICES).unwrap(),
+        prices: PriceTable::from_toml(prices).unwrap(),
         profiles: Profiles::builtin().unwrap(),
         github_token: "t".into(),
     })
@@ -937,4 +949,157 @@ async fn a_dry_run_replays_the_upstream_fix_without_a_model_or_a_pr() {
     assert_eq!(report.hidden_tests_passed, Some(true));
     assert_eq!(report.cost_usd, 0.0);
     assert_eq!(fork_refs(&scratch), "", "nothing was pushed");
+}
+
+/// The configuration of a mode whose state is under `scratch`.
+fn mode(scratch: &Scratch, provider: &str, prefix: &str) -> ModeConfig {
+    ModeConfig::from_toml(&format!(
+        r#"
+{provider}
+[models.light]
+id = "{prefix}light"
+[models.core]
+id = "{prefix}core"
+[models.expert]
+id = "{prefix}expert"
+[run]
+state_dir = "{state}"
+pricing = "unused"
+aci_bin = "{aci}"
+step_timeout_s = 600
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@example.invalid"
+"#,
+        state = scratch.0.join("state").display(),
+        aci = aci_bin().display(),
+    ))
+    .unwrap()
+}
+
+/// A repo of the fixture whose clone is where the registry puts it.
+fn spec(scratch: &Scratch, slug: &str, mode: RepoMode, api: &str, jobs: u32) -> RepoSpec {
+    let clone = scratch.0.join("state/repos").join(slug);
+    std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
+    std::fs::rename(scratch.0.join("clone"), &clone).unwrap();
+    let settings: RepoSettings = serde_json::from_value(json!({
+        "overrides": {
+            "gate": { "coverage": ["sh", "-c", "echo TN: > lcov.info"] },
+            "coverage": { "format": "lcov", "path": "lcov.info" }
+        },
+        "fork": {
+            "owner": "me", "name": "fixture", "api": api, "token_env": "UNUSED",
+            "push_to_local": scratch.0.join("fork.git")
+        }
+    }))
+    .unwrap();
+    RepoSpec {
+        slug: slug.into(),
+        url: format!("https://github.com/me/{slug}"),
+        default_branch: "main".into(),
+        language: aegis_lang::Language::Rust,
+        mode,
+        max_concurrent_jobs: jobs,
+        settings,
+    }
+}
+
+fn to_pr() -> Scripted {
+    Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![])
+}
+
+/// "Xong khi" of #24: two registered repos with different modes run at
+/// the same time, each with its own configuration: the customer-jp one
+/// only ever asks for `jp.` profiles, the other never does, and each has
+/// its own clone, module map and fork.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_repos_with_different_modes_run_side_by_side() {
+    if !tools_ready() {
+        return;
+    }
+    let Some(db) = aegis_store::testing::test_db().await else {
+        return;
+    };
+    let (internal, customer) = (repo_with_bug(), repo_with_bug());
+    let server = github().await;
+    let modes = Modes::new(
+        Some(mode(&internal, "[provider]\nkind = \"claude_api\"", "")),
+        Some(mode(
+            &customer,
+            "[provider]\nkind = \"bedrock\"\nregion = \"ap-northeast-1\"\nrequire_jp_profile = true",
+            "jp.",
+        )),
+    )
+    .unwrap();
+    let uri = server.uri();
+    let a = modes
+        .register(
+            &db.store,
+            &spec(&internal, "fixture", RepoMode::Poc, &uri, 2),
+        )
+        .await
+        .unwrap();
+    let b = modes
+        .register(
+            &db.store,
+            &spec(&customer, "fixture.jp", RepoMode::CustomerJp, &uri, 1),
+        )
+        .await
+        .unwrap();
+
+    let (run_a, run_b) = (
+        modes.repo_run(&db.store, a.id).await.unwrap(),
+        modes.repo_run(&db.store, b.id).await.unwrap(),
+    );
+    assert_eq!(
+        (run_a.max_concurrent_jobs(), run_b.max_concurrent_jobs()),
+        (2, 1)
+    );
+    let jp_prices = ["light", "core", "expert"]
+        .iter()
+        .fold(PRICES.to_owned(), |p, tier| {
+            p.replace(
+                &format!("[models.{tier}]"),
+                &format!("[models.\"jp.{tier}\"]"),
+            )
+        });
+    let pa = platform(run_a.config, to_pr());
+    let pb = platform_priced(run_b.config, to_pr(), &jp_prices);
+    let (ra, rb) = tokio::join!(
+        tokio::spawn({
+            let p = Arc::clone(&pa);
+            async move { run(&p, CancellationToken::new()).await }
+        }),
+        tokio::spawn({
+            let p = Arc::clone(&pb);
+            async move { run(&p, CancellationToken::new()).await }
+        }),
+    );
+    let (ra, rb) = (ra.unwrap(), rb.unwrap());
+    assert_eq!(ra.outcome, Outcome::PrOpened, "{ra:?}");
+    assert_eq!(rb.outcome, Outcome::PrOpened, "{rb:?}");
+
+    let models = |p: &Arc<Platform<Scripted, MemoryLedger>>| {
+        let all = p.provider.requests.lock().unwrap();
+        all.iter().map(|r| r.model.clone()).collect::<Vec<_>>()
+    };
+    let (ma, mb) = (models(&pa), models(&pb));
+    assert!(
+        !ma.is_empty() && ma.iter().all(|m| !m.starts_with("jp.")),
+        "{ma:?}"
+    );
+    assert!(
+        !mb.is_empty() && mb.iter().all(|m| m.starts_with("jp.")),
+        "{mb:?}"
+    );
+    for (scratch, slug) in [(&internal, "fixture"), (&customer, "fixture.jp")] {
+        assert_eq!(fork_refs(scratch), "refs/heads/agent/fixture-7");
+        let maps = scratch.0.join("state/maps").join(slug);
+        assert_eq!(std::fs::read_dir(&maps).unwrap().count(), 1, "{slug}");
+    }
+
+    // A customer repo is refused where no customer-jp mode is configured.
+    let only_poc = Modes::new(modes.poc.clone(), None).unwrap();
+    assert!(only_poc.repo_run(&db.store, b.id).await.is_err());
+    db.drop().await;
 }

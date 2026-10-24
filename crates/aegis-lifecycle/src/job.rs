@@ -54,6 +54,76 @@ pub fn resolve(repo: &Path, rev: &str) -> Result<String, LifecycleError> {
     git(repo, &["rev-parse", "--verify", "--end-of-options", &spec])
 }
 
+/// A digest of the files at `rev` that `keep` selects: their paths and
+/// blob ids (the hash of each file's content). The same files give the
+/// same digest whatever the commit, so an index made from it is redone
+/// only when one of them changes (#24).
+pub fn files_digest(
+    repo: &Path,
+    rev: &str,
+    keep: impl Fn(&Path) -> bool,
+) -> Result<String, LifecycleError> {
+    let spec = format!("{rev}^{{commit}}");
+    // `-z`: `<mode> <type> <id>\t<path>` entries, paths unquoted.
+    let listing = git(
+        repo,
+        &[
+            "ls-tree",
+            "-r",
+            "-z",
+            "--full-tree",
+            "--end-of-options",
+            &spec,
+        ],
+    )?;
+    let kept: String = listing
+        .split('\0')
+        .filter_map(|entry| {
+            let (meta, path) = entry.split_once('\t')?;
+            let mut meta = meta.split(' ');
+            let (_mode, kind, id) = (meta.next()?, meta.next()?, meta.next()?);
+            (kind == "blob" && keep(Path::new(path))).then(|| format!("{id} {path}\n"))
+        })
+        .collect();
+    hash_object(repo, kept.as_bytes())
+}
+
+/// Git's id of `bytes` as a blob, without writing it.
+fn hash_object(repo: &Path, bytes: &[u8]) -> Result<String, LifecycleError> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let failed = |message: String| LifecycleError::Git {
+        args: "hash-object --stdin".into(),
+        message,
+    };
+    let mut child = Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .arg("-C")
+        .arg(repo)
+        .args(["hash-object", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| failed(e.to_string()))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| failed("no stdin".into()))?;
+    stdin.write_all(bytes).map_err(|e| failed(e.to_string()))?;
+    drop(stdin);
+    let out = child
+        .wait_with_output()
+        .map_err(|e| failed(e.to_string()))?;
+    if !out.status.success() {
+        return Err(failed(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
 #[derive(Debug)]
 pub struct Worktree {
     clone: PathBuf,
@@ -104,6 +174,39 @@ impl Drop for Worktree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_digest_changes_with_the_kept_files_only() {
+        let repo = std::env::temp_dir().join(format!("aegis-digest-{}", std::process::id()));
+        std::fs::create_dir_all(repo.join("src dir")).unwrap();
+        let g = |args: &[&str]| {
+            git(
+                &repo,
+                &[
+                    &["-c", "user.name=t", "-c", "user.email=t@example.com"],
+                    args,
+                ]
+                .concat(),
+            )
+            .unwrap()
+        };
+        g(&["init", "-q", "-b", "main"]);
+        let commit = |file: &str, text: &str| {
+            std::fs::write(repo.join(file), text).unwrap();
+            g(&["add", "-A"]);
+            g(&["commit", "-qm", file]);
+            files_digest(&repo, "main", |p| p.extension().is_some_and(|e| e == "rs")).unwrap()
+        };
+        let first = commit("src dir/lib.rs", "fn a() {}\n");
+        assert_eq!(first.len(), 40);
+        // Another commit, same Rust files: the index is kept.
+        assert_eq!(commit("README.md", "hi\n"), first);
+        let changed = commit("src dir/lib.rs", "fn b() {}\n");
+        assert_ne!(changed, first);
+        // Back to the same content: the same digest as before.
+        assert_eq!(commit("src dir/lib.rs", "fn a() {}\n"), first);
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
 
     #[test]
     fn a_relative_worktree_path_is_taken_from_here_not_from_the_clone() {

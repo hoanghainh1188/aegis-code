@@ -19,5 +19,21 @@ effort = "low"
 id = "jp.anthropic.claude-opus-5-5"
 effort = "high"
 
-# [run], [repo] and [identity] as in poc.toml are added once a customer repo
-# is chosen; until then this file only configures the provider and models.
+# Every customer repo of the registry runs with this file (#24); the repo
+# itself (URL, image, Sonar, allow-list, fork) comes from the registry, not
+# from a [repo] section here. Its state stays on the Tokyo deployment
+# (ADR 0003 §6).
+[run]
+state_dir = ".workspace/state-jp"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+sandbox = true
+ledger = "postgres"
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 40
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

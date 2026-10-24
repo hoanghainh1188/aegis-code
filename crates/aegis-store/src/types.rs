@@ -122,6 +122,9 @@ pub struct NewRepo {
     pub default_branch: String,
     pub language: String,
     pub mode: RepoMode,
+    /// Jobs of this repo that may run at the same time, at least 1.
+    pub max_concurrent_jobs: u32,
+    /// The rest of the repo's settings, as `aegis-lifecycle` reads them.
     pub config: serde_json::Value,
 }
 
@@ -133,6 +136,7 @@ pub struct Repo {
     pub default_branch: String,
     pub language: String,
     pub mode: RepoMode,
+    pub max_concurrent_jobs: u32,
     pub config: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
