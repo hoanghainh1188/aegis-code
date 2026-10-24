@@ -9,17 +9,23 @@
 //!
 //! When a job ends (a PR, a stop, a failure, a cancel), its [`JobNotifier`]
 //! is told, to report it where the job came from (#25).
+//!
+//! Each attempt runs in a `job` span (`job_id`, `repo_id`, `attempt`; the
+//! runner adds `repo` and `language`) and is counted in [`metrics`]: the
+//! attempts running, and each one's end and time.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aegis_ledger::Outcome;
 use aegis_store::{AttemptEnd, Claim, Job, JobId, JobStatus, Lease, Run, Store};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
+use crate::metrics::metrics;
 use crate::runner::{Attempt, JobRunner};
 
 /// Infrastructure failures and expired leases a job survives (ADR 0003).
@@ -134,16 +140,28 @@ async fn claim_while_room<R: JobRunner, N: JobNotifier>(
                 return;
             }
         };
-        tracing::info!(job = claim.job.id.0, attempt = claim.run.attempt, "claimed");
+        let span = tracing::info_span!(
+            "job",
+            job_id = claim.job.id.0,
+            repo_id = claim.job.repo_id.0,
+            attempt = claim.run.attempt,
+            repo = tracing::field::Empty,
+            language = tracing::field::Empty,
+        );
+        span.in_scope(|| tracing::info!("claimed"));
         lock(active).insert(claim.job.id, claim.run.clone());
-        tasks.spawn(attempt(
-            store.clone(),
-            Arc::clone(runner),
-            Arc::clone(notifier),
-            Arc::clone(config),
-            Arc::clone(active),
-            claim,
-        ));
+        metrics().jobs_running.inc();
+        tasks.spawn(
+            attempt(
+                store.clone(),
+                Arc::clone(runner),
+                Arc::clone(notifier),
+                Arc::clone(config),
+                Arc::clone(active),
+                claim,
+            )
+            .instrument(span),
+        );
     }
 }
 
@@ -170,23 +188,33 @@ async fn attempt<R: JobRunner, N: JobNotifier>(
     active: Active,
     claim: Claim,
 ) {
-    let job = claim.job.id.0;
-    match run_attempt(&store, &*runner, &config, &claim).await {
+    let started = Instant::now();
+    let status = match run_attempt(&store, &*runner, &config, &claim).await {
         Some(end) => match store
             .finish_attempt(&claim.run, &config.worker_id, &end)
             .await
         {
             Ok(j) => {
-                tracing::info!(job, status = j.status.as_str(), reason = ?j.reason, "attempt ended");
+                tracing::info!(status = j.status.as_str(), reason = ?j.reason, "attempt ended");
                 if j.status != JobStatus::Queued {
                     notifier.job_ended(&j).await;
                 }
+                j.status.as_str()
             }
-            Err(e) => tracing::error!(job, error = %e, "recording the attempt's end"),
+            Err(e) => {
+                tracing::error!(error = %e, "recording the attempt's end");
+                "unrecorded"
+            }
         },
-        None => tracing::warn!(job, "lease lost; the attempt was dropped"),
-    }
+        None => {
+            tracing::warn!("lease lost; the attempt was dropped");
+            "lease_lost"
+        }
+    };
     lock(&active).remove(&claim.job.id);
+    let m = metrics();
+    m.jobs_running.dec();
+    m.attempt_ended(status, started.elapsed().as_secs_f64());
 }
 
 /// How the attempt ended; `None` when the lease was lost and the job
@@ -231,14 +259,14 @@ async fn keep_lease(store: &Store, config: &WorkerConfig, job: JobId, cancel: &C
         {
             Ok(Lease::Held { cancel_requested }) => {
                 if cancel_requested && !cancel.is_cancelled() {
-                    tracing::info!(job = job.0, "cancel asked for; stopping the attempt");
+                    tracing::info!("cancel asked for; stopping the attempt");
                     cancel.cancel();
                 }
             }
             Ok(Lease::Lost) => return,
             // Try again next time; if the lease runs out meanwhile, the
             // next renewal says it is lost.
-            Err(e) => tracing::error!(job = job.0, error = %e, "renewing the lease"),
+            Err(e) => tracing::error!(error = %e, "renewing the lease"),
         }
     }
 }
@@ -291,13 +319,15 @@ async fn drain(store: &Store, config: &WorkerConfig, active: &Active, mut tasks:
     }
     tasks.shutdown().await;
     let left: Vec<Run> = lock(active).drain().map(|(_, run)| run).collect();
+    // Their tasks were dropped before they could count themselves out.
+    metrics().jobs_running.dec_by(left.len() as i64);
     for run in left {
         match store
             .finish_attempt(&run, &config.worker_id, &AttemptEnd::Released)
             .await
         {
-            Ok(_) => tracing::warn!(job = run.job_id.0, "drain ran out; job released"),
-            Err(e) => tracing::error!(job = run.job_id.0, error = %e, "releasing the job"),
+            Ok(_) => tracing::warn!(job_id = run.job_id.0, "drain ran out; job released"),
+            Err(e) => tracing::error!(job_id = run.job_id.0, error = %e, "releasing the job"),
         }
     }
 }

@@ -10,6 +10,10 @@
 //! so the router's budget counts what earlier attempts spent: the cap is
 //! the job's, not the attempt's (ADR 0003 §3). Each event also records the
 //! run that wrote it, so the cost of an interrupted attempt is measurable.
+//!
+//! The attempt adds its repo's slug and language to the worker's `job`
+//! span, which the issue's task runs in, and its model calls are counted
+//! under them ([`JobObserver`]).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -21,12 +25,14 @@ use aegis_ledger::{
 use aegis_lifecycle::{
     IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, run_issue,
 };
-use aegis_provider::Provider;
+use aegis_provider::{Observed, Provider};
 use aegis_secrets::{Secret, Secrets};
 use aegis_store::{Claim, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
+use crate::metrics::JobObserver;
 use crate::runner::{Attempt, JobRunner};
 
 /// The Postgres ledger, with each event tied to the run of its job that is
@@ -209,6 +215,9 @@ impl LifecycleRunner {
     async fn attempt(&self, claim: &Claim, cancel: CancellationToken) -> Result<Attempt, Attempt> {
         let job = &claim.job;
         let RepoRun { repo, mut config } = self.configs.resolve(job.repo_id).await?;
+        let span = tracing::Span::current();
+        span.record("repo", repo.slug.as_str());
+        span.record("language", repo.language.as_str());
         let runtime = self.runtime(repo.mode)?;
         config
             .check_aci_bin()
@@ -256,16 +265,26 @@ impl LifecycleRunner {
             sonar.token = Some(self.secret(&repo.slug, "Sonar's token", name).await?);
         }
         let issue = issue(claim, &config.repo.fork.api, &github_token).await?;
+        let tiers = [
+            (&config.models.light, "light"),
+            (&config.models.core, "core"),
+            (&config.models.expert, "expert"),
+        ]
+        .map(|(model, tier)| (model.id.clone(), tier))
+        .to_vec();
+        let observer = JobObserver::new(&repo.slug, &repo.language, tiers);
         let platform = Arc::new(Platform {
             config,
-            provider: runtime.provider.clone(),
+            provider: Observed::new(runtime.provider.clone(), observer),
             store: self.ledger.clone(),
             prices: runtime.prices.clone(),
             profiles: self.profiles.clone(),
             github_token,
         });
         let _tag = self.ledger.tag(job.ledger_key.clone(), claim.run.id);
-        let mut task = AbortOnDrop(tokio::spawn(run_issue(platform, issue, cancel)));
+        let mut task = AbortOnDrop(tokio::spawn(
+            run_issue(platform, issue, cancel).in_current_span(),
+        ));
         let report = match (&mut task.0).await {
             Ok(Ok(report)) => report,
             Ok(Err(e)) => return Err(Attempt::Infra(e.to_string())),

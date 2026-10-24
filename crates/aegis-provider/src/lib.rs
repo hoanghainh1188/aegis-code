@@ -10,6 +10,7 @@ mod claude_api;
 mod config;
 mod error;
 mod guard;
+mod observe;
 mod types;
 
 #[cfg(feature = "bedrock")]
@@ -18,6 +19,7 @@ pub use claude_api::{API_VERSION, ClaudeApi, DEFAULT_API_KEY_ENV, DEFAULT_BASE_U
 pub use config::{Provider, ProviderConfig};
 pub use error::ProviderError;
 pub use guard::ModelPolicy;
+pub use observe::{CallObserver, CallReport, Observed};
 pub use types::{
     CacheCreation, CachePlan, CacheTtl, ContentBlock, Effort, Message, Request, Response, Role,
     StopReason, ToolDefinition, Usage,

@@ -30,6 +30,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub auth: AuthSection,
     #[serde(default)]
+    pub metrics: MetricsSection,
+    #[serde(default)]
     pub budget: BudgetSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
@@ -58,6 +60,22 @@ impl Default for ApiSection {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
+        }
+    }
+}
+
+/// `/metrics` (#32), on its own listener in every role: for the private
+/// network only, never the API's address ([`crate::metrics`]).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsSection {
+    pub listen: SocketAddr,
+}
+
+impl Default for MetricsSection {
+    fn default() -> Self {
+        Self {
+            listen: SocketAddr::from(([127, 0, 0, 1], 9464)),
         }
     }
 }
@@ -225,6 +243,13 @@ impl ServerConfig {
         if w.poll_s == 0 {
             return Err("worker: poll_s must be at least 1".into());
         }
+        if config.metrics.listen == config.api.listen {
+            return Err(format!(
+                "metrics: listen must not be the API's address ({}): /metrics is \
+                 for the private network only",
+                config.api.listen
+            ));
+        }
         let a = &config.auth;
         if a.session_hours == 0 || a.api_requests_per_minute == 0 {
             return Err(
@@ -283,6 +308,7 @@ mod tests {
         assert_eq!(config.modes.poc, Some(PathBuf::from("config/poc.toml")));
         assert_eq!(config.modes.customer_jp, None);
         assert!(config.api.listen.ip().is_loopback());
+        assert_eq!(config.metrics.listen.port(), 9464);
         assert!(config.auth.oidc.is_none());
         assert_eq!(config.auth.session_hours, 12);
         let worker = config.worker("w".into());
@@ -312,6 +338,10 @@ mod tests {
                 "no path",
             ),
             ("[auth]\nsession_hours = 0\n", "session_hours"),
+            (
+                "[api]\nlisten = \"0.0.0.0:8080\"\n[metrics]\nlisten = \"0.0.0.0:8080\"\n",
+                "metrics",
+            ),
             ("[budget]\nwarn_ratio = 1.5\n", "warn_ratio"),
         ] {
             let err = ServerConfig::from_toml(bad).unwrap_err();

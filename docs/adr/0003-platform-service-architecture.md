@@ -69,6 +69,7 @@ ADR 0002 đặt mục tiêu là platform đầy đủ: chạy như dịch vụ, 
 - Hạ tầng dạng code bằng OpenTofu (Terraform). Có môi trường staging.
 - Secret lấy từ AWS Secrets Manager khi khởi động và khi xoay vòng (#30); không có trong file cấu hình hay image.
 - Log có cấu trúc qua `tracing`, metric dạng Prometheus ở `/metrics` (#32). Không log secret hay nội dung code.
+  - `/metrics` nghe ở cổng nội bộ riêng (`[metrics] listen`, mặc định `127.0.0.1:9464`) trong mọi vai trò, không qua token API: tiến trình chỉ chạy worker không có API, và scrape bằng token tốn một truy vấn DB cùng một suất rate limit mỗi lần. Cổng này chỉ mở cho mạng riêng của Prometheus. Luật cảnh báo ở `deploy/alerts/`, dashboard ở `deploy/grafana/`.
 - Workspace: mỗi job một bản checkout riêng trên đĩa của VM. Hai job cùng repo không được dùng chung một thư mục `target/` (Cargo khóa thư mục build); mỗi job có `target/` riêng, khởi tạo từ cache của repo. Cách khởi tạo (copy, reflink hay `sccache`) chốt sau khi đo ở #2.
 
 ### 7. Ràng buộc cho phần lõi (Phase 1)

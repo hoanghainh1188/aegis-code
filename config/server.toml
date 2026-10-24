@@ -31,6 +31,12 @@ poc = "config/poc.toml"
 # `auth.public_url`'s host and to loopback.
 listen = "127.0.0.1:8080"
 
+# `/metrics` for Prometheus (#32), served by every role on its own port.
+# No token: open this port to the private network only (Prometheus' security
+# group), never next to the API. Shows counts, never a job or a secret.
+[metrics]
+listen = "127.0.0.1:9464"
+
 # Its secrets are in [secrets] with the others, checked when the API
 # starts: AEGIS_SESSION_KEY (at least 32 random bytes; signs the review
 # form's time), and AEGIS_OIDC_CLIENT_SECRET with [auth.oidc].

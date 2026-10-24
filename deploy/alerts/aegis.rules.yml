@@ -1,0 +1,52 @@
+# Cảnh báo vận hành của aegis-server (#32), trên metric ở `/metrics`
+# (crates/aegis-server/src/metrics.rs). Kiểm bằng `promtool test rules
+# aegis.rules.test.yml` trong CI; triển khai (Prometheus, Alertmanager) là #33.
+groups:
+  - name: aegis
+    rules:
+      # Hơn 1/4 lời gọi model của một repo lỗi, kéo dài 15 phút: provider
+      # có sự cố (quá tải, 5xx, mạng) hoặc khoá/hạn mức có vấn đề. Lỗi lẻ
+      # tẻ mà orchestrator tự retry được không đủ ngưỡng.
+      - alert: AegisProviderErrorsSustained
+        expr: |
+          sum by (repo) (rate(aegis_provider_calls_total{result!="ok"}[10m]))
+            / sum by (repo) (rate(aegis_provider_calls_total[10m]))
+            > 0.25
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Lời gọi model của repo {{ $labels.repo }} lỗi kéo dài"
+          description: "Hơn 25% lời gọi model lỗi trong 15 phút. Xem aegis_provider_calls_total theo result để biết loại lỗi."
+
+      # Tỉ lệ đọc cache dưới 50% trong một giờ có đủ lưu lượng (KPI ≥ 70%,
+      # Proposal §8): thứ tự prompt đổi hoặc breakpoint cache đặt sai, chi
+      # phí tăng nhiều lần. Repo ít lời gọi không tính.
+      - alert: AegisCacheReadRatioLow
+        expr: |
+          (
+            sum by (repo) (rate(aegis_provider_tokens_total{kind="cache_read"}[1h]))
+              / sum by (repo) (rate(aegis_provider_tokens_total{kind=~"input|cache_read|cache_write"}[1h]))
+              < 0.5
+          )
+          and
+          sum by (repo) (rate(aegis_provider_tokens_total{kind=~"input|cache_read|cache_write"}[1h])) * 3600
+            > 200000
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tỉ lệ đọc cache của repo {{ $labels.repo }} thấp bất thường"
+          description: "Dưới 50% token đầu vào đọc từ cache trong 1 giờ (KPI ≥ 70%). Kiểm tra thứ tự prompt và cache breakpoint."
+
+      # Job sẵn sàng đã chờ hơn 30 phút mà chưa worker nào nhận: worker
+      # chết, thiếu chỗ hoặc giới hạn theo repo quá chặt. Mọi tiến trình
+      # báo cùng một hàng đợi nên lấy max.
+      - alert: AegisQueueBacklog
+        expr: max(aegis_queue_oldest_ready_seconds) > 1800
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hàng đợi job dồn"
+          description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."

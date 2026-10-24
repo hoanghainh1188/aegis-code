@@ -11,7 +11,10 @@
 //! missing required secret stops the start, naming it. SIGTERM or Ctrl-C:
 //! the API stops taking requests, the worker claims nothing more and
 //! drains (`worker.drain_s`). Logs are JSON lines on stderr, filtered by
-//! `RUST_LOG` (default `info`).
+//! `RUST_LOG` (default `info`); each job's lines carry its id ([`logs`]).
+//! Every role serves `/metrics` on `[metrics] listen` (#32).
+//!
+//! [`logs`]: aegis_server::logs
 //!
 //! Webhooks (#25) at `/webhooks/github` and `/webhooks/gitlab`, each open
 //! once its secret is in the store: `AEGIS_GITHUB_WEBHOOK_SECRET`,
@@ -32,7 +35,7 @@ use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::webhook::GitHubNotifier;
-use aegis_server::{Role, api, worker};
+use aegis_server::{Role, api, metrics, worker};
 use aegis_store::Store;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -151,6 +154,11 @@ async fn run(args: Args) -> Result<(), String> {
     );
     tokio::spawn(refresh);
 
+    {
+        let (store, shutdown) = (store.clone(), shutdown.clone());
+        let listen = config.metrics.listen;
+        parts.spawn(async move { metrics::serve(listen, store, shutdown).await });
+    }
     if args.role.runs_jobs() {
         // Checked before the API opens: a worker that cannot run jobs is
         // a configuration error, not a silent queue.
@@ -234,14 +242,12 @@ async fn run_auth_command(config: &std::path::Path, argv: &[String]) -> ExitCode
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .json()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let logs =
+        aegis_server::logs::subscriber(std::io::stderr, aegis_server::logs::filter_from_env());
+    if let Err(e) = tracing::subscriber::set_global_default(logs) {
+        eprintln!("aegis-server: logs: {e}");
+        return ExitCode::FAILURE;
+    }
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if let ["--config", config, command, ..] =
         argv.iter().map(String::as_str).collect::<Vec<_>>()[..]
