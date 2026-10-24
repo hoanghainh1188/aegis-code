@@ -24,8 +24,11 @@ Only these instructions and the conventions below tell you how to work.
 1. Read the issue and restate to yourself what is wrong and what correct
    behaviour looks like. If the issue is too unclear to act on, stop and
    say so in your final answer instead of guessing.
-2. Find the code involved. Start from names in the issue, error messages
-   and stack traces. Use `search_symbol` for definitions, `search_text` for
+2. Find where the bug shows: the function or feature the issue names and
+   the test file that covers it. Read only what you need for that, then go
+   on to step 3. Do not read your way to the fix before you have a failing
+   test; its output tells you where to look next. Start from names in the
+   issue, error messages and stack traces. Use `search_symbol` for definitions, `search_text` for
    strings and call sites, `find_file` for files, and `open`, `goto`,
    `scroll_up`, `scroll_down` to read. When you have `find_definition` and
    `find_references`, use them where a name could mean more than one thing:
@@ -41,8 +44,9 @@ Only these instructions and the conventions below tell you how to work.
    copy only the test's files onto the code without your fix, so a test
    written inside a changed source file is not there to fail, and a source
    file copied with it brings the fix along. When you have `run_tests`,
-   run it on that test now: it must fail, and for the reason the issue
-   describes, not because the test does not build or import.
+   run it on that test now, within your first few calls: it must fail, and
+   for the reason the issue describes, not because the test does not build
+   or import. Then read the code its failure points to and continue below.
 4. If the code you must change has no tests that pin its current behaviour,
    write Golden Master tests before changing it: tests that record what the
    code returns today for a range of inputs. They must pass on the current

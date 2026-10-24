@@ -20,7 +20,7 @@ use aegis_lifecycle::{
     IssueInput, IssueReport, Platform, Replay, ReplayProvider, RunConfig, run_issue,
 };
 use aegis_provider::{
-    ContentBlock, ModelProvider, ProviderError, Request, Response, StopReason, Usage,
+    ContentBlock, ModelProvider, ProviderError, Request, Response, Role, StopReason, Usage,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -390,6 +390,48 @@ async fn two_rejected_edits_escalate_to_expert_with_the_history() {
     assert_eq!(expert[0].messages.len(), 5);
     assert_eq!(expert[0].system, core[0].system);
     assert_eq!(fork_refs(&scratch), "");
+}
+
+/// The reminder of #144, as the model reads it.
+fn reminder_in(request: &Request) -> bool {
+    request.messages.last().is_some_and(|m| {
+        m.content.iter().any(|b| match b {
+            ContentBlock::Text { text, .. } => text.contains("run_tests"),
+            _ => false,
+        })
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn eight_calls_without_a_test_run_remind_the_agent_once() {
+    let scratch = repo_with_bug();
+    let mut script: Vec<_> = (1..=8)
+        .map(|n| call(&format!("t{n}"), "search_symbol", json!({"name": "Cart"})))
+        .collect();
+    script.push(vec![ContentBlock::text(
+        r#"{"status": "stopped", "stop_reason": "needs a design decision"}"#,
+    )]);
+    let p = platform(
+        config(&scratch, "http://127.0.0.1:1", 40),
+        Scripted::new(script, vec![]),
+    );
+
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(
+        report.reason.as_deref(),
+        Some("agent stopped: needs a design decision")
+    );
+    let core = p.provider.requests_for("core");
+    assert_eq!(core.len(), 9, "the reminder costs no model call");
+    assert_eq!(report.model_calls, 9);
+    let reminded: Vec<_> = core.iter().map(reminder_in).collect();
+    assert_eq!(reminded.iter().filter(|r| **r).count(), 1);
+    assert!(reminded[8], "the 9th call reads the reminder");
+    // Joined to the results of the 8th call: turns still alternate.
+    let last = core[8].messages.last().unwrap();
+    assert_eq!(last.role, Role::User);
+    assert!(matches!(last.content[0], ContentBlock::ToolResult { .. }));
+    assert_eq!(core[8].messages.len(), core[7].messages.len() + 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]

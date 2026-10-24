@@ -1,7 +1,8 @@
 //! What may end a model loop before its next call (ADR 0003, design
-//! §5.3–§5.4): a cancel from outside, the job's budget, or edits rejected
-//! often enough, or Core reading on without a patch, to escalate. The loop only sees a reason string; the
-//! lifecycle reads the structured [`Halt`] back.
+//! §5.3–§5.4): a cancel from outside, the job's budget, edits rejected
+//! often enough, or Core reading on without a patch, to escalate, or calls
+//! made without a test run, to remind the agent (#144). The loop only sees
+//! a reason string; the lifecycle reads the structured [`Halt`] back.
 
 use std::sync::Mutex;
 
@@ -15,21 +16,33 @@ pub enum Halt {
     Cancelled,
     Budget(BudgetStop),
     Escalate(EscalationReason),
+    /// Remind the agent to write and run its reproduction test, then go on
+    /// at the same tier.
+    RemindTest {
+        calls: u32,
+    },
 }
 
-/// The router after the edits of `turns`, and the first decision that is
-/// not `Continue` (an escalation), if any.
-pub fn fold_edits(router: Router, turns: &[TurnRecord]) -> (Router, Decision) {
+/// What the agent reads when reminded (#144).
+pub fn test_reminder(calls: u32) -> String {
+    format!(
+        "You have made {calls} calls without running a test. Stop reading code now: write \
+         the reproduction test for the issue in a test file and run it with `run_tests`. \
+         It must fail for the reason the issue describes. Then use its output to find \
+         and fix the code."
+    )
+}
+
+/// The router after the edits and test runs of `turns`, and the first
+/// decision that is not `Continue` (an escalation), if any.
+pub fn fold_tools(router: Router, turns: &[TurnRecord]) -> (Router, Decision) {
     let mut router = router;
-    for call in turns
-        .iter()
-        .flat_map(|t| &t.tool_calls)
-        .filter(|c| c.name == "edit")
-    {
-        let signal = if call.is_error {
-            Signal::EditRejected
-        } else {
-            Signal::EditAccepted
+    for call in turns.iter().flat_map(|t| &t.tool_calls) {
+        let signal = match (call.name.as_str(), call.is_error) {
+            ("edit", true) => Signal::EditRejected,
+            ("edit", false) => Signal::EditAccepted,
+            ("run_tests", _) => Signal::TestRun,
+            _ => continue,
         };
         let (next, decision) = router.observe(signal);
         router = next;
@@ -71,17 +84,18 @@ impl JobCheck {
         if let Some(stop) = self.budget.evaluate(turns) {
             return Some(Halt::Budget(stop));
         }
-        if self.router.tier() == Tier::Core {
-            let (router, decision) = fold_edits(self.router, turns);
-            if let Decision::Escalate(reason) = decision {
-                return Some(Halt::Escalate(reason));
-            }
-            let calls = self.budget.model_calls(turns);
-            if let (_, Decision::Escalate(reason)) = router.observe(Signal::ModelCalls { calls }) {
-                return Some(Halt::Escalate(reason));
-            }
+        let (router, decision) = fold_tools(self.router, turns);
+        if let Decision::Escalate(reason) = decision
+            && self.router.tier() == Tier::Core
+        {
+            return Some(Halt::Escalate(reason));
         }
-        None
+        let calls = self.budget.model_calls(turns);
+        match router.observe(Signal::ModelCalls { calls }).1 {
+            Decision::Escalate(reason) => Some(Halt::Escalate(reason)),
+            Decision::RemindTest { calls } => Some(Halt::RemindTest { calls }),
+            Decision::Continue | Decision::OpenPr | Decision::Stop(_) => None,
+        }
     }
 }
 
@@ -92,6 +106,7 @@ impl StopCheck for JobCheck {
             Halt::Cancelled => "cancelled".to_owned(),
             Halt::Budget(stop) => stop.to_string(),
             Halt::Escalate(reason) => format!("escalating: {reason}"),
+            Halt::RemindTest { calls } => format!("reminding to run a test after {calls} calls"),
         };
         if let Ok(mut slot) = self.halt.lock() {
             *slot = Some(halt);

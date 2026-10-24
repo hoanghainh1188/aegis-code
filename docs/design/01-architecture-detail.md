@@ -188,6 +188,7 @@ Light trả về JSON cố định:
 | Core | Test tái hiện vẫn fail sau 2 bản vá liên tiếp | Expert |
 | Core | Codebase-Memory cho thấy lỗi trải trên ≥ 3 file (router có luật này nhưng chưa có nguồn tín hiệu, mục 3.2) | Expert |
 | Core | Đã dùng 15 lượt gọi mà chưa có bản vá nào tới test tái hiện hay gate (#127) | Expert |
+| Core, Expert | Đã dùng 8 lượt gọi (rồi 16) mà chưa gọi `run_tests` lần nào (#144) | Nhắc agent viết và chạy test tái hiện, ở lại tầng đó |
 | Expert | Gate qua hết | PR |
 | Expert | Fail 2 lần | Dừng |
 | Bất kỳ | Chi phí cộng dồn > $4 hoặc > 40 lượt gọi model | Dừng |
@@ -195,6 +196,8 @@ Light trả về JSON cố định:
 Khi chuyển sang Expert, giữ toàn bộ lịch sử. Lượt gọi Light không tính vào giới hạn 40.
 
 Giới hạn ban đầu là 20 lượt. Lượt chạy 10 issue đầu của bộ thử (#18, đo ngày 2026-10-23) cho thấy trần $4 không bao giờ chạm (cao nhất $0.54), còn 6/10 issue dừng vì hết 20 lượt. Ca qua gate nộp bản vá đầu sau 7–13 lượt, ca fail sau 17–18 lượt hoặc không nộp. Vì vậy nâng lên 40 lượt và thêm luật 15 lượt chưa có bản vá (#127).
+
+Lời nhắc (#144) dừng vòng lặp trước lượt gọi kế tiếp, thêm một đoạn văn bản vào cuối tin nhắn chứa kết quả công cụ, rồi gọi tiếp ở cùng tầng. Nó không tốn lượt gọi, và mỗi job có tối đa 2 lời nhắc. Khi đo lại ở #142, agent đã có `run_tests` (#137) nhưng chỉ 6/11 lượt có gọi, phần lớn từ lượt 31–40; 4 lượt chỉ đọc code tới hết 40 lượt. Ca duy nhất gọi sớm (lượt 6) cũng là ca nộp gate sớm nhất.
 
 ### 5.4 Tính ngân sách
 

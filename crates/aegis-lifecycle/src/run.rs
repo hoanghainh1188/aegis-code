@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::batch::sonar_batch;
-use crate::checks::{Halt, JobCheck, fold_edits};
+use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -785,7 +785,7 @@ where
             dearest_call_usd = dearest_call_usd.max(cost);
             ledger.tool_calls(tier, tool_calls(turn)).await?;
         }
-        let (after_edits, _) = fold_edits(router, &outcome.turns);
+        let (after_edits, _) = fold_tools(router, &outcome.turns);
         if after_edits.tier() != router.tier() {
             // Escalated on the loop's last turn: Expert takes over from here.
             first_expert_call = true;
@@ -810,9 +810,18 @@ where
                 Some(Halt::Budget(stop)) => {
                     return Ok(Ending::stop(stop.outcome(), stop.to_string()));
                 }
+                Some(Halt::RemindTest { calls }) => {
+                    // The router counts the reminder, so the next one comes
+                    // only after more calls without a test run (#144).
+                    let (next, decision) = router.observe(Signal::ModelCalls { calls });
+                    debug_assert_eq!(decision, Decision::RemindTest { calls });
+                    router = next;
+                    session = session.with_user_text(test_reminder(calls));
+                    continue;
+                }
                 Some(Halt::Escalate(reason)) => {
                     if router.tier() == Tier::Core {
-                        // Not an edit rule, which `fold_edits` already applied:
+                        // Not an edit rule, which `fold_tools` already applied:
                         // Core used its calls without a patch.
                         let calls = ledger.record().model_calls;
                         let (next, decision) = router.observe(Signal::ModelCalls { calls });
