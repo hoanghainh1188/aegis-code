@@ -22,3 +22,6 @@ tokio-util = "0.7.20"
 [features]
 # Bedrock backend for config/customer-jp.toml.
 bedrock = ["aegis-provider/bedrock"]
+
+[dev-dependencies]
+aegis-store = { path = "../aegis-store", features = ["testing"] }

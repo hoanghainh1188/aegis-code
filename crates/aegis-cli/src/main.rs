@@ -281,10 +281,11 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
                     .from
                     .clone()
                     .unwrap_or_else(|| ledger::json_dir(&config));
-                ledger::import(&from).await?
+                ledger::import(&ledger::database().await?, &from).await?
             }
             ("ledger", Some("export")) => {
-                ledger::export(args.to.as_deref().ok_or("--to is required")?).await?
+                let to = args.to.as_deref().ok_or("--to is required")?;
+                ledger::export(&ledger::database().await?, to).await?
             }
             (_, action) => {
                 return Err(format!(

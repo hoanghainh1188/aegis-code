@@ -58,7 +58,7 @@ pub fn json_dir(config: &RunConfig) -> std::path::PathBuf {
 }
 
 /// Connects (and migrates) the database named by `AEGIS_DATABASE_URL`.
-async fn database() -> Result<Store, String> {
+pub async fn database() -> Result<Store, String> {
     let url = std::env::var(DATABASE_URL_ENV)
         .map_err(|_| format!("set {DATABASE_URL_ENV} to the PostgreSQL URL of the ledger"))?;
     Store::connect(&url)
@@ -83,11 +83,11 @@ fn summary(verb: &str, report: &CopyReport) -> String {
 }
 
 /// `aegis ledger import`: the JSON ledger at `from` into the database.
-pub async fn import(from: &Path) -> Result<String, String> {
+/// Only reads `from`: it may be the live ledger of real runs.
+pub async fn import(store: &Store, from: &Path) -> Result<String, String> {
     if !from.is_dir() {
         return Err(format!("no ledger directory {}", from.display()));
     }
-    let store = database().await?;
     let report = copy_ledger(&JsonFileLedger::new(from), &store.ledger())
         .await
         .map_err(|e| e.to_string())?;
@@ -95,10 +95,72 @@ pub async fn import(from: &Path) -> Result<String, String> {
 }
 
 /// `aegis ledger export`: the database's ledger as JSON files under `to`.
-pub async fn export(to: &Path) -> Result<String, String> {
-    let store = database().await?;
+pub async fn export(store: &Store, to: &Path) -> Result<String, String> {
     let report = copy_ledger(&store.ledger(), &JsonFileLedger::new(to))
         .await
         .map_err(|e| e.to_string())?;
     Ok(summary("exported", &report))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::time::SystemTime;
+
+    use aegis_ledger::Outcome;
+
+    use super::*;
+
+    /// Every file's bytes and modification time, and the directory's.
+    fn snapshot(dir: &Path) -> (SystemTime, BTreeMap<String, (Vec<u8>, SystemTime)>) {
+        let files = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                let modified = e.metadata().unwrap().modified().unwrap();
+                let bytes = std::fs::read(e.path()).unwrap();
+                (e.file_name().into_string().unwrap(), (bytes, modified))
+            })
+            .collect();
+        (std::fs::metadata(dir).unwrap().modified().unwrap(), files)
+    }
+
+    #[tokio::test]
+    async fn import_never_writes_to_the_ledger_it_reads() {
+        let Some(db) = aegis_store::testing::test_db().await else {
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("aegis-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let source = JsonFileLedger::new(&dir);
+        let issue = IssueId::parse("scrapy-7604-r1").unwrap();
+        let finished = LedgerEvent::Finished {
+            outcome: Outcome::PrOpened,
+            wall_time_s: 3.0,
+        };
+        source.append(&issue, &finished).await.unwrap();
+        // A run still going: events, no record. The import must not add one.
+        let running = IssueId::parse("typst-1-r1").unwrap();
+        source
+            .append(&running, &LedgerEvent::SecretsRedacted { count: 0 })
+            .await
+            .unwrap();
+        source
+            .save_record(&IssueRecord::from_events(issue.clone(), [&finished]))
+            .await
+            .unwrap();
+        let before = snapshot(&dir);
+
+        let first = import(&db.store, &dir).await.unwrap();
+        let again = import(&db.store, &dir).await.unwrap();
+        assert_eq!(first, "imported 2 issues, 0 already there");
+        assert_eq!(again, "imported 0 issues, 2 already there");
+        assert_eq!(snapshot(&dir), before, "the source is untouched");
+        assert_eq!(
+            db.store.ledger().events(&issue).await.unwrap(),
+            vec![finished]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+        db.drop().await;
+    }
 }
