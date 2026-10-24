@@ -1,19 +1,29 @@
 //! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
-//! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]`:
+//! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]
+//! [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]`:
 //! serves the ACI tools for
 //! one repo over MCP on stdin/stdout. The overrides file holds the language
 //! part of the repo's `RepoConfig` ([`ProfileOverrides`]). With
-//! `--format-image` the formatter of `edit` runs in that image.
+//! `--format-image` the formatter of `edit` and the test of `run_tests` run
+//! in that image, as the gate's steps do: no network, the mounts read-only,
+//! the `--test-env` variables set. `--test-dir` holds `run_tests`' logs.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
-use aegis_aci::{Aci, AciServer, FormatContainer};
+use aegis_aci::{Aci, AciServer, FormatContainer, RUN_TESTS_TIMEOUT, TestSettings};
+use aegis_gate::Sandbox;
 use aegis_lang::{Language, ProfileOverrides, Profiles};
 use rmcp::ServiceExt;
 
 const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
-       [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]";
+       [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]
+       [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]";
+
+/// How long `run_tests` waits for a test still running to stop when the
+/// client goes.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default)]
 struct Args {
@@ -23,6 +33,9 @@ struct Args {
     format_image: Option<String>,
     docker: Option<String>,
     format_mounts: Vec<(String, String)>,
+    test_env: Vec<(String, String)>,
+    test_timeout: Option<Duration>,
+    test_dir: Option<PathBuf>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -44,6 +57,22 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                     .format_mounts
                     .push((host.to_owned(), inside.to_owned()));
             }
+            "--test-env" => {
+                let text = value()?;
+                let (key, val) = text
+                    .split_once('=')
+                    .filter(|(k, _)| !k.is_empty())
+                    .ok_or_else(|| format!("--test-env `{text}` is not <key>=<value>"))?;
+                parsed.test_env.push((key.to_owned(), val.to_owned()));
+            }
+            "--test-timeout" => {
+                let text = value()?;
+                let secs: u64 = text
+                    .parse()
+                    .map_err(|_| format!("--test-timeout `{text}` is not a number of seconds"))?;
+                parsed.test_timeout = Some(Duration::from_secs(secs));
+            }
+            "--test-dir" => parsed.test_dir = Some(value()?.into()),
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -70,15 +99,45 @@ fn build(args: Args) -> Result<Aci, String> {
         .and_then(|p| p.get(language)?.resolve(&overrides))
         .map_err(|e| e.to_string())?;
     let aci = Aci::new(&repo, profile).map_err(|e| e.to_string())?;
-    Ok(match (args.format_image, args.docker) {
-        (Some(image), docker) => aci.with_format_container(FormatContainer {
-            docker: docker.unwrap_or_else(|| "docker".into()),
-            image,
-            mounts: args.format_mounts,
-        }),
+    let defaults = TestSettings::default();
+    let mut tests = TestSettings {
+        sandbox: None,
+        env: args.test_env,
+        timeout: args.test_timeout.unwrap_or(RUN_TESTS_TIMEOUT),
+        work_dir: args.test_dir.unwrap_or(defaults.work_dir),
+    };
+    let aci = match (args.format_image, args.docker) {
+        (Some(image), docker) => {
+            let container = FormatContainer {
+                docker: docker.unwrap_or_else(|| "docker".into()),
+                image,
+                mounts: args.format_mounts,
+            };
+            tests.sandbox = Some(test_sandbox(&container));
+            aci.with_format_container(container)
+        }
         (None, Some(_)) => return Err("--docker needs --format-image".into()),
         (None, None) => aci,
-    })
+    };
+    Ok(aci.with_test_settings(tests))
+}
+
+/// The gate's step container (`aegis_gate::Sandbox`), from the same image
+/// and mounts as the formatter's; the `--test-env` variables are added per
+/// run.
+fn test_sandbox(container: &FormatContainer) -> Sandbox {
+    Sandbox {
+        docker: container.docker.clone(),
+        image: container.image.clone(),
+        mounts: container
+            .mounts
+            .iter()
+            .map(|(host, inside)| (PathBuf::from(host), inside.clone()))
+            .collect(),
+        env: Vec::new(),
+        network: None,
+        read_only_mounts: true,
+    }
 }
 
 #[tokio::main]
@@ -95,8 +154,10 @@ async fn main() -> ExitCode {
     if let Err(e) = aci.start_language_server() {
         eprintln!("aegis-aci: {e}");
     }
+    let server = AciServer::new(aci);
     let served = async {
-        AciServer::new(aci)
+        server
+            .clone()
             .serve(rmcp::transport::stdio())
             .await?
             .waiting()
@@ -110,6 +171,9 @@ async fn main() -> ExitCode {
             1
         }
     };
+    // A test still running would keep its container after the client
+    // has gone.
+    server.stop_tests(STOP_GRACE);
     // Exit now: returning would wait for a tool still running on a
     // blocking thread (a formatter) after the client has gone.
     std::process::exit(code)

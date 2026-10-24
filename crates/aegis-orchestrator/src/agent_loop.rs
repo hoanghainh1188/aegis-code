@@ -41,8 +41,9 @@ pub struct ToolCallRecord {
 /// Longest [`ToolCallRecord::target`], in characters.
 const TARGET_MAX: usize = 120;
 
-/// The file (with its line or line range), symbol, search text or file
-/// pattern a tool call is about; never the content it writes (#129).
+/// The file (with its line or line range), symbol, search text, file
+/// pattern or test a tool call is about; never the content it writes
+/// (#129).
 fn target(input: &Value) -> Option<String> {
     let text = |key| input.get(key).and_then(Value::as_str);
     let number = |key| input.get(key).and_then(Value::as_u64);
@@ -53,7 +54,7 @@ fn target(input: &Value) -> Option<String> {
         (None, Some(line), _, _) => Some(format!(":{line}")),
         (None, None, _, _) => None,
     };
-    let named = ["symbol", "name", "text", "pattern"]
+    let named = ["symbol", "name", "text", "pattern", "test"]
         .into_iter()
         .find_map(text);
     let joined = match (place, named) {
@@ -452,6 +453,10 @@ mod tests {
                 Some("max_retry in scrapy"),
             ),
             (json!({"pattern": "test_*.py"}), Some("test_*.py")),
+            (
+                json!({"test": "tests/test_x.py::test_y"}),
+                Some("tests/test_x.py::test_y"),
+            ),
             (json!({}), None),
         ];
         for (input, expected) in cases {

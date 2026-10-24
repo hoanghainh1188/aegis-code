@@ -6,6 +6,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+aegis-gate = { path = "../aegis-gate" }
 aegis-lang = { path = "../aegis-lang" }
 libc = "0.2.191"
 regex = "1.13.1"

@@ -211,6 +211,23 @@
     "name": "open"
   },
   {
+    "description": "Run one test on the code as it is now, with the command and in the sandbox the checks use for the reproduction test. Returns PASSED or FAILED, the failing tests and the end of the output; a run that takes too long is stopped. Use it to see your reproduction test fail before the fix and pass after it. It is not a check run.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "test": {
+          "description": "One test as the repo's test runner names it, e.g. your reproduction\ntest: `tests/test_x.py::test_y` (pytest), `module::tests::name`\n(cargo test).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "test"
+      ],
+      "type": "object"
+    },
+    "name": "run_tests"
+  },
+  {
     "description": "Show the next 100 lines of the open file.",
     "input_schema": {
       "properties": {},

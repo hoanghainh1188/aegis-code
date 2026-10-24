@@ -1,7 +1,8 @@
 //! ACI tools for the agent (design §3.1): find, view and edit code in one
-//! repo. Everything language-specific (which files are source, grammar,
-//! symbol query, formatter) comes from the repo's resolved language profile
-//! (ADR 0004); this crate names no tool of any language.
+//! repo, and run one test on it. Everything language-specific (which files
+//! are source, grammar, symbol query, formatter, test command) comes from
+//! the repo's resolved language profile (ADR 0004); this crate names no
+//! tool of any language.
 //!
 //! Each tool returns a value whose `Display` is the fixed text shown to the
 //! agent, with paths relative to the repo root and line numbers.
@@ -13,6 +14,7 @@ mod error;
 mod formatter;
 mod lsp;
 mod navigate;
+mod run_tests;
 mod search;
 mod secrets;
 mod server;
@@ -22,11 +24,13 @@ mod workspace;
 
 use std::path::Path;
 
+use aegis_gate::CancelToken;
 use aegis_lang::ResolvedProfile;
 
 pub use edit::{CONTEXT, EditOutcome, EditRequest, Rejection, Snippet};
 pub use error::AciError;
 pub use navigate::{Lookup, LookupAt, LookupResult};
+pub use run_tests::{RUN_TESTS_TIMEOUT, TestRun, TestSettings};
 pub use search::{FileHit, Hits, MAX_RESULTS, SearchResult, SymbolHit, TextHit};
 pub use secrets::{MARKER as REDACTED_MARKER, Redacted, redact};
 pub use server::AciServer;
@@ -44,6 +48,7 @@ pub struct Aci {
     lsp: Option<lsp::Lsp>,
     /// Files written since the language server last saw them.
     changed: lsp::Changed,
+    tests: run_tests::TestRunner,
 }
 
 impl Aci {
@@ -53,7 +58,34 @@ impl Aci {
             viewer: viewer::Viewer::default(),
             lsp: None,
             changed: lsp::Changed::default(),
+            tests: run_tests::TestRunner::new(TestSettings::default()),
         })
+    }
+
+    /// Where `run_tests` runs: the gate's sandbox, environment, time limit.
+    pub fn with_test_settings(self, settings: TestSettings) -> Self {
+        Self {
+            tests: run_tests::TestRunner::new(settings),
+            ..self
+        }
+    }
+
+    /// Whether the profile can run one test: `run_tests` is offered only
+    /// then.
+    pub fn can_run_tests(&self) -> bool {
+        self.workspace.profile().gate.repro_test.command().is_some()
+    }
+
+    /// Stops a `run_tests` call in progress, and refuses later ones; for a
+    /// server shutting down.
+    pub fn tests_cancel_token(&self) -> CancelToken {
+        self.tests.cancel_token()
+    }
+
+    /// Runs `test` with the profile's `gate.repro_test` command on the tree
+    /// as it is now.
+    pub fn run_tests(&mut self, test: &str) -> Result<TestRun, AciError> {
+        self.tests.run(&self.workspace, test)
     }
 
     /// Runs the profile's formatter in `container` (see [`FormatContainer`]).

@@ -137,6 +137,7 @@ async fn tool_list_is_sorted_with_schemas() {
             "find_references",
             "goto",
             "open",
+            "run_tests",
             "scroll_down",
             "scroll_up",
             "search_symbol",

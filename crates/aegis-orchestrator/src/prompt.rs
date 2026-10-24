@@ -82,5 +82,7 @@ mod tests {
         );
         assert!(SYSTEM_PROMPT.contains("Golden Master"));
         assert!(SYSTEM_PROMPT.contains("reproduction test first"));
+        assert!(SYSTEM_PROMPT.contains("`run_tests` runs one test"));
+        assert!(SYSTEM_PROMPT.contains("It is not a check run"));
     }
 }

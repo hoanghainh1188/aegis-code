@@ -242,6 +242,73 @@ async fn a_bug_goes_from_issue_to_pr() {
     assert!(body.contains("repro_test ✔ · test ✔ · coverage"), "{body}");
 }
 
+/// Text of the tool results Core was sent, in order.
+fn tool_results(model: &Scripted) -> Vec<String> {
+    let requests = model.requests_for("core");
+    let last = requests.last().expect("core was called");
+    last.messages
+        .iter()
+        .flat_map(|m| &m.content)
+        .filter_map(|b| match b {
+            ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn core_runs_its_reproduction_test_before_and_after_the_fix_without_a_gate_run() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let run_repro = |id: &str| call(id, "run_tests", json!({"test": "fourth_item_is_refused"}));
+    let model = Scripted::new(
+        vec![
+            create_repro("t1"),
+            run_repro("t2"),
+            fix("t3"),
+            run_repro("t4"),
+            fixed_answer(),
+        ],
+        vec![],
+    );
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    let results = tool_results(&p.provider);
+    assert!(
+        results[1].starts_with("FAILED `fourth_item_is_refused`")
+            && results[1].contains("fourth_item_is_refused"),
+        "{}",
+        results[1]
+    );
+    assert!(
+        results[3].starts_with("PASSED `fourth_item_is_refused`"),
+        "{}",
+        results[3]
+    );
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    // Only the final answer goes through the gate.
+    assert_eq!(record.gate_runs.len(), 1);
+    // The test runs leave nothing in the patch.
+    let changed = Command::new("git")
+        .arg("-C")
+        .arg(scratch.0.join("fork.git"))
+        .args(["show", "--name-only", "--format=", "agent/fixture-7"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&changed.stdout),
+        "src/lib.rs\ntests/fourth_item.rs\n"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_gate_goes_back_to_core_with_a_summary() {
     if !tools_ready() {

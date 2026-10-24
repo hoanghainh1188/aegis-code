@@ -27,6 +27,6 @@ pub use egress::{Egress, EgressSession};
 pub use error::GateError;
 pub use failures::{DID_NOT_FINISH, failing_tests, failing_tests_with};
 pub use gate::{FetchStep, GateRequest, Repro, run_gate};
-pub use report::{GateReport, Skip, StepName, StepReport, StepStatus};
+pub use report::{GateReport, Skip, StepName, StepReport, StepStatus, tail};
 pub use sandbox::{Sandbox, WORKDIR};
 pub use sonar::{Flow, FlowLocation, SonarIssue, SonarStep, TextRange, open_issues};

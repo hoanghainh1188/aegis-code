@@ -228,9 +228,15 @@ fn tool_specs(
         cfg.repo.language.id().into(),
         "--overrides".into(),
         overrides.display().to_string(),
+        // `run_tests` stops at the step timeout, or sooner (#137).
+        "--test-timeout".into(),
+        cfg.run.step_timeout_s.to_string(),
+        "--test-dir".into(),
+        job_dir.join("run_tests").display().to_string(),
     ];
-    // With the gate in containers, `edit`'s formatter runs there too: the
-    // machine needs no language tools (#104).
+    // With the gate in containers, `edit`'s formatter and `run_tests` run
+    // there too: the machine needs no language tools (#104), and the test
+    // sees what the gate's would (#137).
     if let Some(sandbox) = sandbox(cfg, profile)? {
         args.extend([
             "--format-image".into(),
@@ -243,6 +249,9 @@ fn tool_specs(
                 "--format-mount".into(),
                 format!("{}:{inside}", host.display()),
             ]);
+        }
+        for (key, value) in &sandbox.env {
+            args.extend(["--test-env".into(), format!("{key}={value}")]);
         }
     }
     let mut specs = vec![McpServerSpec {
@@ -297,6 +306,14 @@ where
 
     if let Some(why) = fetch_base(cfg, profile, tree.path(), &job_dir, cancel).await? {
         return Ok(Ending::stop(Outcome::StoppedSteps, why));
+    }
+    // The gate would start the tree's build from the cache anyway; doing it
+    // now spares the agent's first `run_tests` a cold build (#137).
+    if let Some(cache) = build_cache(cfg, profile) {
+        let path = tree.path().to_path_buf();
+        tokio::task::spawn_blocking(move || cache.seed(&path))
+            .await
+            .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
     }
     let tools = McpTools::connect(&tool_specs(cfg, profile, tree.path(), &job_dir)?).await?;
     let session = Session::new(
