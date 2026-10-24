@@ -2,13 +2,16 @@
 """Shows, for the latest run of each eval issue, how the agent spent its
 model calls (#142): the tools it called (`tool_calls` events, #129), the
 call of its first `edit`/`create_file`, of its first `run_tests` (#137) and
-of its first gate run, and how the run ended.
+of its first gate run, the router's reminders to run a test (#144) and
+its escalation to Expert (`test_reminded` and `escalated` events, #148),
+and how the run ended.
 
     scripts/eval/tool_usage.py [prefix ...]
 
 A prefix (`typst`, `scrapy-76`) keeps the issues whose id starts with it.
 Reads the ledger under `.workspace/state/ledger`; runs made before #129 have
-no tool events and show `—`.
+no tool events and show `—`; runs made before #148 show no reminder or
+escalation even when there was one.
 """
 
 import json
@@ -45,6 +48,7 @@ def summary(path):
     calls, tools = 0, Counter()
     first = {"write": None, "run_tests": None, "gate": None}
     outcome, any_tools = "running", False
+    reminders, escalation = [], None
     for line in path.read_text().splitlines():
         event = json.loads(line)
         kind = event["event"]
@@ -58,11 +62,16 @@ def summary(path):
                     first["write"] = calls
                 if call["name"] == "run_tests" and first["run_tests"] is None:
                     first["run_tests"] = calls
+        elif kind == "test_reminded":
+            reminders.append(event["calls"])
+        elif kind == "escalated":
+            escalation = f"{event['calls']}: {event['reason']}"
         elif kind == "gate_run" and first["gate"] is None:
             first["gate"] = calls
         elif kind == "finished":
             outcome = event["outcome"]
-    return calls, tools if any_tools else None, first, outcome
+    router = {"reminders": reminders, "escalation": escalation}
+    return calls, tools if any_tools else None, first, router, outcome
 
 
 def cell(value):
@@ -71,19 +80,26 @@ def cell(value):
 
 def main():
     rows = latest_runs(sys.argv[1:])
-    print("| Run | Kết quả | Lượt | `run_tests` | Sửa/tạo đầu | `run_tests` đầu | Gate đầu | Công cụ |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    print(
+        "| Run | Kết quả | Lượt | `run_tests` | Sửa/tạo đầu | `run_tests` đầu | Gate đầu "
+        "| Nhắc ở lượt | Leo thang | Công cụ |"
+    )
+    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     totals = Counter()
     for issue, (n, path) in rows.items():
-        calls, tools, first, outcome = summary(path)
+        calls, tools, first, router, outcome = summary(path)
         top = "—" if tools is None else ", ".join(f"{k} {v}" for k, v in tools.most_common(4))
         runs = "—" if tools is None else str(tools["run_tests"])
+        reminded = ", ".join(map(str, router["reminders"])) or "—"
         print(
             f"| {issue}-r{n} | {outcome} | {calls} | {runs} | {cell(first['write'])} "
-            f"| {cell(first['run_tests'])} | {cell(first['gate'])} | {top} |"
+            f"| {cell(first['run_tests'])} | {cell(first['gate'])} | {reminded} "
+            f"| {cell(router['escalation'])} | {top} |"
         )
         totals[outcome] += 1
         totals["used run_tests"] += bool(tools and tools["run_tests"])
+        totals["reminded"] += bool(router["reminders"])
+        totals["escalated"] += router["escalation"] is not None
     print()
     print(", ".join(f"{k}: {v}" for k, v in sorted(totals.items())))
 

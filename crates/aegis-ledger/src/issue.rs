@@ -80,6 +80,26 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::ToolCalls { tier, calls }).await
     }
 
+    /// The router's reminder to run a test, after `calls` Core/Expert calls
+    /// (#144).
+    pub async fn test_reminded(&mut self, tier: Tier, calls: u32) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::TestReminded { tier, calls }).await
+    }
+
+    /// The router's move from Core to Expert, after `calls` Core/Expert
+    /// calls, for `reason`.
+    pub async fn escalated(
+        &mut self,
+        reason: impl Into<String>,
+        calls: u32,
+    ) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::Escalated {
+            reason: reason.into(),
+            calls,
+        })
+        .await
+    }
+
     /// Secret values hidden from the model; nothing is recorded for zero.
     pub async fn secrets_redacted(&mut self, count: u32) -> Result<(), LedgerError> {
         if count == 0 {
@@ -99,13 +119,16 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
 
     /// Adds the cost-bearing events of a run done for this issue under
     /// another id (a Sonar group's session, #17): model calls and their
-    /// tools, gate runs and redactions. Prices stay as they were recorded.
+    /// tools, the router's reminders and escalations, gate runs and
+    /// redactions. Prices stay as they were recorded.
     pub async fn absorb(&mut self, events: &[LedgerEvent]) -> Result<(), LedgerError> {
         for event in events {
             if matches!(
                 event,
                 LedgerEvent::ModelCall { .. }
                     | LedgerEvent::ToolCalls { .. }
+                    | LedgerEvent::TestReminded { .. }
+                    | LedgerEvent::Escalated { .. }
                     | LedgerEvent::GateRun(_)
                     | LedgerEvent::SecretsRedacted { .. }
             ) {
@@ -303,6 +326,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn router_events_are_logged_but_leave_the_record_alone() {
+        let store = MemoryLedger::new();
+        let prices = PriceTable::from_toml(PRICES).unwrap();
+        let mut ledger = IssueLedger::open(&store, &prices, false, issue())
+            .await
+            .unwrap();
+        ledger
+            .model_call(Tier::Core, "claude-sonnet-5-5", &usage(1_000, 10, 0, 0))
+            .await
+            .unwrap();
+        let before = ledger.record().clone();
+        ledger.test_reminded(Tier::Core, 8).await.unwrap();
+        ledger
+            .escalated("no patch after 15 calls", 15)
+            .await
+            .unwrap();
+
+        assert_eq!(ledger.record(), &before);
+        let events = store.events(&issue()).await.unwrap();
+        assert_eq!(
+            events[1..],
+            [
+                LedgerEvent::TestReminded {
+                    tier: Tier::Core,
+                    calls: 8,
+                },
+                LedgerEvent::Escalated {
+                    reason: "no patch after 15 calls".into(),
+                    calls: 15,
+                },
+            ]
+        );
+        let json: Vec<_> = events[1..]
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect();
+        assert_eq!(
+            json,
+            [
+                r#"{"event":"test_reminded","tier":"core","calls":8}"#,
+                r#"{"event":"escalated","reason":"no patch after 15 calls","calls":15}"#,
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn reopening_keeps_cost_of_the_interrupted_run() {
         let store = MemoryLedger::new();
         let prices = PriceTable::from_toml(PRICES).unwrap();
@@ -382,6 +451,7 @@ mod tests {
         sub.model_call(Tier::Core, "claude-sonnet-5-5", &usage(1_000_000, 0, 0, 0))
             .await
             .unwrap();
+        sub.test_reminded(Tier::Core, 8).await.unwrap();
         sub.gate_run(GateRun {
             passed: true,
             failed_step: None,
@@ -403,7 +473,12 @@ mod tests {
         assert_eq!(record.model_calls, 1);
         assert_eq!(record.gate_runs.len(), 1);
         assert_eq!(record.kind, Some(IssueKind::Sonar));
-        assert_eq!(store.events(&issue()).await.unwrap().len(), 3);
+        let events = store.events(&issue()).await.unwrap();
+        assert_eq!(events.len(), 4);
+        assert!(events.contains(&LedgerEvent::TestReminded {
+            tier: Tier::Core,
+            calls: 8,
+        }));
     }
 
     #[tokio::test]
