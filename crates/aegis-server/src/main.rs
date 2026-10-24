@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use aegis_lifecycle::RunConfig;
+use aegis_lifecycle::{ModeConfig, Modes};
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::{Role, api, worker};
@@ -91,6 +91,23 @@ fn on_shutdown_signal() -> CancellationToken {
     shutdown
 }
 
+/// The configuration of each mode in `[modes]`; the `customer-jp` guard
+/// is checked here. Relative paths in them are taken from here.
+fn modes(config: &ServerConfig) -> Result<Modes, String> {
+    let cwd = std::env::current_dir().map_err(|e| format!("current directory: {e}"))?;
+    let load = |path: &Option<PathBuf>| {
+        path.as_deref()
+            .map(|p| ModeConfig::load(p, &cwd).map_err(|e| format!("{}: {e}", p.display())))
+            .transpose()
+    };
+    let modes = Modes::new(load(&config.modes.poc)?, load(&config.modes.customer_jp)?)
+        .map_err(|e| e.to_string())?;
+    if modes.poc.is_none() && modes.customer_jp.is_none() {
+        return Err("[modes]: a worker needs `poc`, `customer_jp` or both".into());
+    }
+    Ok(modes)
+}
+
 async fn run(args: Args) -> Result<(), String> {
     let config = ServerConfig::load(&args.config)?;
     let url = std::env::var(DATABASE_URL_ENV)
@@ -104,10 +121,8 @@ async fn run(args: Args) -> Result<(), String> {
     if args.role.runs_jobs() {
         // Checked before the API opens: a worker that cannot run jobs is
         // a configuration error, not a silent queue.
-        let run_config = RunConfig::load(&config.run_config).map_err(|e| e.to_string())?;
-        let max_cost_usd = run_config.budget.max_cost_usd;
-        let runner = LifecycleRunner::new(store.clone(), run_config).await?;
-        let worker_config = config.worker(worker_id(), max_cost_usd);
+        let runner = LifecycleRunner::new(store.clone(), modes(&config)?).await?;
+        let worker_config = config.worker(worker_id());
         let (store, shutdown) = (store.clone(), shutdown.clone());
         parts.spawn(async move {
             worker::run_worker(store, Arc::new(runner), worker_config, shutdown).await;

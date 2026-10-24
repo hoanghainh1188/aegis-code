@@ -25,7 +25,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 pub use error::StoreError;
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
-pub use queue::{AttemptEnd, Claim, ClaimLimits, Lease};
+pub use queue::{AttemptEnd, Claim, Lease};
 pub use types::{
     Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, NewRepo, Repo, RepoId, RepoMode,
     Run, RunEnd, RunId, RunStatus,

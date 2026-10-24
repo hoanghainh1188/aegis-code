@@ -1,6 +1,6 @@
 //! The job queue (ADR 0003 §3, #23). A worker claims the oldest queued job
 //! with `FOR UPDATE SKIP LOCKED`, in the same statement that applies the
-//! worker's and the repo's limits, and holds a lease on it that it renews
+//! worker's `max_workers` and the repo's `repos.max_concurrent_jobs`, and holds a lease on it that it renews
 //! while the job runs. Every write to a running job is conditioned on that
 //! lease: a worker that lost it (expired, reclaimed) can no longer end it.
 
@@ -10,7 +10,7 @@ use aegis_ledger::{IssueId, Outcome};
 
 use crate::jobs::{JobRow, RunRow, live};
 use crate::types::outcome_str;
-use crate::{Job, JobId, JobStatus, RepoId, Run, RunStatus, Store, StoreError};
+use crate::{Job, JobId, JobStatus, Run, RunStatus, Store, StoreError};
 
 /// Claims take this transaction-scoped advisory lock, one at a time: the
 /// count of a repo's running jobs is then exact when the next claim reads
@@ -19,16 +19,6 @@ const CLAIM_LOCK: i64 = 0x6165_6769_735f_6a6f; // "aegis_jo"
 
 /// Rows one reclaim handles; the rest wait for the next one.
 const RECLAIM_BATCH: i64 = 100;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClaimLimits<'a> {
-    /// Jobs this worker holds at once (`max_workers`).
-    pub max_workers: u32,
-    /// `max_concurrent_jobs` of a repo without its own value.
-    pub per_repo_default: u32,
-    /// `max_concurrent_jobs` by repo.
-    pub per_repo: &'a [(RepoId, u32)],
-}
 
 /// A claimed job and the run that just started for it.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,19 +102,16 @@ fn secs(d: Duration) -> f64 {
 }
 
 impl Store {
-    /// The oldest queued job this worker may take, now running under a
-    /// lease of `lease` held by `worker`; `None` when there is none.
+    /// The oldest queued job `worker` may take while it holds fewer than
+    /// `max_workers` and the job's repo runs fewer than its
+    /// `max_concurrent_jobs`, now running under a lease of `lease`; `None`
+    /// when there is none.
     pub async fn claim_job(
         &self,
         worker: &str,
         lease: Duration,
-        limits: ClaimLimits<'_>,
+        max_workers: u32,
     ) -> Result<Option<Claim>, StoreError> {
-        let (repos, maxima): (Vec<i64>, Vec<i32>) = limits
-            .per_repo
-            .iter()
-            .map(|(repo, n)| (repo.0, i32::try_from(*n).unwrap_or(i32::MAX)))
-            .unzip();
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(CLAIM_LOCK)
@@ -132,22 +119,19 @@ impl Store {
             .await?;
         let row = sqlx::query_as!(
             JobRow,
-            "WITH limits (repo_id, max_jobs) AS (
-                 SELECT * FROM unnest($3::bigint[], $4::int[])
-             ),
-             busy AS (
+            "WITH busy AS (
                  SELECT repo_id, count(*) AS n FROM jobs WHERE status = 'running'
                  GROUP BY repo_id
              ),
              next AS (
                  SELECT j.id FROM jobs j
-                 LEFT JOIN limits l ON l.repo_id = j.repo_id
+                 JOIN repos r ON r.id = j.repo_id
                  LEFT JOIN busy b ON b.repo_id = j.repo_id
                  WHERE j.status = 'queued' AND j.run_after <= now()
                    AND NOT j.cancel_requested
-                   AND coalesce(b.n, 0) < coalesce(l.max_jobs, $5)
+                   AND coalesce(b.n, 0) < r.max_concurrent_jobs
                    AND (SELECT count(*) FROM jobs
-                        WHERE status = 'running' AND locked_by = $1) < $6
+                        WHERE status = 'running' AND locked_by = $1) < $3
                  ORDER BY j.id
                  LIMIT 1
                  FOR UPDATE OF j SKIP LOCKED
@@ -161,10 +145,7 @@ impl Store {
                        run_after, retries, cancel_requested, reason, pr_url, retry_of",
             worker,
             secs(lease),
-            &repos,
-            &maxima,
-            i32::try_from(limits.per_repo_default).unwrap_or(i32::MAX),
-            i64::from(limits.max_workers),
+            i64::from(max_workers),
         )
         .fetch_optional(&mut *tx)
         .await?;

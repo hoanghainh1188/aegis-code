@@ -1,18 +1,27 @@
 # aegis-server (#23). Database: AEGIS_DATABASE_URL. Relative paths are
 # taken from the directory the server starts in.
 
-# The run configuration of every job; one repo until #24.
-run_config = "config/poc.toml"
+# Each repo's jobs run with the configuration of its mode (`repos.mode`)
+# and the repo's own settings (`repos.config`, #24). Leave a mode out and
+# its repos' jobs stop with a reason.
+[modes]
+poc = "config/poc.toml"
+# Bedrock in Tokyo: build with `--features bedrock`, and deploy where the
+# customer's data may be (ADR 0003 §6). Refused at start unless every call
+# stays in Japan.
+# customer_jp = "config/customer-jp.toml"
 
 [api]
 # Internal API without authentication yet (#29): keep it on loopback.
 listen = "127.0.0.1:8080"
 
 [worker]
-# Jobs this process runs at once.
+# Jobs this process runs at once. A repo's own limit is
+# `repos.max_concurrent_jobs`, over all workers.
 max_workers = 4
-# Jobs of one repo running at once, over all workers.
-max_concurrent_jobs = 2
+# The most a job may spend over all its attempts; a repo's budget may be
+# lower.
+max_cost_usd = 4.0
 lease_s = 60
 renew_s = 20
 poll_s = 5
@@ -20,8 +29,3 @@ poll_s = 5
 drain_s = 600
 # First wait after an infrastructure failure; doubles, at most 3 retries.
 retry_base_s = 30
-
-# A repo's own limit, by its id in the database.
-# [[worker.repos]]
-# repo_id = 1
-# max_concurrent_jobs = 1
