@@ -15,6 +15,47 @@
   <p class="note">Cùng công thức với <code>aegis report</code> (ADR 0005): ngưỡng chấp nhận ≥ 40% tổng, ≥ 35% mỗi ngôn ngữ. Kết quả test ẩn không hiện ở đây.</p>
 </section>
 
+<section aria-labelledby="budget-heading" class="band">
+  <h2 id="budget-heading">Ngân sách tháng</h2>
+  <div class="scroll">
+  <table class="budget">
+    <thead>
+      <tr>
+        <th scope="col">Repo</th>
+        <th scope="col" class="num">Đã dùng</th>
+        <th scope="col" class="num">Trần</th>
+        <th scope="col" class="num">Còn lại</th>
+        <th scope="col">Mức dùng</th>
+        <th scope="col">Trạng thái</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for b in budgets %}
+      <tr>
+        <th scope="row">{{ b.label }}</th>
+        <td class="num">{{ b.spent }}</td>
+        <td class="num">{{ b.cap }}</td>
+        <td class="num">{{ b.left }}</td>
+        <td>
+          {%- if b.capped %}
+          <svg class="spend" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ b.used }} trần">
+            <rect class="track" x="0" y="0" width="100" height="10"></rect>
+            <rect class="bar {{ b.class }}" x="0" y="0" width="{{ b.bar }}" height="10"></rect>
+            <line class="threshold" x1="{{ warn_at }}" x2="{{ warn_at }}" y1="0" y2="10"></line>
+          </svg>
+          {%- else %}—{%- endif %}
+        </td>
+        <td class="{{ b.class }}">{{ b.state }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">Chưa có repo nào.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Tháng tính theo múi giờ {{ time_zone }}. Cảnh báo từ {{ warn_at }}% trần; còn dưới {{ reserve }} (trần một issue) thì repo không nhận job mới, job đang xếp hàng chờ sang tháng hoặc khi trần được nâng.</p>
+</section>
+
 <section aria-labelledby="lang-heading" class="band">
   <div class="band-head">
     <h2 id="lang-heading">Theo ngôn ngữ</h2>

@@ -9,6 +9,7 @@ use std::time::Duration;
 use aegis_ledger::{IssueId, Outcome};
 
 use crate::audit::{self, Target};
+use crate::budget;
 use crate::jobs::{JobRow, RunRow, live};
 use crate::types::outcome_str;
 use crate::{Actor, Job, JobId, JobStatus, Run, RunStatus, Store, StoreError};
@@ -105,8 +106,9 @@ fn secs(d: Duration) -> f64 {
 impl Store {
     /// The oldest queued job `worker` may take while it holds fewer than
     /// `max_workers` and the job's repo runs fewer than its
-    /// `max_concurrent_jobs`, now running under a lease of `lease`; `None`
-    /// when there is none.
+    /// `max_concurrent_jobs` and has budget left this month (#31), now
+    /// running under a lease of `lease`; `None` when there is none. Queued
+    /// jobs of a repo whose budget is spent wait, and say so.
     pub async fn claim_job(
         &self,
         worker: &str,
@@ -118,6 +120,7 @@ impl Store {
             .bind(CLAIM_LOCK)
             .execute(&mut *tx)
             .await?;
+        let held = budget::hold_spent(&mut tx, &self.budget).await?;
         let row = sqlx::query_as!(
             JobRow,
             "WITH busy AS (
@@ -131,6 +134,7 @@ impl Store {
                  WHERE j.status = 'queued' AND j.run_after <= now()
                    AND NOT j.cancel_requested
                    AND coalesce(b.n, 0) < r.max_concurrent_jobs
+                   AND j.repo_id <> ALL($4)
                    AND (SELECT count(*) FROM jobs
                         WHERE status = 'running' AND locked_by = $1) < $3
                  ORDER BY j.id
@@ -139,6 +143,8 @@ impl Store {
              )
              UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_by = $1,
                              locked_until = now() + make_interval(secs => $2),
+                             reason = CASE WHEN starts_with(reason, $5) THEN NULL
+                                      ELSE reason END,
                              updated_at = now()
              FROM next WHERE jobs.id = next.id
              RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, status, outcome,
@@ -147,6 +153,8 @@ impl Store {
             worker,
             secs(lease),
             i64::from(max_workers),
+            &held,
+            budget::waiting_prefix(),
         )
         .fetch_optional(&mut *tx)
         .await?;
@@ -348,7 +356,8 @@ impl Store {
 
     /// A new job for the issue of a failed or cancelled one, with a ledger
     /// of its own (`<key>-r<n>`) and so a budget of its own. A job that is
-    /// done has the agent's result and is not run again.
+    /// done has the agent's result and is not run again; `BudgetSpent`
+    /// when the repo's monthly budget is (#31).
     pub async fn retry_job(&self, job: JobId) -> Result<Job, StoreError> {
         self.retry_job_by(job, &Actor::system()).await
     }
@@ -372,6 +381,7 @@ impl Store {
                 status.as_str()
             )));
         }
+        budget::check(&mut tx, &self.budget, crate::RepoId(old.repo_id)).await?;
         let base = retry_base(&old.ledger_key);
         let taken = sqlx::query_scalar!(
             "SELECT ledger_key FROM jobs WHERE starts_with(ledger_key, $1)",

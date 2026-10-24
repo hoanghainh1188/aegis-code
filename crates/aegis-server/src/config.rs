@@ -1,13 +1,15 @@
 //! The server's configuration (`config/server.toml`): where the API
 //! listens, how the worker paces itself, and the configuration of each
 //! mode. A job runs with its repo's mode and own settings, both read from
-//! the `repos` table (#24); its limit there is `max_concurrent_jobs`. No
+//! the `repos` table (#24); its limits there are `max_concurrent_jobs`
+//! and the monthly budget, whose month `[budget]` sets (#31). No
 //! secret is in it, only where they are read: `[secrets]` (#30).
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use aegis_store::BudgetRules;
 use openidconnect::url::Url;
 use serde::{Deserialize, Deserializer};
 
@@ -27,6 +29,8 @@ pub struct ServerConfig {
     pub worker: WorkerSection,
     #[serde(default)]
     pub auth: AuthSection,
+    #[serde(default)]
+    pub budget: BudgetSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
@@ -119,6 +123,32 @@ fn default_api_requests_per_minute() -> u32 {
     120
 }
 
+/// Repos' monthly budgets (#31); each repo's cap is set through the API.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetSection {
+    /// Where a month begins, `UTC` by default: `Asia/Tokyo`.
+    #[serde(default = "default_time_zone")]
+    pub time_zone: String,
+    /// The share of a cap from which the dashboard warns.
+    #[serde(default = "default_warn_ratio")]
+    pub warn_ratio: f64,
+}
+
+impl Default for BudgetSection {
+    fn default() -> Self {
+        toml::from_str("").expect("every field has a default")
+    }
+}
+
+fn default_time_zone() -> String {
+    "UTC".into()
+}
+
+fn default_warn_ratio() -> f64 {
+    0.8
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerSection {
@@ -204,12 +234,28 @@ impl ServerConfig {
         if a.oidc.is_some() && a.public_url.is_none() {
             return Err("auth: oidc needs public_url, where the SSO sends people back".into());
         }
+        let b = &config.budget;
+        if !(b.warn_ratio > 0.0 && b.warn_ratio <= 1.0) {
+            return Err(format!(
+                "budget: warn_ratio {} must be above 0 and at most 1",
+                b.warn_ratio
+            ));
+        }
         Ok(config)
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Self::from_toml(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// A repo with less than a job's cap left of its month runs no job.
+    pub fn budget_rules(&self) -> BudgetRules {
+        BudgetRules {
+            time_zone: self.budget.time_zone.clone(),
+            job_reserve_usd: self.worker.max_cost_usd,
+            warn_ratio: self.budget.warn_ratio,
+        }
     }
 
     pub fn worker(&self, worker_id: String) -> WorkerConfig {
@@ -266,12 +312,18 @@ mod tests {
                 "no path",
             ),
             ("[auth]\nsession_hours = 0\n", "session_hours"),
+            ("[budget]\nwarn_ratio = 1.5\n", "warn_ratio"),
         ] {
             let err = ServerConfig::from_toml(bad).unwrap_err();
             assert!(err.contains(why), "{bad}: {err}");
         }
         let config = ServerConfig::from_toml("").unwrap();
         assert_eq!(config.worker.max_workers, 4);
+        let rules = config.budget_rules();
+        assert_eq!(
+            (rules.time_zone.as_str(), rules.job_reserve_usd),
+            ("UTC", 4.0)
+        );
         assert!(config.modes.poc.is_none());
     }
 }

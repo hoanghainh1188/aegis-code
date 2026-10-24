@@ -3,6 +3,7 @@
 //! one job, and a failure in between leaves neither.
 
 use crate::audit::{self, Target};
+use crate::budget;
 use crate::jobs::JobRow;
 use crate::{Actor, Delivered, JobId, NewDelivery, NewJob, Store, StoreError};
 
@@ -10,8 +11,9 @@ const MAX_DELIVERY_ID_LEN: usize = 128;
 
 impl Store {
     /// Records `delivery` and queues `job` for it, unless the delivery was
-    /// received before or the issue already has a live job. `NotFound`
-    /// when the repo does not exist.
+    /// received before or the issue already has a live job. When the
+    /// repo's monthly budget is spent (#31), the job is recorded cancelled
+    /// with the reason instead. `NotFound` when the repo does not exist.
     pub async fn deliver_job(
         &self,
         delivery: &NewDelivery,
@@ -37,12 +39,21 @@ impl Store {
         let Some(recorded) = recorded else {
             return Ok(Delivered::Duplicate);
         };
+        let refused = match budget::check(&mut tx, &self.budget, job.repo_id).await {
+            Ok(()) => None,
+            Err(StoreError::BudgetSpent(reason)) => Some(reason),
+            Err(e) => return Err(e),
+        };
         // The live job of the issue wins over a new one, as in
-        // `jobs_one_live_per_issue`.
+        // `jobs_one_live_per_issue`, also over a refused one, which is not
+        // live and so not under that index.
         let created = sqlx::query_as!(
             JobRow,
-            "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
-             VALUES ($1, $2, $3, $4)
+            "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, status, reason)
+             SELECT $1, $2, $3, $4,
+                    CASE WHEN $5::text IS NULL THEN 'queued' ELSE 'cancelled' END, $5
+             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2
+                               AND status IN ('queued', 'running'))
              ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING
              RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
                        attempts, locked_by, locked_until, created_at, updated_at,
@@ -51,6 +62,7 @@ impl Store {
             job.issue_ref,
             job.ledger_key.as_str(),
             job.source.as_str(),
+            refused,
         )
         .fetch_optional(&mut *tx)
         .await
@@ -62,7 +74,10 @@ impl Store {
             Some(row) => {
                 let created: crate::Job = row.try_into()?;
                 let actor = Actor::webhook(delivery.source.as_str());
-                let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
+                let detail = serde_json::json!({
+                    "delivery_id": delivery.delivery_id,
+                    "refused": refused.is_some(),
+                });
                 audit::record(
                     &mut tx,
                     &actor,
@@ -71,7 +86,11 @@ impl Store {
                     detail,
                 )
                 .await?;
-                (created.id, Delivered::Queued(Box::new(created)))
+                let id = created.id;
+                match refused {
+                    None => (id, Delivered::Queued(Box::new(created))),
+                    Some(_) => (id, Delivered::Refused(Box::new(created))),
+                }
             }
             None => {
                 let live = sqlx::query_scalar!(

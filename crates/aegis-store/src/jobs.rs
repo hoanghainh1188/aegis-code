@@ -5,6 +5,7 @@ use aegis_ledger::IssueId;
 use chrono::{DateTime, Utc};
 
 use crate::audit::{self, Target};
+use crate::budget;
 use crate::types::{count, decode_outcome, outcome_str};
 use crate::{
     Actor, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, Run,
@@ -91,7 +92,8 @@ pub(crate) fn live(status: JobStatus) -> bool {
 
 impl Store {
     /// Queues a job. `Conflict` when the issue already has a live job or
-    /// the ledger key is taken; `NotFound` when the repo does not exist.
+    /// the ledger key is taken; `NotFound` when the repo does not exist;
+    /// `BudgetSpent` when its monthly budget is (#31).
     pub async fn create_job(&self, job: &NewJob) -> Result<Job, StoreError> {
         self.create_job_by(job, &Actor::system()).await
     }
@@ -99,6 +101,7 @@ impl Store {
     /// [`Store::create_job`], audited as done by `actor`.
     pub async fn create_job_by(&self, job: &NewJob, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
+        budget::check(&mut tx, &self.budget, job.repo_id).await?;
         let created: Job = sqlx::query_as!(
             JobRow,
             "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
