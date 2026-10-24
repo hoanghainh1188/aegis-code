@@ -22,7 +22,7 @@ mod replay;
 mod run;
 
 pub use answer::{FinalAnswer, Status, parse_answer};
-pub use checks::{Halt, JobCheck, fold_edits};
+pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
     BudgetSection, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig, RunSection,
 };

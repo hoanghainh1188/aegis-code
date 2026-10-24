@@ -53,6 +53,18 @@ impl Session {
         Self { messages, ..self }
     }
 
+    /// Adds `text` for the model to read next: to the last message when it
+    /// is the user's (the results of the tools it just called), so turns
+    /// keep alternating; as a new user message otherwise.
+    pub fn with_user_text(self, text: impl Into<String>) -> Self {
+        let mut messages = self.messages;
+        match messages.last_mut() {
+            Some(last) if last.role == Role::User => last.content.push(ContentBlock::text(text)),
+            _ => messages.push(Message::user_text(text)),
+        }
+        Self { messages, ..self }
+    }
+
     /// Appends an assistant turn produced by `model`.
     pub fn with_assistant(self, model: &str, message: Message) -> Self {
         let has_thinking = message.content.iter().any(is_thinking);
@@ -210,6 +222,30 @@ const ISSUE_INDEX: usize = 0;
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn user_text_joins_the_last_user_message_and_starts_one_after_the_model() {
+        let session = Session::new(vec![], Message::user_text("issue"), CacheTtl::FiveMinutes);
+        let [call, result] = tool_turn("a.rs", "fn a() {}");
+        let session = session
+            .with_assistant("m", call)
+            .with_message(result)
+            .with_user_text("run your test");
+        let roles: Vec<_> = session.messages().iter().map(|m| m.role).collect();
+        assert_eq!(roles, [Role::User, Role::Assistant, Role::User]);
+        let last = session.last_message().unwrap();
+        assert!(matches!(last.content[0], ContentBlock::ToolResult { .. }));
+        assert_eq!(
+            last.content.last(),
+            Some(&ContentBlock::text("run your test"))
+        );
+
+        let session = session
+            .with_assistant("m", Message::assistant(vec![ContentBlock::text("ok")]))
+            .with_user_text("again");
+        assert_eq!(session.messages().len(), 5);
+        assert_eq!(session.last_message(), Some(&Message::user_text("again")));
+    }
 
     fn tool_turn(id: &str, output: &str) -> [Message; 2] {
         [
