@@ -1,0 +1,36 @@
+# aegis-server, bản triển khai: viết bởi OpenTofu (deploy/tofu/modules/aegis).
+# Sửa ở đó, không sửa trên máy. Không có secret trong file này (#30).
+
+[secrets]
+source = "aws"
+region = "${region}"
+prefix = "${secret_prefix}"
+refresh_s = 300
+
+[modes]
+%{ if enable_poc ~}
+poc = "config/poc.toml"
+%{ endif ~}
+%{ if customer_jp ~}
+customer_jp = "config/customer-jp.toml"
+%{ endif ~}
+
+[api]
+# Sau ALB (TLS ở ALB); security group chỉ cho ALB vào cổng này.
+listen = "0.0.0.0:8080"
+
+[auth]
+public_url = "${public_url}"
+session_hours = ${config.session_hours}
+api_requests_per_minute = ${config.api_requests_per_minute}
+%{ if config.oidc_issuer != "" ~}
+
+[auth.oidc]
+issuer = "${config.oidc_issuer}"
+client_id = "${config.oidc_client_id}"
+%{ endif ~}
+
+[worker]
+max_workers = ${config.max_workers}
+max_cost_usd = ${format("%.2f", config.max_cost_usd)}
+drain_s = ${config.drain_s}

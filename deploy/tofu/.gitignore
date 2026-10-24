@@ -1,0 +1,10 @@
+# State nằm trên S3 (backend.hcl); không commit state, plan hay giá trị thật.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!example.tfvars
+backend.hcl
+backend_override.tf
+crash.log
