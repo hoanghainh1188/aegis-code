@@ -1,39 +1,50 @@
-//! The internal API for connectors and the dashboard (ADR 0003 §4): under
-//! `/api/v1`, every answer the same envelope, `{data, error, meta}`. No
-//! authentication yet (#29): it listens on loopback unless told otherwise.
+//! The internal API for connectors and services (ADR 0003 §4): under
+//! `/api/v1`, every answer the same envelope, `{data, error, meta}`.
+//!
+//! Every route but `health` needs a service token and is rate limited
+//! ([`crate::auth::api`]). A service sees and changes only the repos it has
+//! a role in: a job of another repo is "not found". Writes are audited.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aegis_ledger::IssueId;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, Run, Store,
-    StoreError,
+    Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, RepoRole, Run,
+    Store, StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router, middleware};
 use serde::{Deserialize, Serialize};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
+
+use crate::auth::{Access, Auth};
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_ISSUE_REF_LEN: usize = 256;
 
-pub fn router(store: Store) -> Router {
-    Router::new()
-        .route("/api/v1/health", get(health))
+pub fn router(store: Store, auth: Auth) -> Router {
+    let api = Router::new()
         .route("/api/v1/jobs", post(create_job).get(list_jobs))
         .route("/api/v1/jobs/{id}", get(job))
         .route("/api/v1/jobs/{id}/runs", get(list_runs))
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
-        .merge(crate::web::router())
+        .route_layer(middleware::from_fn_with_state(
+            auth.clone(),
+            crate::auth::api::guard,
+        ));
+    Router::new()
+        .route("/api/v1/health", get(health))
+        .merge(api)
+        .merge(crate::web::router(auth))
         .nest_service(
             "/webhooks",
             crate::webhook::router(store.clone(), crate::webhook::WebhookConfig::from_env()),
@@ -44,7 +55,12 @@ pub fn router(store: Store) -> Router {
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
         ))
-        .layer(TraceLayer::new_for_http())
+        // The path only: a query may hold an SSO code (`/auth/callback`).
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|r: &axum::http::Request<_>| {
+                tracing::info_span!("request", method = %r.method(), path = %r.uri().path())
+            }),
+        )
         .with_state(store)
 }
 
@@ -98,7 +114,7 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status,
             code,
@@ -109,6 +125,41 @@ impl ApiError {
     fn invalid(message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid", message)
     }
+
+    fn job_not_found(id: i64) -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("job {id} not found"),
+        )
+    }
+
+    fn forbidden(repo: RepoId, needed: RepoRole) -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            format!("needs the {} role in repo {}", needed.as_str(), repo.0),
+        )
+    }
+}
+
+/// Job `id` when `access` may do what `needed` allows in its repo; a job
+/// of a repo it cannot see is not found.
+async fn job_for(
+    store: &Store,
+    access: &Access,
+    id: i64,
+    needed: RepoRole,
+) -> Result<Job, ApiError> {
+    let job = store
+        .job(JobId(id))
+        .await?
+        .filter(|j| access.can(j.repo_id, RepoRole::Viewer))
+        .ok_or_else(|| ApiError::job_not_found(id))?;
+    if !access.can(job.repo_id, needed) {
+        return Err(ApiError::forbidden(job.repo_id, needed));
+    }
+    Ok(job)
 }
 
 impl IntoResponse for ApiError {
@@ -258,9 +309,14 @@ struct CreateJob {
 
 async fn create_job(
     State(store): State<Store>,
+    Extension(access): Extension<Access>,
     body: Result<Json<CreateJob>, JsonRejection>,
 ) -> ApiResult {
     let Json(body) = body?;
+    let repo_id = RepoId(body.repo_id);
+    if !access.can(repo_id, RepoRole::Maintainer) {
+        return Err(ApiError::forbidden(repo_id, RepoRole::Maintainer));
+    }
     let issue_ref = body.issue_ref.trim();
     if issue_ref.is_empty() || issue_ref.len() > MAX_ISSUE_REF_LEN {
         return Err(ApiError::invalid(format!(
@@ -273,14 +329,13 @@ async fn create_job(
         .ledger_key
         .unwrap_or_else(|| default_ledger_key(issue_ref));
     let ledger_key = IssueId::parse(key).map_err(|e| ApiError::invalid(e.to_string()))?;
-    let job = store
-        .create_job(&NewJob {
-            repo_id: RepoId(body.repo_id),
-            issue_ref: issue_ref.to_owned(),
-            ledger_key,
-            source,
-        })
-        .await?;
+    let new = NewJob {
+        repo_id,
+        issue_ref: issue_ref.to_owned(),
+        ledger_key,
+        source,
+    };
+    let job = store.create_job_by(&new, &access.actor).await?;
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }
 
@@ -317,6 +372,7 @@ fn page_of(limit: Option<u32>, cursor: Option<i64>) -> Page {
 
 async fn list_jobs(
     State(store): State<Store>,
+    Extension(access): Extension<Access>,
     query: Result<Query<ListJobs>, QueryRejection>,
 ) -> ApiResult {
     let Query(q) = query?;
@@ -332,19 +388,19 @@ async fn list_jobs(
         status,
     };
     let p = page_of(q.limit, q.cursor);
-    let jobs = store.list_jobs(&filter, p).await?;
+    let jobs = store
+        .list_jobs_in(&filter, access.visible().as_deref(), p)
+        .await?;
     Ok(page(jobs, p.limit(), JobView::from))
 }
 
-async fn job(State(store): State<Store>, id: Result<Path<i64>, PathRejection>) -> ApiResult {
+async fn job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
     let Path(id) = id?;
-    let job = store.job(JobId(id)).await?.ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            format!("job {id} not found"),
-        )
-    })?;
+    let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
     Ok(ok(StatusCode::OK, JobView::from(job)))
 }
 
@@ -357,26 +413,26 @@ struct ListRuns {
 
 async fn list_runs(
     State(store): State<Store>,
+    Extension(access): Extension<Access>,
     id: Result<Path<i64>, PathRejection>,
     query: Result<Query<ListRuns>, QueryRejection>,
 ) -> ApiResult {
     let Path(id) = id?;
     let Query(q) = query?;
-    if store.job(JobId(id)).await?.is_none() {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            format!("job {id} not found"),
-        ));
-    }
+    job_for(&store, &access, id, RepoRole::Viewer).await?;
     let p = page_of(q.limit, q.cursor);
     let runs = store.list_runs(JobId(id), p).await?;
     Ok(page(runs, p.limit(), RunView::from))
 }
 
-async fn cancel_job(State(store): State<Store>, id: Result<Path<i64>, PathRejection>) -> ApiResult {
+async fn cancel_job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
     let Path(id) = id?;
-    let job = store.request_cancel(JobId(id)).await?;
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.request_cancel_by(JobId(id), &access.actor).await?;
     // A running job stops when its worker next renews the lease.
     let status = if job.status == JobStatus::Cancelled {
         StatusCode::OK
@@ -386,9 +442,14 @@ async fn cancel_job(State(store): State<Store>, id: Result<Path<i64>, PathReject
     Ok(ok(status, JobView::from(job)))
 }
 
-async fn retry_job(State(store): State<Store>, id: Result<Path<i64>, PathRejection>) -> ApiResult {
+async fn retry_job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
     let Path(id) = id?;
-    let job = store.retry_job(JobId(id)).await?;
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.retry_job_by(JobId(id), &access.actor).await?;
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }
 

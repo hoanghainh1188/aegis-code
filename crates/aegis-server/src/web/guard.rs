@@ -1,13 +1,24 @@
-//! What every page goes through: a loopback `Host`, a same-origin check
-//! for forms, and the headers, CSP with a fresh nonce first.
+//! What every page goes through: a known `Host`, a same-origin check and
+//! the CSRF token for forms, the session, then the headers, CSP with a
+//! fresh nonce first.
 //!
-//! The form check is where #29 adds its CSRF token: the forms already
-//! include `form_guard.html`, which will carry the token field.
+//! Pages need a session; without one a page sends the browser to sign in
+//! and a form is refused. `/auth/*` (but logout) and `/static/*` need none.
 
-use axum::extract::Request;
+use aegis_store::ActorKind;
+use axum::body::{Body, to_bytes};
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
+use openidconnect::url::form_urlencoded;
+use subtle::ConstantTimeEq;
+
+use crate::auth::oidc::cookie_value;
+use crate::auth::{Access, Auth, CSRF_FIELD, CSRF_HEADER, SESSION_COOKIE, token_hash};
+
+/// The largest form the guard reads to find its CSRF token.
+const MAX_FORM_BYTES: usize = 64 * 1024;
 
 /// The CSP nonce of one response; templates put it on each `<script>`.
 #[derive(Debug, Clone)]
@@ -25,18 +36,24 @@ impl Nonce {
     }
 }
 
+/// The signed-in person, for the page: their name, and the CSRF token
+/// `form_guard.html` puts in every form.
+#[derive(Debug, Clone)]
+pub struct Me {
+    pub name: String,
+    pub csrf: String,
+}
+
+/// The hash of the request's session token, for signing out.
+#[derive(Debug, Clone)]
+pub struct SessionToken(pub aegis_store::TokenHash);
+
 /// The host of a `Host` or `Origin` authority, without its port.
 fn host_of(authority: &str) -> &str {
     match authority.strip_prefix('[') {
         Some(rest) => rest.split(']').next().unwrap_or(""),
         None => authority.split(':').next().unwrap_or(""),
     }
-}
-
-fn is_loopback(headers: &HeaderMap) -> bool {
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok());
-    host.map(host_of)
-        .is_some_and(|h| matches!(h, "localhost" | "127.0.0.1" | "::1"))
 }
 
 /// A browser says where a form came from with `Sec-Fetch-Site` or
@@ -63,17 +80,115 @@ fn refuse(status: StatusCode, why: &'static str) -> Response {
     (status, [(header::CACHE_CONTROL, "no-store")], why).into_response()
 }
 
-pub async fn guard(mut request: Request, next: Next) -> Response {
-    if !is_loopback(request.headers()) {
-        return refuse(
-            StatusCode::FORBIDDEN,
-            "dashboard answers on loopback only (#29)",
-        );
+fn needs_session(path: &str) -> bool {
+    !(path.starts_with("/static/") || path.starts_with("/auth/") && path != "/auth/logout")
+}
+
+/// `/auth/login?next=<this page>`.
+fn sign_in_first(request: &Request) -> Response {
+    let here = request.uri().path_and_query().map_or("/", |p| p.as_str());
+    let next: String = form_urlencoded::byte_serialize(here.as_bytes()).collect();
+    Redirect::to(&format!("/auth/login?next={next}")).into_response()
+}
+
+/// The answer in place of the page; boxed, as it is the rare path.
+type Stop = Box<Response>;
+
+/// The request's CSRF token: the htmx header, else the form field. The
+/// body is read and put back for the handler.
+async fn csrf_of(request: Request) -> Result<(Request, Option<String>), Stop> {
+    if let Some(token) = request
+        .headers()
+        .get(CSRF_HEADER)
+        .and_then(|v| v.to_str().ok())
+    {
+        let token = token.to_owned();
+        return Ok((request, Some(token)));
+    }
+    let (parts, body) = request.into_parts();
+    let bytes = to_bytes(body, MAX_FORM_BYTES)
+        .await
+        .map_err(|_| Box::new(refuse(StatusCode::PAYLOAD_TOO_LARGE, "form too large")))?;
+    let token = form_urlencoded::parse(&bytes)
+        .find(|(k, _)| k == CSRF_FIELD)
+        .map(|(_, v)| v.into_owned());
+    Ok((Request::from_parts(parts, Body::from(bytes)), token))
+}
+
+/// Puts the session's [`Access`], [`Me`] and [`SessionToken`] in the
+/// request, or answers in its place.
+async fn signed_in(auth: &Auth, request: Request, form: bool) -> Result<Request, Stop> {
+    let token = cookie_value(request.headers(), SESSION_COOKIE).map(token_hash);
+    let session = match token {
+        Some(hash) => auth.store().session(&hash).await,
+        None => Ok(None),
+    };
+    let session = match session {
+        Ok(Some(s)) => s,
+        Ok(None) if form => {
+            return Err(Box::new(refuse(StatusCode::UNAUTHORIZED, "sign in again")));
+        }
+        Ok(None) => return Err(Box::new(sign_in_first(&request))),
+        Err(e) => {
+            tracing::error!(error = %e, "web: session");
+            return Err(Box::new(refuse(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal error",
+            )));
+        }
+    };
+    let mut request = request;
+    if form {
+        let (back, given) = csrf_of(request).await?;
+        request = back;
+        let ok =
+            given.is_some_and(|g| bool::from(g.as_bytes().ct_eq(session.csrf_token.as_bytes())));
+        if !ok {
+            return Err(Box::new(refuse(
+                StatusCode::FORBIDDEN,
+                "CSRF token missing or wrong; reload the page",
+            )));
+        }
+    }
+    let access = Access::load(auth.store(), &session.user, ActorKind::User)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "web: roles");
+            Box::new(refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
+        })?;
+    let extensions = request.extensions_mut();
+    extensions.insert(access);
+    extensions.insert(Me {
+        name: session.user.name.clone(),
+        csrf: session.csrf_token,
+    });
+    if let Some(hash) = token {
+        extensions.insert(SessionToken(hash));
+    }
+    Ok(request)
+}
+
+pub async fn guard(State(auth): State<Auth>, request: Request, next: Next) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .map(host_of);
+    if !host.is_some_and(|h| auth.serves_host(h)) {
+        return refuse(StatusCode::FORBIDDEN, "unknown host");
     }
     let form = !matches!(*request.method(), Method::GET | Method::HEAD);
     if form && !same_origin(request.headers()) {
         return refuse(StatusCode::FORBIDDEN, "cross-site form refused");
     }
+    let mut request = if needs_session(request.uri().path()) {
+        match signed_in(&auth, request, form).await {
+            Ok(request) => request,
+            Err(response) => return *response,
+        }
+    } else {
+        request
+    };
     let Some(nonce) = Nonce::fresh() else {
         tracing::error!("web: no randomness for a CSP nonce");
         return refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
@@ -93,6 +208,10 @@ pub async fn guard(mut request: Request, next: Next) -> Response {
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         (header::X_FRAME_OPTIONS, "DENY"),
         (header::REFERRER_POLICY, "no-referrer"),
+        (
+            header::STRICT_TRANSPORT_SECURITY,
+            "max-age=31536000; includeSubDomains",
+        ),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
@@ -119,14 +238,10 @@ mod tests {
     }
 
     #[test]
-    fn only_loopback_hosts_pass() {
-        for host in ["localhost:8080", "127.0.0.1", "[::1]:8080"] {
-            assert!(is_loopback(&headers(&[("host", host)])), "{host}");
-        }
-        for host in ["example.com", "127.0.0.1.evil.test", "10.0.0.1:8080"] {
-            assert!(!is_loopback(&headers(&[("host", host)])), "{host}");
-        }
-        assert!(!is_loopback(&HeaderMap::new()));
+    fn hosts_lose_their_port() {
+        assert_eq!(host_of("localhost:8080"), "localhost");
+        assert_eq!(host_of("[::1]:8080"), "::1");
+        assert_eq!(host_of("aegis.example.com"), "aegis.example.com");
     }
 
     #[test]
@@ -149,6 +264,16 @@ mod tests {
             ("origin", "http://evil.test")
         ])));
         assert!(same_origin(&headers(&[host])));
+    }
+
+    #[test]
+    fn only_sign_in_and_assets_need_no_session() {
+        for open in ["/auth/login", "/auth/callback", "/static/app.css"] {
+            assert!(!needs_session(open), "{open}");
+        }
+        for closed in ["/", "/jobs", "/jobs/1/review", "/auth/logout"] {
+            assert!(needs_session(closed), "{closed}");
+        }
     }
 
     #[test]

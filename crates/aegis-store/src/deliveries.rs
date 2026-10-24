@@ -2,8 +2,9 @@
 //! for are written in one transaction, so a delivery sent twice creates
 //! one job, and a failure in between leaves neither.
 
+use crate::audit::{self, Target};
 use crate::jobs::JobRow;
-use crate::{Delivered, JobId, NewDelivery, NewJob, Store, StoreError};
+use crate::{Actor, Delivered, JobId, NewDelivery, NewJob, Store, StoreError};
 
 const MAX_DELIVERY_ID_LEN: usize = 128;
 
@@ -60,6 +61,16 @@ impl Store {
         let (job_id, delivered) = match created {
             Some(row) => {
                 let created: crate::Job = row.try_into()?;
+                let actor = Actor::webhook(delivery.source.as_str());
+                let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
+                audit::record(
+                    &mut tx,
+                    &actor,
+                    "job.create",
+                    Target::of_job(&created),
+                    detail,
+                )
+                .await?;
                 (created.id, Delivered::Queued(Box::new(created)))
             }
             None => {

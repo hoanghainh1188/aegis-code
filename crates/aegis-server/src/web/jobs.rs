@@ -6,7 +6,7 @@
 //! know them before giving a verdict.
 
 use aegis_ledger::{IssueRecord, LedgerEvent, LedgerStore, Outcome};
-use aegis_store::{Job, JobFilter, JobId, JobStatus, Page, RepoId, Store};
+use aegis_store::{Job, JobFilter, JobStatus, Page, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::{Path, Query, State};
@@ -15,7 +15,8 @@ use serde::Deserialize;
 
 use super::dashboard::all_repos;
 use super::view::{dollars, seconds, tiers};
-use super::{Nonce, WebError, WebResult, render};
+use super::{Me, Nonce, WebError, WebResult, job_for, render};
+use crate::auth::Access;
 
 const PAGE_SIZE: u32 = 50;
 
@@ -70,6 +71,7 @@ struct Choice {
 #[template(path = "jobs.html")]
 struct JobsPage<'a> {
     nonce: &'a str,
+    me: &'a Me,
     repos: Vec<Choice>,
     statuses: Vec<Choice>,
     rows: Vec<JobRow>,
@@ -99,6 +101,8 @@ fn optional<T>(text: &str, parse: impl Fn(&str) -> Option<T>) -> Result<Option<T
 pub async fn list(
     State(store): State<Store>,
     Extension(nonce): Extension<Nonce>,
+    Extension(access): Extension<Access>,
+    Extension(me): Extension<Me>,
     headers: HeaderMap,
     Query(q): Query<ListQuery>,
 ) -> WebResult {
@@ -107,9 +111,14 @@ pub async fn list(
     let cursor = optional(&q.cursor, |t| t.parse::<i64>().ok())?;
     let page = cursor.map_or(Page::first(PAGE_SIZE), |c| Page::after(c, PAGE_SIZE));
     let jobs = store
-        .list_jobs(&JobFilter { repo_id, status }, page)
+        .list_jobs_in(
+            &JobFilter { repo_id, status },
+            access.visible().as_deref(),
+            page,
+        )
         .await?;
-    let repos = all_repos(&store).await?;
+    let mut repos = all_repos(&store).await?;
+    repos.retain(|id, _| access.can(*id, RepoRole::Viewer));
     let next = jobs.next_page().and_then(Page::cursor).map(|c| {
         format!(
             "/jobs?repo_id={}&status={}&cursor={c}",
@@ -133,7 +142,8 @@ pub async fn list(
             wall_time: seconds(record.wall_time_s),
             created_at: job.created_at.format("%Y-%m-%d %H:%M").to_string(),
             pr_url: pr_link(job),
-            can_review: job.outcome == Some(Outcome::PrOpened),
+            can_review: job.outcome == Some(Outcome::PrOpened)
+                && access.can(job.repo_id, RepoRole::Reviewer),
         });
     }
     // A history restore wants the whole page, not the table.
@@ -162,6 +172,7 @@ pub async fn list(
         .collect();
     render(&JobsPage {
         nonce: nonce.as_str(),
+        me: &me,
         repos,
         statuses,
         rows,
@@ -260,6 +271,7 @@ struct RunRow {
 #[template(path = "job.html")]
 struct JobPage<'a> {
     nonce: &'a str,
+    me: &'a Me,
     id: i64,
     repo: String,
     issue_ref: String,
@@ -280,12 +292,11 @@ struct JobPage<'a> {
 pub async fn detail(
     State(store): State<Store>,
     Extension(nonce): Extension<Nonce>,
+    Extension(access): Extension<Access>,
+    Extension(me): Extension<Me>,
     Path(id): Path<i64>,
 ) -> WebResult {
-    let job = store
-        .job(JobId(id))
-        .await?
-        .ok_or_else(|| WebError::not_found(format!("job {id}")))?;
+    let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
     let repo = store.repo(job.repo_id).await?;
     let events = store.ledger().events(&job.ledger_key).await?;
     let record = IssueRecord::from_events(job.ledger_key.clone(), &events);
@@ -305,6 +316,7 @@ pub async fn detail(
         .collect();
     render(&JobPage {
         nonce: nonce.as_str(),
+        me: &me,
         id,
         repo: repo.map_or(format!("repo {}", job.repo_id.0), |r| r.slug),
         issue_ref: job.issue_ref.clone(),
@@ -313,7 +325,8 @@ pub async fn detail(
         outcome: outcome(&job),
         reason: job.reason.clone().unwrap_or_default(),
         pr_url: pr_link(&job),
-        can_review: job.outcome == Some(Outcome::PrOpened),
+        can_review: job.outcome == Some(Outcome::PrOpened)
+            && access.can(job.repo_id, RepoRole::Reviewer),
         tiers: tiers(&record),
         model_calls: record.model_calls,
         cost: dollars(record.cost_usd),

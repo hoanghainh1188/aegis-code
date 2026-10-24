@@ -1,13 +1,18 @@
 //! The dashboard and the reviewer's pages (#28): KPIs that match the
 //! ledger's report, a review form that writes `review` to the ledger with
-//! the time it took, and pages that stay on loopback and behind the CSP.
+//! the time it took, and pages that stay on known hosts and behind the CSP.
+//! Here as an admin; who may see what is in `auth.rs`.
+
+mod common;
 
 use aegis_ledger::{
     IssueId, Kpi, LedgerEvent, LedgerStore, Outcome, Report, Review, ReviewVerdict, Tier,
     TokenCounts, report,
 };
 use aegis_server::api::router;
+use aegis_server::auth::Signer;
 use aegis_server::web::dashboard_kpis;
+use aegis_server::web::opened_at_signature;
 use aegis_store::testing::test_db;
 use aegis_store::{JobEnd, JobId, JobSource, NewJob, NewRepo, RepoId, RepoMode, Store};
 use axum::Router;
@@ -23,8 +28,22 @@ struct Answer {
     body: String,
 }
 
-async fn send(app: &Router, request: Request<Body>) -> Answer {
-    let response = app.clone().oneshot(request).await.unwrap();
+/// The pages, and an admin's browser.
+struct App {
+    router: Router,
+    browser: common::Browser,
+}
+
+async fn app(store: &Store) -> App {
+    common::admin(store, "admin@example.test").await;
+    App {
+        router: router(store.clone(), common::auth(store)),
+        browser: common::sign_in(store, "admin@example.test").await,
+    }
+}
+
+async fn send(app: &App, request: Request<Body>) -> Answer {
+    let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
@@ -35,20 +54,23 @@ async fn send(app: &Router, request: Request<Body>) -> Answer {
     }
 }
 
-async fn get(app: &Router, uri: &str) -> Answer {
+async fn get(app: &App, uri: &str) -> Answer {
     let request = Request::get(uri)
         .header(header::HOST, "localhost:8080")
+        .header(header::COOKIE, &app.browser.cookie)
         .body(Body::empty())
         .unwrap();
     send(app, request).await
 }
 
-async fn post_form(app: &Router, uri: &str, form: &str) -> Answer {
+/// With the session's CSRF token, as `form_guard.html` adds it.
+async fn post_form(app: &App, uri: &str, form: &str) -> Answer {
     let request = Request::post(uri)
         .header(header::HOST, "localhost:8080")
         .header(header::ORIGIN, "http://localhost:8080")
+        .header(header::COOKIE, &app.browser.cookie)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from(form.to_owned()))
+        .body(Body::from(format!("{form}&_csrf={}", app.browser.csrf)))
         .unwrap();
     send(app, request).await
 }
@@ -205,7 +227,7 @@ async fn the_dashboard_matches_the_ledger_report() {
     let week: usize = d.weeks.iter().map(|g| g.kpi.runs).sum();
     assert_eq!(week, 4, "jobs only, by week");
 
-    let app = router(s.clone());
+    let app = app(s).await;
     let page = get(&app, "/").await;
     assert_eq!(page.status, StatusCode::OK);
     for value in [
@@ -242,7 +264,7 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     )
     .await;
     let stopped = job(s, typst, "typst-10", Some(Outcome::StoppedBudget), &[]).await;
-    let app = router(s.clone());
+    let app = app(s).await;
 
     let form = get(&app, &format!("/jobs/{}/review", id.0)).await;
     assert_eq!(form.status, StatusCode::OK);
@@ -275,8 +297,18 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
         assert!(!told.iter().any(|t| page.contains(t)), "{page}");
     }
 
+    assert!(form.body.contains("name=\"_csrf\""));
+    // The form signed a time 90 s ago for this job and this reviewer.
     let opened_at = chrono::Utc::now().timestamp_millis() - 90_000;
-    let fields = format!("verdict=accepted_with_edits&lines_edited=3&opened_at={opened_at}");
+    let sig = opened_at_signature(
+        &Signer::new(common::SESSION_KEY),
+        id,
+        app.browser.user,
+        opened_at,
+    );
+    let fields = format!(
+        "verdict=accepted_with_edits&lines_edited=3&opened_at={opened_at}&opened_sig={sig}"
+    );
     let sent = post_form(&app, &format!("/jobs/{}/review", id.0), &fields).await;
     assert_eq!(sent.status, StatusCode::SEE_OTHER, "{}", sent.body);
     assert_eq!(sent.headers[header::LOCATION], format!("/jobs/{}", id.0));
@@ -300,8 +332,9 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     let again = post_form(&app, &format!("/jobs/{}/review", id.0), &fields).await;
     assert_eq!(again.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(again.body.contains("đã có review"), "{}", again.body);
-    let replace =
-        format!("verdict=rejected&lines_edited=0&broke_tests=on&replace=on&opened_at={opened_at}");
+    let replace = format!(
+        "verdict=rejected&lines_edited=0&broke_tests=on&replace=on&opened_at={opened_at}&opened_sig={sig}"
+    );
     let replaced = post_form(&app, &format!("/jobs/{}/review", id.0), &replace).await;
     assert_eq!(replaced.status, StatusCode::SEE_OTHER);
     let record = s
@@ -317,21 +350,22 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     let bad = post_form(
         &app,
         &format!("/jobs/{}/review", id.0),
-        "verdict=accepted&lines_edited=x&opened_at=0",
+        &format!("verdict=accepted&lines_edited=x&opened_at={opened_at}&opened_sig={sig}"),
     )
     .await;
     assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(bad.body.contains("số dòng sửa"), "{}", bad.body);
     let no_pr = get(&app, &format!("/jobs/{}/review", stopped.0)).await;
     assert_eq!(no_pr.status, StatusCode::CONFLICT);
     db.drop().await;
 }
 
 #[tokio::test]
-async fn pages_stay_on_loopback_and_refuse_cross_site_forms() {
+async fn pages_stay_on_known_hosts_and_refuse_cross_site_forms() {
     let Some(db) = test_db().await else { return };
     let typst = repo(&db.store, "typst", "rust").await;
     let id = job(&db.store, typst, "typst-5", Some(Outcome::PrOpened), &[]).await;
-    let app = router(db.store.clone());
+    let app = app(&db.store).await;
 
     let rebound = Request::get("/")
         .header(header::HOST, "evil.test")
@@ -358,6 +392,7 @@ async fn pages_stay_on_loopback_and_refuse_cross_site_forms() {
     assert_eq!(script.headers[header::CONTENT_TYPE], "text/javascript");
     let table = Request::get("/jobs?repo_id=&status=done")
         .header(header::HOST, "127.0.0.1:8080")
+        .header(header::COOKIE, &app.browser.cookie)
         .header("hx-request", "true")
         .body(Body::empty())
         .unwrap();

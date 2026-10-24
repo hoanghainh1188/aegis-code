@@ -1,6 +1,7 @@
 //! `/`: the KPIs of the ledger in total, per language, per repo and per
 //! week. The total is `aegis report`'s "All runs"; the groups use the same
-//! formula ([`Kpi::grouped`]) on the same records.
+//! formula ([`Kpi::grouped`]) on the same records. Someone who is not an
+//! admin sees only the runs of the repos they have a role in.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +12,8 @@ use axum::Extension;
 use axum::extract::State;
 
 use super::view::KpiRow;
-use super::{Nonce, WebError, WebResult, render};
+use super::{Me, Nonce, WebError, WebResult, render};
+use crate::auth::Access;
 
 /// Weeks the dashboard shows, the latest last.
 const WEEKS_SHOWN: usize = 12;
@@ -34,11 +36,13 @@ pub struct Dashboard {
     pub weeks: Vec<Group>,
 }
 
-async fn all_jobs(store: &Store) -> Result<Vec<Job>, WebError> {
+async fn all_jobs(store: &Store, within: Option<&[RepoId]>) -> Result<Vec<Job>, WebError> {
     let mut jobs = Vec::new();
     let mut page = Page::first(Page::MAX_LIMIT);
     loop {
-        let batch = store.list_jobs(&JobFilter::default(), page).await?;
+        let batch = store
+            .list_jobs_in(&JobFilter::default(), within, page)
+            .await?;
         let next = batch.next_page();
         jobs.extend(batch.items);
         match next {
@@ -70,9 +74,18 @@ fn groups(map: BTreeMap<String, Kpi>) -> Vec<Group> {
 
 /// Every KPI the page shows, from the ledger and the jobs in `store`.
 pub async fn dashboard_kpis(store: &Store) -> Result<Dashboard, WebError> {
-    let records = report::records(&store.ledger()).await?;
+    dashboard_kpis_within(store, None).await
+}
+
+/// [`dashboard_kpis`] of the jobs of the repos `within` only, when given;
+/// runs outside jobs are then left out too.
+pub async fn dashboard_kpis_within(
+    store: &Store,
+    within: Option<&[RepoId]>,
+) -> Result<Dashboard, WebError> {
+    let mut records = report::records(&store.ledger()).await?;
     let repos = all_repos(store).await?;
-    let jobs: BTreeMap<String, (Job, Option<&Repo>)> = all_jobs(store)
+    let jobs: BTreeMap<String, (Job, Option<&Repo>)> = all_jobs(store, within)
         .await?
         .into_iter()
         .map(|j| {
@@ -80,6 +93,9 @@ pub async fn dashboard_kpis(store: &Store) -> Result<Dashboard, WebError> {
             (j.ledger_key.as_str().to_owned(), (j, repo))
         })
         .collect();
+    if within.is_some() {
+        records.retain(|r| jobs.contains_key(r.issue_id.as_str()));
+    }
     let job_of = |r: &IssueRecord| jobs.get(r.issue_id.as_str());
     let languages = Kpi::grouped(&records, |r| {
         Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |(_, repo)| {
@@ -108,6 +124,7 @@ pub async fn dashboard_kpis(store: &Store) -> Result<Dashboard, WebError> {
 #[template(path = "dashboard.html")]
 struct DashboardPage<'a> {
     nonce: &'a str,
+    me: &'a Me,
     total: KpiRow,
     languages: Vec<KpiRow>,
     repos: Vec<KpiRow>,
@@ -121,8 +138,13 @@ fn bar(rate: f64) -> u32 {
     (rate * 200.0).round() as u32
 }
 
-pub async fn page(State(store): State<Store>, Extension(nonce): Extension<Nonce>) -> WebResult {
-    let d = dashboard_kpis(&store).await?;
+pub async fn page(
+    State(store): State<Store>,
+    Extension(nonce): Extension<Nonce>,
+    Extension(access): Extension<Access>,
+    Extension(me): Extension<Me>,
+) -> WebResult {
+    let d = dashboard_kpis_within(&store, access.visible().as_deref()).await?;
     let rows = |groups: &[Group], min: f64| -> Vec<KpiRow> {
         groups
             .iter()
@@ -131,6 +153,7 @@ pub async fn page(State(store): State<Store>, Extension(nonce): Extension<Nonce>
     };
     render(&DashboardPage {
         nonce: nonce.as_str(),
+        me: &me,
         total: KpiRow::new("Tổng", &d.total, ACCEPT_RATE_MIN),
         languages: rows(&d.languages, LANGUAGE_ACCEPT_RATE_MIN),
         repos: rows(&d.repos, ACCEPT_RATE_MIN),

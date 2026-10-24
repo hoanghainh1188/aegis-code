@@ -9,7 +9,14 @@ all-features = true
 # Bỏ qua một advisory phải ghi id và lý do ở `ignore`.
 yanked = "deny"
 unmaintained = "all"
-ignore = []
+ignore = [
+    # `rsa` và `crypto-bigint` 0.5, kéo vào bởi `openidconnect` (#29): hai
+    # advisory về rò rỉ thời gian khi dùng khóa bí mật (giải mã, ký). Server
+    # chỉ kiểm chữ ký ID token bằng khóa công khai của SSO, không giữ khóa
+    # RSA/EC bí mật nào. Gỡ khi `openidconnect` lên bản đã sửa.
+    { id = "RUSTSEC-2023-0071", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
+    { id = "RUSTSEC-2026-0387", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
+]
 
 [licenses]
 # Chỉ license permissive. Thêm license mới phải qua review.

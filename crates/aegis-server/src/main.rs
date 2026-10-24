@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! aegis-server --config config/server.toml [--role api|worker|all]
+//! aegis-server grant|revoke|token|revoke-tokens|revoke-sessions …
 //! ```
 //!
 //! The database is `AEGIS_DATABASE_URL`; its schema is brought up to date
@@ -12,7 +13,8 @@
 //! Webhooks (#25) at `/webhooks/github` and `/webhooks/gitlab`, each open
 //! once its secret is set: `AEGIS_GITHUB_WEBHOOK_SECRET`,
 //! `AEGIS_GITLAB_WEBHOOK_TOKEN`; the trigger label is `AEGIS_WEBHOOK_LABEL`
-//! (`aegis`). Workers comment on a GitHub issue when its job ends if
+//! (`aegis`). Sign-in (#29): `[auth]` in the configuration, secrets from
+//! `aegis_server::auth::load_secrets`. Workers comment on a GitHub issue when its job ends if
 //! `AEGIS_GITHUB_COMMENT_TOKEN` is set (API root: `AEGIS_GITHUB_API`).
 
 use std::path::PathBuf;
@@ -20,6 +22,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use aegis_lifecycle::{ModeConfig, Modes};
+use aegis_server::auth::{self, Auth};
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::webhook::GitHubNotifier;
@@ -149,7 +152,8 @@ async fn run(args: Args) -> Result<(), String> {
             .await
             .map_err(|e| format!("listen on {}: {e}", config.api.listen))?;
         tracing::info!(listen = %config.api.listen, "API listening");
-        let app = api::router(store.clone());
+        let auth = Auth::new(store.clone(), config.auth.clone(), auth::load_secrets()?)?;
+        let app = api::router(store.clone(), auth);
         let shutdown = shutdown.clone();
         parts.spawn(async move {
             axum::serve(listener, app)
@@ -172,6 +176,30 @@ async fn run(args: Args) -> Result<(), String> {
     result
 }
 
+/// Roles, tokens and sessions ([`auth::cli`]): straight to the database.
+async fn run_auth_command(argv: &[String]) -> ExitCode {
+    let done = async {
+        let url = std::env::var(DATABASE_URL_ENV)
+            .map_err(|_| format!("set {DATABASE_URL_ENV} to the PostgreSQL URL"))?;
+        let store = Store::connect(&url)
+            .await
+            .map_err(|e| format!("{DATABASE_URL_ENV}: {e}"))?;
+        let out = auth::cli::run(&store, argv).await;
+        store.close().await;
+        out
+    };
+    match done.await {
+        Ok(out) => {
+            println!("{out}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("aegis-server: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -182,7 +210,11 @@ async fn main() -> ExitCode {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-    let args = match parse_args(std::env::args().skip(1)) {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().is_some_and(|a| auth::cli::is_command(a)) {
+        return run_auth_command(&argv).await;
+    }
+    let args = match parse_args(argv.into_iter()) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("aegis-server: {e}\n{USAGE}");

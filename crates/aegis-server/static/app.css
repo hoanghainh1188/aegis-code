@@ -78,6 +78,8 @@ code, .ref { font-family: var(--font-num); font-size: 0.92em; }
 .masthead nav { display: flex; gap: var(--space-4); }
 .masthead nav a { color: var(--ink); text-decoration: none; font-weight: 600; }
 .masthead nav a:hover { color: var(--accent); }
+.masthead .session { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; }
+.masthead .who { color: var(--ink-soft); font-size: var(--text-small); }
 
 main { padding: var(--space-4) clamp(1rem, 4vw, 3rem) var(--space-section); max-width: 90rem; }
 
@@ -157,8 +159,8 @@ button, .button {
 }
 button:hover, .button:hover { background: var(--accent); border-color: var(--accent); }
 button:active, .button:active { transform: translateY(1px); }
-.button.ghost { background: transparent; color: var(--ink); }
-.button.ghost:hover { color: var(--paper); }
+.button.ghost, button.ghost { background: transparent; color: var(--ink); }
+.button.ghost:hover, button.ghost:hover { color: var(--paper); }
 
 .review form { display: grid; gap: var(--space-4); max-width: 32rem; margin-top: var(--space-4); }
 fieldset { border: 1px solid var(--rule-strong); padding: var(--space-3); margin: 0; display: grid; gap: var(--space-2); }

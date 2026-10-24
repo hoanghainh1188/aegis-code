@@ -2,12 +2,16 @@
 //! the ledger with [`IssueLedger::reviewed`] as `aegis review` does.
 //!
 //! The reviewer does not type the review time (ADR 0005): the form carries
-//! the moment the page was served, and the time is counted from it to the
-//! submit. The page shows neither the hidden test result nor anything
-//! derived from it.
+//! the moment the page was served, signed with the session key for that
+//! job and that reviewer (#29), and the time is counted from it to the
+//! submit. A changed or borrowed `opened_at` is refused. The page shows
+//! neither the hidden test result nor anything derived from it.
+//!
+//! Needs the reviewer role in the job's repo. The review and its audit
+//! entry are written in one transaction ([`Store::record_review`]).
 
-use aegis_ledger::{IssueLedger, Outcome, PriceTable, Review, ReviewVerdict};
-use aegis_store::{Job, JobId, Store};
+use aegis_ledger::{Outcome, Review, ReviewVerdict};
+use aegis_store::{Job, JobId, RepoRole, Store, StoreError, UserId};
 use askama::Template;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -16,16 +20,16 @@ use axum::{Extension, Form};
 use serde::Deserialize;
 
 use super::jobs::record;
-use super::{Nonce, WebError, WebResult, render};
+use super::{Me, Nonce, WebError, WebResult, job_for, render};
+use crate::auth::{Access, Auth, Signer};
+
+/// What `opened_at`'s signature is for.
+const OPENED_AT_PURPOSE: &str = "review-opened-at";
 
 /// A page older than this is refused: its time would not be a review's.
 pub const REVIEW_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 /// Clock difference tolerated between the page and the submit.
 const CLOCK_SKEW_MS: i64 = 5_000;
-/// `IssueLedger` prices model calls; a review prices nothing.
-const UNPRICED: &str = "regional_surcharge = 0.0\n\
-    [cache_write_multiplier]\n5m = 0.0\n1h = 0.0\n\
-    [models.unpriced]\ninput = 0.0\noutput = 0.0\ncache_read_multiplier = 0.0\n";
 
 /// Minutes from serving the form at `opened_at_ms` to its submit at
 /// `now_ms`, both Unix milliseconds.
@@ -53,23 +57,45 @@ fn verdict(text: &str) -> Option<ReviewVerdict> {
     }
 }
 
+/// The signature of `opened_at` on `job`'s review form served to `user`:
+/// good for that job and that reviewer only.
+pub fn opened_at_signature(signer: &Signer, job: JobId, user: UserId, opened_at: i64) -> String {
+    signer.sign(OPENED_AT_PURPOSE, &opened_at_message(job, user, opened_at))
+}
+
+fn opened_at_message(job: JobId, user: UserId, opened_at: i64) -> String {
+    format!("{}:{}:{opened_at}", job.0, user.0)
+}
+
+/// Who signs: a session always has a user.
+fn reviewer(access: &Access) -> UserId {
+    access.actor.user.unwrap_or(UserId(0))
+}
+
 #[derive(Template)]
 #[template(path = "review.html")]
 struct ReviewPage<'a> {
     nonce: &'a str,
+    me: &'a Me,
     id: i64,
     issue_ref: String,
     pr_url: Option<String>,
     existing: Option<String>,
     opened_at: i64,
+    opened_sig: String,
     error: Option<String>,
 }
 
-async fn reviewable(store: &Store, id: i64) -> Result<Job, WebError> {
-    let job = store
-        .job(JobId(id))
-        .await?
-        .ok_or_else(|| WebError::not_found(format!("job {id}")))?;
+/// Who asks, and what the page needs to say it.
+struct Viewer<'a> {
+    auth: &'a Auth,
+    access: &'a Access,
+    nonce: &'a Nonce,
+    me: &'a Me,
+}
+
+async fn reviewable(store: &Store, access: &Access, id: i64) -> Result<Job, WebError> {
+    let job = job_for(store, access, id, RepoRole::Reviewer).await?;
     if job.outcome != Some(Outcome::PrOpened) {
         return Err(WebError::new(
             StatusCode::CONFLICT,
@@ -81,7 +107,7 @@ async fn reviewable(store: &Store, id: i64) -> Result<Job, WebError> {
 
 async fn page(
     store: &Store,
-    nonce: &Nonce,
+    viewer: &Viewer<'_>,
     job: &Job,
     opened_at: i64,
     error: Option<String>,
@@ -98,12 +124,19 @@ async fn page(
         StatusCode::OK
     };
     let html = render(&ReviewPage {
-        nonce: nonce.as_str(),
+        nonce: viewer.nonce.as_str(),
+        me: viewer.me,
         id: job.id.0,
         issue_ref: job.issue_ref.clone(),
         pr_url: job.pr_url.clone().filter(|u| u.starts_with("https://")),
         existing,
         opened_at,
+        opened_sig: opened_at_signature(
+            viewer.auth.signer(),
+            job.id,
+            reviewer(viewer.access),
+            opened_at,
+        ),
         error,
     })?;
     Ok((status, html).into_response())
@@ -111,11 +144,20 @@ async fn page(
 
 pub async fn form(
     State(store): State<Store>,
+    Extension(auth): Extension<Auth>,
     Extension(nonce): Extension<Nonce>,
+    Extension(access): Extension<Access>,
+    Extension(me): Extension<Me>,
     Path(id): Path<i64>,
 ) -> WebResult {
-    let job = reviewable(&store, id).await?;
-    page(&store, &nonce, &job, now_ms(), None).await
+    let job = reviewable(&store, &access, id).await?;
+    let viewer = Viewer {
+        auth: &auth,
+        access: &access,
+        nonce: &nonce,
+        me: &me,
+    };
+    page(&store, &viewer, &job, now_ms(), None).await
 }
 
 /// The form's fields as text: a bad value is shown back, not a 400.
@@ -131,6 +173,8 @@ pub struct ReviewForm {
     replace: Option<String>,
     #[serde(default)]
     opened_at: String,
+    #[serde(default)]
+    opened_sig: String,
 }
 
 fn parse(form: &ReviewForm, now: i64) -> Result<Review, String> {
@@ -154,27 +198,47 @@ fn parse(form: &ReviewForm, now: i64) -> Result<Review, String> {
 
 pub async fn submit(
     State(store): State<Store>,
+    Extension(auth): Extension<Auth>,
     Extension(nonce): Extension<Nonce>,
+    Extension(access): Extension<Access>,
+    Extension(me): Extension<Me>,
     Path(id): Path<i64>,
     Form(form): Form<ReviewForm>,
 ) -> WebResult {
-    let job = reviewable(&store, id).await?;
+    let job = reviewable(&store, &access, id).await?;
+    let viewer = Viewer {
+        auth: &auth,
+        access: &access,
+        nonce: &nonce,
+        me: &me,
+    };
     let now = now_ms();
-    let opened_at = form.opened_at.parse().unwrap_or(now);
+    // Only a time this server signed for this job and this reviewer
+    // counts; anything else starts the count again.
+    let signed = form.opened_at.parse::<i64>().ok().filter(|t| {
+        let message = opened_at_message(job.id, reviewer(&access), *t);
+        auth.signer()
+            .verify(OPENED_AT_PURPOSE, &message, &form.opened_sig)
+    });
+    let Some(opened_at) = signed else {
+        let why = "thời điểm mở trang không hợp lệ; tải lại trang rồi duyệt".to_owned();
+        return page(&store, &viewer, &job, now, Some(why)).await;
+    };
     let review = match parse(&form, now) {
         Ok(review) => review,
-        Err(why) => return page(&store, &nonce, &job, opened_at, Some(why)).await,
+        Err(why) => return page(&store, &viewer, &job, opened_at, Some(why)).await,
     };
-    let prices = PriceTable::from_toml(UNPRICED)?;
-    let ledger = store.ledger();
-    // `regional` only changes the price of model calls.
-    let mut issue = IssueLedger::open(&ledger, &prices, false, job.ledger_key.clone()).await?;
-    if issue.record().review.is_some() && form.replace.is_none() {
-        let why = "PR này đã có review; đánh dấu \"thay review cũ\" để đổi".to_owned();
-        return page(&store, &nonce, &job, opened_at, Some(why)).await;
+    match store
+        .record_review(&job, review, form.replace.is_some(), &access.actor)
+        .await
+    {
+        Ok(_) => Ok(Redirect::to(&format!("/jobs/{id}")).into_response()),
+        Err(StoreError::Conflict(_)) => {
+            let why = "PR này đã có review; đánh dấu \"thay review cũ\" để đổi".to_owned();
+            page(&store, &viewer, &job, opened_at, Some(why)).await
+        }
+        Err(e) => Err(e.into()),
     }
-    issue.reviewed(review).await?;
-    Ok(Redirect::to(&format!("/jobs/{id}")).into_response())
 }
 
 #[cfg(test)]
@@ -187,7 +251,6 @@ mod tests {
         assert_eq!(review_minutes(1_000, 0), Ok(0.0));
         assert!(review_minutes(10_000, 0).is_err());
         assert!(review_minutes(0, REVIEW_MAX_AGE_MS + 1).is_err());
-        PriceTable::from_toml(UNPRICED).unwrap();
     }
 
     #[test]
@@ -198,6 +261,7 @@ mod tests {
             broke_tests: None,
             replace: None,
             opened_at: "0".into(),
+            opened_sig: String::new(),
         };
         let review = parse(&form("accepted_with_edits", " 3 "), 120_000).unwrap();
         assert_eq!(

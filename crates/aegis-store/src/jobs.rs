@@ -4,10 +4,11 @@
 use aegis_ledger::IssueId;
 use chrono::{DateTime, Utc};
 
+use crate::audit::{self, Target};
 use crate::types::{count, decode_outcome, outcome_str};
 use crate::{
-    Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, Run, RunEnd,
-    RunId, RunStatus, Store, StoreError,
+    Actor, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, Run,
+    RunEnd, RunId, RunStatus, Store, StoreError,
 };
 
 pub(crate) struct JobRow {
@@ -92,7 +93,13 @@ impl Store {
     /// Queues a job. `Conflict` when the issue already has a live job or
     /// the ledger key is taken; `NotFound` when the repo does not exist.
     pub async fn create_job(&self, job: &NewJob) -> Result<Job, StoreError> {
-        sqlx::query_as!(
+        self.create_job_by(job, &Actor::system()).await
+    }
+
+    /// [`Store::create_job`], audited as done by `actor`.
+    pub async fn create_job_by(&self, job: &NewJob, actor: &Actor) -> Result<Job, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let created: Job = sqlx::query_as!(
             JobRow,
             "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
              VALUES ($1, $2, $3, $4)
@@ -104,13 +111,23 @@ impl Store {
             job.ledger_key.as_str(),
             job.source.as_str(),
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| match StoreError::from_db(e) {
             StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
             other => other,
         })?
-        .try_into()
+        .try_into()?;
+        audit::record(
+            &mut tx,
+            actor,
+            "job.create",
+            Target::of_job(&created),
+            serde_json::json!({}),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(created)
     }
 
     pub async fn job(&self, id: JobId) -> Result<Option<Job>, StoreError> {
@@ -134,6 +151,17 @@ impl Store {
         filter: &JobFilter,
         page: Page,
     ) -> Result<PageOf<Job>, StoreError> {
+        self.list_jobs_in(filter, None, page).await
+    }
+
+    /// [`Store::list_jobs`], only of the repos `within` when given.
+    pub async fn list_jobs_in(
+        &self,
+        filter: &JobFilter,
+        within: Option<&[RepoId]>,
+        page: Page,
+    ) -> Result<PageOf<Job>, StoreError> {
+        let within: Option<Vec<i64>> = within.map(|repos| repos.iter().map(|r| r.0).collect());
         let rows = sqlx::query_as!(
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
@@ -143,11 +171,13 @@ impl Store {
              WHERE ($1::bigint IS NULL OR repo_id = $1)
                AND ($2::text IS NULL OR status = $2)
                AND ($3::bigint IS NULL OR id < $3)
+               AND ($5::bigint[] IS NULL OR repo_id = ANY($5))
              ORDER BY id DESC LIMIT $4",
             filter.repo_id.map(|r| r.0),
             filter.status.map(JobStatus::as_str),
             page.cursor(),
             page.fetch(),
+            within.as_deref(),
         )
         .fetch_all(&self.pool)
         .await?;

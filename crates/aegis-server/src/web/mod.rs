@@ -3,8 +3,8 @@
 //! from `aegis-store` directly, not through the API.
 //!
 //! Scripts are served from `/static`, never from a CDN, and the CSP allows
-//! only them, by nonce; nothing is inline. No login yet (#29): every page
-//! answers only to a loopback `Host`, which also stops DNS rebinding.
+//! only them, by nonce; nothing is inline. Every page needs a session
+//! (#29) and shows only the repos its user has a role in; see [`guard`].
 
 mod dashboard;
 mod guard;
@@ -12,24 +12,29 @@ mod jobs;
 mod review;
 mod view;
 
-use aegis_store::{Store, StoreError};
+use aegis_store::{Job, JobId, RepoRole, Store, StoreError};
 use askama::Template;
-use axum::Router;
 use axum::http::{StatusCode, header};
-use axum::middleware;
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
+use axum::{Extension, Router, middleware};
 
-pub use dashboard::{Dashboard, Group, dashboard_kpis};
-pub use guard::Nonce;
-pub use review::{REVIEW_MAX_AGE_MS, review_minutes};
+use crate::auth::{Access, Auth, oidc};
+
+pub use dashboard::{Dashboard, Group, dashboard_kpis, dashboard_kpis_within};
+pub use guard::{Me, Nonce, SessionToken};
+pub use review::{REVIEW_MAX_AGE_MS, opened_at_signature, review_minutes};
 
 const HTMX: &[u8] = include_bytes!("../../static/htmx-2.0.11.min.js");
 const CSS: &[u8] = include_bytes!("../../static/app.css");
 
 /// The pages, under the API's state; `api::router` merges them in.
-pub fn router() -> Router<Store> {
+pub fn router(auth: Auth) -> Router<Store> {
     Router::new()
+        .route("/auth/login", get(oidc::login))
+        .route("/auth/callback", get(oidc::callback))
+        .route("/auth/logout", post(oidc::logout))
+        .route("/auth/signed-out", get(oidc::signed_out))
         .route("/", get(dashboard::page))
         .route("/jobs", get(jobs::list))
         .route("/jobs/{id}", get(jobs::detail))
@@ -39,7 +44,8 @@ pub fn router() -> Router<Store> {
             get(|| asset(HTMX, "text/javascript")),
         )
         .route("/static/app.css", get(|| asset(CSS, "text/css")))
-        .layer(middleware::from_fn(guard::guard))
+        .layer(middleware::from_fn_with_state(auth.clone(), guard::guard))
+        .layer(Extension(auth))
 }
 
 async fn asset(body: &'static [u8], content_type: &'static str) -> Response {
@@ -61,14 +67,14 @@ pub struct WebError {
 }
 
 impl WebError {
-    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
             message: message.into(),
         }
     }
 
-    fn not_found(what: impl Into<String>) -> Self {
+    pub(crate) fn not_found(what: impl Into<String>) -> Self {
         Self::new(
             StatusCode::NOT_FOUND,
             format!("{} không tồn tại", what.into()),
@@ -115,6 +121,31 @@ impl IntoResponse for WebError {
 }
 
 type WebResult = Result<Response, WebError>;
+
+/// Job `id` when `access` may do what `needed` allows in its repo. A job
+/// of a repo it cannot see is "not found", as if it did not exist.
+async fn job_for(
+    store: &Store,
+    access: &Access,
+    id: i64,
+    needed: RepoRole,
+) -> Result<Job, WebError> {
+    let job = store
+        .job(JobId(id))
+        .await?
+        .filter(|j| access.can(j.repo_id, RepoRole::Viewer))
+        .ok_or_else(|| WebError::not_found(format!("job {id}")))?;
+    if !access.can(job.repo_id, needed) {
+        return Err(WebError::new(
+            StatusCode::FORBIDDEN,
+            format!(
+                "bạn cần vai trò {} trong repo của job {id}",
+                needed.as_str()
+            ),
+        ));
+    }
+    Ok(job)
+}
 
 fn render(page: &impl Template) -> WebResult {
     page.render()

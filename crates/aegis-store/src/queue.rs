@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use aegis_ledger::{IssueId, Outcome};
 
+use crate::audit::{self, Target};
 use crate::jobs::{JobRow, RunRow, live};
 use crate::types::outcome_str;
-use crate::{Job, JobId, JobStatus, Run, RunStatus, Store, StoreError};
+use crate::{Actor, Job, JobId, JobStatus, Run, RunStatus, Store, StoreError};
 
 /// Claims take this transaction-scoped advisory lock, one at a time: the
 /// count of a repo's running jobs is then exact when the next claim reads
@@ -307,6 +308,12 @@ impl Store {
     /// worker stops it when it next renews the lease. `Conflict` when the
     /// job has ended.
     pub async fn request_cancel(&self, job: JobId) -> Result<Job, StoreError> {
+        self.request_cancel_by(job, &Actor::system()).await
+    }
+
+    /// [`Store::request_cancel`], audited as done by `actor`.
+    pub async fn request_cancel_by(&self, job: JobId, actor: &Actor) -> Result<Job, StoreError> {
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query_as!(
             JobRow,
             "UPDATE jobs SET cancel_requested = true,
@@ -320,18 +327,34 @@ impl Store {
                        run_after, retries, cancel_requested, reason, pr_url, retry_of",
             job.0,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
-        match row {
-            Some(row) => row.try_into(),
-            None => Err(self.ended_or_missing(job).await),
-        }
+        let Some(row) = row else {
+            drop(tx);
+            return Err(self.ended_or_missing(job).await);
+        };
+        let cancelled: Job = row.try_into()?;
+        audit::record(
+            &mut tx,
+            actor,
+            "job.cancel",
+            Target::of_job(&cancelled),
+            serde_json::json!({}),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(cancelled)
     }
 
     /// A new job for the issue of a failed or cancelled one, with a ledger
     /// of its own (`<key>-r<n>`) and so a budget of its own. A job that is
     /// done has the agent's result and is not run again.
     pub async fn retry_job(&self, job: JobId) -> Result<Job, StoreError> {
+        self.retry_job_by(job, &Actor::system()).await
+    }
+
+    /// [`Store::retry_job`], audited as done by `actor`.
+    pub async fn retry_job_by(&self, job: JobId, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
         let old = sqlx::query!(
             "SELECT repo_id, issue_ref, ledger_key, source, status FROM jobs
@@ -373,8 +396,18 @@ impl Store {
         .fetch_one(&mut *tx)
         .await
         .map_err(StoreError::from_db)?;
+        let retried: Job = row.try_into()?;
+        let detail = serde_json::json!({ "retry_of": job.0 });
+        audit::record(
+            &mut tx,
+            actor,
+            "job.retry",
+            Target::of_job(&retried),
+            detail,
+        )
+        .await?;
         tx.commit().await?;
-        row.try_into()
+        Ok(retried)
     }
 
     /// What the job's ledger has spent over all its runs, in $.

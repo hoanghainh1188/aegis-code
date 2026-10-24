@@ -2,13 +2,15 @@
 //! listens, how the worker paces itself, and the configuration of each
 //! mode. A job runs with its repo's mode and own settings, both read from
 //! the `repos` table (#24); its limit there is `max_concurrent_jobs`. The
-//! database URL is not in it: `AEGIS_DATABASE_URL`.
+//! database URL is not in it: `AEGIS_DATABASE_URL`; nor are the secrets of
+//! sign-in ([`crate::auth::load_secrets`]).
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use openidconnect::url::Url;
+use serde::{Deserialize, Deserializer};
 
 use crate::worker::WorkerConfig;
 
@@ -23,6 +25,8 @@ pub struct ServerConfig {
     pub api: ApiSection,
     #[serde(default)]
     pub worker: WorkerSection,
+    #[serde(default)]
+    pub auth: AuthSection,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -49,6 +53,67 @@ impl Default for ApiSection {
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
         }
     }
+}
+
+/// Sign-in (#29). The dashboard needs `oidc`; the API needs only tokens.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthSection {
+    /// Where people open the dashboard, `https://aegis.example.com`. Pages
+    /// answer to its host and to loopback only; the SSO sends people back
+    /// to `<public_url>/auth/callback`.
+    #[serde(default, deserialize_with = "url")]
+    pub public_url: Option<Url>,
+    #[serde(default = "default_session_hours")]
+    pub session_hours: u32,
+    /// Per service token, per API process.
+    #[serde(default = "default_api_requests_per_minute")]
+    pub api_requests_per_minute: u32,
+    #[serde(default)]
+    pub oidc: Option<OidcSection>,
+}
+
+impl Default for AuthSection {
+    fn default() -> Self {
+        toml::from_str("").expect("every field has a default")
+    }
+}
+
+/// The company SSO. Its client secret is `AEGIS_OIDC_CLIENT_SECRET`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OidcSection {
+    /// `https://login.example.com/realms/acme`: discovery is read from
+    /// `<issuer>/.well-known/openid-configuration`.
+    pub issuer: String,
+    pub client_id: String,
+}
+
+fn url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Url>, D::Error> {
+    let text = String::deserialize(d)?;
+    let url = Url::parse(&text).map_err(serde::de::Error::custom)?;
+    if url.host_str().is_none() || url.path() != "/" || url.query().is_some() {
+        return Err(serde::de::Error::custom(format!(
+            "`{text}`: a scheme and a host, no path"
+        )));
+    }
+    // The session cookie is `Secure`: browsers keep it over HTTPS only,
+    // and over plain HTTP on loopback.
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if url.scheme() != "https" && !loopback {
+        return Err(serde::de::Error::custom(format!(
+            "`{text}`: https, unless on loopback"
+        )));
+    }
+    Ok(Some(url))
+}
+
+fn default_session_hours() -> u32 {
+    12
+}
+
+fn default_api_requests_per_minute() -> u32 {
+    120
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,6 +192,15 @@ impl ServerConfig {
         if w.poll_s == 0 {
             return Err("worker: poll_s must be at least 1".into());
         }
+        let a = &config.auth;
+        if a.session_hours == 0 || a.api_requests_per_minute == 0 {
+            return Err(
+                "auth: session_hours and api_requests_per_minute must be at least 1".into(),
+            );
+        }
+        if a.oidc.is_some() && a.public_url.is_none() {
+            return Err("auth: oidc needs public_url, where the SSO sends people back".into());
+        }
         Ok(config)
     }
 
@@ -160,6 +234,8 @@ mod tests {
         assert_eq!(config.modes.poc, Some(PathBuf::from("config/poc.toml")));
         assert_eq!(config.modes.customer_jp, None);
         assert!(config.api.listen.ip().is_loopback());
+        assert!(config.auth.oidc.is_none());
+        assert_eq!(config.auth.session_hours, 12);
         let worker = config.worker("w".into());
         assert!(worker.renew_every < worker.lease);
         assert_eq!(worker.max_cost_usd, 4.0);
@@ -171,6 +247,20 @@ mod tests {
             ("[worker]\nlease_s = 10\nrenew_s = 10\n", "renew_s"),
             ("[worker]\nmax_cost_usd = 0.0\n", "max_cost_usd"),
             ("[worker]\nrepos = []\n", "unknown field"),
+        ] {
+            let err = ServerConfig::from_toml(bad).unwrap_err();
+            assert!(err.contains(why), "{bad}: {err}");
+        }
+        for (bad, why) in [
+            (
+                "[auth.oidc]\nissuer = \"https://sso\"\nclient_id = \"a\"\n",
+                "public_url",
+            ),
+            (
+                "[auth]\npublic_url = \"https://aegis.test/dash\"\n",
+                "no path",
+            ),
+            ("[auth]\nsession_hours = 0\n", "session_hours"),
         ] {
             let err = ServerConfig::from_toml(bad).unwrap_err();
             assert!(err.contains(why), "{bad}: {err}");

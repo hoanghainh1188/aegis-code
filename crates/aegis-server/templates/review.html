@@ -11,6 +11,7 @@
   <form method="post" action="/jobs/{{ id }}/review">
     {% include "form_guard.html" %}
     <input type="hidden" name="opened_at" value="{{ opened_at }}">
+    <input type="hidden" name="opened_sig" value="{{ opened_sig }}">
     <fieldset>
       <legend>Kết luận</legend>
       <label class="choice"><input type="radio" name="verdict" value="accepted" required> Chấp nhận</label>

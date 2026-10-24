@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of\n             FROM jobs\n             WHERE ($1::bigint IS NULL OR repo_id = $1)\n               AND ($2::text IS NULL OR status = $2)\n               AND ($3::bigint IS NULL OR id < $3)\n             ORDER BY id DESC LIMIT $4",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of\n             FROM jobs\n             WHERE ($1::bigint IS NULL OR repo_id = $1)\n               AND ($2::text IS NULL OR status = $2)\n               AND ($3::bigint IS NULL OR id < $3)\n               AND ($5::bigint[] IS NULL OR repo_id = ANY($5))\n             ORDER BY id DESC LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -207,7 +207,8 @@
         "Int8",
         "Text",
         "Int8",
-        "Int8"
+        "Int8",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -231,5 +232,5 @@
       true
     ]
   },
-  "hash": "fe2aad504dd9d0c45feca99bb06ec3b6608c7e0b36dfdefcf98c3b50fc54cd2d"
+  "hash": "e71642d86fa437f4a1eda2ebb14e6555c070eac31d2dcb618cd7768eeb36fee4"
 }
