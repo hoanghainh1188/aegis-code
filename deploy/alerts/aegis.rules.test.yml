@@ -1,0 +1,95 @@
+# `promtool test rules aegis.rules.test.yml`: mỗi cảnh báo bắn đúng lúc,
+# đúng repo, và không bắn khi chỉ có lỗi lẻ, ít lưu lượng hay hàng đợi ngắn.
+rule_files:
+  - aegis.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Repo a: từ phút 30, nửa số lời gọi bị overloaded. Repo b: 5% lỗi.
+  - interval: 1m
+    input_series:
+      - series: 'aegis_provider_calls_total{repo="a",language="rust",tier="core",result="ok"}'
+        values: '0+30x90'
+      - series: 'aegis_provider_calls_total{repo="a",language="rust",tier="core",result="overloaded"}'
+        values: '0x30 0+30x60'
+      - series: 'aegis_provider_calls_total{repo="b",language="python",tier="core",result="ok"}'
+        values: '0+95x90'
+      - series: 'aegis_provider_calls_total{repo="b",language="python",tier="core",result="rate_limited"}'
+        values: '0+5x90'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: AegisProviderErrorsSustained
+        exp_alerts: []
+      # Vượt ngưỡng từ khoảng phút 33, chưa đủ 15 phút.
+      - eval_time: 42m
+        alertname: AegisProviderErrorsSustained
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: AegisProviderErrorsSustained
+        exp_alerts:
+          - exp_labels:
+              repo: a
+              severity: critical
+            exp_annotations:
+              summary: "Lời gọi model của repo a lỗi kéo dài"
+              description: "Hơn 25% lời gọi model lỗi trong 15 phút. Xem aegis_provider_calls_total theo result để biết loại lỗi."
+
+  # Repo a đọc cache 90%; b chỉ 10% với 600k token/giờ; c cũng 10% nhưng
+  # chỉ 6k token/giờ.
+  - interval: 1m
+    input_series:
+      - series: 'aegis_provider_tokens_total{repo="a",language="rust",tier="core",kind="input"}'
+        values: '0+1000x150'
+      - series: 'aegis_provider_tokens_total{repo="a",language="rust",tier="core",kind="cache_read"}'
+        values: '0+9000x150'
+      - series: 'aegis_provider_tokens_total{repo="a",language="rust",tier="core",kind="output"}'
+        values: '0+50000x150'
+      - series: 'aegis_provider_tokens_total{repo="b",language="go",tier="core",kind="input"}'
+        values: '0+8000x150'
+      - series: 'aegis_provider_tokens_total{repo="b",language="go",tier="core",kind="cache_write"}'
+        values: '0+1000x150'
+      - series: 'aegis_provider_tokens_total{repo="b",language="go",tier="core",kind="cache_read"}'
+        values: '0+1000x150'
+      - series: 'aegis_provider_tokens_total{repo="c",language="java",tier="light",kind="input"}'
+        values: '0+90x150'
+      - series: 'aegis_provider_tokens_total{repo="c",language="java",tier="light",kind="cache_read"}'
+        values: '0+10x150'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AegisCacheReadRatioLow
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: AegisCacheReadRatioLow
+        exp_alerts:
+          - exp_labels:
+              repo: b
+              severity: warning
+            exp_annotations:
+              summary: "Tỉ lệ đọc cache của repo b thấp bất thường"
+              description: "Dưới 50% token đầu vào đọc từ cache trong 1 giờ (KPI ≥ 70%). Kiểm tra thứ tự prompt và cache breakpoint."
+
+  # Hai tiến trình báo cùng hàng đợi. Từ phút 20 không job nào được nhận:
+  # job cũ nhất chờ thêm 60 giây mỗi phút, qua 30 phút ở phút 50.
+  - interval: 1m
+    input_series:
+      - series: 'aegis_queue_oldest_ready_seconds{instance="api-1"}'
+        values: '0x20 60+60x50'
+      - series: 'aegis_queue_oldest_ready_seconds{instance="worker-1"}'
+        values: '0x20 60+60x50'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: AegisQueueBacklog
+        exp_alerts: []
+      # Qua ngưỡng nhưng chưa đủ 10 phút.
+      - eval_time: 55m
+        alertname: AegisQueueBacklog
+        exp_alerts: []
+      - eval_time: 62m
+        alertname: AegisQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Hàng đợi job dồn"
+              description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."

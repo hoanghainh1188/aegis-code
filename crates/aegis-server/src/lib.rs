@@ -8,6 +8,8 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod lifecycle;
+pub mod logs;
+pub mod metrics;
 pub mod runner;
 pub mod secrets;
 pub mod web;

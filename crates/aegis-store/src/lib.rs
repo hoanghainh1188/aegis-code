@@ -15,6 +15,7 @@ mod ledger;
 mod page;
 mod queue;
 mod repos;
+mod stats;
 mod types;
 mod users;
 
@@ -31,6 +32,7 @@ pub use error::StoreError;
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
 pub use queue::{AttemptEnd, Claim, Lease};
+pub use stats::QueueStats;
 pub use types::{
     ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,
     NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
