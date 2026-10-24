@@ -202,6 +202,9 @@ pub enum Delivered {
     Duplicate,
     /// The issue already has a live job; no second one.
     AlreadyLive(JobId),
+    /// The repo's monthly budget is spent (#31): the job is recorded
+    /// cancelled, with the reason, so the issue can be told.
+    Refused(Box<Job>),
 }
 
 /// How a job ends.

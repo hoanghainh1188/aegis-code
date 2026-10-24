@@ -1,5 +1,5 @@
 //! `/`: the KPIs of the ledger in total, per language, per repo and per
-//! week. The total is `aegis report`'s "All runs"; the groups use the same
+//! week, and each repo's budget this month (#31). The total is `aegis report`'s "All runs"; the groups use the same
 //! formula ([`Kpi::grouped`]) on the same records. Someone who is not an
 //! admin sees only the runs of the repos they have a role in.
 
@@ -11,7 +11,7 @@ use askama::Template;
 use axum::Extension;
 use axum::extract::State;
 
-use super::view::KpiRow;
+use super::view::{BudgetRow, KpiRow, dollars};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::Access;
 
@@ -129,6 +129,11 @@ struct DashboardPage<'a> {
     languages: Vec<KpiRow>,
     repos: Vec<KpiRow>,
     weeks: Vec<KpiRow>,
+    budgets: Vec<BudgetRow>,
+    time_zone: &'a str,
+    /// The warning threshold, in % of the cap.
+    warn_at: u32,
+    reserve: String,
     total_min: u32,
     language_min: u32,
 }
@@ -144,7 +149,15 @@ pub async fn page(
     Extension(access): Extension<Access>,
     Extension(me): Extension<Me>,
 ) -> WebResult {
-    let d = dashboard_kpis_within(&store, access.visible().as_deref()).await?;
+    let within = access.visible();
+    let d = dashboard_kpis_within(&store, within.as_deref()).await?;
+    let rules = store.budget_rules();
+    let budgets = store
+        .repo_budgets(within.as_deref())
+        .await?
+        .iter()
+        .map(|b| BudgetRow::new(b, rules))
+        .collect();
     let rows = |groups: &[Group], min: f64| -> Vec<KpiRow> {
         groups
             .iter()
@@ -158,6 +171,10 @@ pub async fn page(
         languages: rows(&d.languages, LANGUAGE_ACCEPT_RATE_MIN),
         repos: rows(&d.repos, ACCEPT_RATE_MIN),
         weeks: rows(&d.weeks, ACCEPT_RATE_MIN),
+        budgets,
+        time_zone: &rules.time_zone,
+        warn_at: (rules.warn_ratio * 100.0).round() as u32,
+        reserve: dollars(rules.job_reserve_usd),
         total_min: bar(ACCEPT_RATE_MIN),
         language_min: bar(LANGUAGE_ACCEPT_RATE_MIN),
     })

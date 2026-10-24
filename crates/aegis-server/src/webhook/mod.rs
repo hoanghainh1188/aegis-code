@@ -15,6 +15,9 @@
 //! endpoint whose secret is not in the store answers 404. The label is
 //! `AEGIS_WEBHOOK_LABEL` (`aegis` by default), not a secret.
 //!
+//! When the repo's monthly budget is spent (#31) the job is recorded
+//! cancelled with the reason, and the GitHub issue told so.
+//!
 //! A verified delivery is still untrusted (design §7): only the repo's
 //! URL and path and the issue or run number are read from it.
 
@@ -37,6 +40,7 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::api::default_ledger_key;
+use crate::worker::JobNotifier;
 use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
@@ -59,14 +63,18 @@ pub struct WebhookConfig {
     pub burst: u32,
     /// …and refilled at this rate. Beyond, 429: the sender retries.
     pub per_minute: u32,
+    /// Tells the issue of a job refused for its repo's budget (#31).
+    pub notifier: Option<GitHubNotifier>,
 }
 
 impl WebhookConfig {
     /// The secrets of the server's store ([`crate::secrets::installed`]),
     /// the label from the environment.
     pub fn from_env() -> Self {
+        let secrets = crate::secrets::installed();
         Self {
-            secrets: crate::secrets::installed(),
+            notifier: Some(GitHubNotifier::from_env(secrets.clone())),
+            secrets,
             label: std::env::var(LABEL_ENV)
                 .ok()
                 .filter(|l| !l.is_empty())
@@ -234,7 +242,7 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> 
         Err(refusal) => return refusal.into_response(),
     };
     let wanted = events::github(event, &body, &hooks.config.label);
-    deliver(&hooks.store, WebhookSource::Github, id, event, wanted).await
+    deliver(&hooks, WebhookSource::Github, id, event, wanted).await
 }
 
 async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> Response {
@@ -253,7 +261,7 @@ async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> 
         Err(refusal) => return refusal.into_response(),
     };
     let wanted = events::gitlab(event, &body, &hooks.config.label);
-    deliver(&hooks.store, WebhookSource::Gitlab, id, event, wanted).await
+    deliver(&hooks, WebhookSource::Gitlab, id, event, wanted).await
 }
 
 fn ignored(delivery: &str, why: &str) -> Response {
@@ -276,7 +284,7 @@ fn internal(delivery: &str, e: &StoreError) -> Response {
 }
 
 async fn deliver(
-    store: &Store,
+    hooks: &Hooks,
     source: WebhookSource,
     delivery: &str,
     event: &str,
@@ -290,7 +298,7 @@ async fn deliver(
             return refuse(StatusCode::BAD_REQUEST, "bad_request", why).into_response();
         }
     };
-    let repo = match store.repo_by_remote(&wanted.repo_url).await {
+    let repo = match hooks.store.repo_by_remote(&wanted.repo_url).await {
         Ok(Some(repo)) => repo,
         Ok(None) => return ignored(delivery, "repository not registered"),
         Err(StoreError::Conflict(why)) => return ignored(delivery, &why),
@@ -310,7 +318,8 @@ async fn deliver(
             return refuse(StatusCode::BAD_REQUEST, "bad_request", e.to_string()).into_response();
         }
     };
-    let delivered = store
+    let delivered = hooks
+        .store
         .deliver_job(
             &NewDelivery {
                 source,
@@ -344,6 +353,18 @@ async fn deliver(
             answer(
                 StatusCode::OK,
                 json!({ "status": "already_queued", "job_id": job.0 }),
+            )
+        }
+        Ok(Delivered::Refused(job)) => {
+            tracing::info!(delivery, job = job.id.0, repo = %repo.slug, issue_ref, "job refused: the repo's budget is spent");
+            let (job_id, reason) = (job.id.0, job.reason.clone());
+            if let Some(notifier) = hooks.config.notifier.clone() {
+                // The answer does not wait for GitHub.
+                tokio::spawn(async move { notifier.job_ended(&job).await });
+            }
+            answer(
+                StatusCode::OK,
+                json!({ "status": "refused", "job_id": job_id, "reason": reason }),
             )
         }
         Ok(Delivered::Duplicate) => {

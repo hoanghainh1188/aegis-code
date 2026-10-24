@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE repos SET monthly_budget_usd = $2 WHERE id = $1\n               RETURNING id, slug, monthly_budget_usd, repo_month_spent(id, $3) AS \"spent!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "monthly_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "monthly_budget_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "spent!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "0a2d2116088e6eca70071cd539a3e696bfcd05510dae51620e58c858c9e354e5"
+}

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, slug, monthly_budget_usd, repo_month_spent(id, $1) AS \"spent!\"\n               FROM repos WHERE $2::bigint[] IS NULL OR id = ANY($2)\n               ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "monthly_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "monthly_budget_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "spent!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "06712fd60679221fa5461dc3bc6a4c85cf8737178a8285b540dc382b9819dad2"
+}

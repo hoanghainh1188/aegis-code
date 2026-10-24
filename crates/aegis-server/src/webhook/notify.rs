@@ -1,11 +1,11 @@
 //! Tells the issue how its job ended (#25): a comment by the platform's
 //! GitHub account on the issue of every `github` job, with the PR or the
-//! reason it stopped. Jobs of other sources are not reported yet.
+//! reason it stopped, or that its repo's monthly budget is spent (#31). Jobs of other sources are not reported yet.
 
 use aegis_ledger::Outcome;
 use aegis_pr::{GitHub, inert};
 use aegis_secrets::Secrets;
-use aegis_store::{Job, JobSource, JobStatus};
+use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus};
 
 use crate::lifecycle::parse_issue_ref;
 use crate::worker::JobNotifier;
@@ -33,10 +33,16 @@ impl GitHubNotifier {
         }
     }
 
+    /// The API root from [`GITHUB_API_ENV`]; the token is read from
+    /// `secrets` at each comment.
+    pub fn from_env(secrets: Secrets) -> Self {
+        let api = std::env::var(GITHUB_API_ENV).unwrap_or_else(|_| DEFAULT_GITHUB_API.into());
+        Self::new(&api, secrets)
+    }
+
     /// The token from `secrets`, read now; the API root from
     /// [`GITHUB_API_ENV`], not a secret.
     pub async fn from_secrets(secrets: &Secrets) -> Result<Self, String> {
-        let api = std::env::var(GITHUB_API_ENV).unwrap_or_else(|_| DEFAULT_GITHUB_API.into());
         let token = secrets
             .load(COMMENT_TOKEN_ENV)
             .await
@@ -44,7 +50,7 @@ impl GitHubNotifier {
         if token.is_none() {
             tracing::info!("no secret {COMMENT_TOKEN_ENV}: jobs' ends are not commented on");
         }
-        Ok(Self::new(&api, secrets.clone()))
+        Ok(Self::from_env(secrets.clone()))
     }
 }
 
@@ -93,7 +99,13 @@ pub fn status_comment(job: &Job) -> String {
             format!("stopped without a pull request: {}.", stop(outcome)),
             job.reason.as_deref(),
         ),
-        (JobStatus::Cancelled, _) => ("cancelled its job for this issue.".into(), None),
+        (JobStatus::Cancelled, _) => match job.reason.as_deref() {
+            Some(r) if r.starts_with(BUDGET_SPENT) => (
+                "did not take this issue: the repository's monthly budget is spent.".into(),
+                Some(r),
+            ),
+            _ => ("cancelled its job for this issue.".into(), None),
+        },
         _ => (
             "could not finish this issue: the platform failed. Its operators can see why.".into(),
             None,
@@ -170,6 +182,14 @@ mod tests {
             "mentions are made inert: {text}"
         );
         assert!(!text.contains("https://evil"), "{text}");
+
+        let refused = Job {
+            reason: Some(format!("{BUDGET_SPENT}: $97.00 of $100.00 used")),
+            ..job(JobStatus::Cancelled, None)
+        };
+        let text = status_comment(&refused);
+        assert!(text.contains("monthly budget"), "{text}");
+        assert!(text.contains("$97.00 of $100.00"), "{text}");
 
         let failed = Job {
             reason: Some("database: connection refused at 10.0.0.3".into()),

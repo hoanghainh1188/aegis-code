@@ -4,13 +4,17 @@
 //! Every route but `health` needs a service token and is rate limited
 //! ([`crate::auth::api`]). A service sees and changes only the repos it has
 //! a role in: a job of another repo is "not found". Writes are audited.
+//!
+//! A repo's monthly budget (#31) is read at `GET /api/v1/repos/{id}/budget`
+//! and its cap set with `PUT` (maintainer); a job asked for when it is
+//! spent is refused with `409 budget_spent` and the reason.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aegis_ledger::IssueId;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, RepoRole, Run,
-    Store, StoreError,
+    Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoBudget, RepoId,
+    RepoRole, Run, Store, StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -18,7 +22,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router, middleware};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -37,6 +41,10 @@ pub fn router(store: Store, auth: Auth) -> Router {
         .route("/api/v1/jobs/{id}/runs", get(list_runs))
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
+        .route(
+            "/api/v1/repos/{id}/budget",
+            get(repo_budget).put(set_repo_budget),
+        )
         .route_layer(middleware::from_fn_with_state(
             auth.clone(),
             crate::auth::api::guard,
@@ -185,6 +193,7 @@ impl From<StoreError> for ApiError {
                 format!("{what} not found"),
             ),
             StoreError::Conflict(why) => Self::new(StatusCode::CONFLICT, "conflict", why),
+            StoreError::BudgetSpent(why) => Self::new(StatusCode::CONFLICT, "budget_spent", why),
             StoreError::Invalid { field, message } => Self::invalid(format!("{field}: {message}")),
             StoreError::Ledger(e) => Self::invalid(e.to_string()),
             // Database details stay in the log.
@@ -451,6 +460,104 @@ async fn retry_job(
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
     let job = store.retry_job_by(JobId(id), &access.actor).await?;
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
+}
+
+#[derive(Debug, Serialize)]
+struct BudgetView {
+    repo_id: i64,
+    slug: String,
+    /// `null`: no monthly cap.
+    monthly_usd: Option<f64>,
+    spent_usd: f64,
+    left_usd: Option<f64>,
+    /// `unlimited`, `ok`, `warn` or `spent`: no new job runs.
+    state: &'static str,
+    time_zone: String,
+    warn_ratio: f64,
+    /// A repo with less than this left is spent: one job's cap.
+    job_reserve_usd: f64,
+}
+
+impl BudgetView {
+    fn new(store: &Store, b: RepoBudget) -> Self {
+        let rules = store.budget_rules();
+        Self {
+            repo_id: b.repo_id.0,
+            state: b.state(rules).as_str(),
+            left_usd: b.left_usd(),
+            slug: b.slug,
+            monthly_usd: b.monthly_usd,
+            spent_usd: b.spent_usd,
+            time_zone: rules.time_zone.clone(),
+            warn_ratio: rules.warn_ratio,
+            job_reserve_usd: rules.job_reserve_usd,
+        }
+    }
+}
+
+/// Repo `id` when `access` may do what `needed` allows in it; a repo it
+/// cannot see is not found.
+fn repo_for(access: &Access, id: i64, needed: RepoRole) -> Result<RepoId, ApiError> {
+    let repo = RepoId(id);
+    if !access.can(repo, RepoRole::Viewer) {
+        return Err(repo_not_found(id));
+    }
+    if !access.can(repo, needed) {
+        return Err(ApiError::forbidden(repo, needed));
+    }
+    Ok(repo)
+}
+
+fn repo_not_found(id: i64) -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        format!("repo {id} not found"),
+    )
+}
+
+async fn repo_budget(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let repo = repo_for(&access, id, RepoRole::Viewer)?;
+    let budget = store
+        .repo_budget(repo)
+        .await?
+        .ok_or_else(|| repo_not_found(id))?;
+    Ok(ok(StatusCode::OK, BudgetView::new(&store, budget)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetBudget {
+    /// Required; `null` removes the cap.
+    #[serde(default, deserialize_with = "present")]
+    monthly_usd: Option<Option<f64>>,
+}
+
+fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<f64>>, D::Error> {
+    Option::<f64>::deserialize(d).map(Some)
+}
+
+async fn set_repo_budget(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+    body: Result<Json<SetBudget>, JsonRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let Json(body) = body?;
+    let repo = repo_for(&access, id, RepoRole::Maintainer)?;
+    let monthly_usd = body
+        .monthly_usd
+        .ok_or_else(|| ApiError::invalid("monthly_usd: required, `null` for no cap"))?;
+    let budget = store
+        .set_monthly_budget_by(repo, monthly_usd, &access.actor)
+        .await?;
+    Ok(ok(StatusCode::OK, BudgetView::new(&store, budget)))
 }
 
 #[cfg(test)]
