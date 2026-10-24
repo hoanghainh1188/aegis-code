@@ -10,19 +10,25 @@ use crate::{
     RunId, RunStatus, Store, StoreError,
 };
 
-struct JobRow {
-    id: i64,
-    repo_id: i64,
-    issue_ref: String,
-    ledger_key: String,
-    source: String,
-    status: String,
-    outcome: Option<String>,
-    attempts: i32,
-    locked_by: Option<String>,
-    locked_until: Option<DateTime<Utc>>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+pub(crate) struct JobRow {
+    pub(crate) id: i64,
+    pub(crate) repo_id: i64,
+    pub(crate) issue_ref: String,
+    pub(crate) ledger_key: String,
+    pub(crate) source: String,
+    pub(crate) status: String,
+    pub(crate) outcome: Option<String>,
+    pub(crate) attempts: i32,
+    pub(crate) locked_by: Option<String>,
+    pub(crate) locked_until: Option<DateTime<Utc>>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
+    pub(crate) run_after: DateTime<Utc>,
+    pub(crate) retries: i32,
+    pub(crate) cancel_requested: bool,
+    pub(crate) reason: Option<String>,
+    pub(crate) pr_url: Option<String>,
+    pub(crate) retry_of: Option<i64>,
 }
 
 impl TryFrom<JobRow> for Job {
@@ -42,18 +48,24 @@ impl TryFrom<JobRow> for Job {
             locked_until: row.locked_until,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            run_after: row.run_after,
+            retries: count("jobs.retries", row.retries)?,
+            cancel_requested: row.cancel_requested,
+            reason: row.reason,
+            pr_url: row.pr_url,
+            retry_of: row.retry_of.map(JobId),
         })
     }
 }
 
-struct RunRow {
-    id: i64,
-    job_id: i64,
-    attempt: i32,
-    status: String,
-    error: Option<String>,
-    started_at: DateTime<Utc>,
-    ended_at: Option<DateTime<Utc>>,
+pub(crate) struct RunRow {
+    pub(crate) id: i64,
+    pub(crate) job_id: i64,
+    pub(crate) attempt: i32,
+    pub(crate) status: String,
+    pub(crate) error: Option<String>,
+    pub(crate) started_at: DateTime<Utc>,
+    pub(crate) ended_at: Option<DateTime<Utc>>,
 }
 
 impl TryFrom<RunRow> for Run {
@@ -72,7 +84,7 @@ impl TryFrom<RunRow> for Run {
     }
 }
 
-fn live(status: JobStatus) -> bool {
+pub(crate) fn live(status: JobStatus) -> bool {
     matches!(status, JobStatus::Queued | JobStatus::Running)
 }
 
@@ -85,7 +97,8 @@ impl Store {
             "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
              VALUES ($1, $2, $3, $4)
              RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at",
+                       attempts, locked_by, locked_until, created_at, updated_at,
+                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
             job.repo_id.0,
             job.issue_ref,
             job.ledger_key.as_str(),
@@ -104,7 +117,8 @@ impl Store {
         sqlx::query_as!(
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                    attempts, locked_by, locked_until, created_at, updated_at
+                    attempts, locked_by, locked_until, created_at, updated_at,
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of
              FROM jobs WHERE id = $1",
             id.0,
         )
@@ -123,7 +137,8 @@ impl Store {
         let rows = sqlx::query_as!(
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                    attempts, locked_by, locked_until, created_at, updated_at
+                    attempts, locked_by, locked_until, created_at, updated_at,
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of
              FROM jobs
              WHERE ($1::bigint IS NULL OR repo_id = $1)
                AND ($2::text IS NULL OR status = $2)
@@ -290,7 +305,8 @@ impl Store {
                              updated_at = now()
              WHERE id = $1
              RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at",
+                       attempts, locked_by, locked_until, created_at, updated_at,
+                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
             job.0,
             status.as_str(),
             outcome,

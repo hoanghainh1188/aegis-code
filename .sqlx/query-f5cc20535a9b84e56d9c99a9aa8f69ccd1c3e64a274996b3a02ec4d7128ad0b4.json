@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at\n             FROM jobs WHERE id = $1",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of\n             FROM jobs WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -134,6 +134,72 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "run_after",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "run_after"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "retries",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "retries"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "cancel_requested",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "cancel_requested"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "pr_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "pr_url"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "retry_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "retry_of"
+          }
+        }
       }
     ],
     "parameters": {
@@ -153,8 +219,14 @@
       true,
       true,
       false,
-      false
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "4409f928423b913f77f1f6e92055bca95c8cc0e5af41dbed454402854426fd43"
+  "hash": "f5cc20535a9b84e56d9c99a9aa8f69ccd1c3e64a274996b3a02ec4d7128ad0b4"
 }

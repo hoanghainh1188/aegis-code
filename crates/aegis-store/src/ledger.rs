@@ -4,7 +4,7 @@
 use aegis_ledger::{IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore};
 use sqlx::PgPool;
 
-use crate::{Store, StoreError};
+use crate::{RunId, Store, StoreError};
 
 /// Rows read per query; the trait returns everything, the queries do not.
 const READ_PAGE: i64 = 1_000;
@@ -44,20 +44,32 @@ impl PgLedger {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-}
 
-impl LedgerStore for PgLedger {
-    async fn append(&self, issue: &IssueId, event: &LedgerEvent) -> Result<(), LedgerError> {
+    /// [`LedgerStore::append`], with the event tied to the job's run that
+    /// wrote it: what an interrupted attempt cost stays measurable.
+    pub async fn append_in_run(
+        &self,
+        issue: &IssueId,
+        event: &LedgerEvent,
+        run: Option<RunId>,
+    ) -> Result<(), LedgerError> {
         event.ensure_finite()?;
         sqlx::query!(
-            "INSERT INTO ledger_events (ledger_key, event) VALUES ($1, $2)",
+            "INSERT INTO ledger_events (ledger_key, event, run_id) VALUES ($1, $2, $3)",
             issue.as_str(),
             encode(event)?,
+            run.map(|r| r.0),
         )
         .execute(&self.pool)
         .await
         .map_err(store_error)?;
         Ok(())
+    }
+}
+
+impl LedgerStore for PgLedger {
+    async fn append(&self, issue: &IssueId, event: &LedgerEvent) -> Result<(), LedgerError> {
+        self.append_in_run(issue, event, None).await
     }
 
     async fn events(&self, issue: &IssueId) -> Result<Vec<LedgerEvent>, LedgerError> {

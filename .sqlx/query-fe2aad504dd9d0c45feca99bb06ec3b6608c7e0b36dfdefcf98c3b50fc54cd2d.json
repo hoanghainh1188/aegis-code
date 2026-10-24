@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)\n             VALUES ($1, $2, $3, $4)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of\n             FROM jobs\n             WHERE ($1::bigint IS NULL OR repo_id = $1)\n               AND ($2::text IS NULL OR status = $2)\n               AND ($3::bigint IS NULL OR id < $3)\n             ORDER BY id DESC LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -134,14 +134,80 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "run_after",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "run_after"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "retries",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "retries"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "cancel_requested",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "cancel_requested"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "pr_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "pr_url"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "retry_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "retry_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
         "Text",
-        "Text",
-        "Text"
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -156,8 +222,14 @@
       true,
       true,
       false,
-      false
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "b12859db3d16ed7c84bf6d749e9d14824cf141e02c38a5b105e0982f19bccd55"
+  "hash": "fe2aad504dd9d0c45feca99bb06ec3b6608c7e0b36dfdefcf98c3b50fc54cd2d"
 }
