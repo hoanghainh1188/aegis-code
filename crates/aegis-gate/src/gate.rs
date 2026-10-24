@@ -118,11 +118,22 @@ fn exact_regex(names: &[&str]) -> String {
 /// Whether `id`, as read from test output, is the test named `test`. A
 /// parametrized pytest case `<test>[<params>]` is one of its cases (#133).
 fn is_test(id: &str, test: &str) -> bool {
-    let id = match id.split_once('[') {
+    let id = without_params(id);
+    id == test || id.ends_with(&format!("::{test}"))
+}
+
+/// Whether `id` is the test named `test` or one inside it, when `test` names
+/// a file or a class (#136).
+fn is_in(id: &str, test: &str) -> bool {
+    let id = without_params(id);
+    is_test(id, test) || id.starts_with(&format!("{test}::")) || id.contains(&format!("::{test}::"))
+}
+
+fn without_params(id: &str) -> &str {
+    match id.split_once('[') {
         Some((name, _)) if id.ends_with(']') => name,
         _ => id,
-    };
-    id == test || id.ends_with(&format!("::{test}"))
+    }
 }
 
 fn skip_of(reason: SkipReason) -> Skip {
@@ -496,7 +507,7 @@ impl<'a> Run<'a> {
             // The test itself must fail there, not the build around it.
             (_, Some(format)) => failing_tests_with(format, harness, &read_log(&base.log))
                 .iter()
-                .any(|id| is_test(id, &repro.test)),
+                .any(|id| is_in(id, &repro.test)),
             (e, None) => matches!(e, Exit::Code(_)),
         };
         if failed_on_base {
@@ -930,5 +941,24 @@ mod tests {
         assert!(!is_test("tests/test_x.py::test_y2[1]", test));
         // Brackets that do not end the id are part of the name.
         assert!(!is_test("tests/test_x.py::test_y[1]::more", test));
+    }
+
+    #[test]
+    fn a_file_or_class_holds_the_tests_inside_it() {
+        let id = "tests/test_x.py::TestX::test_y[a::b]";
+        assert!(is_in(id, "tests/test_x.py::TestX"));
+        assert!(is_in(id, "TestX"));
+        assert!(is_in(id, "tests/test_x.py"));
+        assert!(is_in(id, "tests/test_x.py::TestX::test_y"));
+        assert!(!is_in(id, "tests/test_x.py::Test"));
+        assert!(!is_in(
+            "tests/test_x.py::TestX2::test_y",
+            "tests/test_x.py::TestX"
+        ));
+        assert!(!is_in("tests/test_x.py::TestX2::test_y", "TestX"));
+        assert!(!is_in("tests/test_x.pyc::test_y", "tests/test_x.py"));
+        // Only the reproduction test may name a node; a test allowed to
+        // change is matched by its own name.
+        assert!(!is_test(id, "tests/test_x.py::TestX"));
     }
 }
