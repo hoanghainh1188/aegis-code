@@ -1,0 +1,5 @@
+# Chép thành backend.hcl (không commit) và điền: tofu init -backend-config=backend.hcl
+# Bucket do deploy/tofu/bootstrap tạo.
+bucket = "aegis-tofu-state-123456789012"
+key    = "staging/terraform.tfstate"
+region = "ap-northeast-1"

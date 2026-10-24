@@ -1,0 +1,102 @@
+#!/bin/bash
+# Khởi tạo máy aegis-server (Amazon Linux 2023), chạy một lần khi tạo máy.
+# Viết bởi OpenTofu (deploy/tofu/modules/aegis); xem docs/runbook/README.md.
+set -euxo pipefail
+
+dnf install -y docker
+DATA=/data
+WORKSPACE=${workspace_dir}
+
+# Volume EBS của workspace: định dạng lần đầu, giữ nguyên khi thay máy.
+DEV=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${workspace_volume}
+for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 5; done
+blkid "$DEV" || mkfs.xfs "$DEV"
+mkdir -p "$DATA"
+echo "$DEV $DATA xfs defaults,nofail 0 2" >> /etc/fstab
+mount "$DATA"
+
+# Image và lớp của Docker (sandbox Rust vài GB) cũng nằm trên volume này.
+mkdir -p "$DATA/docker" "$DATA/workspace" /etc/docker
+echo "{\"data-root\": \"$DATA/docker\"}" > /etc/docker/daemon.json
+systemctl enable --now docker
+
+# Đường dẫn workspace trùng trong container và trên máy: gate đưa đường
+# dẫn này cho daemon Docker khi mount /work vào sandbox.
+mkdir -p "$WORKSPACE"
+echo "$DATA/workspace $WORKSPACE none bind,nofail 0 0" >> /etc/fstab
+mount "$WORKSPACE"
+chown ${aegis_uid}:${aegis_uid} "$WORKSPACE"
+chmod 0750 "$WORKSPACE"
+
+mkdir -p /etc/aegis
+cat > /etc/aegis/server.toml <<'TOML'
+${server_toml}
+TOML
+# Group của /var/run/docker.sock: aegis-server (uid ${aegis_uid}) cần nó để
+# chạy sandbox. Ai có group này là root của máy (docs/runbook, "Worker và Docker").
+echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" > /etc/aegis/docker.env
+
+cat > /usr/local/bin/aegis-deploy <<'DEPLOY'
+#!/bin/bash
+# aegis-deploy [tag]: chạy image aegis-server theo tag (mặc định: SSM
+# parameter ${image_tag_param}), kéo image sandbox cùng tag, chờ health.
+# Rollback = chạy lại với tag trước.
+set -euo pipefail
+tag="$${1:-$(aws ssm get-parameter --region ${region} --name ${image_tag_param} --query Parameter.Value --output text)}"
+aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${registry}
+docker pull "${image_repository}:$tag"
+for p in ${sandbox_profiles}; do
+  docker pull "${registry}/aegis-sandbox-$p:$tag"
+  docker tag "${registry}/aegis-sandbox-$p:$tag" "aegis-sandbox-$p"
+done
+echo "AEGIS_IMAGE=${image_repository}:$tag" > /etc/aegis/image.env
+systemctl restart aegis
+for _ in $(seq 1 60); do
+  if curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then
+    echo "aegis-server $tag healthy"
+    exit 0
+  fi
+  sleep 5
+done
+echo "aegis-server $tag not healthy after 5 min" >&2
+journalctl -u aegis --no-pager -n 50 >&2
+exit 1
+DEPLOY
+chmod 0755 /usr/local/bin/aegis-deploy
+
+# --network host: đọc role của máy qua IMDS (hop limit 1 chặn container
+# khác). --stop-timeout lớn hơn worker.drain_s để job đang chạy kịp xong.
+cat > /etc/systemd/system/aegis.service <<'UNIT'
+[Unit]
+Description=aegis-server (role all)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/etc/aegis/image.env
+EnvironmentFile=/etc/aegis/docker.env
+ExecStartPre=-/usr/bin/docker rm -f aegis
+ExecStart=/usr/bin/docker run --rm --name aegis --network host \
+  --user ${aegis_uid}:${aegis_uid} --group-add $${DOCKER_GID} \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume ${workspace_dir}:${workspace_dir} \
+  --volume /etc/aegis/server.toml:/etc/aegis/server.toml:ro \
+  --log-driver awslogs --log-opt awslogs-region=${region} \
+  --log-opt awslogs-group=${log_group} --log-opt awslogs-stream=%H \
+  --stop-timeout ${stop_timeout_s} \
+  $${AEGIS_IMAGE} --config /etc/aegis/server.toml --role all
+ExecStop=/usr/bin/docker stop --time ${stop_timeout_s} aegis
+TimeoutStopSec=${stop_timeout_s + 40}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable aegis
+
+# Lần đầu (tag "bootstrap") chưa có image: chờ workflow deploy.
+if [ "$(aws ssm get-parameter --region ${region} --name ${image_tag_param} --query Parameter.Value --output text)" != "bootstrap" ]; then
+  /usr/local/bin/aegis-deploy
+fi
