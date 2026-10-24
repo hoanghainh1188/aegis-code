@@ -25,7 +25,7 @@ use crate::failures::{failing_tests_with, ran_tests};
 use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
-use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, tail};
+use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 use crate::sandbox::Sandbox;
 use crate::sonar::{self, SonarStep};
 use crate::{GateError, deps};
@@ -72,9 +72,41 @@ pub struct GateRequest<'a> {
     /// had to change): the profile's `update_references` may rewrite their
     /// reference output, and only theirs (#105).
     pub allowed_tests: Vec<String>,
+    /// Groups of tests the agent declares, when too many changed to name
+    /// one by one (#147): their references may be rewritten too, only
+    /// inside the group's directory.
+    pub reference_groups: Vec<ReferenceGroup>,
     /// The Sonar server and project (#91); `None` skips the step as not
     /// configured.
     pub sonar: Option<SonarStep>,
+}
+
+/// Tests whose reference output changed together, e.g. every HTML hash of
+/// typst's suite (#147). Only references: the tests still run after the
+/// update and must then fail only as on the base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceGroup {
+    /// A reference directory inside the profile's `reference_dirs`; the
+    /// update may write only there.
+    pub dir: String,
+    /// Test names, `*` matching any run of characters.
+    pub tests: String,
+}
+
+impl ReferenceGroup {
+    fn covers(&self, id: &str) -> bool {
+        glob(&self.tests, without_params(id)) || glob(&self.tests, harness_name(id))
+    }
+
+    /// `dir` without a trailing `/`, if it is a plain relative path inside
+    /// one of `dirs`.
+    fn dir_in(&self, dirs: &[String]) -> Option<&str> {
+        let dir = self.dir.trim_end_matches('/');
+        let plain = !dir.is_empty()
+            && !dir.starts_with('/')
+            && dir.split('/').all(|c| !matches!(c, "" | "." | ".."));
+        (plain && dirs.iter().any(|d| dir == d || is_inside(dir, d))).then_some(dir)
+    }
 }
 
 /// The profile's fetch command and where it may go.
@@ -97,6 +129,7 @@ struct Run<'a> {
     index: PathBuf,
     /// What is checked; written again after a reference update.
     tree: String,
+    references: UpdatedReferences,
 }
 
 /// `^(a|b)$` matching exactly `names`, regex characters escaped.
@@ -127,6 +160,38 @@ fn is_test(id: &str, test: &str) -> bool {
 fn is_in(id: &str, test: &str) -> bool {
     let id = without_params(id);
     is_test(id, test) || id.starts_with(&format!("{test}::")) || id.contains(&format!("::{test}::"))
+}
+
+/// The test's own name, without the binary or file before `::`: what the
+/// harness's update command selects.
+fn harness_name(id: &str) -> &str {
+    let id = without_params(id);
+    id.rsplit("::").next().unwrap_or(id)
+}
+
+/// Whether `text` matches `pattern`, where `*` matches any run of
+/// characters.
+fn glob(pattern: &str, text: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let Some(mut rest) = parts.next().and_then(|first| text.strip_prefix(first)) else {
+        return false;
+    };
+    let parts: Vec<&str> = parts.collect();
+    let Some((last, middle)) = parts.split_last() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        match rest.find(part) {
+            Some(i) => rest = &rest[i + part.len()..],
+            None => return false,
+        }
+    }
+    rest.ends_with(last)
+}
+
+/// Whether `path` is under the directory `dir`.
+fn is_inside(path: &str, dir: &str) -> bool {
+    path.strip_prefix(dir).is_some_and(|r| r.starts_with('/'))
 }
 
 fn without_params(id: &str) -> &str {
@@ -669,25 +734,72 @@ impl<'a> Run<'a> {
             );
             return Ok(report(name, StepStatus::Passed, &ran, detail));
         }
-        // Every new failure is a test the agent says had to change: its
-        // reference output is rewritten, then all the tests run again.
+        let Some(update) = self.req.profile.gate.update_references.clone() else {
+            return fail(
+                &ran,
+                format!(
+                    "{} tests fail that pass on the base revision:\n{}\n\n{}",
+                    broken.len(),
+                    list(&broken),
+                    tail(&again.log)
+                ),
+            );
+        };
+        // Every new failure is a test the agent says had to change, by name
+        // or in a group: its reference output is rewritten, then all the
+        // tests run again.
         let declared = |id: &String| self.req.allowed_tests.iter().any(|t| is_test(id, t));
-        if let Some(update) = self.req.profile.gate.update_references.clone()
-            && broken.iter().all(declared)
-        {
-            let names: Vec<&str> = self
+        let (groups, ignored): (Vec<&ReferenceGroup>, Vec<&ReferenceGroup>) = self
+            .req
+            .reference_groups
+            .iter()
+            .partition(|g| g.dir_in(&update.dirs).is_some());
+        let grouped = |id: &String| groups.iter().any(|g| g.covers(id));
+        if broken.iter().all(|id| declared(id) || grouped(id)) {
+            let mut names: Vec<String> = self
                 .req
                 .allowed_tests
                 .iter()
                 .filter(|t| broken.iter().any(|id| is_test(id, t)))
-                .map(String::as_str)
+                .cloned()
                 .collect();
-            return self.update_references(&update, &names, &argv, &on_base, &ran);
+            let in_groups: Vec<&String> = broken.iter().filter(|id| !declared(id)).collect();
+            // A group's update may write only in its directory; with tests
+            // declared by name too, in the profile's (#105).
+            let dirs: Vec<String> = if names.is_empty() {
+                groups
+                    .iter()
+                    .filter(|g| in_groups.iter().any(|id| g.covers(id)))
+                    .filter_map(|g| g.dir_in(&update.dirs))
+                    .map(str::to_owned)
+                    .collect()
+            } else {
+                update.dirs.clone()
+            };
+            for id in in_groups {
+                let name = harness_name(id).to_owned();
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+            return self.update_references(&update, &names, &dirs, &argv, &on_base, &ran);
+        }
+        let mut hint = String::from(
+            "If the fix had to change their reference output, declare each in \
+             `allowed_test_changes`, or groups of them in `allowed_reference_changes`.",
+        );
+        if !ignored.is_empty() {
+            let dirs: Vec<&str> = ignored.iter().map(|g| g.dir.as_str()).collect();
+            hint.push_str(&format!(
+                " Groups ignored, their directory is not inside {}: {}.",
+                quoted(&update.dirs),
+                quoted(&dirs)
+            ));
         }
         fail(
             &ran,
             format!(
-                "{} tests fail that pass on the base revision:\n{}\n\n{}",
+                "{} tests fail that pass on the base revision:\n{}\n\n{hint}\n\n{}",
                 broken.len(),
                 list(&broken),
                 tail(&again.log)
@@ -696,19 +808,20 @@ impl<'a> Run<'a> {
     }
 
     /// Rewrites the reference output of `names` with the profile's command,
-    /// checks it wrote nothing outside `reference_dirs`, and runs the tests
-    /// once more: they must now fail only as on the base (#105).
+    /// checks it wrote nothing outside `dirs`, and runs the tests once more:
+    /// they must now fail only as on the base (#105).
     fn update_references(
         &mut self,
         update: &ReferenceUpdate,
-        names: &[&str],
+        names: &[String],
+        dirs: &[String],
         test_argv: &[String],
         on_base: &BTreeSet<String>,
         earlier: &[&Ran],
     ) -> Result<StepReport, GateError> {
         let name = StepName::Test;
         let mut ran: Vec<&Ran> = earlier.to_vec();
-        let pattern = exact_regex(names);
+        let pattern = exact_regex(&names.iter().map(String::as_str).collect::<Vec<_>>());
         let argv = update.command.render(&[(Placeholder::Test, &pattern)])?;
         let updated = self.run_in(&argv, false, "update-references")?;
         match updated.exit {
@@ -725,12 +838,7 @@ impl<'a> Run<'a> {
             // A harness may exit non-zero after it updated what failed.
             Exit::Code(_) => {}
         }
-        let inside = |path: &str| {
-            update.dirs.iter().any(|d| {
-                path.strip_prefix(d.as_str())
-                    .is_some_and(|r| r.starts_with('/'))
-            })
-        };
+        let inside = |path: &str| dirs.iter().any(|d| is_inside(path, d));
         let before: BTreeSet<String> = self.changes.iter().map(|c| c.path.clone()).collect();
         let changes = git::changes(self.req.repo, &self.base, &self.index)?;
         let mut written: BTreeSet<String> = self
@@ -748,7 +856,7 @@ impl<'a> Run<'a> {
         if !outside.is_empty() {
             let why = format!(
                 "updating the reference outputs wrote outside {}:\n{}",
-                update.dirs.join(", "),
+                dirs.join(", "),
                 list(&outside)
             );
             ran.push(&updated);
@@ -778,12 +886,16 @@ impl<'a> Run<'a> {
         let detail = format!(
             "updated the reference outputs of {} declared tests:\n{}\nfiles:\n{}",
             names.len(),
-            list(&names.iter().map(|n| (*n).to_owned()).collect()),
+            list(&names.iter().cloned().collect()),
             list(&written)
         );
         ran.push(&updated);
         ran.push(&after);
         if still.is_empty() {
+            self.references = UpdatedReferences {
+                tests: names.to_vec(),
+                files: written.into_iter().collect(),
+            };
             return Ok(report(name, StepStatus::Passed, &ran, detail));
         }
         Ok(report(
@@ -933,6 +1045,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         snapshot,
         index,
         tree,
+        references: UpdatedReferences::default(),
     };
     if let Some(cache) = &req.build_cache {
         cache.seed(req.repo)?;
@@ -960,7 +1073,12 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         let _ = cache.refresh_from(base.path());
     }
     let (tree, base) = (run.tree.clone(), run.base.clone());
-    Ok(GateReport { steps, tree, base })
+    Ok(GateReport {
+        steps,
+        tree,
+        base,
+        references: run.references,
+    })
 }
 
 #[cfg(test)]
@@ -1007,5 +1125,61 @@ mod tests {
         // Only the reproduction test may name a node; a test allowed to
         // change is matched by its own name.
         assert!(!is_test(id, "tests/test_x.py::TestX"));
+    }
+
+    #[test]
+    fn a_star_matches_any_run_of_characters() {
+        assert!(glob("*", "tests::math-mat-html"));
+        assert!(glob("*", ""));
+        assert!(glob("math-*", "math-mat-html"));
+        assert!(glob("*-html", "math-mat-html"));
+        assert!(glob("math-*-html", "math-mat-html"));
+        assert!(glob("m*a*t", "mat"));
+        assert!(!glob("math-*", "tests::math-mat"));
+        assert!(!glob("*-html", "math-mat-html2"));
+        assert!(!glob("a*a", "a"));
+        assert!(!glob("*x*x", "x"));
+        assert!(!glob("math", "math-mat"));
+        assert!(!glob("", "math"));
+    }
+
+    #[test]
+    fn a_group_covers_tests_by_their_own_name_or_full_id() {
+        let group = |tests: &str| ReferenceGroup {
+            dir: "tests/ref/html".into(),
+            tests: tests.into(),
+        };
+        assert!(group("math-*").covers("tests::math-mat-html"));
+        assert!(group("tests::math-*").covers("tests::math-mat-html"));
+        assert!(group("test_*").covers("tests/test_x.py::test_y[1]"));
+        assert!(!group("math-*").covers("tests::basic-table"));
+        assert_eq!(harness_name("tests/test_x.py::test_y[a::b]"), "test_y");
+        assert_eq!(harness_name("shows-value"), "shows-value");
+    }
+
+    #[test]
+    fn a_group_s_directory_must_be_a_reference_dir_or_inside_one() {
+        let dirs = vec!["tests/ref".to_owned()];
+        let dir_in = |dir: &str| {
+            ReferenceGroup {
+                dir: dir.into(),
+                tests: "*".into(),
+            }
+            .dir_in(&dirs)
+            .map(str::to_owned)
+        };
+        assert_eq!(dir_in("tests/ref/html/").as_deref(), Some("tests/ref/html"));
+        assert_eq!(dir_in("tests/ref").as_deref(), Some("tests/ref"));
+        for outside in [
+            "tests",
+            "tests/reference",
+            "tests/ref/../suite",
+            "tests/ref/./html",
+            "tests/ref//html",
+            "/tests/ref/html",
+            "",
+        ] {
+            assert_eq!(dir_in(outside), None, "{outside}");
+        }
     }
 }

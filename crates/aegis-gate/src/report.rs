@@ -108,6 +108,17 @@ impl StepReport {
     }
 }
 
+/// Reference outputs the gate rewrote because the agent declared that their
+/// expected output had to change (#105, #147); the pull request lists them
+/// for the reviewer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdatedReferences {
+    /// Test names the update command was given.
+    pub tests: Vec<String>,
+    /// Files it wrote.
+    pub files: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateReport {
     pub steps: Vec<StepReport>,
@@ -117,6 +128,8 @@ pub struct GateReport {
     /// Full commit id of the base revision the patch was compared with;
     /// the pull request's commit goes on top of it.
     pub base: String,
+    /// Empty unless the test step passed by updating references.
+    pub references: UpdatedReferences,
 }
 
 impl GateReport {

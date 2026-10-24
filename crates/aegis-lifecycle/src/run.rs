@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    BuildCache, CancelToken, Egress, FetchStep, GateReport, GateRequest, Runner, Sandbox,
-    SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
+    BuildCache, CancelToken, Egress, FetchStep, GateReport, GateRequest, ReferenceGroup, Runner,
+    Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
 };
 use aegis_lang::{AllowList, Profiles, ResolvedProfile};
 use aegis_ledger::{
@@ -555,6 +555,14 @@ pub(crate) async fn gate(
             .iter()
             .map(|c| c.test.clone())
             .collect::<Vec<_>>(),
+        answer
+            .allowed_reference_changes
+            .iter()
+            .map(|g| ReferenceGroup {
+                dir: g.references.clone(),
+                tests: g.tests.clone(),
+            })
+            .collect::<Vec<_>>(),
         sonar,
     );
     let report = tokio::task::spawn_blocking(move || {
@@ -570,6 +578,7 @@ pub(crate) async fn gate(
             fetch,
             build_cache,
             allowed_tests,
+            reference_groups,
             sonar,
         ) = owned;
         run_gate(&GateRequest {
@@ -586,6 +595,7 @@ pub(crate) async fn gate(
             fetch,
             build_cache,
             allowed_tests,
+            reference_groups,
             sonar,
         })
     })

@@ -171,6 +171,10 @@ impl<P, S> BatchSteps<'_, P, S> {
                 .values()
                 .flat_map(|a| a.allowed_test_changes.clone())
                 .collect(),
+            allowed_reference_changes: answers
+                .values()
+                .flat_map(|a| a.allowed_reference_changes.clone())
+                .collect(),
             stop_reason: None,
         }
     }
@@ -310,6 +314,10 @@ fn batch_answer(
         allowed_test_changes: merged
             .iter()
             .flat_map(|a| a.allowed_test_changes.clone())
+            .collect(),
+        allowed_reference_changes: merged
+            .iter()
+            .flat_map(|a| a.allowed_reference_changes.clone())
             .collect(),
         stop_reason: None,
     }

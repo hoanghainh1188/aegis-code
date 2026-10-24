@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use aegis_gate::{
-    CancelToken, GateReport, GateRequest, Repro, Sandbox, StepName, StepStatus, run_gate,
+    CancelToken, GateReport, GateRequest, ReferenceGroup, Repro, Sandbox, StepName, StepStatus,
+    run_gate,
 };
 use aegis_lang::{Language, ProfileOverrides, Profiles, ResolvedProfile};
 
@@ -144,7 +145,7 @@ impl Repo {
         env: Vec<(String, String)>,
         sandbox: Option<Sandbox>,
     ) -> GateReport {
-        self.gate_full(profile, repro, step_timeout, cancel, env, sandbox, &[])
+        self.gate_full(profile, repro, step_timeout, cancel, env, sandbox, &[], &[])
     }
 
     /// The gate with `tests` declared as allowed test changes (#105).
@@ -157,6 +158,29 @@ impl Repo {
             vec![],
             None,
             tests,
+            &[],
+        )
+    }
+
+    /// The gate with `groups` declared as allowed reference changes (#147),
+    /// each a directory and a test name pattern.
+    pub fn gate_grouping(&self, profile: &ResolvedProfile, groups: &[(&str, &str)]) -> GateReport {
+        let groups: Vec<ReferenceGroup> = groups
+            .iter()
+            .map(|(dir, tests)| ReferenceGroup {
+                dir: (*dir).to_owned(),
+                tests: (*tests).to_owned(),
+            })
+            .collect();
+        self.gate_full(
+            profile,
+            None,
+            Duration::from_secs(600),
+            CancelToken::new(),
+            vec![],
+            None,
+            &[],
+            &groups,
         )
     }
 
@@ -187,6 +211,7 @@ impl Repo {
         env: Vec<(String, String)>,
         sandbox: Option<Sandbox>,
         allowed_tests: &[&str],
+        reference_groups: &[ReferenceGroup],
     ) -> GateReport {
         let allowed = BTreeSet::new();
         let dir = self.dir();
@@ -205,6 +230,7 @@ impl Repo {
             fetch: None,
             build_cache: None,
             allowed_tests: allowed_tests.iter().map(|t| (*t).to_owned()).collect(),
+            reference_groups: reference_groups.to_vec(),
             sonar: None,
         })
         .unwrap()

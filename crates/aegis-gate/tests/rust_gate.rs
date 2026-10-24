@@ -384,6 +384,7 @@ fn work_dir_inside_the_repo_is_refused() {
         fetch: None,
         build_cache: None,
         allowed_tests: vec![],
+        reference_groups: vec![],
         sonar: None,
     })
     .unwrap_err();
@@ -568,6 +569,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             fetch: None,
             build_cache: None,
             allowed_tests: vec![],
+            reference_groups: vec![],
             sonar: None,
         })
     };
@@ -654,6 +656,8 @@ fn a_declared_test_s_reference_is_updated_and_sent() {
     );
     assert!(test.detail.contains("tests/ref/out.txt"), "{}", test.detail);
     assert_eq!(repo.read("tests/ref/out.txt"), "new\n");
+    assert_eq!(report.references.tests, ["shows-value"]);
+    assert_eq!(report.references.files, ["tests/ref/out.txt"]);
     // The gated tree, what goes into the PR, has the new reference.
     let listed = Command::new("git")
         .arg("-C")
@@ -715,6 +719,75 @@ fn only_declared_tests_that_fail_are_updated_by_an_exact_regex() {
     let profile = reference_profile(r#"printf %s \"$1\" > tests/ref/regex.txt"#);
     repo.gate_allowing(&profile, &["shows-value", "a.b"]);
     assert_eq!(repo.read("tests/ref/regex.txt"), r"^(shows\-value)$");
+}
+
+#[test]
+fn a_group_s_failing_tests_have_their_references_updated_and_listed() {
+    let repo = repo_with_reference();
+    let profile = reference_profile(r#"printf %s \"$1\" > tests/ref/regex.txt"#);
+    let report = repo.gate_grouping(&profile, &[("tests/ref/", "shows-*")]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Passed, "{report}");
+    assert_eq!(repo.read("tests/ref/out.txt"), "new\n");
+    // Only the tests that fail, by the harness's own name.
+    assert_eq!(repo.read("tests/ref/regex.txt"), r"^(shows\-value)$");
+    assert_eq!(report.references.tests, ["shows-value"]);
+    assert_eq!(
+        report.references.files,
+        ["tests/ref/out.txt", "tests/ref/regex.txt"]
+    );
+}
+
+#[test]
+fn a_group_s_update_may_write_only_in_its_directory() {
+    let repo = repo_with_reference();
+    let report = repo.gate_grouping(&reference_profile("true"), &[("tests/ref/html", "*")]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Failed, "{report}");
+    assert!(
+        test.detail.contains("wrote outside tests/ref/html"),
+        "{}",
+        test.detail
+    );
+    assert!(test.detail.contains("tests/ref/out.txt"), "{}", test.detail);
+    assert_eq!(report.references, Default::default());
+}
+
+#[test]
+fn a_failing_test_outside_every_group_still_fails() {
+    let repo = repo_with_reference();
+    let report = repo.gate_grouping(&reference_profile("true"), &[("tests/ref", "other-*")]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Failed, "{report}");
+    assert!(
+        test.detail.contains("allowed_reference_changes"),
+        "{}",
+        test.detail
+    );
+    assert_eq!(repo.read("tests/ref/out.txt"), "old\n");
+}
+
+#[test]
+fn a_group_outside_the_reference_dirs_is_ignored() {
+    let repo = repo_with_reference();
+    let report = repo.gate_grouping(&reference_profile("true"), &[("src", "*")]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Failed, "{report}");
+    assert!(test.detail.contains("Groups ignored"), "{}", test.detail);
+    assert!(test.detail.contains("`src`"), "{}", test.detail);
+    assert_eq!(repo.read("tests/ref/out.txt"), "old\n");
+}
+
+#[test]
+fn a_group_does_not_pass_a_test_the_update_does_not_fix() {
+    // The update writes a wrong reference: the test runs again and fails.
+    let repo = repo_with_reference();
+    let profile = reference_profile("echo wrong > tests/ref/out.txt");
+    let report = repo.gate_grouping(&profile, &[("tests/ref", "*")]);
+    let test = report.step(StepName::Test).unwrap();
+    assert_eq!(test.status, StepStatus::Failed, "{report}");
+    assert!(test.detail.contains("still fail"), "{}", test.detail);
+    assert_eq!(report.references, Default::default());
 }
 
 #[test]

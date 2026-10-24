@@ -45,6 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fetch: None,
         build_cache: None,
         allowed_tests: vec![],
+        reference_groups: vec![],
         sonar: None,
     })?;
     println!("{report}");
@@ -73,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }],
         repro_test: None,
         allowed_test_changes: vec![],
+        allowed_reference_changes: vec![],
         gate: &report,
         coverage_percent: None,
         cost: Cost {

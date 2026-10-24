@@ -101,6 +101,7 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
         }),
         build_cache: None,
         allowed_tests: vec![],
+        reference_groups: vec![],
         sonar: None,
     })
     .unwrap()

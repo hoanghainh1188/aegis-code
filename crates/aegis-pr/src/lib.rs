@@ -23,7 +23,10 @@ use std::path::Path;
 
 use aegis_gate::GateReport;
 
-pub use body::{AllowedTestChange, ChangeNote, Cost, PrContent, gate_line, inert, render};
+pub use body::{
+    AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, PrContent, gate_line, inert,
+    render,
+};
 pub use branch::{AgentBranch, EvalBranch};
 pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};
 pub use coverage::{cobertura_percent, lcov_percent};

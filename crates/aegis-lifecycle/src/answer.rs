@@ -1,7 +1,7 @@
 //! The agent's final answer, the JSON object `prompts/system.md` asks for.
 
 use aegis_gate::Repro;
-use aegis_pr::{AllowedTestChange, ChangeNote};
+use aegis_pr::{AllowedReferenceChange, AllowedTestChange, ChangeNote};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -31,6 +31,18 @@ struct RawAllowed {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct RawGroup {
+    references: String,
+    #[serde(default = "every_test")]
+    tests: String,
+    reason: String,
+}
+
+fn every_test() -> String {
+    "*".into()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct Raw {
     status: Status,
     #[serde(default)]
@@ -42,6 +54,8 @@ struct Raw {
     #[serde(default)]
     allowed_test_changes: Vec<RawAllowed>,
     #[serde(default)]
+    allowed_reference_changes: Vec<RawGroup>,
+    #[serde(default)]
     stop_reason: Option<String>,
 }
 
@@ -52,6 +66,8 @@ pub struct FinalAnswer {
     pub changes: Vec<ChangeNote>,
     pub repro: Option<Repro>,
     pub allowed_test_changes: Vec<AllowedTestChange>,
+    /// Groups of tests whose references may change together (#147).
+    pub allowed_reference_changes: Vec<AllowedReferenceChange>,
     pub stop_reason: Option<String>,
 }
 
@@ -91,6 +107,15 @@ pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
                 reason: a.reason,
             })
             .collect(),
+        allowed_reference_changes: raw
+            .allowed_reference_changes
+            .into_iter()
+            .map(|g| AllowedReferenceChange {
+                references: g.references,
+                tests: g.tests,
+                reason: g.reason,
+            })
+            .collect(),
         stop_reason: raw.stop_reason,
     })
 }
@@ -119,5 +144,33 @@ mod tests {
                 .contains("changes")
         );
         assert!(parse_answer(r#"{"status": "maybe"}"#).is_err());
+    }
+
+    #[test]
+    fn reads_groups_of_reference_changes() {
+        let a = parse_answer(
+            r#"{"status": "fixed", "changes": [{"location": "a.rs:1", "note": "n"}],
+             "allowed_reference_changes": [
+               {"references": "tests/ref/html", "reason": "MathML spacing"},
+               {"references": "tests/ref/render", "tests": "math-*", "reason": "r"}]}"#,
+        )
+        .unwrap();
+        let groups: Vec<(&str, &str)> = a
+            .allowed_reference_changes
+            .iter()
+            .map(|g| (g.references.as_str(), g.tests.as_str()))
+            .collect();
+        assert_eq!(
+            groups,
+            [("tests/ref/html", "*"), ("tests/ref/render", "math-*")]
+        );
+        assert!(
+            parse_answer(
+                r#"{"status": "fixed", "changes": [{"location": "a.rs:1", "note": "n"}],
+                 "allowed_reference_changes": [{"references": "tests/ref"}]}"#
+            )
+            .unwrap_err()
+            .contains("reason")
+        );
     }
 }
