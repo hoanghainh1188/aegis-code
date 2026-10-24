@@ -6,8 +6,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aegis_ledger::Outcome;
+use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::runner::{Attempt, JobRunner};
-use aegis_server::webhook::{GitHubNotifier, Secret, WebhookConfig, router};
+use aegis_server::webhook::{
+    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV, GitHubNotifier, WebhookConfig, router,
+};
 use aegis_server::worker::{WorkerConfig, run_worker_notifying};
 use aegis_store::testing::test_db;
 use aegis_store::{Claim, Job, JobFilter, JobSource, JobStatus, NewRepo, Page, RepoMode, Store};
@@ -28,8 +31,7 @@ const TOKEN: &str = "gitlab-token";
 
 fn config() -> WebhookConfig {
     WebhookConfig {
-        github_secret: Some(Secret::new(SECRET)),
-        gitlab_token: Some(Secret::new(TOKEN)),
+        secrets: Secrets::fixed([(GITHUB_SECRET_ENV, SECRET), (GITLAB_TOKEN_ENV, TOKEN)]),
         label: "aegis".into(),
         burst: 100,
         per_minute: 600,
@@ -172,7 +174,7 @@ async fn deliveries_without_the_right_signature_are_refused() {
     let closed = router(
         db.store.clone(),
         WebhookConfig {
-            github_secret: None,
+            secrets: Secrets::fixed([(GITLAB_TOKEN_ENV, TOKEN)]),
             ..config()
         },
     );
@@ -290,6 +292,52 @@ async fn a_failed_ci_run_on_the_default_branch_queues_a_ci_job() {
 }
 
 #[tokio::test]
+async fn a_rotated_secret_is_read_again_when_a_delivery_does_not_verify() {
+    let Some(db) = test_db().await else { return };
+    let source = MemorySource::new([(GITLAB_TOKEN_ENV, "old-token")]);
+    let secrets = Secrets::new(source.clone());
+    secrets.load(GITLAB_TOKEN_ENV).await.unwrap();
+    secrets.load(GITHUB_SECRET_ENV).await.unwrap();
+    let app = router(
+        db.store.clone(),
+        WebhookConfig {
+            secrets: secrets.clone(),
+            ..config()
+        },
+    );
+    let body = json!({ "object_kind": "note" });
+    // Rotated at GitLab and in the store; the process has the old one.
+    source.set(GITLAB_TOKEN_ENV, TOKEN);
+    let (status, reply) = gitlab(&app, "Note Hook", "g-1", &body).await;
+    assert!(
+        status != StatusCode::UNAUTHORIZED && status != StatusCode::NOT_FOUND,
+        "{status} {reply}"
+    );
+    let old = [
+        ("x-gitlab-event", "Note Hook"),
+        ("x-gitlab-event-uuid", "g-2"),
+        ("x-gitlab-token", "old-token"),
+    ];
+    assert_eq!(
+        send(&app, "/gitlab", &old, &body).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // A secret added to the store opens its endpoint at the next refresh.
+    assert_eq!(
+        github(&app, "issues", "d-1", &body).await.0,
+        StatusCode::NOT_FOUND
+    );
+    source.set(GITHUB_SECRET_ENV, SECRET);
+    secrets.refresh().await;
+    assert_ne!(
+        github(&app, "issues", "d-1", &body).await.0,
+        StatusCode::NOT_FOUND
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
 async fn deliveries_beyond_the_rate_are_refused() {
     let Some(db) = test_db().await else { return };
     let app = router(
@@ -346,7 +394,10 @@ async fn the_issue_is_told_when_its_job_ends() {
     let (status, reply) = github(&app, "issues", "d-1", &labeled("typst/typst", 12, "aegis")).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{reply}");
 
-    let notifier = GitHubNotifier::new(&github_api.uri(), Some(Secret::new("comment-token")));
+    let notifier = GitHubNotifier::new(
+        &github_api.uri(),
+        Secrets::fixed([(COMMENT_TOKEN_ENV, "comment-token")]),
+    );
     let shutdown = CancellationToken::new();
     let worker = tokio::spawn(run_worker_notifying(
         db.store.clone(),

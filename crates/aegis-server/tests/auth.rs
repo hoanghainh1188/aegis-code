@@ -110,7 +110,12 @@ async fn pr_job(s: &Store, repo: RepoId, key: &str) -> JobId {
 /// The review fields of `who`'s form for `job`, signed `seconds_ago`.
 fn review_fields(who: &Browser, job: JobId, seconds_ago: i64) -> String {
     let opened_at = chrono::Utc::now().timestamp_millis() - seconds_ago * 1000;
-    let sig = opened_at_signature(&Signer::new(common::SESSION_KEY), job, who.user, opened_at);
+    let sig = opened_at_signature(
+        &Signer::new(common::KEY.as_bytes()),
+        job,
+        who.user,
+        opened_at,
+    );
     format!(
         "verdict=accepted&lines_edited=0&opened_at={opened_at}&opened_sig={sig}&_csrf={}",
         who.csrf
@@ -662,5 +667,59 @@ async fn people_sign_in_through_the_sso() {
     let back = send(&app, page(&callback, Some(&pending))).await;
     assert_eq!(back.status, StatusCode::SEE_OTHER, "{}", back.body);
     assert_eq!(back.headers[header::LOCATION], "/");
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn the_api_does_not_start_without_the_secrets_of_sign_in() {
+    use aegis_secrets::{MemorySource, Secrets};
+    use aegis_server::auth::{OIDC_CLIENT_SECRET, SESSION_KEY, load_at_start};
+
+    let with_sso = AuthSection {
+        public_url: Some("https://aegis.test".parse().unwrap()),
+        oidc: Some(OidcSection {
+            issuer: "https://sso.test".into(),
+            client_id: "aegis".into(),
+        }),
+        ..AuthSection::default()
+    };
+    // Neither: both named.
+    let none = Secrets::new(MemorySource::new([("OTHER", "s3cret-other")]));
+    let err = load_at_start(&none, &with_sso).await.unwrap_err();
+    assert!(
+        err.contains(SESSION_KEY) && err.contains(OIDC_CLIENT_SECRET),
+        "{err}"
+    );
+    // Without SSO the client secret is not needed.
+    let err = load_at_start(&none, &AuthSection::default())
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains(SESSION_KEY) && !err.contains(OIDC_CLIENT_SECRET),
+        "{err}"
+    );
+    // Too short a key is named, its value is not.
+    let short = Secrets::new(MemorySource::new([
+        (SESSION_KEY, "sh0rt-k3y"),
+        (OIDC_CLIENT_SECRET, "client-s3cret"),
+    ]));
+    let err = load_at_start(&short, &with_sso).await.unwrap_err();
+    assert!(
+        err.contains(SESSION_KEY) && !err.contains("sh0rt-k3y"),
+        "{err}"
+    );
+    // Both there: read from the store now, and the API can be built.
+    let key = common::KEY;
+    let both = Secrets::new(MemorySource::new([
+        (SESSION_KEY, key),
+        (OIDC_CLIENT_SECRET, "client-s3cret"),
+    ]));
+    load_at_start(&both, &with_sso).await.unwrap();
+    assert_eq!(
+        both.get(OIDC_CLIENT_SECRET).unwrap().expose(),
+        "client-s3cret"
+    );
+    let Some(db) = test_db().await else { return };
+    aegis_server::auth::Auth::new(db.store.clone(), with_sso, both).unwrap();
     db.drop().await;
 }

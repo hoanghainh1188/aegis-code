@@ -3,6 +3,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use aegis_secrets::Secrets;
 use reqwest::header::{HeaderValue, RETRY_AFTER};
 use reqwest::{StatusCode, redirect};
 use serde::Deserialize;
@@ -21,18 +22,59 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Non-streaming requests with large `max_tokens` can run for minutes.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// The key of every call: fixed, or the secret's current value, read
+/// again when the API refuses it (rotation, #30).
+#[derive(Clone)]
+enum ApiKey {
+    Fixed(HeaderValue),
+    Secret { secrets: Secrets, name: String },
+}
+
+fn key_header(api_key: &str) -> Result<HeaderValue, ProviderError> {
+    let mut value = HeaderValue::from_str(api_key.trim())
+        .map_err(|_| ProviderError::Config("API key contains invalid characters".into()))?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+impl ApiKey {
+    fn header(&self) -> Result<HeaderValue, ProviderError> {
+        match self {
+            Self::Fixed(value) => Ok(value.clone()),
+            Self::Secret { secrets, name } => {
+                let secret = secrets
+                    .get(name)
+                    .ok_or_else(|| ProviderError::Config(format!("secret {name} is not loaded")))?;
+                key_header(secret.expose())
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ClaudeApi {
     http: reqwest::Client,
     base_url: String,
-    api_key: HeaderValue,
+    api_key: ApiKey,
 }
 
 impl ClaudeApi {
     pub fn new(api_key: &str) -> Result<Self, ProviderError> {
-        let mut api_key = HeaderValue::from_str(api_key.trim())
-            .map_err(|_| ProviderError::Config("API key contains invalid characters".into()))?;
-        api_key.set_sensitive(true);
+        Self::with_key(ApiKey::Fixed(key_header(api_key)?))
+    }
+
+    /// The key is secret `name` of `secrets`, already loaded: each call
+    /// takes its value then, so a rotated key is used from the next call.
+    pub fn from_secret(secrets: &Secrets, name: &str) -> Result<Self, ProviderError> {
+        let key = ApiKey::Secret {
+            secrets: secrets.clone(),
+            name: name.to_owned(),
+        };
+        key.header()?;
+        Self::with_key(key)
+    }
+
+    fn with_key(api_key: ApiKey) -> Result<Self, ProviderError> {
         // No redirects: reqwest does not strip `x-api-key` on cross-host redirects.
         let http = reqwest::Client::builder()
             .redirect(redirect::Policy::none())
@@ -94,15 +136,15 @@ impl fmt::Debug for ClaudeApi {
 impl ModelProvider for ClaudeApi {
     async fn send(&self, request: &Request) -> Result<Response, ProviderError> {
         let body = build_body(request, Target::ClaudeApi)?;
-        let response = self
-            .http
-            .post(format!("{}/v1/messages", self.base_url))
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", API_VERSION)
-            .json(&body)
-            .send()
-            .await
-            .map_err(send_error)?;
+        let mut response = self.post(&body, self.api_key.header()?).await?;
+        // A refused secret key may have been rotated: read it again and
+        // try once more with the new one.
+        if response.status() == StatusCode::UNAUTHORIZED
+            && let ApiKey::Secret { secrets, name } = &self.api_key
+            && let Some(rotated) = secrets.refresh_after_auth_failure(name).await
+        {
+            response = self.post(&body, key_header(rotated.expose())?).await?;
+        }
 
         let status = response.status();
         let retry_after_s = response
@@ -120,6 +162,23 @@ impl ModelProvider for ClaudeApi {
         } else {
             Err(error_from(status, retry_after_s, &text))
         }
+    }
+}
+
+impl ClaudeApi {
+    async fn post(
+        &self,
+        body: &serde_json::Value,
+        key: HeaderValue,
+    ) -> Result<reqwest::Response, ProviderError> {
+        self.http
+            .post(format!("{}/v1/messages", self.base_url))
+            .header("x-api-key", key)
+            .header("anthropic-version", API_VERSION)
+            .json(body)
+            .send()
+            .await
+            .map_err(send_error)
     }
 }
 

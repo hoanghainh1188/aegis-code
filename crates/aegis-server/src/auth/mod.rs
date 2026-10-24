@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use aegis_secrets::{Secret, Secrets};
 use aegis_store::{Actor, ActorKind, RepoId, RepoRole, Store, StoreError, TokenHash, User};
 use sha2::{Digest, Sha256};
 
@@ -35,42 +36,37 @@ pub const SESSION_COOKIE: &str = "__Host-aegis_session";
 pub const CSRF_FIELD: &str = "_csrf";
 pub const CSRF_HEADER: &str = "x-csrf-token";
 
-const SESSION_KEY_ENV: &str = "AEGIS_SESSION_KEY";
-const OIDC_SECRET_ENV: &str = "AEGIS_OIDC_CLIENT_SECRET";
-const MIN_SESSION_KEY_LEN: usize = 32;
+/// The secrets of sign-in, in the secret store (#30) like every other.
+/// Signs the review form's `opened_at` and the sign-in state.
+pub const SESSION_KEY: &str = "AEGIS_SESSION_KEY";
+/// The dashboard's OIDC client secret; needed with `[auth.oidc]`.
+pub const OIDC_CLIENT_SECRET: &str = "AEGIS_OIDC_CLIENT_SECRET";
+pub const MIN_SESSION_KEY_LEN: usize = 32;
 
-/// The secrets sign-in needs. `Debug` shows none of them.
-pub struct Secrets {
-    /// Signs the review form's `opened_at` and the sign-in state.
-    pub session_key: Vec<u8>,
-    /// The dashboard's OIDC client secret; `None` for a public client.
-    pub oidc_client_secret: Option<String>,
-}
-
-impl std::fmt::Debug for Secrets {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Secrets").finish_non_exhaustive()
+/// Reads the secrets of sign-in now, as the API starts: the session key,
+/// and the OIDC client secret with `[auth.oidc]`. Fails naming each one
+/// missing, never a value. Both are then read again with the others when
+/// they rotate.
+pub async fn load_at_start(secrets: &Secrets, config: &AuthSection) -> Result<(), String> {
+    let mut names = vec![SESSION_KEY];
+    if config.oidc.is_some() {
+        names.push(OIDC_CLIENT_SECRET);
     }
+    secrets.require(&names).await.map_err(|e| e.to_string())?;
+    session_key(secrets).map(drop)
 }
 
-/// The one place the auth secrets are read: from the environment for now,
-/// from the secret manager once #30 lands.
-pub fn load_secrets() -> Result<Secrets, String> {
-    let session_key = std::env::var(SESSION_KEY_ENV)
-        .map_err(|_| format!("set {SESSION_KEY_ENV}: at least {MIN_SESSION_KEY_LEN} random bytes"))?
-        .into_bytes();
-    if session_key.len() < MIN_SESSION_KEY_LEN {
+/// The session key as last read, if it is long enough.
+fn session_key(secrets: &Secrets) -> Result<Secret, String> {
+    let key = secrets
+        .get(SESSION_KEY)
+        .ok_or_else(|| format!("{SESSION_KEY}: not loaded"))?;
+    if key.expose().len() < MIN_SESSION_KEY_LEN {
         return Err(format!(
-            "{SESSION_KEY_ENV}: at least {MIN_SESSION_KEY_LEN} bytes"
+            "{SESSION_KEY}: at least {MIN_SESSION_KEY_LEN} bytes"
         ));
     }
-    let oidc_client_secret = std::env::var(OIDC_SECRET_ENV)
-        .ok()
-        .filter(|s| !s.is_empty());
-    Ok(Secrets {
-        session_key,
-        oidc_client_secret,
-    })
+    Ok(key)
 }
 
 /// A fresh random token as hex: session tokens, CSRF tokens, API tokens.
@@ -100,17 +96,19 @@ struct Inner {
 }
 
 impl Auth {
+    /// `secrets` must hold the session key ([`load_at_start`]).
     pub fn new(store: Store, config: AuthSection, secrets: Secrets) -> Result<Self, String> {
+        let signer = Signer::from_secrets(secrets.clone())?;
         let oidc = config
             .oidc
             .as_ref()
-            .map(|o| oidc::Oidc::new(o, &config, secrets.oidc_client_secret))
+            .map(|o| oidc::Oidc::new(o, &config, secrets))
             .transpose()?;
         let limiter = RateLimiter::per_minute(config.api_requests_per_minute);
         Ok(Self {
             inner: Arc::new(Inner {
                 store,
-                signer: Signer::new(&secrets.session_key),
+                signer,
                 oidc,
                 limiter,
                 config,

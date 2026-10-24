@@ -11,6 +11,7 @@ aegis-ledger = { path = "../aegis-ledger" }
 aegis-lifecycle = { path = "../aegis-lifecycle" }
 aegis-pr = { path = "../aegis-pr" }
 aegis-provider = { path = "../aegis-provider" }
+aegis-secrets = { path = "../aegis-secrets", features = ["aws"] }
 aegis-store = { path = "../aegis-store" }
 askama = { version = "0.16.1", default-features = false, features = ["derive", "std"] }
 axum = { version = "0.8.9", default-features = false, features = ["form", "http1", "json", "query", "tokio", "tracing"] }
@@ -35,6 +36,8 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 bedrock = ["aegis-provider/bedrock"]
 
 [dev-dependencies]
+aegis-gate = { path = "../aegis-gate" }
+aegis-secrets = { path = "../aegis-secrets" }
 aegis-store = { path = "../aegis-store", features = ["testing"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 http-body-util = "0.1.5"

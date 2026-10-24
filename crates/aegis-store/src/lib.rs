@@ -63,6 +63,14 @@ impl Store {
         Ok(Self { pool })
     }
 
+    /// New connections use `url` (a rotated password, #30); open ones
+    /// keep theirs until the pool replaces them.
+    pub fn set_url(&self, url: &str) -> Result<(), StoreError> {
+        self.pool
+            .set_connect_options(PgConnectOptions::from_str(url)?);
+        Ok(())
+    }
+
     /// The ledger in this database.
     pub fn ledger(&self) -> PgLedger {
         PgLedger::new(self.pool.clone())

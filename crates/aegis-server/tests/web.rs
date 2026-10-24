@@ -301,7 +301,7 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     // The form signed a time 90 s ago for this job and this reviewer.
     let opened_at = chrono::Utc::now().timestamp_millis() - 90_000;
     let sig = opened_at_signature(
-        &Signer::new(common::SESSION_KEY),
+        &Signer::new(common::KEY.as_bytes()),
         id,
         app.browser.user,
         opened_at,

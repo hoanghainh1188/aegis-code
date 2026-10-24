@@ -12,6 +12,7 @@
 
 use std::time::Duration;
 
+use aegis_secrets::Secrets;
 use aegis_store::{ActorKind, Store};
 use askama::Template;
 use axum::Extension;
@@ -28,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
-use super::{Access, Auth, SESSION_COOKIE, random_token, token_hash};
+use super::{Access, Auth, OIDC_CLIENT_SECRET, SESSION_COOKIE, random_token, token_hash};
 use crate::config::{AuthSection, OidcSection};
 use crate::web::{SessionToken, WebError};
 
@@ -43,7 +44,8 @@ const MAX_NEXT_LEN: usize = 512;
 pub(crate) struct Oidc {
     issuer: IssuerUrl,
     client_id: ClientId,
-    secret: Option<ClientSecret>,
+    /// Holds the client secret, read at each sign-in so it may rotate.
+    secrets: Secrets,
     redirect: RedirectUrl,
     http: reqwest::Client,
     metadata: RwLock<Option<CoreProviderMetadata>>,
@@ -53,7 +55,7 @@ impl Oidc {
     pub(crate) fn new(
         oidc: &OidcSection,
         auth: &AuthSection,
-        secret: Option<String>,
+        secrets: Secrets,
     ) -> Result<Self, String> {
         let issuer =
             IssuerUrl::new(oidc.issuer.clone()).map_err(|e| format!("auth.oidc.issuer: {e}"))?;
@@ -73,7 +75,7 @@ impl Oidc {
         Ok(Self {
             issuer,
             client_id: ClientId::new(oidc.client_id.clone()),
-            secret: secret.map(ClientSecret::new),
+            secrets,
             redirect: RedirectUrl::from_url(redirect),
             http,
             metadata: RwLock::new(None),
@@ -95,7 +97,11 @@ impl Oidc {
     }
 
     fn client(&self, metadata: CoreProviderMetadata) -> SsoClient {
-        CoreClient::from_provider_metadata(metadata, self.client_id.clone(), self.secret.clone())
+        let secret = self
+            .secrets
+            .get(OIDC_CLIENT_SECRET)
+            .map(|s| ClientSecret::new(s.expose().to_owned()));
+        CoreClient::from_provider_metadata(metadata, self.client_id.clone(), secret)
             .set_redirect_uri(self.redirect.clone())
     }
 }

@@ -3,18 +3,18 @@
 
 #![allow(dead_code, reason = "each test file uses part of it")]
 
-use aegis_server::auth::{Auth, Secrets, random_token, token_hash};
+use aegis_secrets::Secrets;
+use aegis_server::auth::{Auth, OIDC_CLIENT_SECRET, SESSION_KEY, random_token, token_hash};
 use aegis_server::config::AuthSection;
 use aegis_store::{Actor, RepoId, RepoRole, Store, UserId, UserKind};
 
-pub const SESSION_KEY: &[u8] = b"a test session key, 32 bytes or more";
+pub const KEY: &str = "a test session key, 32 bytes or more";
 
+/// The secret store holds the session key, and `oidc_secret` if given.
 pub fn auth_with(store: &Store, config: AuthSection, oidc_secret: Option<&str>) -> Auth {
-    let secrets = Secrets {
-        session_key: SESSION_KEY.to_vec(),
-        oidc_client_secret: oidc_secret.map(str::to_owned),
-    };
-    Auth::new(store.clone(), config, secrets).unwrap()
+    let mut values = vec![(SESSION_KEY, KEY)];
+    values.extend(oidc_secret.map(|s| (OIDC_CLIENT_SECRET, s)));
+    Auth::new(store.clone(), config, Secrets::fixed(values)).unwrap()
 }
 
 /// No SSO: sessions come from [`sign_in`].

@@ -9,6 +9,7 @@ pub mod auth;
 pub mod config;
 pub mod lifecycle;
 pub mod runner;
+pub mod secrets;
 pub mod web;
 pub mod webhook;
 pub mod worker;

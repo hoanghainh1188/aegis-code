@@ -4,17 +4,16 @@
 
 use aegis_ledger::Outcome;
 use aegis_pr::{GitHub, inert};
+use aegis_secrets::Secrets;
 use aegis_store::{Job, JobSource, JobStatus};
 
 use crate::lifecycle::parse_issue_ref;
 use crate::worker::JobNotifier;
 
-use super::Secret;
-
 /// The GitHub API root, `https://api.github.com` when unset.
 pub const GITHUB_API_ENV: &str = "AEGIS_GITHUB_API";
-/// A token that may comment on the issues of the registered repos; no
-/// comments when unset.
+/// The secret: a token that may comment on the issues of the registered
+/// repos; no comments while the store has none.
 pub const COMMENT_TOKEN_ENV: &str = "AEGIS_GITHUB_COMMENT_TOKEN";
 
 const DEFAULT_GITHUB_API: &str = "https://api.github.com";
@@ -22,24 +21,30 @@ const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 #[derive(Debug, Clone)]
 pub struct GitHubNotifier {
     api: String,
-    token: Option<Secret>,
+    /// Where [`COMMENT_TOKEN_ENV`] is read, at each comment.
+    secrets: Secrets,
 }
 
 impl GitHubNotifier {
-    pub fn new(api: &str, token: Option<Secret>) -> Self {
+    pub fn new(api: &str, secrets: Secrets) -> Self {
         Self {
             api: api.to_owned(),
-            token,
+            secrets,
         }
     }
 
-    pub fn from_env() -> Self {
+    /// The token from `secrets`, read now; the API root from
+    /// [`GITHUB_API_ENV`], not a secret.
+    pub async fn from_secrets(secrets: &Secrets) -> Result<Self, String> {
         let api = std::env::var(GITHUB_API_ENV).unwrap_or_else(|_| DEFAULT_GITHUB_API.into());
-        let token = Secret::from_env(COMMENT_TOKEN_ENV);
+        let token = secrets
+            .load(COMMENT_TOKEN_ENV)
+            .await
+            .map_err(|e| e.to_string())?;
         if token.is_none() {
-            tracing::info!("{COMMENT_TOKEN_ENV} is not set: jobs' ends are not commented on");
+            tracing::info!("no secret {COMMENT_TOKEN_ENV}: jobs' ends are not commented on");
         }
-        Self::new(&api, token)
+        Ok(Self::new(&api, secrets.clone()))
     }
 }
 
@@ -48,7 +53,9 @@ impl JobNotifier for GitHubNotifier {
         if job.source != JobSource::Github {
             return;
         }
-        let Some(token) = &self.token else { return };
+        let Some(token) = self.secrets.get(COMMENT_TOKEN_ENV) else {
+            return;
+        };
         let Ok((owner, repo, number)) = parse_issue_ref(&job.issue_ref) else {
             tracing::warn!(job = job.id.0, "not an issue to comment on");
             return;

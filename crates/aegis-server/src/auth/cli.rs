@@ -1,15 +1,17 @@
 //! Roles and tokens from the server's command line, audited as `cli`:
 //!
 //! ```text
-//! aegis-server grant  <who> <repo-slug> maintainer|reviewer|viewer
-//! aegis-server grant  <who> admin
-//! aegis-server revoke <who> <repo-slug>|admin
-//! aegis-server token  <service>         # prints a new API token, once
-//! aegis-server revoke-tokens <service>
-//! aegis-server revoke-sessions <who>    # signs a person out everywhere
+//! aegis-server --config <file> <command>
+//!   grant  <who> <repo-slug> maintainer|reviewer|viewer
+//!   grant  <who> admin
+//!   revoke <who> <repo-slug>|admin
+//!   token  <service>             # prints a new API token, once
+//!   revoke-tokens <service>
+//!   revoke-sessions <who>        # signs a person out everywhere
 //! ```
 //!
-//! `<who>` is a person's e-mail (as the SSO gives it; granted before the
+//! The database URL comes from the configuration's secret store, as for
+//! the server. `<who>` is a person's e-mail (as the SSO gives it; granted before the
 //! first sign-in is fine) or a service's name.
 
 use aegis_store::{Actor, RepoRole, Store, UserKind};
@@ -17,12 +19,13 @@ use aegis_store::{Actor, RepoRole, Store, UserKind};
 use super::{random_token, token_hash};
 
 pub const USAGE: &str = "\
-aegis-server grant <who> <repo-slug> maintainer|reviewer|viewer
-aegis-server grant <who> admin
-aegis-server revoke <who> <repo-slug>|admin
-aegis-server token <service>
-aegis-server revoke-tokens <service>
-aegis-server revoke-sessions <who>";
+aegis-server --config <file> <command>, the command one of:
+  grant <who> <repo-slug> maintainer|reviewer|viewer
+  grant <who> admin
+  revoke <who> <repo-slug>|admin
+  token <service>
+  revoke-tokens <service>
+  revoke-sessions <who>";
 
 /// Whether `first`, the first argument, names one of these commands.
 pub fn is_command(first: &str) -> bool {

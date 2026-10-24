@@ -2,20 +2,25 @@
 //!
 //! ```text
 //! aegis-server --config config/server.toml [--role api|worker|all]
-//! aegis-server grant|revoke|token|revoke-tokens|revoke-sessions …
+//! aegis-server --config <file> grant|revoke|token|revoke-tokens|revoke-sessions …
 //! ```
 //!
-//! The database is `AEGIS_DATABASE_URL`; its schema is brought up to date
-//! on start. SIGTERM or Ctrl-C: the API stops taking requests, the worker
-//! claims nothing more and drains (`worker.drain_s`). Logs are JSON lines
-//! on stderr, filtered by `RUST_LOG` (default `info`).
+//! Secrets come from `[secrets]` (#30): AWS Secrets Manager, or the
+//! environment for dev and tests. The database is the secret
+//! `AEGIS_DATABASE_URL`; its schema is brought up to date on start. A
+//! missing required secret stops the start, naming it. SIGTERM or Ctrl-C:
+//! the API stops taking requests, the worker claims nothing more and
+//! drains (`worker.drain_s`). Logs are JSON lines on stderr, filtered by
+//! `RUST_LOG` (default `info`).
 //!
 //! Webhooks (#25) at `/webhooks/github` and `/webhooks/gitlab`, each open
-//! once its secret is set: `AEGIS_GITHUB_WEBHOOK_SECRET`,
-//! `AEGIS_GITLAB_WEBHOOK_TOKEN`; the trigger label is `AEGIS_WEBHOOK_LABEL`
-//! (`aegis`). Sign-in (#29): `[auth]` in the configuration, secrets from
-//! `aegis_server::auth::load_secrets`. Workers comment on a GitHub issue when its job ends if
-//! `AEGIS_GITHUB_COMMENT_TOKEN` is set (API root: `AEGIS_GITHUB_API`).
+//! once its secret is in the store: `AEGIS_GITHUB_WEBHOOK_SECRET`,
+//! `AEGIS_GITLAB_WEBHOOK_TOKEN`; the trigger label is the variable
+//! `AEGIS_WEBHOOK_LABEL` (`aegis`). Workers comment on a GitHub issue when
+//! its job ends if the store has `AEGIS_GITHUB_COMMENT_TOKEN` (API root:
+//! the variable `AEGIS_GITHUB_API`). Sign-in (#29): `[auth]` in the
+//! configuration; the API needs the secrets `AEGIS_SESSION_KEY` and, with
+//! `[auth.oidc]`, `AEGIS_OIDC_CLIENT_SECRET`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -25,6 +30,7 @@ use aegis_lifecycle::{ModeConfig, Modes};
 use aegis_server::auth::{self, Auth};
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
+use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::webhook::GitHubNotifier;
 use aegis_server::{Role, api, worker};
 use aegis_store::Store;
@@ -32,7 +38,6 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 const USAGE: &str = "usage: aegis-server --config <file> [--role api|worker|all]";
-const DATABASE_URL_ENV: &str = "AEGIS_DATABASE_URL";
 
 #[derive(Debug)]
 struct Args {
@@ -120,22 +125,37 @@ fn modes(config: &ServerConfig) -> Result<Modes, String> {
 
 async fn run(args: Args) -> Result<(), String> {
     let config = ServerConfig::load(&args.config)?;
-    let url = std::env::var(DATABASE_URL_ENV)
-        .map_err(|_| format!("set {DATABASE_URL_ENV} to the PostgreSQL URL"))?;
-    let store = Store::connect(&url)
+    let section = secrets::section(config.secrets.as_ref())?;
+    let secrets = section.open(config.modes.customer_jp.is_some()).await?;
+    secrets::load_at_start(&secrets, args.role).await?;
+    if args.role.serves_api() {
+        auth::load_at_start(&secrets, &config.auth).await?;
+    }
+    secrets::install(&secrets);
+    let url = secrets
+        .get(DATABASE_URL)
+        .ok_or_else(|| format!("{DATABASE_URL}: not loaded"))?;
+    let store = Store::connect(url.expose())
         .await
-        .map_err(|e| format!("{DATABASE_URL_ENV}: {e}"))?;
+        .map_err(|e| format!("{DATABASE_URL}: {e}"))?;
     let shutdown = on_shutdown_signal();
     let mut parts: JoinSet<Result<(), String>> = JoinSet::new();
+    let refresh = secrets::keep_fresh(
+        secrets.clone(),
+        store.clone(),
+        section.refresh_every(),
+        shutdown.clone(),
+    );
+    tokio::spawn(refresh);
 
     if args.role.runs_jobs() {
         // Checked before the API opens: a worker that cannot run jobs is
         // a configuration error, not a silent queue.
-        let runner = LifecycleRunner::new(store.clone(), modes(&config)?).await?;
+        let runner = LifecycleRunner::new(store.clone(), modes(&config)?, secrets.clone()).await?;
+        let notifier = Arc::new(GitHubNotifier::from_secrets(&secrets).await?);
         let worker_config = config.worker(worker_id());
         let (store, shutdown) = (store.clone(), shutdown.clone());
         parts.spawn(async move {
-            let notifier = Arc::new(GitHubNotifier::from_env());
             worker::run_worker_notifying(
                 store,
                 Arc::new(runner),
@@ -152,7 +172,7 @@ async fn run(args: Args) -> Result<(), String> {
             .await
             .map_err(|e| format!("listen on {}: {e}", config.api.listen))?;
         tracing::info!(listen = %config.api.listen, "API listening");
-        let auth = Auth::new(store.clone(), config.auth.clone(), auth::load_secrets()?)?;
+        let auth = Auth::new(store.clone(), config.auth.clone(), secrets.clone())?;
         let app = api::router(store.clone(), auth);
         let shutdown = shutdown.clone();
         parts.spawn(async move {
@@ -176,14 +196,23 @@ async fn run(args: Args) -> Result<(), String> {
     result
 }
 
-/// Roles, tokens and sessions ([`auth::cli`]): straight to the database.
-async fn run_auth_command(argv: &[String]) -> ExitCode {
+/// Roles, tokens and sessions ([`auth::cli`]): straight to the database,
+/// whose URL comes from the configuration's secret store.
+async fn run_auth_command(config: &std::path::Path, argv: &[String]) -> ExitCode {
     let done = async {
-        let url = std::env::var(DATABASE_URL_ENV)
-            .map_err(|_| format!("set {DATABASE_URL_ENV} to the PostgreSQL URL"))?;
-        let store = Store::connect(&url)
+        let config = ServerConfig::load(config)?;
+        let section = secrets::section(config.secrets.as_ref())?;
+        let secrets = section.open(config.modes.customer_jp.is_some()).await?;
+        secrets
+            .require(&[DATABASE_URL])
             .await
-            .map_err(|e| format!("{DATABASE_URL_ENV}: {e}"))?;
+            .map_err(|e| e.to_string())?;
+        let url = secrets
+            .get(DATABASE_URL)
+            .ok_or_else(|| format!("{DATABASE_URL}: not loaded"))?;
+        let store = Store::connect(url.expose())
+            .await
+            .map_err(|e| format!("{DATABASE_URL}: {e}"))?;
         let out = auth::cli::run(&store, argv).await;
         store.close().await;
         out
@@ -211,8 +240,11 @@ async fn main() -> ExitCode {
         )
         .init();
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    if argv.first().is_some_and(|a| auth::cli::is_command(a)) {
-        return run_auth_command(&argv).await;
+    if let ["--config", config, command, ..] =
+        argv.iter().map(String::as_str).collect::<Vec<_>>()[..]
+        && auth::cli::is_command(command)
+    {
+        return run_auth_command(std::path::Path::new(config), &argv[2..]).await;
     }
     let args = match parse_args(argv.into_iter()) {
         Ok(args) => args,
