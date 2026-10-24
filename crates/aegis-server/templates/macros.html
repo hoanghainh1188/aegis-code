@@ -1,0 +1,53 @@
+{% macro kpi_table(heading, rows) %}
+<div class="scroll">
+<table class="kpi">
+  <thead>
+    <tr>
+      <th scope="col">{{ heading }}</th>
+      <th scope="col" class="num">Lượt chạy</th>
+      <th scope="col" class="num">PR mở</th>
+      <th scope="col" class="num">Chờ duyệt</th>
+      <th scope="col" class="num">PR được chấp nhận</th>
+      <th scope="col" class="num">Phá test cũ</th>
+      <th scope="col" class="num">Chi phí / issue</th>
+      <th scope="col" class="num">Thời gian duyệt</th>
+      <th scope="col" class="num">Đọc cache</th>
+      <th scope="col" class="num">Lên Expert</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <th scope="row">{{ r.label }}</th>
+      <td class="num">{{ r.runs }}</td>
+      <td class="num">{{ r.prs_opened }}</td>
+      <td class="num">{{ r.awaiting_review }}</td>
+      <td class="num {{ r.accept_class }}">{{ r.accept }}</td>
+      <td class="num">{{ r.broke_tests }}</td>
+      <td class="num {{ r.cost_class }}">{{ r.cost }}</td>
+      <td class="num {{ r.review_class }}">{{ r.review }}</td>
+      <td class="num {{ r.cache_class }}">{{ r.cache }}</td>
+      <td class="num">{{ r.expert }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="empty">Chưa có lượt chạy nào.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+
+{% macro bars(rows, min, caption) %}
+{%- if !rows.is_empty() %}
+<svg class="bars" viewBox="0 0 340 {{ rows.len() * 26 + 22 }}" role="img" aria-label="{{ caption }}">
+  {%- for r in rows %}
+  <text class="label" x="0" y="{{ loop.index0 * 26 + 17 }}">{{ r.label }}</text>
+  <rect class="track" x="120" y="{{ loop.index0 * 26 + 5 }}" width="200" height="16"></rect>
+  <rect class="bar {{ r.accept_class }}" x="120" y="{{ loop.index0 * 26 + 5 }}" width="{{ r.accept_bar }}" height="16"></rect>
+  {%- endfor %}
+  <line class="threshold" x1="{{ 120 + min }}" x2="{{ 120 + min }}" y1="0" y2="{{ rows.len() * 26 + 6 }}"></line>
+  <text class="tick" x="{{ 120 + min }}" y="{{ rows.len() * 26 + 19 }}">ngưỡng</text>
+</svg>
+{%- endif %}
+
+{% endmacro %}

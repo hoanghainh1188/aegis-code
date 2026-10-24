@@ -2,11 +2,11 @@
 //! into the ledger, and the Proposal §8 KPIs out of it. Neither needs the
 //! model provider.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
+use aegis_lang::Language;
 use aegis_ledger::{
-    IssueId, IssueLedger, IssueRecord, Kpi, LedgerStore, Outcome, PriceTable, Review, ReviewVerdict,
+    IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Report, Review, ReviewVerdict, SetIssue,
 };
 use aegis_lifecycle::{RunConfig, load_set};
 use aegis_pr::GitHub;
@@ -114,73 +114,24 @@ pub async fn review<S: LedgerStore + Sync>(
     Ok(format!("{id}\t{verdict:?}\t{lines} lines\t{minutes} min"))
 }
 
-/// Every run's record, rebuilt from its events.
-async fn records<S: LedgerStore>(store: &S) -> Result<Vec<IssueRecord>, String> {
-    let mut out = Vec::new();
-    for issue in store.issues().await.map_err(|e| e.to_string())? {
-        let events = store.events(&issue).await.map_err(|e| e.to_string())?;
-        out.push(IssueRecord::from_events(issue, &events));
-    }
-    Ok(out)
-}
-
-/// The eval id and run number of `record` when it is a run of one of
-/// `ids` (run ids are `<eval id>-r<n>`).
-fn run_of<'a>(record: &IssueRecord, ids: &'a [String]) -> Option<(&'a str, u32)> {
-    let id = record.issue_id.as_str().to_ascii_lowercase();
-    ids.iter().find_map(|i| {
-        let n = id.strip_prefix(i.as_str())?.strip_prefix("-r")?;
-        let n = if n.bytes().all(|b| b.is_ascii_digit()) {
-            n.parse().ok()?
-        } else {
-            return None;
-        };
-        Some((i.as_str(), n))
-    })
-}
-
-/// The KPIs of all runs. When `set` names the eval set, only the latest
-/// run of each of its issues counts, in total and per language: a rerun
-/// replaces the run before it, and other runs in the ledger (a live API
-/// check, a manual `aegis run`) would skew the PoC's numbers.
+/// The KPIs of all runs, or of the latest run of each issue of the eval
+/// set in `set`, in total and per language ([`Report`]).
 pub async fn report<S: LedgerStore>(store: &S, set: Option<&Path>) -> Result<String, String> {
-    let records = records(store).await?;
+    let records = aegis_ledger::report::records(store)
+        .await
+        .map_err(|e| e.to_string())?;
     let Some(dir) = set else {
-        return Ok(format!("## All runs\n{}", Kpi::from_records(&records)));
+        return Ok(Report::<Language>::all(&records).to_string());
     };
-    let issues = load_set(dir).map_err(|e| e.to_string())?;
-    let ids_of = |language: Option<_>| -> Vec<String> {
-        issues
-            .iter()
-            .filter(|i| language.is_none_or(|l| i.language == l))
-            .map(|i| i.id.to_ascii_lowercase())
-            .collect()
-    };
-    let in_set = |ids: &[String]| -> Vec<&IssueRecord> {
-        let mut latest: BTreeMap<&str, (u32, &IssueRecord)> = BTreeMap::new();
-        for record in &records {
-            if let Some((id, n)) = run_of(record, ids)
-                && latest.get(id).is_none_or(|(seen, _)| n > *seen)
-            {
-                latest.insert(id, (n, record));
-            }
-        }
-        latest.into_values().map(|(_, record)| record).collect()
-    };
-    let mut out = format!(
-        "## Latest run of each issue in the set\n{}",
-        Kpi::from_records(in_set(&ids_of(None)))
-    );
-    let mut languages: Vec<_> = issues.iter().map(|i| i.language).collect();
-    languages.sort();
-    languages.dedup();
-    for language in languages {
-        out.push_str(&format!(
-            "\n## {language}\n{}",
-            Kpi::from_records(in_set(&ids_of(Some(language))))
-        ));
-    }
-    Ok(out)
+    let set: Vec<SetIssue<Language>> = load_set(dir)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|i| SetIssue {
+            id: i.id,
+            language: i.language,
+        })
+        .collect();
+    Ok(Report::of_set(&records, &set).to_string())
 }
 
 #[cfg(test)]

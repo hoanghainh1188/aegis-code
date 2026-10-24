@@ -8,6 +8,8 @@ use crate::{IssueRecord, Outcome, ReviewVerdict, Tier};
 
 /// PoC thresholds of Proposal §8.
 pub const ACCEPT_RATE_MIN: f64 = 0.40;
+/// Each language's own acceptance rate (ADR 0005).
+pub const LANGUAGE_ACCEPT_RATE_MIN: f64 = 0.35;
 pub const COST_PER_ISSUE_MAX: f64 = 4.0;
 pub const REVIEW_MINUTES_MAX: f64 = 15.0;
 pub const CACHE_READ_MIN: f64 = 0.70;

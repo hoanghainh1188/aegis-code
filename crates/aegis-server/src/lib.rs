@@ -8,6 +8,7 @@ pub mod api;
 pub mod config;
 pub mod lifecycle;
 pub mod runner;
+pub mod web;
 pub mod webhook;
 pub mod worker;
 

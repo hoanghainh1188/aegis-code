@@ -33,6 +33,7 @@ pub fn router(store: Store) -> Router {
         .route("/api/v1/jobs/{id}/runs", get(list_runs))
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
+        .merge(crate::web::router())
         .nest_service(
             "/webhooks",
             crate::webhook::router(store.clone(), crate::webhook::WebhookConfig::from_env()),
