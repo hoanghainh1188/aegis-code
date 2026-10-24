@@ -18,13 +18,15 @@
 //! - The queue, read from the database at each scrape: ready, waiting
 //!   (backoff) and running jobs, and how long the oldest ready one waited.
 //!   Every process reports the same queue; alerts take the max.
+//! - Each repo's monthly budget (#31), read at each scrape too: what it
+//!   spent this month and its cap, when it has one.
 
 use std::net::SocketAddr;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 
 use aegis_provider::{CallObserver, CallReport};
-use aegis_store::Store;
+use aegis_store::{RepoBudget, Store};
 use axum::Router;
 use axum::extract::State;
 use axum::http::{StatusCode, header};
@@ -78,6 +80,11 @@ struct TierLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct RepoLabels {
+    repo: String,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct QueueLabels {
     state: &'static str,
 }
@@ -99,6 +106,8 @@ pub struct Metrics {
     provider_call_seconds: Family<TierLabels, Histogram>,
     queue_jobs: Family<QueueLabels, Gauge>,
     queue_oldest_ready_seconds: Gauge<f64, AtomicU64>,
+    budget_spent_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
+    budget_cap_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
 }
 
 impl Metrics {
@@ -162,6 +171,18 @@ impl Metrics {
             "How long the oldest ready job has waited since it was due",
             queue_oldest_ready_seconds.clone(),
         );
+        let budget_spent_usd = Family::default();
+        registry.register(
+            "repo_budget_spent_usd",
+            "What each repo spent this month, in $",
+            budget_spent_usd.clone(),
+        );
+        let budget_cap_usd = Family::default();
+        registry.register(
+            "repo_budget_cap_usd",
+            "Each repo's monthly cap, in $; absent for a repo without one",
+            budget_cap_usd.clone(),
+        );
         Self {
             registry,
             jobs_running,
@@ -173,6 +194,8 @@ impl Metrics {
             provider_call_seconds,
             queue_jobs,
             queue_oldest_ready_seconds,
+            budget_spent_usd,
+            budget_cap_usd,
         }
     }
 
@@ -195,6 +218,22 @@ impl Metrics {
                 .set(count);
         }
         self.queue_oldest_ready_seconds.set(stats.oldest_ready_s);
+    }
+
+    fn budgets(&self, budgets: &[RepoBudget]) {
+        // A repo whose cap was removed must not keep its old one.
+        self.budget_cap_usd.clear();
+        for b in budgets {
+            let labels = RepoLabels {
+                repo: b.slug.clone(),
+            };
+            self.budget_spent_usd
+                .get_or_create(&labels)
+                .set(b.spent_usd);
+            if let Some(cap) = b.monthly_usd {
+                self.budget_cap_usd.get_or_create(&labels).set(cap);
+            }
+        }
     }
 
     /// The text Prometheus scrapes.
@@ -297,6 +336,10 @@ async fn scrape(State(store): State<Store>) -> Response {
         // The other metrics still count; the queue's stay as last read.
         Err(e) => tracing::error!(error = %e, "reading the queue for /metrics"),
     }
+    match store.repo_budgets(None).await {
+        Ok(budgets) => m.budgets(&budgets),
+        Err(e) => tracing::error!(error = %e, "reading the budgets for /metrics"),
+    }
     match m.render() {
         Ok(text) => ([(header::CONTENT_TYPE, CONTENT_TYPE)], text).into_response(),
         Err(e) => {
@@ -392,6 +435,31 @@ mod tests {
             " 1",
         );
         assert!(text.ends_with("# EOF\n"));
+    }
+
+    #[test]
+    fn budgets_show_spend_and_only_the_caps_that_exist() {
+        let budget = |slug: &str, cap, spent| RepoBudget {
+            repo_id: aegis_store::RepoId(1),
+            slug: slug.into(),
+            monthly_usd: cap,
+            spent_usd: spent,
+        };
+        let m = metrics();
+        m.budgets(&[
+            budget("unit-capped", Some(50.0), 12.5),
+            budget("unit-open", None, 3.0),
+        ]);
+        let text = m.render().unwrap();
+        let line = |start: &str| line_of(&text, start).unwrap_or_else(|| panic!("{start}\n{text}"));
+        assert!(line(r#"aegis_repo_budget_spent_usd{repo="unit-capped"}"#).ends_with(" 12.5"));
+        assert!(line(r#"aegis_repo_budget_cap_usd{repo="unit-capped"}"#).ends_with(" 50.0"));
+        assert!(line(r#"aegis_repo_budget_spent_usd{repo="unit-open"}"#).ends_with(" 3.0"));
+        assert!(line_of(&text, r#"aegis_repo_budget_cap_usd{repo="unit-open"}"#).is_none());
+        // The cap is removed: so is its series.
+        m.budgets(&[budget("unit-capped", None, 12.5)]);
+        let text = m.render().unwrap();
+        assert!(line_of(&text, r#"aegis_repo_budget_cap_usd{repo="unit-capped"}"#).is_none());
     }
 
     #[test]

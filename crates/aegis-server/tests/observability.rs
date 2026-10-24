@@ -2,7 +2,7 @@
 //! worker and the real runner, with its secrets in a fake secret store
 //! (#30). Its logs are captured as the server writes them: every line of
 //! the job carries its id, none holds a secret or the content of a file
-//! of the repo. Its model calls show up in `/metrics`.
+//! of the repo. Its model calls and its cost show up in `/metrics`.
 //!
 //! The model and GitHub are faked with wiremock; the repo, the ACI
 //! server, the Rust gate and the push to a bare fork are real. One test in
@@ -389,5 +389,8 @@ async fn a_whole_job_logs_its_id_and_no_secret_or_code_and_is_counted() {
         0.0
     );
     assert_eq!(value_of(&scraped, "aegis_queue_oldest_ready_seconds "), 0.0);
+    // The job's cost counts in its repo's month (#31); no cap is set.
+    assert!(value_of(&scraped, r#"aegis_repo_budget_spent_usd{repo="fixture"}"#) > 0.0);
+    assert!(!scraped.contains(r#"aegis_repo_budget_cap_usd{repo="fixture"}"#));
     db.drop().await;
 }

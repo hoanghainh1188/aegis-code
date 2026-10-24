@@ -873,6 +873,73 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Ngân sách",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "id": 19,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Đã dùng trong tháng so với trần",
+      "description": "Theo repo, đọc từ DB mỗi lần scrape (#31). Repo không có trần chỉ có đường đã dùng.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 20,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (repo) (aegis_repo_budget_spent_usd{repo=~\"$repo\"})",
+          "legendFormat": "{{repo}} đã dùng",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (repo) (aegis_repo_budget_cap_usd{repo=~\"$repo\"})",
+          "legendFormat": "{{repo}} trần",
+          "refId": "B"
+        }
+      ]
     }
   ]
 }
