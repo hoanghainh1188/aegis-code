@@ -2,6 +2,7 @@
 //! into the ledger, and the Proposal §8 KPIs out of it. Neither needs the
 //! model provider.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use aegis_ledger::{
@@ -124,34 +125,61 @@ async fn records<S: LedgerStore>(store: &S) -> Result<Vec<IssueRecord>, String> 
     Ok(out)
 }
 
-/// The KPIs of all runs, and per language when `set` names the eval set
-/// the runs came from (run ids are `<eval id>-r<n>`).
+/// The eval id and run number of `record` when it is a run of one of
+/// `ids` (run ids are `<eval id>-r<n>`).
+fn run_of<'a>(record: &IssueRecord, ids: &'a [String]) -> Option<(&'a str, u32)> {
+    let id = record.issue_id.as_str().to_ascii_lowercase();
+    ids.iter().find_map(|i| {
+        let n = id.strip_prefix(i.as_str())?.strip_prefix("-r")?;
+        let n = if n.bytes().all(|b| b.is_ascii_digit()) {
+            n.parse().ok()?
+        } else {
+            return None;
+        };
+        Some((i.as_str(), n))
+    })
+}
+
+/// The KPIs of all runs. When `set` names the eval set, only the latest
+/// run of each of its issues counts, in total and per language: a rerun
+/// replaces the run before it, and other runs in the ledger (a live API
+/// check, a manual `aegis run`) would skew the PoC's numbers.
 pub async fn report<S: LedgerStore>(store: &S, set: Option<&Path>) -> Result<String, String> {
     let records = records(store).await?;
-    let mut out = format!("## All runs\n{}", Kpi::from_records(&records));
-    if let Some(dir) = set {
-        let issues = load_set(dir).map_err(|e| e.to_string())?;
-        let mut languages: Vec<_> = issues.iter().map(|i| i.language).collect();
-        languages.sort();
-        languages.dedup();
-        for language in languages {
-            let prefixes: Vec<String> = issues
-                .iter()
-                .filter(|i| i.language == language)
-                .map(|i| format!("{}-r", i.id.to_ascii_lowercase()))
-                .collect();
-            let of_language: Vec<&IssueRecord> = records
-                .iter()
-                .filter(|r| {
-                    let id = r.issue_id.as_str().to_ascii_lowercase();
-                    prefixes.iter().any(|p| id.starts_with(p.as_str()))
-                })
-                .collect();
-            out.push_str(&format!(
-                "\n## {language}\n{}",
-                Kpi::from_records(of_language)
-            ));
+    let Some(dir) = set else {
+        return Ok(format!("## All runs\n{}", Kpi::from_records(&records)));
+    };
+    let issues = load_set(dir).map_err(|e| e.to_string())?;
+    let ids_of = |language: Option<_>| -> Vec<String> {
+        issues
+            .iter()
+            .filter(|i| language.is_none_or(|l| i.language == l))
+            .map(|i| i.id.to_ascii_lowercase())
+            .collect()
+    };
+    let in_set = |ids: &[String]| -> Vec<&IssueRecord> {
+        let mut latest: BTreeMap<&str, (u32, &IssueRecord)> = BTreeMap::new();
+        for record in &records {
+            if let Some((id, n)) = run_of(record, ids)
+                && latest.get(id).is_none_or(|(seen, _)| n > *seen)
+            {
+                latest.insert(id, (n, record));
+            }
         }
+        latest.into_values().map(|(_, record)| record).collect()
+    };
+    let mut out = format!(
+        "## Latest run of each issue in the set\n{}",
+        Kpi::from_records(in_set(&ids_of(None)))
+    );
+    let mut languages: Vec<_> = issues.iter().map(|i| i.language).collect();
+    languages.sort();
+    languages.dedup();
+    for language in languages {
+        out.push_str(&format!(
+            "\n## {language}\n{}",
+            Kpi::from_records(in_set(&ids_of(Some(language))))
+        ));
     }
     Ok(out)
 }
@@ -263,7 +291,14 @@ mod tests {
         };
         for (id, cost, outcome) in [
             ("typst-7541-r1", 1.0, Outcome::PrOpened),
-            ("scrapy-7604-r1", 3.0, Outcome::StoppedBudget),
+            // Rerun: r10 replaces r2 and r9, whatever the ledger's order.
+            ("scrapy-7604-r10", 3.0, Outcome::StoppedBudget),
+            ("scrapy-7604-r2", 9.0, Outcome::PrOpened),
+            ("scrapy-7604-r9", 9.0, Outcome::PrOpened),
+            // Not runs of the set: a live check, and another issue whose id
+            // only starts like one of the set's.
+            ("TYPST-8850-R1X", 9.0, Outcome::StoppedSteps),
+            ("scrapy-76040-r1", 9.0, Outcome::StoppedSteps),
         ] {
             let issue = IssueId::parse(id).unwrap();
             store.append(&issue, &call(cost)).await.unwrap();
@@ -281,9 +316,12 @@ mod tests {
         let set = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval/issues");
         let text = report(&store, Some(&set)).await.unwrap();
         assert!(
-            text.starts_with("## All runs\n2 runs, 1 PRs opened"),
+            text.starts_with("## Latest run of each issue in the set\n2 runs, 1 PRs opened"),
             "{text}"
         );
+        assert!(text.contains("| $2.00 |"), "{text}");
+        let all = report(&store, None).await.unwrap();
+        assert!(all.starts_with("## All runs\n6 runs"), "{all}");
         assert!(text.contains("## rust\n1 runs, 1 PRs opened"), "{text}");
         assert!(text.contains("## python\n1 runs, 0 PRs opened"), "{text}");
         assert!(
