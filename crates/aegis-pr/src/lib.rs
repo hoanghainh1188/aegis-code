@@ -32,7 +32,7 @@ pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_messa
 pub use coverage::{cobertura_percent, lcov_percent};
 pub use error::PrError;
 pub use git::{Identity, Remote};
-pub use github::{GitHub, PullRequest};
+pub use github::{GitHub, IssueComment, PullRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pushed {

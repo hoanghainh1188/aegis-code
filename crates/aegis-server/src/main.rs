@@ -8,6 +8,12 @@
 //! on start. SIGTERM or Ctrl-C: the API stops taking requests, the worker
 //! claims nothing more and drains (`worker.drain_s`). Logs are JSON lines
 //! on stderr, filtered by `RUST_LOG` (default `info`).
+//!
+//! Webhooks (#25) at `/webhooks/github` and `/webhooks/gitlab`, each open
+//! once its secret is set: `AEGIS_GITHUB_WEBHOOK_SECRET`,
+//! `AEGIS_GITLAB_WEBHOOK_TOKEN`; the trigger label is `AEGIS_WEBHOOK_LABEL`
+//! (`aegis`). Workers comment on a GitHub issue when its job ends if
+//! `AEGIS_GITHUB_COMMENT_TOKEN` is set (API root: `AEGIS_GITHUB_API`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -16,6 +22,7 @@ use std::sync::Arc;
 use aegis_lifecycle::{ModeConfig, Modes};
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
+use aegis_server::webhook::GitHubNotifier;
 use aegis_server::{Role, api, worker};
 use aegis_store::Store;
 use tokio::task::JoinSet;
@@ -125,7 +132,15 @@ async fn run(args: Args) -> Result<(), String> {
         let worker_config = config.worker(worker_id());
         let (store, shutdown) = (store.clone(), shutdown.clone());
         parts.spawn(async move {
-            worker::run_worker(store, Arc::new(runner), worker_config, shutdown).await;
+            let notifier = Arc::new(GitHubNotifier::from_env());
+            worker::run_worker_notifying(
+                store,
+                Arc::new(runner),
+                notifier,
+                worker_config,
+                shutdown,
+            )
+            .await;
             Ok(())
         });
     }
