@@ -1,0 +1,188 @@
+//! `aegis-server`: the API, the workers, or both (ADR 0003 §1).
+//!
+//! ```text
+//! aegis-server --config config/server.toml [--role api|worker|all]
+//! ```
+//!
+//! The database is `AEGIS_DATABASE_URL`; its schema is brought up to date
+//! on start. SIGTERM or Ctrl-C: the API stops taking requests, the worker
+//! claims nothing more and drains (`worker.drain_s`). Logs are JSON lines
+//! on stderr, filtered by `RUST_LOG` (default `info`).
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use aegis_lifecycle::RunConfig;
+use aegis_server::config::ServerConfig;
+use aegis_server::lifecycle::LifecycleRunner;
+use aegis_server::{Role, api, worker};
+use aegis_store::Store;
+use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
+
+const USAGE: &str = "usage: aegis-server --config <file> [--role api|worker|all]";
+const DATABASE_URL_ENV: &str = "AEGIS_DATABASE_URL";
+
+#[derive(Debug)]
+struct Args {
+    config: PathBuf,
+    role: Role,
+}
+
+fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut config = None;
+    let mut role = Role::All;
+    while let Some(flag) = args.next() {
+        let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
+        match flag.as_str() {
+            "--config" => config = Some(PathBuf::from(value()?)),
+            "--role" => {
+                let text = value()?;
+                role = Role::parse(&text).ok_or_else(|| format!("unknown role `{text}`"))?;
+            }
+            "--help" | "-h" => return Err(USAGE.into()),
+            _ => return Err(format!("unknown argument `{flag}`")),
+        }
+    }
+    Ok(Args {
+        config: config.ok_or("--config is required")?,
+        role,
+    })
+}
+
+/// Unique per process, also across machines sharing the database.
+fn worker_id() -> String {
+    let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "aegis".into());
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    format!("{host}-{}-{started}", std::process::id())
+}
+
+fn on_shutdown_signal() -> CancellationToken {
+    let shutdown = CancellationToken::new();
+    let token = shutdown.clone();
+    tokio::spawn(async move {
+        let terminate = async {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{SignalKind, signal};
+                match signal(SignalKind::terminate()) {
+                    Ok(mut s) => {
+                        s.recv().await;
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "cannot listen for SIGTERM");
+                        std::future::pending::<()>().await;
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            std::future::pending::<()>().await;
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            () = terminate => {}
+        }
+        tracing::info!("shutting down");
+        token.cancel();
+    });
+    shutdown
+}
+
+async fn run(args: Args) -> Result<(), String> {
+    let config = ServerConfig::load(&args.config)?;
+    let url = std::env::var(DATABASE_URL_ENV)
+        .map_err(|_| format!("set {DATABASE_URL_ENV} to the PostgreSQL URL"))?;
+    let store = Store::connect(&url)
+        .await
+        .map_err(|e| format!("{DATABASE_URL_ENV}: {e}"))?;
+    let shutdown = on_shutdown_signal();
+    let mut parts: JoinSet<Result<(), String>> = JoinSet::new();
+
+    if args.role.runs_jobs() {
+        // Checked before the API opens: a worker that cannot run jobs is
+        // a configuration error, not a silent queue.
+        let run_config = RunConfig::load(&config.run_config).map_err(|e| e.to_string())?;
+        let max_cost_usd = run_config.budget.max_cost_usd;
+        let runner = LifecycleRunner::new(store.clone(), run_config).await?;
+        let worker_config = config.worker(worker_id(), max_cost_usd);
+        let (store, shutdown) = (store.clone(), shutdown.clone());
+        parts.spawn(async move {
+            worker::run_worker(store, Arc::new(runner), worker_config, shutdown).await;
+            Ok(())
+        });
+    }
+    if args.role.serves_api() {
+        let listener = tokio::net::TcpListener::bind(config.api.listen)
+            .await
+            .map_err(|e| format!("listen on {}: {e}", config.api.listen))?;
+        tracing::info!(listen = %config.api.listen, "API listening");
+        let app = api::router(store.clone());
+        let shutdown = shutdown.clone();
+        parts.spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+                .map_err(|e| format!("API: {e}"))
+        });
+    }
+
+    let mut result = Ok(());
+    while let Some(done) = parts.join_next().await {
+        let done = done.map_err(|e| format!("a part of the server panicked: {e}"))?;
+        if let Err(e) = done {
+            // One part failing stops the others.
+            shutdown.cancel();
+            result = Err(e);
+        }
+    }
+    store.close().await;
+    result
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .json()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+    let args = match parse_args(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("aegis-server: {e}\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    match run(args).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            tracing::error!(error = %e, "aegis-server stopped");
+            eprintln!("aegis-server: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(text: &str) -> Result<Args, String> {
+        parse_args(text.split_whitespace().map(String::from))
+    }
+
+    #[test]
+    fn the_role_defaults_to_all() {
+        let a = args("--config c.toml").unwrap();
+        assert_eq!((a.config, a.role), (PathBuf::from("c.toml"), Role::All));
+        assert_eq!(args("--config c --role worker").unwrap().role, Role::Worker);
+        assert!(args("--config c --role web").is_err());
+        assert!(args("--role api").is_err());
+    }
+}

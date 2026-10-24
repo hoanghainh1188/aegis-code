@@ -21,6 +21,14 @@ macro_rules! text_enum {
                 }
             }
 
+            /// The value spelled `text`, as the column holds it.
+            pub fn parse(text: &str) -> Option<Self> {
+                match text {
+                    $($text => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+
             pub(crate) fn decode(column: &'static str, text: &str) -> Result<Self, StoreError> {
                 match text {
                     $($text => Ok(Self::$variant),)+
@@ -155,6 +163,16 @@ pub struct Job {
     pub locked_until: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Not claimed before this (backoff after an infrastructure failure).
+    pub run_after: DateTime<Utc>,
+    /// Infrastructure failures and expired leases so far.
+    pub retries: u32,
+    pub cancel_requested: bool,
+    /// Why it ended: the agent's stop reason, the failure, the cancel.
+    pub reason: Option<String>,
+    pub pr_url: Option<String>,
+    /// The job this one runs again.
+    pub retry_of: Option<JobId>,
 }
 
 /// How a job ends.

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ledger_key FROM jobs WHERE starts_with(ledger_key, $1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ledger_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "ledger_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0918cd4b4f844c9b5ebc99ea855b833c00f3ad59f1cf2519034fc7b097535e5a"
+}

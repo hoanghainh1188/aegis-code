@@ -1,14 +1,16 @@
 //! Durable platform state in PostgreSQL (ADR 0003 §2, #22): repos, jobs,
-//! their runs, and the ledger behind [`aegis_ledger::LedgerStore`].
+//! their runs, the job queue, and the ledger behind
+//! [`aegis_ledger::LedgerStore`].
 //!
 //! Queries are checked against the schema at compile time; `.sqlx/` at the
 //! workspace root lets the crate build without a database. Every list is
-//! paged ([`Page`]). The queue's claim and lease queries come with #23.
+//! paged ([`Page`]).
 
 mod error;
 mod jobs;
 mod ledger;
 mod page;
+mod queue;
 mod repos;
 mod types;
 
@@ -23,6 +25,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 pub use error::StoreError;
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
+pub use queue::{AttemptEnd, Claim, ClaimLimits, Lease};
 pub use types::{
     Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, NewRepo, Repo, RepoId, RepoMode,
     Run, RunEnd, RunId, RunStatus,

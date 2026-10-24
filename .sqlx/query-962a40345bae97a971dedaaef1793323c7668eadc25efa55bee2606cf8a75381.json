@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,\n                             updated_at = now()\n             WHERE id = $1\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at",
+  "query": "UPDATE jobs SET cancel_requested = true,\n                 status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,\n                 reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'\n                               ELSE reason END,\n                 updated_at = now()\n             WHERE id = $1 AND status IN ('queued', 'running')\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
   "describe": {
     "columns": [
       {
@@ -134,13 +134,77 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "run_after",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "run_after"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "retries",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "retries"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "cancel_requested",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "cancel_requested"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "pr_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "pr_url"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "retry_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "retry_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -155,8 +219,14 @@
       true,
       true,
       false,
-      false
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "c187defddfa3a590137d4d903607bff8425cc9e8d7def49d15c7dd104a41a818"
+  "hash": "962a40345bae97a971dedaaef1793323c7668eadc25efa55bee2606cf8a75381"
 }

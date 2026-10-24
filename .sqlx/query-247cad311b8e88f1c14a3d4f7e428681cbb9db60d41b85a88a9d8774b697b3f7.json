@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET locked_until = now() + make_interval(secs => $3)\n             WHERE id = $1 AND locked_by = $2 AND status = 'running'\n             RETURNING cancel_requested",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cancel_requested",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "cancel_requested"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "247cad311b8e88f1c14a3d4f7e428681cbb9db60d41b85a88a9d8774b697b3f7"
+}
