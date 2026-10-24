@@ -22,7 +22,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt", "json", "std"] }
 
 [features]
-# Bedrock backend for config/customer-jp.toml.
+# Bedrock backend for config/customer-jp.toml (`[modes] customer_jp`).
 bedrock = ["aegis-provider/bedrock"]
 
 [dev-dependencies]

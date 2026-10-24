@@ -1,5 +1,8 @@
 //! The runner of real jobs: the issue's lifecycle (#16) in its own
-//! worktree and gate containers, with the job's ledger in PostgreSQL.
+//! worktree and gate containers, with the job's ledger in PostgreSQL. Each
+//! job runs with its repo's configuration from the `repos` table: the
+//! mode's provider and models, the repo's own image, Sonar project,
+//! allow-list and budget (#24, #162).
 //!
 //! Every attempt of a job writes to the same ledger (`jobs.ledger_key`),
 //! so the router's budget counts what earlier attempts spent: the cap is
@@ -10,10 +13,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use aegis_lang::Profiles;
-use aegis_ledger::{IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, PriceTable};
-use aegis_lifecycle::{IssueInput, Platform, RunConfig, run_issue};
+use aegis_ledger::{
+    IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable,
+};
+use aegis_lifecycle::{
+    IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, run_issue,
+};
 use aegis_provider::Provider;
-use aegis_store::{Claim, JobSource, PgLedger, RunId, Store};
+use aegis_store::{Claim, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -89,87 +96,125 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
-pub struct LifecycleRunner {
-    platform: Arc<Platform<Provider, RunLedger>>,
+/// Where each job's configuration comes from: its repo in the `repos`
+/// table and the configuration of the repo's mode (#24).
+#[derive(Debug, Clone)]
+pub struct RepoConfigs {
+    modes: Modes,
     store: Store,
 }
 
-impl LifecycleRunner {
-    /// The platform of `config`, checked as `aegis run` checks it: the ACI
-    /// binary, the prices of every model, the fork token when PRs open.
-    pub async fn new(store: Store, config: RunConfig) -> Result<Self, String> {
-        config.check_aci_bin().map_err(|e| e.to_string())?;
-        let prices = PriceTable::load(&config.run.pricing).map_err(|e| e.to_string())?;
-        for model in [
-            &config.models.light,
-            &config.models.core,
-            &config.models.expert,
-        ] {
+impl RepoConfigs {
+    pub fn new(modes: Modes, store: Store) -> Self {
+        Self { modes, store }
+    }
+
+    /// The repo and the configuration its jobs run with. `Rejected`, with
+    /// the reason, when it cannot run: no such repo, no configuration for
+    /// its mode, settings that do not build. `Infra` when the database
+    /// failed.
+    pub async fn resolve(&self, repo: RepoId) -> Result<RepoRun, Attempt> {
+        self.modes
+            .repo_run(&self.store, repo)
+            .await
+            .map_err(|e| match e {
+                LifecycleError::Store(e) => Attempt::Infra(e.to_string()),
+                other => Attempt::Rejected(other.to_string()),
+            })
+    }
+}
+
+/// What the jobs of one mode share: its provider and prices, checked at
+/// start.
+struct ModeRuntime {
+    provider: Provider,
+    prices: PriceTable,
+}
+
+impl ModeRuntime {
+    async fn new(mode: &ModeConfig) -> Result<Self, String> {
+        let prices = PriceTable::load(&mode.run.pricing).map_err(|e| e.to_string())?;
+        for model in [&mode.models.light, &mode.models.core, &mode.models.expert] {
             prices.price(&model.id).map_err(|e| e.to_string())?;
         }
-        let github_token = if config.run.open_prs {
-            let env = &config.repo.fork.token_env;
-            std::env::var(env).map_err(|_| format!("set {env} to a token for the fork"))?
-        } else {
-            String::new()
-        };
-        let provider = Provider::from_config(&config.provider)
+        let provider = Provider::from_config(&mode.provider)
             .await
             .map_err(|e| e.to_string())?;
-        let platform = Platform {
-            store: RunLedger::new(store.ledger()),
-            config,
-            provider,
-            prices,
-            profiles: Profiles::builtin().map_err(|e| e.to_string())?,
-            github_token,
+        Ok(Self { provider, prices })
+    }
+}
+
+pub struct LifecycleRunner {
+    configs: RepoConfigs,
+    store: Store,
+    ledger: RunLedger,
+    profiles: Profiles,
+    poc: Option<ModeRuntime>,
+    customer_jp: Option<ModeRuntime>,
+}
+
+impl LifecycleRunner {
+    /// The provider and prices of each configured mode, checked now: a
+    /// mode that cannot run fails the start, not its jobs.
+    pub async fn new(store: Store, modes: Modes) -> Result<Self, String> {
+        let runtime = |mode: Option<ModeConfig>| async move {
+            match mode {
+                Some(m) => ModeRuntime::new(&m).await.map(Some),
+                None => Ok(None),
+            }
         };
+        let poc = runtime(modes.poc.clone())
+            .await
+            .map_err(|e| format!("mode poc: {e}"))?;
+        let customer_jp = runtime(modes.customer_jp.clone())
+            .await
+            .map_err(|e| format!("mode customer-jp: {e}"))?;
         Ok(Self {
-            platform: Arc::new(platform),
+            configs: RepoConfigs::new(modes, store.clone()),
+            ledger: RunLedger::new(store.ledger()),
             store,
+            profiles: Profiles::builtin().map_err(|e| e.to_string())?,
+            poc,
+            customer_jp,
         })
     }
 
-    async fn issue(&self, claim: &Claim) -> Result<IssueInput, Attempt> {
-        let job = &claim.job;
-        if !matches!(job.source, JobSource::Github | JobSource::Cli) {
-            return Err(Attempt::Rejected(format!(
-                "no connector for `{}` jobs yet",
-                job.source.as_str()
-            )));
+    fn runtime(&self, mode: RepoMode) -> Result<&ModeRuntime, Attempt> {
+        match mode {
+            RepoMode::Poc => self.poc.as_ref(),
+            RepoMode::CustomerJp => self.customer_jp.as_ref(),
         }
-        let (owner, name, number) = parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
-        let token = Some(self.platform.github_token.as_str()).filter(|t| !t.is_empty());
-        let api = &self.platform.config.repo.fork.api;
-        let issue = IssueInput::from_github(api, &owner, &name, number, token)
-            .await
-            .map_err(|e| Attempt::Infra(e.to_string()))?;
-        Ok(IssueInput {
-            id: job.ledger_key.as_str().to_owned(),
-            ..issue
-        })
+        .ok_or_else(|| Attempt::Rejected(format!("no configuration for mode `{}`", mode.as_str())))
     }
 
     async fn attempt(&self, claim: &Claim, cancel: CancellationToken) -> Result<Attempt, Attempt> {
         let job = &claim.job;
-        let key = &self.platform.config.repo.key;
-        let repo = self
+        let RepoRun { repo, config } = self.configs.resolve(job.repo_id).await?;
+        let runtime = self.runtime(repo.mode)?;
+        config
+            .check_aci_bin()
+            .map_err(|e| Attempt::Rejected(e.to_string()))?;
+        // The repo's own budget may be below the worker's cap.
+        let spent = self
             .store
-            .repo(job.repo_id)
+            .job_spent(&job.ledger_key)
             .await
-            .map_err(|e| Attempt::Infra(e.to_string()))?
-            .ok_or_else(|| Attempt::Rejected(format!("repo {} not found", job.repo_id.0)))?;
-        if &repo.slug != key {
-            return Err(Attempt::Rejected(format!(
-                "no run configuration for repo `{}`: this server runs `{key}` (#24)",
-                repo.slug
-            )));
+            .map_err(|e| Attempt::Infra(e.to_string()))?;
+        let budget = config.budget.max_cost_usd;
+        if spent >= budget {
+            return Ok(Attempt::Ended {
+                outcome: Outcome::StoppedBudget,
+                reason: Some(format!(
+                    "repo `{}`'s budget of ${budget:.2} is spent: ${spent:.2}",
+                    repo.slug
+                )),
+                pr_url: None,
+            });
         }
         // An earlier attempt may have closed the ledger before its worker
         // died: its outcome is the job's.
         let events = self
-            .platform
-            .store
+            .ledger
             .events(&job.ledger_key)
             .await
             .map_err(|e| Attempt::Infra(e.to_string()))?;
@@ -180,16 +225,28 @@ impl LifecycleRunner {
                 pr_url: None,
             });
         }
-        let issue = self.issue(claim).await?;
-        let _tag = self
-            .platform
-            .store
-            .tag(job.ledger_key.clone(), claim.run.id);
-        let mut task = AbortOnDrop(tokio::spawn(run_issue(
-            Arc::clone(&self.platform),
-            issue,
-            cancel,
-        )));
+        let github_token = if config.run.open_prs {
+            let env = &config.repo.fork.token_env;
+            std::env::var(env).map_err(|_| {
+                Attempt::Rejected(format!(
+                    "repo `{}`: set {env} to a token for its fork",
+                    repo.slug
+                ))
+            })?
+        } else {
+            String::new()
+        };
+        let issue = issue(claim, &config.repo.fork.api, &github_token).await?;
+        let platform = Arc::new(Platform {
+            config,
+            provider: runtime.provider.clone(),
+            store: self.ledger.clone(),
+            prices: runtime.prices.clone(),
+            profiles: self.profiles.clone(),
+            github_token,
+        });
+        let _tag = self.ledger.tag(job.ledger_key.clone(), claim.run.id);
+        let mut task = AbortOnDrop(tokio::spawn(run_issue(platform, issue, cancel)));
         let report = match (&mut task.0).await {
             Ok(Ok(report)) => report,
             Ok(Err(e)) => return Err(Attempt::Infra(e.to_string())),
@@ -207,6 +264,26 @@ impl JobRunner for LifecycleRunner {
     async fn run(&self, claim: &Claim, cancel: CancellationToken) -> Attempt {
         self.attempt(claim, cancel).await.unwrap_or_else(|a| a)
     }
+}
+
+/// The issue of a GitHub or CLI job, under the job's ledger key.
+async fn issue(claim: &Claim, api: &str, token: &str) -> Result<IssueInput, Attempt> {
+    let job = &claim.job;
+    if !matches!(job.source, JobSource::Github | JobSource::Cli) {
+        return Err(Attempt::Rejected(format!(
+            "no connector for `{}` jobs yet",
+            job.source.as_str()
+        )));
+    }
+    let (owner, name, number) = parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+    let token = Some(token).filter(|t| !t.is_empty());
+    let issue = IssueInput::from_github(api, &owner, &name, number, token)
+        .await
+        .map_err(|e| Attempt::Infra(e.to_string()))?;
+    Ok(IssueInput {
+        id: job.ledger_key.as_str().to_owned(),
+        ..issue
+    })
 }
 
 /// `owner/repo#number`.

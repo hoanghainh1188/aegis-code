@@ -139,8 +139,6 @@ fn config(id: &str) -> WorkerConfig {
     WorkerConfig {
         worker_id: id.into(),
         max_workers: 4,
-        max_concurrent_jobs: 3,
-        repo_limits: Vec::new(),
         lease: Duration::from_millis(600),
         renew_every: Duration::from_millis(100),
         poll_every: Duration::from_millis(50),
@@ -151,13 +149,18 @@ fn config(id: &str) -> WorkerConfig {
 }
 
 async fn repo(s: &Store, slug: &str) -> RepoId {
+    limited(s, slug, 3).await
+}
+
+/// A repo that runs at most `max` of its jobs at once.
+async fn limited(s: &Store, slug: &str, max: u32) -> RepoId {
     s.create_repo(&NewRepo {
         slug: slug.into(),
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
         mode: RepoMode::Poc,
-        max_concurrent_jobs: 3,
+        max_concurrent_jobs: max,
         config: serde_json::json!({}),
     })
     .await
@@ -233,7 +236,8 @@ async fn runs_of(s: &Store, job: &Job) -> Vec<RunStatus> {
 async fn ten_jobs_at_once_all_end_with_a_reason_within_the_limits() {
     let Some(db) = test_db().await else { return };
     let s = &db.store;
-    let a = repo(s, "a").await;
+    // Repo a takes two jobs at a time, b three.
+    let a = limited(s, "a", 2).await;
     let b = repo(s, "b").await;
     let infra = |e: &str| Step::After(Duration::from_millis(30), Attempt::Infra(e.into()));
     let runner = Arc::new(
@@ -265,13 +269,9 @@ async fn ten_jobs_at_once_all_end_with_a_reason_within_the_limits() {
     for n in 0..4 {
         job(s, b, &format!("x/b#{n}")).await;
     }
-    // Two workers share the queue; repo a takes two jobs at a time.
-    let limited = |id| WorkerConfig {
-        repo_limits: vec![(a, 2)],
-        ..config(id)
-    };
-    let (stop1, w1) = spawn_worker(s, &runner, limited("w1"));
-    let (stop2, w2) = spawn_worker(s, &runner, limited("w2"));
+    // Two workers share the queue.
+    let (stop1, w1) = spawn_worker(s, &runner, config("w1"));
+    let (stop2, w2) = spawn_worker(s, &runner, config("w2"));
     let jobs = wait_for(s, Duration::from_secs(30), ended).await;
     stop1.cancel();
     stop2.cancel();
@@ -333,14 +333,13 @@ async fn ten_jobs_at_once_all_end_with_a_reason_within_the_limits() {
 async fn a_worker_that_dies_loses_no_job() {
     let Some(db) = test_db().await else { return };
     let s = &db.store;
-    let a = repo(s, "a").await;
+    let a = limited(s, "a", 5).await;
     for n in 0..5 {
         job(s, a, &format!("x/a#{n}")).await;
     }
     let hanging = Arc::new(Scripted::hanging());
     let dying = WorkerConfig {
         max_workers: 5,
-        max_concurrent_jobs: 5,
         lease: Duration::from_millis(300),
         ..config("dying")
     };
@@ -360,11 +359,7 @@ async fn a_worker_that_dies_loses_no_job() {
     );
 
     let runner = Arc::new(Scripted::default());
-    let next = WorkerConfig {
-        max_concurrent_jobs: 5,
-        ..config("next")
-    };
-    let (stop, task) = spawn_worker(s, &runner, next);
+    let (stop, task) = spawn_worker(s, &runner, config("next"));
     let jobs = wait_for(s, Duration::from_secs(20), ended).await;
     stop.cancel();
     task.await.unwrap();

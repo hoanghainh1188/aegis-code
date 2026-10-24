@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aegis_ledger::Outcome;
-use aegis_store::{AttemptEnd, Claim, ClaimLimits, JobId, Lease, RepoId, Run, Store};
+use aegis_store::{AttemptEnd, Claim, JobId, Lease, Run, Store};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -30,10 +30,6 @@ pub struct WorkerConfig {
     pub worker_id: String,
     /// Jobs this process runs at once.
     pub max_workers: u32,
-    /// `max_concurrent_jobs` of a repo without its own value.
-    pub max_concurrent_jobs: u32,
-    /// `max_concurrent_jobs` by repo (#24 supplies these from the repos).
-    pub repo_limits: Vec<(RepoId, u32)>,
     pub lease: Duration,
     /// Shorter than `lease`, so one missed renewal does not lose it.
     pub renew_every: Duration,
@@ -43,7 +39,9 @@ pub struct WorkerConfig {
     pub drain: Duration,
     /// First wait after an infrastructure failure; doubles each retry.
     pub retry_base: Duration,
-    /// The job's budget over all its attempts ($4, ADR 0003 §3).
+    /// The most any job may spend over all its attempts ($4, ADR 0003
+    /// §3). A repo with a smaller budget of its own is stopped at that one
+    /// by its runner.
     pub max_cost_usd: f64,
 }
 
@@ -94,14 +92,9 @@ async fn claim_while_room<R: JobRunner>(
     active: &Active,
     tasks: &mut JoinSet<()>,
 ) {
-    let limits = ClaimLimits {
-        max_workers: config.max_workers,
-        per_repo_default: config.max_concurrent_jobs,
-        per_repo: &config.repo_limits,
-    };
     while tasks.len() < config.max_workers as usize {
         let claim = match store
-            .claim_job(&config.worker_id, config.lease, limits)
+            .claim_job(&config.worker_id, config.lease, config.max_workers)
             .await
         {
             Ok(Some(claim)) => claim,
