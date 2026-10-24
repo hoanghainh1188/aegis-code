@@ -34,6 +34,10 @@ pub fn router(store: Store) -> Router {
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .merge(crate::web::router())
+        .nest_service(
+            "/webhooks",
+            crate::webhook::router(store.clone(), crate::webhook::WebhookConfig::from_env()),
+        )
         .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such route") })
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TimeoutLayer::with_status_code(
@@ -282,7 +286,7 @@ async fn create_job(
 
 /// `owner/repo#12` → `owner-repo-12-<ms>`: a ledger of its own for each
 /// job, even of the same issue.
-fn default_ledger_key(issue_ref: &str) -> String {
+pub(crate) fn default_ledger_key(issue_ref: &str) -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());

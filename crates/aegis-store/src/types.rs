@@ -29,6 +29,7 @@ macro_rules! text_enum {
                 }
             }
 
+            #[allow(dead_code, reason = "not every enum is read back")]
             pub(crate) fn decode(column: &'static str, text: &str) -> Result<Self, StoreError> {
                 match text {
                     $($text => Ok(Self::$variant),)+
@@ -58,6 +59,11 @@ text_enum! {
         Sonar = "sonar",
         Ci = "ci",
     }
+}
+
+text_enum! {
+    /// Who sent a webhook delivery.
+    WebhookSource { Github = "github", Gitlab = "gitlab" }
 }
 
 text_enum! {
@@ -177,6 +183,25 @@ pub struct Job {
     pub pr_url: Option<String>,
     /// The job this one runs again.
     pub retry_of: Option<JobId>,
+}
+
+/// A webhook delivery that asks for a job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewDelivery {
+    pub source: WebhookSource,
+    /// `X-GitHub-Delivery`, `X-Gitlab-Event-UUID`: 1 to 128 bytes.
+    pub delivery_id: String,
+    pub event: String,
+}
+
+/// What became of a delivery's job.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Delivered {
+    Queued(Box<Job>),
+    /// The delivery was received before: nothing done.
+    Duplicate,
+    /// The issue already has a live job; no second one.
+    AlreadyLive(JobId),
 }
 
 /// How a job ends.

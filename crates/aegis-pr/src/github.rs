@@ -1,6 +1,7 @@
 //! Opens the pull request on GitHub (REST API). The PR is always opened in
 //! the configured repo, from a branch of that same repo: the agent works on
-//! a fork and has no way to target another repository.
+//! a fork and has no way to target another repository. The same client,
+//! made for the repository of an issue, comments on that issue (#25).
 
 use std::time::Duration;
 
@@ -26,6 +27,13 @@ pub struct GitHub {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PullRequest {
     pub number: u64,
+    #[serde(rename = "html_url")]
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct IssueComment {
+    pub id: u64,
     #[serde(rename = "html_url")]
     pub url: String,
 }
@@ -175,30 +183,19 @@ impl GitHub {
         Ok(u32::try_from(lines).unwrap_or(u32::MAX))
     }
 
-    /// Opens a PR from `head` into `base`.
-    pub async fn open_pull_request(
+    async fn post<T: serde::de::DeserializeOwned>(
         &self,
-        head: &AgentBranch,
-        base: &str,
-        title: &str,
-        body: &str,
-        draft: bool,
-    ) -> Result<PullRequest, PrError> {
-        let url = format!("{}/repos/{}/{}/pulls", self.api, self.owner, self.repo);
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T, PrError> {
+        let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
         let response = self
             .client
             .post(&url)
             .bearer_auth(&self.token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION)
-            .json(&json!({
-                "title": title,
-                "head": head.name(),
-                "base": base,
-                "body": body,
-                "draft": draft,
-                "maintainer_can_modify": false,
-            }))
+            .json(body)
             .send()
             .await
             .map_err(|e| PrError::Http(e.to_string()))?;
@@ -221,5 +218,38 @@ impl GitHub {
                 message,
             })
         }
+    }
+
+    /// Opens a PR from `head` into `base`.
+    pub async fn open_pull_request(
+        &self,
+        head: &AgentBranch,
+        base: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> Result<PullRequest, PrError> {
+        self.post(
+            "pulls",
+            &json!({
+                "title": title,
+                "head": head.name(),
+                "base": base,
+                "body": body,
+                "draft": draft,
+                "maintainer_can_modify": false,
+            }),
+        )
+        .await
+    }
+
+    /// Comments on issue `number` of this repo: the job's status for whoever
+    /// asked for it there (#25). The caller makes `body` inert.
+    pub async fn comment_on_issue(&self, number: u64, body: &str) -> Result<IssueComment, PrError> {
+        self.post(
+            &format!("issues/{number}/comments"),
+            &json!({ "body": body }),
+        )
+        .await
     }
 }

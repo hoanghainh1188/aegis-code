@@ -390,3 +390,24 @@ async fn review_edits_count_the_lines_after_the_agents_commit() {
         "only the agent's commit"
     );
 }
+
+#[tokio::test]
+async fn comments_on_an_issue() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/typst/typst/issues/7/comments"))
+        .and(header("authorization", "Bearer t"))
+        .and(body_partial_json(json!({ "body": "done" })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": 99, "html_url": "https://github.com/typst/typst/issues/7#issuecomment-99"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let github = GitHub::new(&server.uri(), "typst", "typst", "t").unwrap();
+    let comment = github.comment_on_issue(7, "done").await.unwrap();
+    assert_eq!(comment.id, 99);
+
+    let err = github.comment_on_issue(8, "done").await.unwrap_err();
+    assert!(matches!(err, PrError::GitHub { status: 404, .. }), "{err}");
+}
