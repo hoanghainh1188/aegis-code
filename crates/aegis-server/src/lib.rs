@@ -5,6 +5,7 @@
 //! gate containers.
 
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod lifecycle;
 pub mod runner;

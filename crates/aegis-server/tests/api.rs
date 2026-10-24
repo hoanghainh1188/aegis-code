@@ -1,5 +1,8 @@
 //! The internal API (#23): jobs created, listed, cancelled and retried,
-//! every answer in the `{data, error, meta}` envelope.
+//! every answer in the `{data, error, meta}` envelope. Here by an admin
+//! service; who may do what is in `auth.rs`.
+
+mod common;
 
 use aegis_server::api::router;
 use aegis_store::testing::test_db;
@@ -11,14 +14,29 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+/// The API, and the token of an admin service.
+struct App {
+    router: Router,
+    token: String,
+}
+
+async fn app(store: &Store) -> App {
+    common::admin(store, "ops").await;
+    App {
+        router: router(store.clone(), common::auth(store)),
+        token: common::token(store, "ops").await,
+    }
+}
+
+async fn call(app: &App, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
     let request = Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {}", app.token))
         .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
         .unwrap();
-    let response = app.clone().oneshot(request).await.unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let json = serde_json::from_slice(&bytes).unwrap_or_else(|_| {
@@ -52,7 +70,7 @@ fn assert_error(body: &Value, code: &str) {
 #[tokio::test]
 async fn jobs_are_created_listed_cancelled_and_retried() {
     let Some(db) = test_db().await else { return };
-    let app = router(db.store.clone());
+    let app = app(&db.store).await;
     let repo_id = repo(&db.store).await;
 
     let (status, body) = call(&app, "GET", "/api/v1/health", None).await;
@@ -122,7 +140,7 @@ async fn jobs_are_created_listed_cancelled_and_retried() {
 #[tokio::test]
 async fn bad_requests_answer_in_the_envelope() {
     let Some(db) = test_db().await else { return };
-    let app = router(db.store.clone());
+    let app = app(&db.store).await;
     let repo_id = repo(&db.store).await;
 
     let (status, body) = call(&app, "GET", "/api/v1/jobs/9999", None).await;

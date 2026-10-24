@@ -52,6 +52,15 @@ pub async fn test_db() -> Option<TestDb> {
 }
 
 impl TestDb {
+    /// Runs `sql` as the platform's own user would: for what the store's
+    /// API does not offer, such as trying to change the audit log.
+    pub async fn raw(&self, sql: &'static str) -> Result<u64, sqlx::Error> {
+        sqlx::raw_sql(sql)
+            .execute(&self.store.pool)
+            .await
+            .map(|r| r.rows_affected())
+    }
+
     /// Drops the database. A failed test leaves its database behind; CI's
     /// server is thrown away, a local one can drop `aegis_test_*` by hand.
     pub async fn drop(self) {

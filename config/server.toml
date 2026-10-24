@@ -26,8 +26,25 @@ poc = "config/poc.toml"
 # customer_jp = "config/customer-jp.toml"
 
 [api]
-# Internal API without authentication yet (#29): keep it on loopback.
+# `/api/v1` takes service tokens and the dashboard a sign-in (#29), so the
+# API may listen beyond loopback, behind TLS. Pages answer only to
+# `auth.public_url`'s host and to loopback.
 listen = "127.0.0.1:8080"
+
+# Its secrets are in [secrets] with the others, checked when the API
+# starts: AEGIS_SESSION_KEY (at least 32 random bytes; signs the review
+# form's time), and AEGIS_OIDC_CLIENT_SECRET with [auth.oidc].
+# Roles and tokens: `aegis-server --config <file> grant|token …`.
+[auth]
+# public_url = "https://aegis.example.com"
+session_hours = 12
+# Per service token, per API process.
+api_requests_per_minute = 120
+
+# The company SSO; without it the dashboard cannot be signed in to.
+# [auth.oidc]
+# issuer = "https://login.example.com/realms/acme"
+# client_id = "aegis"
 
 [worker]
 # Jobs this process runs at once. A repo's own limit is

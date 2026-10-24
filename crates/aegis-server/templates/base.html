@@ -15,6 +15,11 @@
     <a href="/">KPI</a>
     <a href="/jobs">Job</a>
   </nav>
+  <form class="session" method="post" action="/auth/logout">
+    {% include "form_guard.html" %}
+    <span class="who">{{ me.name }}</span>
+    <button type="submit" class="ghost">Đăng xuất</button>
+  </form>
 </header>
 <main>
 {% block content %}{% endblock %}

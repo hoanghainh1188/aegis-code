@@ -264,3 +264,56 @@ pub(crate) fn count(column: &'static str, value: i32) -> Result<u32, StoreError>
         value: value.to_string(),
     })
 }
+
+text_enum! {
+    /// How an actor got in: a dashboard session, an API token, the command
+    /// line on the server, a signed webhook, the platform itself.
+    ActorKind {
+        User = "user",
+        Token = "token",
+        Cli = "cli",
+        Webhook = "webhook",
+        System = "system",
+    }
+}
+
+text_enum! {
+    /// A person signs in through the SSO; a service uses API tokens.
+    UserKind { Person = "person", Service = "service" }
+}
+
+text_enum! {
+    /// What a user may do in one repo; each role includes those below it.
+    RepoRole {
+        Viewer = "viewer",
+        Reviewer = "reviewer",
+        Maintainer = "maintainer",
+    }
+}
+
+impl RepoRole {
+    fn rank(self) -> u8 {
+        match self {
+            Self::Viewer => 0,
+            Self::Reviewer => 1,
+            Self::Maintainer => 2,
+        }
+    }
+
+    /// Whether this role allows what `needed` allows.
+    pub fn includes(self, needed: Self) -> bool {
+        self.rank() >= needed.rank()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UserId(pub i64);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct User {
+    pub id: UserId,
+    pub kind: UserKind,
+    /// A person's e-mail or a service's name, lower case.
+    pub name: String,
+    pub is_admin: bool,
+}

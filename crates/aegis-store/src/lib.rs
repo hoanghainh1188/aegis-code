@@ -1,11 +1,13 @@
 //! Durable platform state in PostgreSQL (ADR 0003 §2, #22): repos, jobs,
 //! their runs, the job queue, webhook deliveries, and the ledger behind
-//! [`aegis_ledger::LedgerStore`].
+//! [`aegis_ledger::LedgerStore`]; users, sessions, roles and the audit log
+//! (#29).
 //!
 //! Queries are checked against the schema at compile time; `.sqlx/` at the
 //! workspace root lets the crate build without a database. Every list is
 //! paged ([`Page`]).
 
+mod audit;
 mod deliveries;
 mod error;
 mod jobs;
@@ -14,6 +16,7 @@ mod page;
 mod queue;
 mod repos;
 mod types;
+mod users;
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -23,14 +26,17 @@ use std::str::FromStr;
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
+pub use audit::{Actor, AuditEntry};
 pub use error::StoreError;
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
 pub use queue::{AttemptEnd, Claim, Lease};
 pub use types::{
-    Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob, NewRepo,
-    Repo, RepoId, RepoMode, Run, RunEnd, RunId, RunStatus, WebhookSource,
+    ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,
+    NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
+    UserKind, WebhookSource,
 };
+pub use users::{Session, TokenHash};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 

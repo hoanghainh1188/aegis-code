@@ -11,7 +11,7 @@ use aegis_lang::Language;
 use aegis_ledger::Tier;
 use aegis_provider::ProviderConfig;
 use aegis_router::ModelsConfig;
-use aegis_store::{NewRepo, Repo, RepoId, RepoMode, Store};
+use aegis_store::{Actor, NewRepo, Repo, RepoId, RepoMode, Store};
 use serde::{Deserialize, Serialize};
 
 use crate::LifecycleError;
@@ -294,7 +294,7 @@ impl Modes {
             new.mode,
             &new.config,
         )?;
-        Ok(store.create_repo(&new).await?)
+        Ok(store.create_repo_by(&new, &Actor::cli()).await?)
     }
 }
 

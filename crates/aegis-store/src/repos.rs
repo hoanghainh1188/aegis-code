@@ -1,5 +1,6 @@
+use crate::audit::{self, Target};
 use crate::types::{RepoMode, count};
-use crate::{NewRepo, Page, PageOf, Repo, RepoId, Store, StoreError};
+use crate::{Actor, NewRepo, Page, PageOf, Repo, RepoId, Store, StoreError};
 
 const MAX_SLUG_LEN: usize = 128;
 
@@ -66,6 +67,12 @@ impl TryFrom<RepoRow> for Repo {
 
 impl Store {
     pub async fn create_repo(&self, repo: &NewRepo) -> Result<Repo, StoreError> {
+        self.create_repo_by(repo, &Actor::system()).await
+    }
+
+    /// [`Store::create_repo`], audited as done by `actor` with the
+    /// settings it registered.
+    pub async fn create_repo_by(&self, repo: &NewRepo, actor: &Actor) -> Result<Repo, StoreError> {
         check_slug(&repo.slug)?;
         let max_jobs = i32::try_from(repo.max_concurrent_jobs)
             .ok()
@@ -74,7 +81,8 @@ impl Store {
                 field: "max_concurrent_jobs",
                 message: format!("{}: from 1 to {}", repo.max_concurrent_jobs, i32::MAX),
             })?;
-        sqlx::query_as!(
+        let mut tx = self.pool.begin().await?;
+        let created: Repo = sqlx::query_as!(
             RepoRow,
             "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -87,10 +95,24 @@ impl Store {
             max_jobs,
             repo.config,
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(StoreError::from_db)?
-        .try_into()
+        .try_into()?;
+        let detail = serde_json::json!({
+            "slug": created.slug,
+            "url": created.url,
+            "mode": created.mode.as_str(),
+            "max_concurrent_jobs": created.max_concurrent_jobs,
+            "config": created.config,
+        });
+        let target = Target {
+            repo: Some(created.id),
+            job: None,
+        };
+        audit::record(&mut tx, actor, "repo.register", target, detail).await?;
+        tx.commit().await?;
+        Ok(created)
     }
 
     pub async fn repo(&self, id: RepoId) -> Result<Option<Repo>, StoreError> {

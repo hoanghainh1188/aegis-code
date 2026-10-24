@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event FROM ledger_events WHERE ledger_key = $1 ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "ledger_events",
+            "name": "event"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "794fec6d5d8e3d22e42f410695af2ae3ba8e71cd6ea880dcd1f70410e9153f6b"
+}

@@ -1,1 +1,2 @@
-{#- Every form includes this. #29 puts its CSRF token field here. -#}
+{#- Every form includes this: the session's CSRF token, checked by `web::guard` (#29). -#}
+<input type="hidden" name="_csrf" value="{{ me.csrf }}">
