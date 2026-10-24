@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}KPI{% endblock %}
+{% block content %}
+<section class="hero" aria-labelledby="kpi-heading">
+  <p class="eyebrow">Ledger · mọi lượt chạy đã kết thúc</p>
+  <h1 id="kpi-heading">PR được chấp nhận <strong class="{{ total.accept_class }}">{{ total.accept }}</strong></h1>
+  <dl class="figures">
+    <div><dt>Chi phí / issue</dt><dd class="{{ total.cost_class }}">{{ total.cost }}</dd><dd class="threshold">ngưỡng ≤ $4</dd></div>
+    <div><dt>Thời gian duyệt / PR</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">≤ 15 phút</dd></div>
+    <div><dt>Đọc cache</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
+    <div><dt>Lên Expert</dt><dd>{{ total.expert }}</dd><dd class="threshold">theo dõi</dd></div>
+    <div><dt>Chờ duyệt</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">PR chưa có review</dd></div>
+  </dl>
+  <p class="note">Cùng công thức với <code>aegis report</code> (ADR 0005): ngưỡng chấp nhận ≥ 40% tổng, ≥ 35% mỗi ngôn ngữ. Kết quả test ẩn không hiện ở đây.</p>
+</section>
+
+<section aria-labelledby="lang-heading" class="band">
+  <div class="band-head">
+    <h2 id="lang-heading">Theo ngôn ngữ</h2>
+    {% call m::bars(languages, language_min, "Tỉ lệ chấp nhận theo ngôn ngữ, ngưỡng 35%") %}{% endcall %}
+  </div>
+  {% call m::kpi_table("Ngôn ngữ", languages) %}{% endcall %}
+</section>
+
+<section aria-labelledby="repo-heading" class="band">
+  <h2 id="repo-heading">Theo repo</h2>
+  {% call m::kpi_table("Repo", repos) %}{% endcall %}
+</section>
+
+<section aria-labelledby="week-heading" class="band">
+  <div class="band-head">
+    <h2 id="week-heading">Theo tuần tạo job</h2>
+    {% call m::bars(weeks, total_min, "Tỉ lệ chấp nhận theo tuần, ngưỡng 40%") %}{% endcall %}
+  </div>
+  {% call m::kpi_table("Tuần", weeks) %}{% endcall %}
+</section>
+{% endblock %}

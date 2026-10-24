@@ -33,6 +33,7 @@ pub fn router(store: Store) -> Router {
         .route("/api/v1/jobs/{id}/runs", get(list_runs))
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
+        .merge(crate::web::router())
         .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such route") })
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TimeoutLayer::with_status_code(

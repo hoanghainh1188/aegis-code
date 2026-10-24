@@ -9,14 +9,19 @@ mod issue;
 mod kpi;
 mod pricing;
 mod record;
+pub mod report;
 mod store;
 
 pub use error::LedgerError;
 pub use issue::IssueLedger;
-pub use kpi::Kpi;
+pub use kpi::{
+    ACCEPT_RATE_MIN, CACHE_READ_MIN, COST_PER_ISSUE_MAX, Kpi, LANGUAGE_ACCEPT_RATE_MIN,
+    REVIEW_MINUTES_MAX,
+};
 pub use pricing::{LongPrompt, ModelPrice, PriceTable};
 pub use record::{
     GateRun, IssueId, IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier,
     TokenCounts, ToolCall,
 };
+pub use report::{Report, SetIssue};
 pub use store::{CopyReport, JsonFileLedger, LedgerStore, MemoryLedger, copy_ledger};

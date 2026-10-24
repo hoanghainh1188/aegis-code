@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0}'>
+<title>{% block title %}aegis{% endblock %} · aegis</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx-2.0.11.min.js" nonce="{{ nonce }}" defer></script>
+</head>
+<body>
+<header class="masthead">
+  <a class="brand" href="/">aegis<span>ledger</span></a>
+  <nav aria-label="Chính">
+    <a href="/">KPI</a>
+    <a href="/jobs">Job</a>
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
