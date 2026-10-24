@@ -106,6 +106,7 @@ fn gated(scratch: &Scratch, test_command: &str) -> (PathBuf, PathBuf, GateReport
         fetch: None,
         build_cache: None,
         allowed_tests: vec![],
+        reference_groups: vec![],
         sonar: None,
     })
     .unwrap();
@@ -199,6 +200,7 @@ fn the_body_follows_the_template_and_model_text_is_inert() {
             test: "golden::render".into(),
             reason: "output now ends with a newline".into(),
         }],
+        allowed_reference_changes: vec![],
         gate: &report,
         coverage_percent: Some(82.04),
         cost: Cost {

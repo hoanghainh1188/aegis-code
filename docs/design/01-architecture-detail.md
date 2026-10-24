@@ -242,6 +242,18 @@ Chạy tuần tự trong Docker. Bước nào fail thì dừng, trả log (đã 
 3. Sau khi sửa: test nào đổi kết quả thì agent phải liệt kê trong PR, mục "Test được phép đổi", kèm lý do.
 4. Người duyệt xác nhận từng test trong danh sách đó.
 
+Test so output với file tham chiếu (ảnh, `hashes.txt` của typst) thì agent không tự ghi tham chiếu: profile có `update_references` (lệnh `--update` của harness) và `reference_dirs`, gate chạy lệnh đó cho các test fail mới mà agent khai báo, rồi chạy lại toàn bộ test (#105).
+
+- **Theo từng test:** `allowed_test_changes`, mỗi test một lý do. Lệnh cập nhật được ghi trong `reference_dirs` của profile.
+- **Theo nhóm (#147):** bản sửa đổi output của hàng trăm test (typst-8850: ~368 hash HTML) thì không khai từng test được. Agent khai `allowed_reference_changes`: `{"references": "tests/ref/html", "tests": "*", "reason": …}`, một thư mục tham chiếu nằm trong `reference_dirs` và một mẫu tên test (`*` khớp mọi chuỗi). Test fail mới khớp mẫu thì được cập nhật như test khai riêng, bằng regex đúng tên các test đó (tên harness, phần sau `::` cuối).
+- Nhóm chỉ áp dụng cho tham chiếu, không nới gì khác:
+  - Gate chỉ cập nhật test đang fail, không phải mọi test khớp mẫu.
+  - Lệnh cập nhật chỉ được ghi trong thư mục của nhóm; ghi ra ngoài (ví dụ nhóm `tests/ref/html` mà đổi ảnh `tests/ref/render`) thì bước `test` fail và nêu file. Có cả test khai riêng thì giới hạn là `reference_dirs` của profile, như trên.
+  - Sau khi cập nhật, toàn bộ test chạy lại và chỉ được fail như trên base: nhóm không chấp nhận một test fail vì logic.
+  - Thư mục của nhóm không nằm trong `reference_dirs` (hoặc có `..`, đường dẫn tuyệt đối) thì nhóm bị bỏ qua, lý do fail ghi rõ.
+  - Thay đổi code hay giá trị mong đợi của test vẫn khai riêng trong `allowed_test_changes`.
+- PR liệt kê các nhóm kèm lý do, và mọi file tham chiếu cùng tên test gate đã cập nhật (`GateReport::references`), để người duyệt xác nhận.
+
 ### 6.3 Gộp nhiều bản vá (issue Sonar chia nhóm)
 
 `aegis_sonar_batch::integrate` (#17); batch id là id của issue.
@@ -272,6 +284,8 @@ Chạy tuần tự trong Docker. Bước nào fail thì dừng, trả log (đã 
 ## Test
 - Test tái hiện: <tên> (FAIL → PASS)
 - Test được phép đổi: <danh sách + lý do, hoặc "không có">
+- Nhóm tham chiếu được phép đổi: <thư mục, mẫu tên + lý do; chỉ khi có>
+- Tham chiếu gate đã cập nhật, người duyệt cần xác nhận: <file, test; chỉ khi có>
 
 ## Kết quả gate
 <các bước của profile, ví dụ: fmt ✔ · lint ✔ · test ✔> · coverage <x%> · Sonar ✔

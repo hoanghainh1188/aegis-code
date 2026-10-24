@@ -108,6 +108,9 @@ else:
   "allowed_test_changes": [
     {"test": "test name", "reason": "Why its expected result changed."}
   ],
+  "allowed_reference_changes": [
+    {"references": "tests/ref/html", "tests": "*", "reason": "Why these outputs changed."}
+  ],
   "stop_reason": null
 }
 ```
@@ -117,4 +120,17 @@ else:
 - `repro_test` is `null` when the issue is not a bug (for example a
   refactor or documentation change). Its `files` are every file that holds
   the test, and only tests.
+- `allowed_test_changes` lists existing tests whose expected result had to
+  change, each with its reason. When a test compares its output with a
+  stored reference (an image, a hash), the gate rewrites that reference
+  with the repository's own update command; you do not write it.
+- `allowed_reference_changes` is for a fix that changes the reference
+  output of many tests at once, too many to name: one entry per reference
+  directory, `tests` a name pattern where `*` matches anything (default
+  `*`). The gate rewrites the references of the failing tests that match,
+  only inside that directory, and runs all the tests again; the pull
+  request lists every reference it changed for the reviewer. It covers
+  reference output only: a test whose code or expected values you edit
+  goes in `allowed_test_changes`. Many changed references are not a reason
+  to stop.
 - Paths are relative to the repository root.

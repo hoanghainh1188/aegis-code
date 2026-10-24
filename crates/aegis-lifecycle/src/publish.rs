@@ -90,6 +90,7 @@ where
         changes: answer.changes.clone(),
         repro_test: answer.repro.as_ref().map(|r| r.test.clone()),
         allowed_test_changes: answer.allowed_test_changes.clone(),
+        allowed_reference_changes: answer.allowed_reference_changes.clone(),
         gate,
         coverage_percent: coverage_percent(profile, tree),
         cost: Cost {

@@ -13,6 +13,9 @@ const MAX_FIELD_CHARS: usize = 2000;
 /// Change notes listed; the rest are counted.
 const MAX_CHANGES: usize = 50;
 
+/// Updated reference files and tests listed each; the rest are counted.
+const MAX_REFERENCES: usize = 100;
+
 /// GitHub refuses bodies over 65 536 characters.
 const MAX_BODY_CHARS: usize = 60_000;
 
@@ -32,6 +35,17 @@ pub struct AllowedTestChange {
     pub reason: String,
 }
 
+/// A group of tests whose reference output (images, hashes) the patch may
+/// change together, too many to name one by one (#147).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AllowedReferenceChange {
+    /// The reference directory the gate may rewrite.
+    pub references: String,
+    /// Test names, `*` matching any run of characters.
+    pub tests: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cost {
     pub models: Vec<String>,
@@ -46,6 +60,7 @@ pub struct PrContent<'a> {
     pub changes: Vec<ChangeNote>,
     pub repro_test: Option<String>,
     pub allowed_test_changes: Vec<AllowedTestChange>,
+    pub allowed_reference_changes: Vec<AllowedReferenceChange>,
     pub gate: &'a GateReport,
     pub coverage_percent: Option<f64>,
     pub cost: Cost,
@@ -132,6 +147,19 @@ pub fn gate_line(gate: &GateReport, coverage: Option<f64>) -> String {
         .join(" · ")
 }
 
+/// `` `a`, `b` ``, the first [`MAX_REFERENCES`] of them; the rest counted.
+fn spans(items: &[String]) -> String {
+    let mut shown: Vec<String> = items
+        .iter()
+        .take(MAX_REFERENCES)
+        .map(|i| format!("`{}`", inert(i)))
+        .collect();
+    if items.len() > MAX_REFERENCES {
+        shown.push(format!("… và {} khác", items.len() - MAX_REFERENCES));
+    }
+    shown.join(", ")
+}
+
 pub fn render(pr: &PrContent<'_>) -> String {
     let mut out = String::new();
     let _ = write!(out, "## Issue\n{}\n\n", link(&pr.issue_url));
@@ -162,6 +190,34 @@ pub fn render(pr: &PrContent<'_>) -> String {
         for t in &pr.allowed_test_changes {
             let _ = writeln!(out, "  - `{}` — {}", inert(&t.test), inert(&t.reason));
         }
+    }
+    if !pr.allowed_reference_changes.is_empty() {
+        out.push_str("- Nhóm tham chiếu được phép đổi:\n");
+        for g in &pr.allowed_reference_changes {
+            let _ = writeln!(
+                out,
+                "  - `{}`, test `{}` — {}",
+                inert(&g.references),
+                inert(&g.tests),
+                inert(&g.reason)
+            );
+        }
+    }
+    let updated = &pr.gate.references;
+    if !updated.files.is_empty() {
+        out.push_str("- Tham chiếu gate đã cập nhật, người duyệt cần xác nhận:\n");
+        let _ = writeln!(
+            out,
+            "  - File ({}): {}",
+            updated.files.len(),
+            spans(&updated.files)
+        );
+        let _ = writeln!(
+            out,
+            "  - Test ({}): {}",
+            updated.tests.len(),
+            spans(&updated.tests)
+        );
     }
     let models: Vec<String> = pr.cost.models.iter().map(|m| inert(m)).collect();
     let _ = write!(
@@ -200,5 +256,49 @@ mod tests {
             "https://github.com/o/r/issues/1"
         );
         assert_eq!(link("https://x\n## fake"), "https:\u{200b}//x ## fake");
+    }
+
+    #[test]
+    fn groups_and_the_references_the_gate_updated_are_listed() {
+        let gate = GateReport {
+            steps: vec![],
+            tree: "t".into(),
+            base: "b".into(),
+            references: aegis_gate::UpdatedReferences {
+                tests: (0..=MAX_REFERENCES).map(|i| format!("math-{i}")).collect(),
+                files: vec!["tests/ref/html/hashes.txt".into()],
+            },
+        };
+        let body = render(&PrContent {
+            issue_url: "https://github.com/o/r/issues/1".into(),
+            cause: "c".into(),
+            changes: vec![],
+            repro_test: None,
+            allowed_test_changes: vec![],
+            allowed_reference_changes: vec![AllowedReferenceChange {
+                references: "tests/ref/html".into(),
+                tests: "*".into(),
+                reason: "MathML spacing changed\n## fake".into(),
+            }],
+            gate: &gate,
+            coverage_percent: None,
+            cost: Cost {
+                models: vec![],
+                model_calls: 0,
+                usd: 0.0,
+            },
+        });
+        assert!(
+            body.contains(
+                "- Nhóm tham chiếu được phép đổi:\n  \
+                 - `tests/ref/html`, test `\u{200b}*` — MathML spacing changed ## fake\n\
+                 - Tham chiếu gate đã cập nhật, người duyệt cần xác nhận:\n  \
+                 - File (1): `tests/ref/html/hashes.txt`\n  \
+                 - Test (101): `math-0`, `math-1`,"
+            ),
+            "{body}"
+        );
+        assert!(body.contains("`math-99`, … và 1 khác\n"), "{body}");
+        assert!(!body.contains("math-100"), "{body}");
     }
 }
