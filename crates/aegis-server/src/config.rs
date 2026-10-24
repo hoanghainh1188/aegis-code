@@ -1,8 +1,8 @@
 //! The server's configuration (`config/server.toml`): where the API
 //! listens, how the worker paces itself, and the configuration of each
 //! mode. A job runs with its repo's mode and own settings, both read from
-//! the `repos` table (#24); its limit there is `max_concurrent_jobs`. The
-//! database URL is not in it: `AEGIS_DATABASE_URL`.
+//! the `repos` table (#24); its limit there is `max_concurrent_jobs`. No
+//! secret is in it, only where they are read: `[secrets]` (#30).
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use crate::secrets::SecretsSection;
 use crate::worker::WorkerConfig;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -23,6 +24,9 @@ pub struct ServerConfig {
     pub api: ApiSection,
     #[serde(default)]
     pub worker: WorkerSection,
+    /// Required to start; optional here so the file parses without it.
+    #[serde(default)]
+    pub secrets: Option<SecretsSection>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -163,6 +167,8 @@ mod tests {
         let worker = config.worker("w".into());
         assert!(worker.renew_every < worker.lease);
         assert_eq!(worker.max_cost_usd, 4.0);
+        let secrets = config.secrets.expect("[secrets] is in the example");
+        assert_eq!(secrets.source, crate::secrets::SourceKind::Env);
     }
 
     #[test]

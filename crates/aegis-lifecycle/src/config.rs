@@ -214,8 +214,13 @@ pub struct IdentityConfig {
 pub struct SonarConfig {
     pub url: String,
     /// Variable holding the analysis token; read when the gate runs and
-    /// given to the scanner and the Web API only.
+    /// given to the scanner and the Web API only. The server reads the
+    /// secret of this name instead and sets [`Self::token`] (#30).
     pub token_env: String,
+    /// The token, when its owner read it from a secret store; never in a
+    /// file.
+    #[serde(skip)]
+    pub token: Option<aegis_secrets::Secret>,
     #[serde(default)]
     pub organization: Option<String>,
     pub project_key: String,
@@ -301,10 +306,14 @@ impl SonarConfig {
         Ok(())
     }
 
-    /// The gate's step, with the token read now from `token_env`.
+    /// The gate's step, with [`Self::token`] or else the token read now
+    /// from `token_env`.
     pub fn step(&self, cache: Option<PathBuf>) -> Result<aegis_gate::SonarStep, LifecycleError> {
-        let token = std::env::var(&self.token_env)
-            .ok()
+        let token = self
+            .token
+            .as_ref()
+            .map(|t| t.expose().to_owned())
+            .or_else(|| std::env::var(&self.token_env).ok())
             .filter(|t| !t.is_empty())
             .ok_or_else(|| {
                 LifecycleError::Config(format!(
@@ -501,5 +510,10 @@ project_key = "p""#,
         let step = cfg.step(None).unwrap();
         assert_eq!(step.token, std::env::var("PATH").unwrap());
         assert_eq!(step.image.as_deref(), Some("sonarsource/sonar-scanner-cli"));
+        let cfg = SonarConfig {
+            token: Some(aegis_secrets::Secret::new("from-the-store")),
+            ..cfg
+        };
+        assert_eq!(cfg.step(None).unwrap().token, "from-the-store");
     }
 }
