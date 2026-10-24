@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use aegis_lang::Profiles;
 use aegis_ledger::{
-    IssueId, LedgerEvent, LedgerStore, MemoryLedger, Outcome, PriceTable, Tier, ToolCall,
+    IssueId, IssueRecord, JsonFileLedger, Kpi, LedgerEvent, LedgerStore, MemoryLedger, Outcome,
+    PriceTable, Tier, ToolCall, copy_ledger,
 };
 use aegis_lifecycle::{
     IssueInput, IssueReport, Platform, Replay, ReplayProvider, RunConfig, run_issue,
@@ -240,6 +241,69 @@ async fn a_bug_goes_from_issue_to_pr() {
         "{body}"
     );
     assert!(body.contains("repro_test ✔ · test ✔ · coverage"), "{body}");
+}
+
+/// "Xong khi" of #22: an issue run with its ledger in PostgreSQL writes
+/// every event there, and the same ledger as JSON gives the same record
+/// and KPIs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bug_goes_to_pr_with_its_ledger_in_postgres() {
+    if !tools_ready() {
+        return;
+    }
+    let Some(db) = aegis_store::testing::test_db().await else {
+        return;
+    };
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let model = Scripted::new(
+        vec![
+            call("t1", "search_symbol", json!({"name": "Cart::add"})),
+            create_repro("t2"),
+            fix("t3"),
+            fixed_answer(),
+        ],
+        vec![],
+    );
+    let p = Arc::new(Platform {
+        config: config(&scratch, &server.uri(), 20),
+        provider: model,
+        store: db.store.ledger(),
+        prices: PriceTable::from_toml(PRICES).unwrap(),
+        profiles: Profiles::builtin().unwrap(),
+        github_token: "t".into(),
+    });
+
+    let report = run_issue(Arc::clone(&p), issue(), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+
+    let id = IssueId::parse("fixture-7").unwrap();
+    let events = p.store.events(&id).await.unwrap();
+    let count = |kind: fn(&LedgerEvent) -> bool| events.iter().filter(|e| kind(e)).count();
+    assert_eq!(
+        count(|e| matches!(
+            e,
+            LedgerEvent::ModelCall {
+                tier: Tier::Core,
+                ..
+            }
+        )),
+        4
+    );
+    assert_eq!(count(|e| matches!(e, LedgerEvent::ToolCalls { .. })), 3);
+    assert_eq!(count(|e| matches!(e, LedgerEvent::GateRun(_))), 1);
+    let saved = db.store.record(&id).await.unwrap().expect("record saved");
+    assert_eq!(saved, IssueRecord::from_events(id.clone(), &events));
+    assert_eq!(saved.cost_usd, report.cost_usd);
+
+    let json = JsonFileLedger::new(scratch.0.join("ledger-json"));
+    copy_ledger(&p.store, &json).await.unwrap();
+    let from_json = IssueRecord::from_events(id.clone(), &json.events(&id).await.unwrap());
+    assert_eq!(from_json, saved);
+    assert_eq!(Kpi::from_records([&from_json]), Kpi::from_records([&saved]));
+    db.drop().await;
 }
 
 /// Text of the tool results Core was sent, in order.

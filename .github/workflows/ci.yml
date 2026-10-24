@@ -75,6 +75,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AEGIS_REQUIRE_PROFILE_TOOLS: "1"
+      AEGIS_TEST_DATABASE_URL: postgres://postgres:aegis@localhost:5432/postgres
+      AEGIS_REQUIRE_POSTGRES: "1"
+    services:
+      # aegis-store's tests and those that run an issue on it (#22).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: aegis
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - if: needs.changes.outputs.code == 'true'
@@ -120,6 +131,40 @@ jobs:
       - if: needs.changes.outputs.code != 'true'
         run: echo "Skipping test for documentation-only changes"
 
+  sqlx:
+    name: sqlx-prepare
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:aegis@localhost:5432/aegis
+    services:
+      # aegis-store's tests and those that run an issue on it (#22).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: aegis
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - if: needs.changes.outputs.code == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: needs.changes.outputs.code == 'true'
+        uses: Swatinem/rust-cache@v2
+      - if: needs.changes.outputs.code == 'true'
+        name: sqlx-cli
+        run: cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+      # The committed `.sqlx/` must match the queries and the migrations.
+      - if: needs.changes.outputs.code == 'true'
+        name: cargo sqlx prepare --check
+        run: |
+          cargo sqlx database create
+          cargo sqlx migrate run --source crates/aegis-store/migrations
+          cargo sqlx prepare --workspace --check
+      - if: needs.changes.outputs.code != 'true'
+        run: echo "Skipping sqlx for documentation-only changes"
+
   deny:
     name: deny
     needs: changes
@@ -145,6 +190,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AEGIS_REQUIRE_PROFILE_TOOLS: "1"
+      AEGIS_TEST_DATABASE_URL: postgres://postgres:aegis@localhost:5432/postgres
+      AEGIS_REQUIRE_POSTGRES: "1"
+    services:
+      # aegis-store's tests and those that run an issue on it (#22).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: aegis
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - if: needs.changes.outputs.code == 'true'

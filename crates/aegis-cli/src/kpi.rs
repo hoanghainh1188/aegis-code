@@ -6,8 +6,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use aegis_ledger::{
-    IssueId, IssueLedger, IssueRecord, JsonFileLedger, Kpi, LedgerStore, Outcome, PriceTable,
-    Review, ReviewVerdict,
+    IssueId, IssueLedger, IssueRecord, Kpi, LedgerStore, Outcome, PriceTable, Review, ReviewVerdict,
 };
 use aegis_lifecycle::{RunConfig, load_set};
 use aegis_pr::GitHub;
@@ -23,10 +22,6 @@ pub struct ReviewArgs {
     pub from_pr: Option<String>,
     pub broke_tests: bool,
     pub replace: bool,
-}
-
-pub fn store(config: &RunConfig) -> JsonFileLedger {
-    JsonFileLedger::new(config.run.state_dir.join("ledger"))
 }
 
 fn verdict(text: &str) -> Result<ReviewVerdict, String> {
@@ -62,7 +57,12 @@ async fn lines_from_pr(config: &RunConfig, pr: &str) -> Result<u32, String> {
         .map_err(|e| e.to_string())
 }
 
-pub async fn review(config: &RunConfig, args: &ReviewArgs) -> Result<String, String> {
+/// Records the review in `store`, the configured ledger.
+pub async fn review<S: LedgerStore + Sync>(
+    config: &RunConfig,
+    store: &S,
+    args: &ReviewArgs,
+) -> Result<String, String> {
     let id = args.id.as_deref().ok_or("--id is required")?;
     let verdict = verdict(args.verdict.as_deref().ok_or("--verdict is required")?)?;
     let minutes: f64 = args
@@ -81,7 +81,6 @@ pub async fn review(config: &RunConfig, args: &ReviewArgs) -> Result<String, Str
         (None, Some(pr)) => lines_from_pr(config, pr).await?,
         _ => return Err("give --lines or --from-pr".into()),
     };
-    let store = store(config);
     let prices = PriceTable::load(&config.run.pricing).map_err(|e| e.to_string())?;
     let regional = matches!(config.provider, ProviderConfig::Bedrock { .. });
     let issue = IssueId::parse(id).map_err(|e| e.to_string())?;
@@ -93,7 +92,7 @@ pub async fn review(config: &RunConfig, args: &ReviewArgs) -> Result<String, Str
     {
         return Err(format!("no run `{id}` in the ledger"));
     }
-    let mut ledger = IssueLedger::open(&store, &prices, regional, issue)
+    let mut ledger = IssueLedger::open(store, &prices, regional, issue)
         .await
         .map_err(|e| e.to_string())?;
     let record = ledger.record();
@@ -215,7 +214,7 @@ mod tests {
     async fn a_review_is_recorded_once_unless_replaced() {
         let state = std::env::temp_dir().join(format!("aegis-review-{}", std::process::id()));
         let config = config(&state);
-        let store = store(&config);
+        let store = aegis_ledger::JsonFileLedger::new(crate::ledger::json_dir(&config));
         for (id, outcome) in [
             ("scrapy-7604-r1", Outcome::PrOpened),
             ("scrapy-7604-r2", Outcome::StoppedSteps),
@@ -241,20 +240,24 @@ mod tests {
         };
 
         assert!(
-            review(&config, &args("scrapy-7604-r1", false))
+            review(&config, &store, &args("scrapy-7604-r1", false))
                 .await
                 .is_ok()
         );
-        let again = review(&config, &args("scrapy-7604-r1", false))
+        let again = review(&config, &store, &args("scrapy-7604-r1", false))
             .await
             .unwrap_err();
         assert!(again.contains("already has a review"), "{again}");
-        assert!(review(&config, &args("scrapy-7604-r1", true)).await.is_ok());
-        let stopped = review(&config, &args("scrapy-7604-r2", false))
+        assert!(
+            review(&config, &store, &args("scrapy-7604-r1", true))
+                .await
+                .is_ok()
+        );
+        let stopped = review(&config, &store, &args("scrapy-7604-r2", false))
             .await
             .unwrap_err();
         assert!(stopped.contains("did not open a PR"), "{stopped}");
-        let missing = review(&config, &args("scrapy-1-r9", false))
+        let missing = review(&config, &store, &args("scrapy-1-r9", false))
             .await
             .unwrap_err();
         assert!(missing.contains("no run"), "{missing}");
@@ -262,7 +265,7 @@ mod tests {
             minutes: Some("-1".into()),
             ..args("scrapy-7604-r1", true)
         };
-        assert!(review(&config, &bad).await.is_err());
+        assert!(review(&config, &store, &bad).await.is_err());
 
         let text = report(&store, None).await.unwrap();
         assert!(

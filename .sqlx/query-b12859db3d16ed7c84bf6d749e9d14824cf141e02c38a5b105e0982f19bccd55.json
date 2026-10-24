@@ -1,0 +1,163 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)\n             VALUES ($1, $2, $3, $4)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "repo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "repo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "issue_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "issue_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ledger_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "ledger_key"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "locked_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "locked_by"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "locked_until",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "locked_until"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b12859db3d16ed7c84bf6d749e9d14824cf141e02c38a5b105e0982f19bccd55"
+}

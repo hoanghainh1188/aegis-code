@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, slug, url, default_branch, language, mode, config, created_at\n             FROM repos WHERE $1::bigint IS NULL OR id > $1\n             ORDER BY id LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "default_branch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "default_branch"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "language",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "config",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "config"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "efa5c3b43dfb86fd2de3793c5d3a2192116f850988d5c34702173fd06054f899"
+}

@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runs SET status = $2, error = $3, ended_at = now()\n             WHERE id = $1 AND status = 'running'\n             RETURNING id, job_id, attempt, status, error, started_at, ended_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "attempt",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "attempt"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "ended_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "ended_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "c6d35a7f790a52a24672b113818b25a9dd30779cac089514418732e860a08a8b"
+}

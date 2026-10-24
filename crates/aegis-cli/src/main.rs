@@ -8,6 +8,8 @@
 //! aegis eval  --config config/poc.toml --set eval/issues --replay --no-pr
 //! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
 //! aegis report --config config/poc.toml [--set eval/issues]
+//! aegis ledger import --config config/poc.toml [--from .workspace/state/ledger]
+//! aegis ledger export --config config/poc.toml --to exported-ledger
 //! ```
 //!
 //! `issues.txt` has one `owner/repo#number` per line (`#` comments allowed).
@@ -18,13 +20,17 @@
 //! written through the tools, runs `<id>-dry<n>` in their own ledger.
 //! `--no-pr` stops where the PR would be opened, with or without `--replay`
 //! (#111); the fork token is then not needed.
+//!
+//! `run.ledger = "postgres"` keeps the ledger of real runs in the database
+//! named by `AEGIS_DATABASE_URL` (#22); dry runs keep their own JSON
+//! ledger either way. `aegis ledger import|export` copies between the two.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use aegis_lang::Profiles;
-use aegis_ledger::{JsonFileLedger, Outcome, PriceTable};
+use aegis_ledger::{JsonFileLedger, LedgerStore, Outcome, PriceTable};
 use aegis_lifecycle::{
     EvalIssue, IssueInput, IssueReport, LifecycleError, Platform, Replay, ReplayProvider,
     RunConfig, run_issue,
@@ -33,6 +39,8 @@ use aegis_provider::{ModelProvider, Provider};
 
 mod banner;
 mod kpi;
+mod ledger;
+use ledger::Ledger;
 use tokio_util::sync::CancellationToken;
 
 const USAGE: &str = "usage:
@@ -41,7 +49,9 @@ const USAGE: &str = "usage:
   aegis eval  --config <file> --set <dir> [--only <id>]... [--replay] [--no-pr]
   aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
-  aegis report --config <file> [--set <dir>]";
+  aegis report --config <file> [--set <dir>]
+  aegis ledger import --config <file> [--from <dir>]
+  aegis ledger export --config <file> --to <dir>";
 
 #[derive(Debug, Default)]
 struct Args {
@@ -56,6 +66,10 @@ struct Args {
     replay: bool,
     no_pr: bool,
     review: kpi::ReviewArgs,
+    /// `import` or `export` after `aegis ledger`.
+    action: Option<String>,
+    from: Option<PathBuf>,
+    to: Option<PathBuf>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -70,6 +84,9 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         command: first,
         ..Args::default()
     };
+    if parsed.command == "ledger" {
+        parsed.action = Some(args.next().ok_or("`aegis ledger` needs import or export")?);
+    }
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
         match flag.as_str() {
@@ -88,6 +105,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--from-pr" => parsed.review.from_pr = Some(value()?),
             "--broke-tests" => parsed.review.broke_tests = true,
             "--replace" => parsed.review.replace = true,
+            "--from" => parsed.from = Some(value()?.into()),
+            "--to" => parsed.to = Some(value()?.into()),
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -106,7 +125,7 @@ fn parse_issue_ref(text: &str) -> Result<(String, String, u64), String> {
     Ok((owner.to_owned(), name.to_owned(), number))
 }
 
-type Run = Platform<Provider, JsonFileLedger>;
+type Run = Platform<Provider, Ledger>;
 
 /// The model's platform; no fork token unless PRs are opened.
 async fn platform(config_path: &Path, open_prs: bool) -> Result<Run, String> {
@@ -116,7 +135,7 @@ async fn platform(config_path: &Path, open_prs: bool) -> Result<Run, String> {
         .await
         .map_err(|e| e.to_string())?;
     let github_token = fork_token(&config)?;
-    let store = JsonFileLedger::new(config.run.state_dir.join("ledger"));
+    let store = ledger::open(&config).await?;
     finish_platform(config, provider, store, github_token)
 }
 
@@ -142,12 +161,12 @@ fn replay_platform(
     finish_platform(config, ReplayProvider::default(), store, github_token)
 }
 
-fn finish_platform<P>(
+fn finish_platform<P, S>(
     config: RunConfig,
     provider: P,
-    store: JsonFileLedger,
+    store: S,
     github_token: String,
-) -> Result<Platform<P, JsonFileLedger>, String> {
+) -> Result<Platform<P, S>, String> {
     // Before the first issue, so a missing ACI writes nothing to the ledger.
     config.check_aci_bin().map_err(|e| e.to_string())?;
     let prices = PriceTable::load(&config.run.pricing).map_err(|e| e.to_string())?;
@@ -182,13 +201,14 @@ async fn fetch(run: &Run, issue_ref: &str) -> Result<IssueInput, String> {
 }
 
 /// Runs one issue in its own task.
-async fn one<P>(
-    run: &Arc<Platform<P, JsonFileLedger>>,
+async fn one<P, S>(
+    run: &Arc<Platform<P, S>>,
     issue: IssueInput,
     cancel: &CancellationToken,
 ) -> Result<IssueReport, LifecycleError>
 where
     P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
 {
     tokio::spawn(run_issue(Arc::clone(run), issue, cancel.clone()))
         .await
@@ -240,19 +260,38 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         banner::print_help();
         return Ok(true);
     }
-    if !["run", "batch", "eval", "review", "report"].contains(&args.command.as_str()) {
+    if !["run", "batch", "eval", "review", "report", "ledger"].contains(&args.command.as_str()) {
         return Err(format!("unknown command `{}`", args.command));
     }
     // Reading and writing the ledger needs neither the model nor the fork.
-    if let "review" | "report" = args.command.as_str() {
+    if let "review" | "report" | "ledger" = args.command.as_str() {
         let path = args.config.as_deref().ok_or("--config is required")?;
         let config = RunConfig::load(path).map_err(|e| e.to_string())?;
-        let text = if args.command == "review" {
-            let mut review = std::mem::take(&mut args.review);
-            review.id = args.id.clone();
-            kpi::review(&config, &review).await?
-        } else {
-            kpi::report(&kpi::store(&config), args.set.as_deref()).await?
+        let text = match (args.command.as_str(), args.action.as_deref()) {
+            ("review", _) => {
+                let mut review = std::mem::take(&mut args.review);
+                review.id = args.id.clone();
+                kpi::review(&config, &ledger::open(&config).await?, &review).await?
+            }
+            ("report", _) => {
+                kpi::report(&ledger::open(&config).await?, args.set.as_deref()).await?
+            }
+            ("ledger", Some("import")) => {
+                let from = args
+                    .from
+                    .clone()
+                    .unwrap_or_else(|| ledger::json_dir(&config));
+                ledger::import(&from).await?
+            }
+            ("ledger", Some("export")) => {
+                ledger::export(args.to.as_deref().ok_or("--to is required")?).await?
+            }
+            (_, action) => {
+                return Err(format!(
+                    "`aegis ledger` takes import or export, not `{}`",
+                    action.unwrap_or_default()
+                ));
+            }
         };
         println!("{text}");
         return Ok(true);
@@ -329,15 +368,16 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
 /// Runs the set's issues of the configured repo's language, one after the
 /// other, each under a new run id. Exit code 0 when every run opened a PR
 /// whose hidden tests pass.
-async fn eval<P>(
-    run: &Arc<Platform<P, JsonFileLedger>>,
+async fn eval<P, S>(
+    run: &Arc<Platform<P, S>>,
     args: &Args,
     cancel: &CancellationToken,
     mark: &str,
-    before: impl Fn(&Platform<P, JsonFileLedger>, &EvalIssue) -> Result<(), String>,
+    before: impl Fn(&Platform<P, S>, &EvalIssue) -> Result<(), String>,
 ) -> Result<bool, String>
 where
     P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
 {
     let dir = args.set.as_deref().ok_or("--set is required")?;
     let set = aegis_lifecycle::load_set(dir).map_err(|e| e.to_string())?;
@@ -427,6 +467,19 @@ mod tests {
         assert_eq!(args.command, "run");
         assert_eq!(args.issue.as_deref(), Some("a/b#1"));
         assert!(parse_args(["run", "--bogus"].into_iter().map(String::from)).is_err());
+
+        let args = parse_args(
+            ["ledger", "export", "--config", "c.toml", "--to", "out"]
+                .into_iter()
+                .map(String::from),
+        )
+        .unwrap();
+        assert_eq!(
+            (args.command.as_str(), args.action.as_deref()),
+            ("ledger", Some("export"))
+        );
+        assert_eq!(args.to.as_deref(), Some(Path::new("out")));
+        assert!(parse_args(["ledger"].into_iter().map(String::from)).is_err());
     }
 
     #[test]
@@ -478,6 +531,7 @@ mod tests {
                 .unwrap();
         assert_eq!(config.repo.key, "scrapy");
         assert_eq!(config.models.core.id, "claude-sonnet-5-5");
+        assert_eq!(config.run.ledger, aegis_lifecycle::LedgerBackend::Json);
         let profile = Profiles::builtin()
             .unwrap()
             .get(config.repo.language)
