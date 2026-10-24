@@ -14,6 +14,7 @@ fn repo(slug: &str) -> NewRepo {
         default_branch: "main".into(),
         language: "rust".into(),
         mode: RepoMode::Poc,
+        max_concurrent_jobs: 2,
         config: serde_json::json!({ "image": "aegis/rust:1" }),
     }
 }
@@ -35,6 +36,7 @@ async fn repos_are_created_found_and_unique_by_slug() {
     assert_eq!(typst.slug, "typst");
     assert_eq!(typst.mode, RepoMode::Poc);
     assert_eq!(typst.config["image"], "aegis/rust:1");
+    assert_eq!(typst.max_concurrent_jobs, 2);
     assert_eq!(s.repo(typst.id).await.unwrap(), Some(typst.clone()));
     assert_eq!(s.repo_by_slug("typst").await.unwrap(), Some(typst));
 
@@ -42,6 +44,21 @@ async fn repos_are_created_found_and_unique_by_slug() {
     assert!(matches!(err, StoreError::Conflict(_)), "{err}");
     let err = s.create_repo(&repo("../etc")).await.unwrap_err();
     assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
+    let none_at_once = NewRepo {
+        max_concurrent_jobs: 0,
+        ..repo("idle")
+    };
+    let err = s.create_repo(&none_at_once).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            StoreError::Invalid {
+                field: "max_concurrent_jobs",
+                ..
+            }
+        ),
+        "{err}"
+    );
     db.drop().await;
 }
 

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use aegis_lang::{Language, ProfileOverrides};
 use aegis_provider::ProviderConfig;
 use aegis_router::{BudgetLimits, EscalationRules, ModelsConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::LifecycleError;
 
@@ -105,7 +105,7 @@ fn default_context_window() -> u64 {
     200_000
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BudgetSection {
     pub max_cost_usd: f64,
@@ -135,8 +135,8 @@ impl BudgetSection {
     }
 }
 
-/// The repo the agent maintains (Phase 1: one per run configuration;
-/// many repos come with #24).
+/// The repo the agent maintains: the `[repo]` section of a CLI run, or
+/// built from the registry (#24, [`crate::Modes`]).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepoConfig {
@@ -156,6 +156,16 @@ pub struct RepoConfig {
     /// Packages a patch may add (`policies/allowed-*.toml`).
     #[serde(default)]
     pub allowed_packages: Option<PathBuf>,
+    /// More packages a patch may add, this repo's own allow-list.
+    #[serde(default)]
+    pub allowed_package_names: Vec<String>,
+    /// Licenses this repo's dependencies may have, in place of
+    /// `policies/licenses.toml`, for the audit step (`{licenses}`, #159).
+    #[serde(default)]
+    pub licenses: Option<Vec<String>>,
+    /// Advisories (`RUSTSEC-…`, `GHSA-…`) this repo's audit lets through.
+    #[serde(default)]
+    pub ignored_advisories: Vec<String>,
     /// How eval runs run an issue's hidden tests (#98): `{tests}` becomes
     /// the tests as separate arguments, `{tests_regex}` one `^(a|b)$`.
     #[serde(default)]
@@ -173,7 +183,7 @@ impl RepoConfig {
 }
 
 /// The fork the agent pushes to and opens PRs in.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForkConfig {
     pub owner: String,
@@ -199,7 +209,7 @@ pub struct IdentityConfig {
 
 /// SonarQube Server or SonarQube Cloud (design §6.1): they differ in
 /// `url`, the token and `organization` (Cloud only).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SonarConfig {
     pub url: String,
@@ -253,6 +263,8 @@ fn default_sonar_poll() -> u64 {
 }
 
 /// Another MCP server whose tools the agent gets (Codebase-Memory).
+/// `{index_dir}` in `args` and `env` values is the repo's own index
+/// directory, `<state_dir>/index/<repo key>`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraServer {
@@ -321,23 +333,27 @@ impl RunConfig {
     pub fn from_toml(text: &str) -> Result<Self, LifecycleError> {
         let config: Self =
             toml::from_str(text).map_err(|e| LifecycleError::Config(e.to_string()))?;
-        config.repo.profile_overrides()?;
-        let key_ok = !config.repo.key.is_empty()
-            && config
-                .repo
-                .key
+        config.check()
+    }
+
+    /// What deserializing alone does not check. A registry slug is a valid
+    /// key: `.` is allowed past the first character.
+    pub(crate) fn check(self) -> Result<Self, LifecycleError> {
+        self.repo.profile_overrides()?;
+        let key = &self.repo.key;
+        let key_ok = key.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && key
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
+                .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
         if !key_ok {
             return Err(LifecycleError::Config(format!(
-                "repo.key `{}` must be letters, digits, `-` or `_`",
-                config.repo.key
+                "repo.key `{key}` must be letters, digits, `-`, `_` or `.`, starting with a letter or digit"
             )));
         }
-        if let Some(sonar) = &config.sonar {
+        if let Some(sonar) = &self.sonar {
             sonar.check()?;
         }
-        Ok(config)
+        Ok(self)
     }
 
     /// Reads `path`; relative paths in it are taken from the current

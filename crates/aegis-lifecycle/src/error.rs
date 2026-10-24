@@ -14,6 +14,9 @@ pub enum LifecycleError {
     Git { args: String, message: String },
 
     #[error(transparent)]
+    Store(#[from] aegis_store::StoreError),
+
+    #[error(transparent)]
     Ledger(#[from] aegis_ledger::LedgerError),
 
     #[error(transparent)]

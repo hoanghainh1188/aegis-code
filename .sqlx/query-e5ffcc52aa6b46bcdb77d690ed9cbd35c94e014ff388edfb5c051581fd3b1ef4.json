@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, url, default_branch, language, mode, config, created_at\n             FROM repos WHERE slug = $1",
+  "query": "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at\n             FROM repos WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "max_concurrent_jobs",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "max_concurrent_jobs"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "config",
         "type_info": "Jsonb",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -94,7 +105,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -105,8 +116,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "c0423b98827261c41a5a23f0a01bed8b09817b05bc5f35993a25f3b6dd3143b2"
+  "hash": "e5ffcc52aa6b46bcdb77d690ed9cbd35c94e014ff388edfb5c051581fd3b1ef4"
 }

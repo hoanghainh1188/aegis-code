@@ -360,7 +360,7 @@ where
     let mut groups = group(&found, checkout.path(), cfg.repo.language);
     let left_out = groups.split_off(MAX_GROUPS.min(groups.len()));
     // Made once here, not by every session at the same time.
-    module_map(cfg, profile)?;
+    module_map(cfg, profile, checkout.path(), &base)?;
 
     let sessions = join_all(
         groups
