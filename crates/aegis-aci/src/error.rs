@@ -34,6 +34,10 @@ pub enum AciError {
     #[error("{0}")]
     LanguageServer(String),
 
+    /// `run_tests` could not start the test command.
+    #[error("cannot run the test: {0}")]
+    Tests(String),
+
     #[error("I/O error on `{path}`: {message}")]
     Io { path: String, message: String },
 

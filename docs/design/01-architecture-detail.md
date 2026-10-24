@@ -69,7 +69,7 @@ Mọi công cụ trả kết quả có định dạng rõ, kèm đường dẫn 
 | `open` | File, dòng bắt đầu | Khung 100 dòng có số dòng, số dòng ẩn trên/dưới | 100 dòng / lần |
 | `scroll_up` / `scroll_down` / `goto` | Hướng hoặc số dòng | Khung 100 dòng mới | — |
 | `edit` | File, dòng từ–đến, nội dung mới | Đoạn sau khi sửa ±5 dòng | Kiểm tra cú pháp bằng tree-sitter + formatter của profile (ví dụ `rustfmt`, `ruff format`); lỗi → từ chối, không ghi file |
-| `run_tests` | Crate hoặc tên test | Kết quả đã tóm tắt | Gọi gate runner, không chạy shell tự do |
+| `run_tests` | Tên một test (như test runner gọi) | PASSED / FAILED, test fail, phần cuối output | Lệnh `gate.repro_test` của profile, trong sandbox của gate (`--network none`, image và mount của profile); dừng sau `step_timeout_s`, tối đa 240 s. Không phải lần gate, không chạy shell tự do (#137) |
 
 Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của SWE-agent: 100 dòng cho kết quả tốt hơn 30 dòng, 400 dòng và cả file.
 

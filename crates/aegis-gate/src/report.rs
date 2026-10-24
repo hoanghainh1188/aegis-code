@@ -160,7 +160,7 @@ fn read_end(path: &Path, bytes: u64) -> String {
 }
 
 /// The last lines of a log, each cut to a readable width.
-pub(crate) fn tail(log: &Path) -> String {
+pub fn tail(log: &Path) -> String {
     let text = read_end(log, TAIL_BYTES);
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     lines[lines.len().saturating_sub(TAIL_LINES)..]

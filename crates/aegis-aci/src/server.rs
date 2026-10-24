@@ -13,6 +13,8 @@ use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
+use aegis_gate::CancelToken;
+
 use crate::{Aci, AciError, EditOutcome, EditRequest, LookupAt, redact};
 
 /// The tools that need the profile's language server (#89).
@@ -90,6 +92,14 @@ pub struct EditParams {
     pub content: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunTestsParams {
+    /// One test as the repo's test runner names it, e.g. your reproduction
+    /// test: `tests/test_x.py::test_y` (pytest), `module::tests::name`
+    /// (cargo test).
+    pub test: String,
+}
+
 /// A call that waited this long for the previous one is dropped. Kept below
 /// the orchestrator's call timeout, so a call it reported as unfinished is
 /// never run afterwards.
@@ -98,12 +108,14 @@ pub const MAX_QUEUE_WAIT: Duration = Duration::from_secs(120);
 #[derive(Debug, Clone)]
 pub struct AciServer {
     aci: Arc<Mutex<Aci>>,
+    tests: CancelToken,
     tool_router: ToolRouter<Self>,
 }
 
 impl AciServer {
     /// The tool list is fixed for the session: the language server's
-    /// tools are left out when the profile names none.
+    /// tools are left out when the profile names none, `run_tests` when it
+    /// has no command for one test.
     pub fn new(aci: Aci) -> Self {
         let mut tool_router = Self::tool_router();
         if !aci.has_language_server() {
@@ -111,10 +123,27 @@ impl AciServer {
                 tool_router.remove_route(name);
             }
         }
+        if !aci.can_run_tests() {
+            tool_router.remove_route("run_tests");
+        }
         Self {
+            tests: aci.tests_cancel_token(),
             aci: Arc::new(Mutex::new(aci)),
             tool_router,
         }
+    }
+
+    /// Stops a `run_tests` call in progress and waits up to `grace` for it
+    /// to kill its container, so none outlives the session.
+    pub fn stop_tests(&self, grace: Duration) {
+        self.tests.cancel();
+        let (done, finished) = std::sync::mpsc::channel();
+        let aci = Arc::clone(&self.aci);
+        std::thread::spawn(move || {
+            drop(aci.lock());
+            let _ = done.send(());
+        });
+        let _ = finished.recv_timeout(grace);
     }
 
     /// Runs a tool off the async runtime: edits may wait on the formatter.
@@ -292,13 +321,26 @@ impl AciServer {
             EditOutcome::Rejected { .. } => Err(outcome.to_string()),
         })
     }
+
+    #[tool(
+        description = "Run one test on the code as it is now, with the command and in \
+                          the sandbox the checks use for the reproduction test. \
+                          Returns PASSED or FAILED, the failing tests and the end of the \
+                          output; a run that takes too long is stopped. Use it to see your \
+                          reproduction test fail before the fix and pass after it. It is \
+                          not a check run."
+    )]
+    async fn run_tests(&self, Parameters(p): Parameters<RunTestsParams>) -> Result<String, String> {
+        self.with_aci(move |aci| aci.run_tests(&p.test)).await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AciServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Find, view and edit code in one repo. Paths are relative to the repo root.",
+            "Find, view and edit code in one repo, and run one test on it. Paths are \
+             relative to the repo root.",
         )
     }
 }
@@ -310,11 +352,15 @@ mod tests {
     use super::*;
 
     fn tools(with_language_server: bool) -> Vec<String> {
+        tools_with(with_language_server, &ProfileOverrides::default())
+    }
+
+    fn tools_with(with_language_server: bool, overrides: &ProfileOverrides) -> Vec<String> {
         let mut profile = Profiles::builtin()
             .unwrap()
             .get(Language::Rust)
             .unwrap()
-            .resolve(&ProfileOverrides::default())
+            .resolve(overrides)
             .unwrap();
         if !with_language_server {
             profile.profile.aci.lsp = None;
@@ -339,5 +385,14 @@ mod tests {
             assert!(!without.iter().any(|t| t == name), "{without:?}");
         }
         assert_eq!(with.len(), without.len() + LANGUAGE_SERVER_TOOLS.len());
+    }
+
+    #[test]
+    fn run_tests_comes_only_with_a_command_for_one_test() {
+        assert!(tools(true).iter().any(|t| t == "run_tests"));
+        let overrides: ProfileOverrides = toml::from_str("[gate]\nrepro_test = false\n").unwrap();
+        let without = tools_with(true, &overrides);
+        assert!(!without.iter().any(|t| t == "run_tests"), "{without:?}");
+        assert_eq!(without.len() + 1, tools(true).len());
     }
 }
