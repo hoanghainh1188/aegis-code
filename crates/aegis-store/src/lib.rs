@@ -1,11 +1,12 @@
 //! Durable platform state in PostgreSQL (ADR 0003 §2, #22): repos, jobs,
-//! their runs, the job queue, and the ledger behind
+//! their runs, the job queue, webhook deliveries, and the ledger behind
 //! [`aegis_ledger::LedgerStore`].
 //!
 //! Queries are checked against the schema at compile time; `.sqlx/` at the
 //! workspace root lets the crate build without a database. Every list is
 //! paged ([`Page`]).
 
+mod deliveries;
 mod error;
 mod jobs;
 mod ledger;
@@ -27,8 +28,8 @@ pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
 pub use queue::{AttemptEnd, Claim, Lease};
 pub use types::{
-    Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, NewRepo, Repo, RepoId, RepoMode,
-    Run, RunEnd, RunId, RunStatus,
+    Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob, NewRepo,
+    Repo, RepoId, RepoMode, Run, RunEnd, RunId, RunStatus, WebhookSource,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();

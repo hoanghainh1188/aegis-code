@@ -287,7 +287,7 @@ async fn issue(claim: &Claim, api: &str, token: &str) -> Result<IssueInput, Atte
 }
 
 /// `owner/repo#number`.
-fn parse_issue_ref(text: &str) -> Result<(String, String, u64), String> {
+pub(crate) fn parse_issue_ref(text: &str) -> Result<(String, String, u64), String> {
     let bad = || format!("`{text}` is not owner/repo#number");
     let (repo, number) = text.trim().split_once('#').ok_or_else(bad)?;
     let (owner, name) = repo.split_once('/').ok_or_else(bad)?;

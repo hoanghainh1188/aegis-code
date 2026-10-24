@@ -6,13 +6,17 @@
 //! Shutdown: no new claims, the running attempts get the drain time to
 //! end; those still running then are dropped, their runs `interrupted`
 //! and their jobs queued again for the next worker.
+//!
+//! When a job ends (a PR, a stop, a failure, a cancel), its [`JobNotifier`]
+//! is told, to report it where the job came from (#25).
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aegis_ledger::Outcome;
-use aegis_store::{AttemptEnd, Claim, JobId, Lease, Run, Store};
+use aegis_store::{AttemptEnd, Claim, Job, JobId, JobStatus, Lease, Run, Store};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -51,6 +55,20 @@ pub fn backoff(base: Duration, retries: u32) -> Duration {
         .min(MAX_BACKOFF)
 }
 
+/// Told of every job a worker ends, once, after its end is recorded. It
+/// runs in the job's slot, so it should bound its own time.
+pub trait JobNotifier: Send + Sync + 'static {
+    fn job_ended(&self, job: &Job) -> impl Future<Output = ()> + Send;
+}
+
+/// Tells no one.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoNotifier;
+
+impl JobNotifier for NoNotifier {
+    async fn job_ended(&self, _job: &Job) {}
+}
+
 /// The runs this worker holds, to release them if the drain runs out.
 type Active = Arc<Mutex<HashMap<JobId, Run>>>;
 
@@ -59,6 +77,17 @@ type Active = Arc<Mutex<HashMap<JobId, Run>>>;
 pub async fn run_worker<R: JobRunner>(
     store: Store,
     runner: Arc<R>,
+    config: WorkerConfig,
+    shutdown: CancellationToken,
+) {
+    run_worker_notifying(store, runner, Arc::new(NoNotifier), config, shutdown).await;
+}
+
+/// [`run_worker`], telling `notifier` of every job that ends.
+pub async fn run_worker_notifying<R: JobRunner, N: JobNotifier>(
+    store: Store,
+    runner: Arc<R>,
+    notifier: Arc<N>,
     config: WorkerConfig,
     shutdown: CancellationToken,
 ) {
@@ -74,7 +103,7 @@ pub async fn run_worker<R: JobRunner>(
             Ok(_) => {}
             Err(e) => tracing::error!(error = %e, "reclaiming expired leases"),
         }
-        claim_while_room(&store, &runner, &config, &active, &mut tasks).await;
+        claim_while_room(&store, &runner, &notifier, &config, &active, &mut tasks).await;
         tokio::select! {
             () = shutdown.cancelled() => break,
             () = tokio::time::sleep(config.poll_every) => {}
@@ -85,9 +114,10 @@ pub async fn run_worker<R: JobRunner>(
     tracing::info!(worker = %config.worker_id, "worker stopped");
 }
 
-async fn claim_while_room<R: JobRunner>(
+async fn claim_while_room<R: JobRunner, N: JobNotifier>(
     store: &Store,
     runner: &Arc<R>,
+    notifier: &Arc<N>,
     config: &Arc<WorkerConfig>,
     active: &Active,
     tasks: &mut JoinSet<()>,
@@ -109,6 +139,7 @@ async fn claim_while_room<R: JobRunner>(
         tasks.spawn(attempt(
             store.clone(),
             Arc::clone(runner),
+            Arc::clone(notifier),
             Arc::clone(config),
             Arc::clone(active),
             claim,
@@ -131,9 +162,10 @@ fn log_join(done: Result<(), tokio::task::JoinError>) {
     }
 }
 
-async fn attempt<R: JobRunner>(
+async fn attempt<R: JobRunner, N: JobNotifier>(
     store: Store,
     runner: Arc<R>,
+    notifier: Arc<N>,
     config: Arc<WorkerConfig>,
     active: Active,
     claim: Claim,
@@ -145,7 +177,10 @@ async fn attempt<R: JobRunner>(
             .await
         {
             Ok(j) => {
-                tracing::info!(job, status = j.status.as_str(), reason = ?j.reason, "attempt ended")
+                tracing::info!(job, status = j.status.as_str(), reason = ?j.reason, "attempt ended");
+                if j.status != JobStatus::Queued {
+                    notifier.job_ended(&j).await;
+                }
             }
             Err(e) => tracing::error!(job, error = %e, "recording the attempt's end"),
         },
