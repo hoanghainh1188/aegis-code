@@ -278,7 +278,11 @@ Code của khách sẽ được gửi tới API model. Việc này phải đư�
 | Tỉ lệ đọc cache | `cache_read_input_tokens` / tổng input | ≥ 70% |
 | Tỉ lệ issue phải lên Expert | Log định tuyến | Theo dõi, chưa đặt ngưỡng |
 
-Các ngưỡng trên là đề xuất ban đầu. Nên chốt lại với team sau 1 tuần chạy thử.
+Các ngưỡng trên là đề xuất ban đầu. Sau ba lần đo trên bộ thử 32 issue (#18, #142, #145), ngưỡng đã được chốt ở [ADR 0005](../adr/0005-kpi-thresholds-after-phase-1.md):
+- Tỉ lệ chấp nhận ≥ 40% tính chung, và ≥ 35% cho mỗi ngôn ngữ. 40% cho mỗi ngôn ngữ là mục tiêu ở Phase 2.
+- Các ngưỡng còn lại giữ nguyên.
+
+Kết quả Phase 1: tổng 50%, Python 64%, Rust 39%, không PR nào làm vỡ test cũ, chi phí khoảng $0.55/issue, cache 92%.
 
 ## 9. Lộ trình triển khai
 
@@ -287,7 +291,7 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 | Phase | Thời gian | Làm gì | Mốc đo |
 | --- | --- | --- | --- |
 | 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động |
-| 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; language profile Rust và Python; chạy bộ issue của một repo mỗi ngôn ngữ | Đạt các ngưỡng ở mục 8 |
+| 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; language profile Rust và Python; chạy bộ issue của một repo mỗi ngôn ngữ | Đạt các ngưỡng ở mục 8, chốt ở [ADR 0005](../adr/0005-kpi-thresholds-after-phase-1.md). **Đã đóng mốc 2026-10-24** |
 | 2. Platform | 2–3 tháng | Profile TypeScript/JavaScript, Java, Go, C#/.NET; chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai. Kiến trúc: [ADR 0003](../adr/0003-platform-service-architecture.md) | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP |
 | 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài 6 profile ban đầu ([ADR 0004](../adr/0004-multi-language-profiles.md)), model local | Có ROI rõ ràng |
 
