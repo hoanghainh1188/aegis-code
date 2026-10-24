@@ -175,12 +175,15 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+      # The gate's policy for target repos, run on this tree to show it is
+      # valid. Advisories are left to the step above: aegis's own exceptions
+      # (deny.toml) must not be copied into the targets' policy.
       - if: needs.changes.outputs.code == 'true'
         name: policies/deny.toml is valid
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           arguments: --config policies/deny.toml
-          command: check
+          command: check bans licenses sources
       - if: needs.changes.outputs.code != 'true'
         run: echo "Skipping deny for documentation-only changes"
 
