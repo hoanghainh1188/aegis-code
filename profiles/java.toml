@@ -2,7 +2,7 @@
 # Mặc định cho Maven; repo dùng Gradle hay có formatter/linter riêng
 # (Spotless, Checkstyle…) thì ghi đè trong RepoConfig.
 # Placeholder: `{test}` ở gate.repro_test (`Class#method` của surefire),
-# `{lockfile}` / `{licenses}` ở audit.
+# `{lockfile}` / `{licenses}` / `{osv_config}` ở audit.
 #
 # Gate chạy không mạng nên mọi lệnh Maven có `-o`. Bước lấy phụ thuộc chạy
 # pha `test` với một tag JUnit không có thật: surefire tải provider JUnit
@@ -56,7 +56,9 @@ fetch = [
     "-Dsurefire.failIfNoSpecifiedTests=false",
     "-DfailIfNoTests=false",
 ]
-audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+# OSV advisories and deps.dev license data; nothing else (#159).
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
 # Bản vá chạm vào là bị chặn (#83): cấu hình Maven ngoài pom (thêm -D, -s
 # settings.xml, mirror), build script và wrapper của Gradle, không đọc được.
 protected = [

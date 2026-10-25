@@ -1,6 +1,7 @@
 # Language profile Go (ADR 0004, #69). Lệnh là mảng argv, không qua shell.
 # Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test (regex
-# của `go test -run`), `{lockfile}` / `{licenses}` ở dependencies.audit.
+# của `go test -run`), `{lockfile}` / `{licenses}` / `{osv_config}` ở
+# dependencies.audit.
 # RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
 
 language = "go"
@@ -35,7 +36,9 @@ manifests = ["go.mod"]
 lockfiles = ["go.mod", "go.sum"]
 official_source = "proxy.golang.org"
 fetch = ["go", "mod", "download"]
-audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+# OSV advisories and deps.dev license data; nothing else (#159).
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
 # Bản vá chạm vào là bị chặn (#83): go.work ghi đè replace của go.mod;
 # vendor/ được build thay cho module tải về, không kiểm hash.
 protected = [

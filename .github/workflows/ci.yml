@@ -123,6 +123,11 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         uses: Swatinem/rust-cache@v2
       - if: needs.changes.outputs.code == 'true'
+        # The Rust profile's audit step (#159), as in docker/rust.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - if: needs.changes.outputs.code == 'true'
         name: test (workspace)
         run: cargo test --workspace
       - if: needs.changes.outputs.code == 'true'
@@ -271,7 +276,8 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov
+          # cargo-deny: the Rust profile's audit step (#159), as in docker/rust.
+          tool: cargo-llvm-cov,cargo-deny@0.20.2
       - if: needs.changes.outputs.code == 'true'
         name: coverage (workspace, all features)
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80 --lcov --output-path lcov.info

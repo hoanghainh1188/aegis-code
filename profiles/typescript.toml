@@ -2,7 +2,7 @@
 # argv, không qua shell. Công cụ chạy bằng `npx --no-install` để chỉ dùng bản
 # đã có trong node_modules của repo (gate không có mạng).
 # Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test (file hoặc
-# tên test, truyền cho test runner), `{lockfile}` / `{licenses}` ở audit.
+# tên test, truyền cho test runner), `{lockfile}` / `{licenses}` / `{osv_config}` ở audit.
 # RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
 
 language = "typescript"
@@ -39,7 +39,9 @@ manifests = ["package.json"]
 lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
 official_source = "https://registry.npmjs.org"
 fetch = ["npm", "ci", "--ignore-scripts"]
-audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+# OSV advisories and deps.dev license data; nothing else (#159).
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
 # Bản vá chạm vào là bị chặn (#83): .npmrc đổi registry mà lockfile vẫn
 # ghi registry.npmjs.org.
 protected = [

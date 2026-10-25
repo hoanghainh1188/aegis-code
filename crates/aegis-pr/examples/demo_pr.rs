@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         allowed_tests: vec![],
         reference_groups: vec![],
         sonar: None,
+        audit: Default::default(),
     })?;
     println!("{report}");
     if !report.passed() {
