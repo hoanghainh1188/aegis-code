@@ -61,6 +61,11 @@ impl TestDb {
             .map(|r| r.rows_affected())
     }
 
+    /// How to connect to this database, as another process would.
+    pub fn options(&self) -> PgConnectOptions {
+        self.admin.clone().database(&self.name)
+    }
+
     /// Drops the database. A failed test leaves its database behind; CI's
     /// server is thrown away, a local one can drop `aegis_test_*` by hand.
     pub async fn drop(self) {

@@ -43,7 +43,15 @@ pub use types::{
 };
 pub use users::{PendingLogin, Session, TokenHash};
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
+/// The schema's migrations, expand/contract (`docs/runbook`): an older
+/// binary must start on a schema a newer one expanded, as a rollback does
+/// (#176). So migrations applied but unknown to this binary are let be;
+/// one it knows whose checksum changed still stops it.
+fn migrator() -> sqlx::migrate::Migrator {
+    let mut migrator = sqlx::migrate!();
+    migrator.set_ignore_missing(true);
+    migrator
+}
 
 const MAX_CONNECTIONS: u32 = 10;
 
@@ -67,7 +75,7 @@ impl Store {
             .max_connections(MAX_CONNECTIONS)
             .connect_with(options)
             .await?;
-        MIGRATOR.run(&pool).await?;
+        migrator().run(&pool).await?;
         Ok(Self {
             pool,
             budget: Arc::default(),

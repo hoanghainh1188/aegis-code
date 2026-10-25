@@ -102,7 +102,7 @@ Rollback chỉ đổi image, không lùi DB. Vì thế mỗi migration phải ch
 - **Expand** (một bản phát hành): thêm bảng, cột cho phép NULL hoặc có default, index (`CONCURRENTLY` nếu bảng lớn). Code mới ghi cả cột cũ lẫn mới nếu cần.
 - **Contract** (bản phát hành sau, khi không còn rollback về bản trước expand): xóa cột/bảng cũ, thêm `NOT NULL`.
 - Không đổi tên hay đổi kiểu cột trong một bước; không xóa thứ bản trước còn đọc.
-- **Giới hạn hiện tại (#176):** server chạy migration với cài đặt mặc định của `sqlx`, nên image cũ gặp DB đã có migration nó không biết sẽ dừng với `VersionMissing`. Đến khi #176 xong, **không rollback được qua một bản có migration**: sửa tiến (bản mới), đừng xóa dòng trong `_sqlx_migrations`. Bản không có migration rollback bình thường.
+- Server bỏ qua các migration đã áp mà nó không biết (#176), nên image cũ vẫn khởi động trên DB mà bản mới đã expand. Migration nó biết mà bị sửa (checksum khác) thì vẫn dừng với `VersionMismatch`: không sửa một migration đã phát hành, viết migration mới. Đừng xóa dòng trong `_sqlx_migrations`.
 
 ## 2. Rollback
 
@@ -111,7 +111,7 @@ Bản mới lỗi (health không lên, lỗi nhiều trong log, hành vi sai):
 1. Lấy tag trước: phần tóm tắt của lần deploy vừa rồi, hoặc lịch sử parameter: `aws ssm get-parameter-history --name /aegis/<env>/image_tag --query 'Parameters[].[LastModifiedDate,Value]' --output text`.
 2. Actions → Deploy: `action=deploy`, `image_tag=<tag trước>`. Giống hệt triển khai.
 3. Workflow không chạy được (GitHub sự cố): `aws ssm start-session --target <instance_id>`, rồi `sudo /usr/local/bin/aegis-deploy <tag trước>` và `aws ssm put-parameter --name /aegis/<env>/image_tag --value <tag trước> --overwrite` để lần khởi động sau dùng đúng tag.
-4. DB không lùi (expand/contract ở trên). Tag trước cũ hơn một migration đã áp: xem giới hạn #176 ở mục 1. Migration của bản lỗi làm hỏng dữ liệu: dừng server (`sudo systemctl stop aegis`), khôi phục RDS về thời điểm trước deploy (point-in-time restore ra instance mới, rồi đổi host trong `AEGIS_DATABASE_URL`), mở issue.
+4. DB không lùi (expand/contract ở trên); tag trước vẫn chạy trên DB có migration mới hơn nó. Migration của bản lỗi làm hỏng dữ liệu: dừng server (`sudo systemctl stop aegis`), khôi phục RDS về thời điểm trước deploy (point-in-time restore ra instance mới, rồi đổi host trong `AEGIS_DATABASE_URL`), mở issue.
 5. Hạ tầng: revert commit trong `deploy/tofu`, merge, `action=apply`.
 
 ## 3. Xoay secret
