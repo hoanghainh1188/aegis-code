@@ -1010,6 +1010,9 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
             "work_dir must be outside the repo, or its files count as part of the patch".into(),
         ));
     }
+    if let Some(sandbox) = &req.sandbox {
+        sandbox.check()?;
+    }
     let logs = work.join("logs");
     std::fs::create_dir_all(&logs).map_err(|e| GateError::io(&logs, &e))?;
     let base = git::resolve(req.repo, req.base)?;
