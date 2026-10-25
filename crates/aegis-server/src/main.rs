@@ -211,9 +211,9 @@ async fn run(args: Args) -> Result<(), String> {
 
 /// Roles, tokens and sessions ([`auth::cli`]): straight to the database,
 /// whose URL comes from the configuration's secret store.
-async fn run_auth_command(config: &std::path::Path, argv: &[String]) -> ExitCode {
+async fn run_auth_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode {
     let done = async {
-        let config = ServerConfig::load(config)?;
+        let config = ServerConfig::load(config_path)?;
         let section = secrets::section(config.secrets.as_ref())?;
         let secrets = section.open(config.modes.customer_jp.is_some()).await?;
         secrets
@@ -226,7 +226,7 @@ async fn run_auth_command(config: &std::path::Path, argv: &[String]) -> ExitCode
         let store = Store::connect(url.expose())
             .await
             .map_err(|e| format!("{DATABASE_URL}: {e}"))?;
-        let out = auth::cli::run(&store, argv).await;
+        let out = auth::cli::run(&store, config_path, argv).await;
         store.close().await;
         out
     };
