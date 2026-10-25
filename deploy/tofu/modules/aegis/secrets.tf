@@ -11,6 +11,7 @@ locals {
       "AEGIS_GITHUB_WEBHOOK_SECRET",
       "AEGIS_GITLAB_WEBHOOK_TOKEN",
       "AEGIS_GITHUB_COMMENT_TOKEN",
+      "AEGIS_GITLAB_COMMENT_TOKEN",
     ],
     var.server_config.oidc_issuer == "" ? [] : ["AEGIS_OIDC_CLIENT_SECRET"],
     var.enable_poc ? ["ANTHROPIC_API_KEY"] : [],

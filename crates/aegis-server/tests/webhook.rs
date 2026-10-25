@@ -1,6 +1,6 @@
 //! Webhooks against a real database (#25): signatures, duplicates, the
 //! label and CI triggers, and the comment when the job ends, with GitHub
-//! played by a mock server.
+//! and GitLab played by mock servers.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -9,7 +9,8 @@ use aegis_ledger::Outcome;
 use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::webhook::{
-    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV, GitHubNotifier, WebhookConfig, router,
+    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
+    GitHubNotifier, GitLabNotifier, WebhookConfig, router,
 };
 use aegis_server::worker::{WorkerConfig, run_worker_notifying};
 use aegis_store::testing::test_db;
@@ -23,7 +24,7 @@ use serde_json::{Value, json};
 use sha2::Sha256;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
-use wiremock::matchers::{body_string_contains, method, path};
+use wiremock::matchers::{body_string_contains, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SECRET: &str = "github-secret";
@@ -36,6 +37,7 @@ fn config() -> WebhookConfig {
         burst: 100,
         per_minute: 600,
         notifier: None,
+        gitlab_notifier: None,
     }
 }
 
@@ -361,6 +363,85 @@ async fn deliveries_beyond_the_rate_are_refused() {
     db.drop().await;
 }
 
+#[tokio::test]
+async fn a_gitlab_issue_is_told_once_when_its_job_ends() {
+    let Some(db) = test_db().await else { return };
+    repo(&db.store, "app", "https://gitlab.com/group/app").await;
+    let (github_api, gitlab_api) = (MockServer::start().await, MockServer::start().await);
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(0)
+        .mount(&github_api)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v4/projects/group%2Fapp/issues/4/notes"))
+        .and(header("private-token", "gitlab-comment-token"))
+        .and(body_string_contains(
+            "https://github.com/aegis-bot/typst/pull/5",
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": 1 })))
+        .expect(1)
+        .mount(&gitlab_api)
+        .await;
+
+    let app = router(db.store.clone(), config());
+    let issue = json!({
+        "object_kind": "issue",
+        "project": { "path_with_namespace": "group/app", "web_url": "https://gitlab.com/group/app" },
+        "object_attributes": { "iid": 4, "action": "update" },
+        "changes": { "labels": { "previous": [], "current": [{ "title": "aegis" }] } }
+    });
+    let (status, reply) = gitlab(&app, "Issue Hook", "g-1", &issue).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{reply}");
+
+    // Both tokens are there: only the issue's forge is told.
+    let secrets = Secrets::fixed([
+        (COMMENT_TOKEN_ENV, "comment-token"),
+        (GITLAB_COMMENT_TOKEN_ENV, "gitlab-comment-token"),
+    ]);
+    let notifier = (
+        GitHubNotifier::new(&github_api.uri(), secrets.clone()),
+        GitLabNotifier::new(&format!("{}/api/v4", gitlab_api.uri()), secrets),
+    );
+    let shutdown = CancellationToken::new();
+    let worker = tokio::spawn(run_worker_notifying(
+        db.store.clone(),
+        Arc::new(OpensPr),
+        Arc::new(notifier),
+        worker_config(),
+        shutdown.clone(),
+    ));
+    let start = Instant::now();
+    while gitlab_api
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .is_empty()
+    {
+        assert!(start.elapsed() < Duration::from_secs(10), "no comment came");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    shutdown.cancel();
+    worker.await.unwrap();
+    assert_eq!(jobs(&db.store).await[0].status, JobStatus::Done);
+    github_api.verify().await;
+    gitlab_api.verify().await;
+    db.drop().await;
+}
+
+fn worker_config() -> WorkerConfig {
+    WorkerConfig {
+        worker_id: "w".into(),
+        max_workers: 1,
+        lease: Duration::from_secs(5),
+        renew_every: Duration::from_secs(1),
+        poll_every: Duration::from_millis(50),
+        drain: Duration::from_secs(5),
+        retry_base: Duration::from_millis(20),
+        max_cost_usd: 4.0,
+    }
+}
+
 /// Opens a PR at once.
 struct OpensPr;
 
@@ -404,16 +485,7 @@ async fn the_issue_is_told_when_its_job_ends() {
         db.store.clone(),
         Arc::new(OpensPr),
         Arc::new(notifier),
-        WorkerConfig {
-            worker_id: "w".into(),
-            max_workers: 1,
-            lease: Duration::from_secs(5),
-            renew_every: Duration::from_secs(1),
-            poll_every: Duration::from_millis(50),
-            drain: Duration::from_secs(5),
-            retry_base: Duration::from_millis(20),
-            max_cost_usd: 4.0,
-        },
+        worker_config(),
         shutdown.clone(),
     ));
     let start = Instant::now();

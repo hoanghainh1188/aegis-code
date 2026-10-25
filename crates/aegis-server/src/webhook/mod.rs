@@ -44,7 +44,10 @@ use crate::worker::JobNotifier;
 use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
-pub use notify::{COMMENT_TOKEN_ENV, GITHUB_API_ENV, GitHubNotifier, status_comment};
+pub use notify::{
+    COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
+    GitLabNotifier, status_comment,
+};
 
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
 pub const GITLAB_TOKEN_ENV: &str = "AEGIS_GITLAB_WEBHOOK_TOKEN";
@@ -63,8 +66,10 @@ pub struct WebhookConfig {
     pub burst: u32,
     /// …and refilled at this rate. Beyond, 429: the sender retries.
     pub per_minute: u32,
-    /// Tells the issue of a job refused for its repo's budget (#31).
+    /// Tells the issue of a job refused for its repo's budget (#31)…
     pub notifier: Option<GitHubNotifier>,
+    /// …on GitLab (#168).
+    pub gitlab_notifier: Option<GitLabNotifier>,
 }
 
 impl WebhookConfig {
@@ -74,6 +79,7 @@ impl WebhookConfig {
         let secrets = crate::secrets::installed();
         Self {
             notifier: Some(GitHubNotifier::from_env(secrets.clone())),
+            gitlab_notifier: Some(GitLabNotifier::from_env(secrets.clone())),
             secrets,
             label: std::env::var(LABEL_ENV)
                 .ok()
@@ -358,10 +364,12 @@ async fn deliver(
         Ok(Delivered::Refused(job)) => {
             tracing::info!(delivery, job = job.id.0, repo = %repo.slug, issue_ref, "job refused: the repo's budget is spent");
             let (job_id, reason) = (job.id.0, job.reason.clone());
-            if let Some(notifier) = hooks.config.notifier.clone() {
-                // The answer does not wait for GitHub.
-                tokio::spawn(async move { notifier.job_ended(&job).await });
-            }
+            let notifier = (
+                hooks.config.notifier.clone(),
+                hooks.config.gitlab_notifier.clone(),
+            );
+            // The answer does not wait for GitHub or GitLab.
+            tokio::spawn(async move { notifier.job_ended(&job).await });
             answer(
                 StatusCode::OK,
                 json!({ "status": "refused", "job_id": job_id, "reason": reason }),

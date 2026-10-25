@@ -67,6 +67,24 @@ pub trait JobNotifier: Send + Sync + 'static {
     fn job_ended(&self, job: &Job) -> impl Future<Output = ()> + Send;
 }
 
+/// Tells both, one after the other: a notifier per forge, each skipping
+/// the jobs of the others.
+impl<A: JobNotifier, B: JobNotifier> JobNotifier for (A, B) {
+    async fn job_ended(&self, job: &Job) {
+        self.0.job_ended(job).await;
+        self.1.job_ended(job).await;
+    }
+}
+
+/// Tells it if there is one.
+impl<N: JobNotifier> JobNotifier for Option<N> {
+    async fn job_ended(&self, job: &Job) {
+        if let Some(notifier) = self {
+            notifier.job_ended(job).await;
+        }
+    }
+}
+
 /// Tells no one.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoNotifier;

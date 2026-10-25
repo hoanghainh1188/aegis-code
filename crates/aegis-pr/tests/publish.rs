@@ -10,8 +10,8 @@ use std::time::Duration;
 use aegis_gate::{CancelToken, GateReport, GateRequest, run_gate};
 use aegis_lang::{Language, ProfileOverrides, Profiles};
 use aegis_pr::{
-    AllowedTestChange, ChangeNote, CommitInput, Cost, GitHub, Identity, PrContent, PrError, Remote,
-    abandon, push_gated, render, write_commit_message,
+    AllowedTestChange, ChangeNote, CommitInput, Cost, GitHub, GitLab, Identity, PrContent, PrError,
+    Remote, abandon, push_gated, render, write_commit_message,
 };
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, StopReason, Usage,
@@ -410,4 +410,28 @@ async fn comments_on_an_issue() {
 
     let err = github.comment_on_issue(8, "done").await.unwrap_err();
     assert!(matches!(err, PrError::GitHub { status: 404, .. }), "{err}");
+}
+
+#[tokio::test]
+async fn comments_on_a_gitlab_issue() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v4/projects/group%2Fsub%2Fapp/issues/4/notes"))
+        .and(header("private-token", "t"))
+        .and(body_partial_json(json!({ "body": "done" })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": 31, "body": "done" })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let api = format!("{}/api/v4/", server.uri());
+    let gitlab = GitLab::new(&api, "group/sub/app", "t").unwrap();
+    assert_eq!(gitlab.comment_on_issue(4, "done").await.unwrap().id, 31);
+
+    let err = gitlab.comment_on_issue(5, "done").await.unwrap_err();
+    assert!(matches!(err, PrError::GitLab { status: 404, .. }), "{err}");
+
+    for bad in ["app", "group/../app", "group//app", "group/a b", "/app"] {
+        assert!(GitLab::new(&api, bad, "t").is_err(), "{bad}");
+    }
+    assert!(GitLab::new("http://gitlab.example/api/v4", "group/app", "t").is_err());
 }

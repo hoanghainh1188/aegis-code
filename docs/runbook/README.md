@@ -130,7 +130,7 @@ aws secretsmanager put-secret-value --secret-id aegis/<env>/<TÊN> --secret-stri
 | `AEGIS_SESSION_KEY` (≥ 32 byte, `openssl rand -hex 32`) | Đặt giá trị mới. Phiên đăng nhập và form review đang mở hết hiệu lực; người dùng đăng nhập lại |
 | `AEGIS_OIDC_CLIENT_SECRET` | Tạo secret mới ở SSO (giữ cả hai) → đặt → thu hồi cái cũ |
 | `AEGIS_GITHUB_WEBHOOK_SECRET`, `AEGIS_GITLAB_WEBHOOK_TOKEN` | Đặt giá trị mới vào store trước, rồi đổi ở cài đặt webhook. Request giữa hai bước sai chữ ký → server đọc lại secret; GitHub/GitLab gửi lại được từ trang webhook |
-| `AEGIS_GITHUB_COMMENT_TOKEN`, token Git/Sonar của repo | Tạo token mới → đặt → thu hồi cái cũ |
+| `AEGIS_GITHUB_COMMENT_TOKEN`, `AEGIS_GITLAB_COMMENT_TOKEN`, token Git/Sonar của repo | Tạo token mới → đặt → thu hồi cái cũ |
 
 Lộ secret: thu hồi ở nơi cấp **trước**, rồi đặt giá trị mới. Kiểm CloudTrail ai đã `GetSecretValue`. Mật khẩu master RDS do RDS tự xoay; server không dùng nó.
 

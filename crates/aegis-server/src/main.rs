@@ -21,7 +21,9 @@
 //! `AEGIS_GITLAB_WEBHOOK_TOKEN`; the trigger label is the variable
 //! `AEGIS_WEBHOOK_LABEL` (`aegis`). Workers comment on a GitHub issue when
 //! its job ends if the store has `AEGIS_GITHUB_COMMENT_TOKEN` (API root:
-//! the variable `AEGIS_GITHUB_API`). Sign-in (#29): `[auth]` in the
+//! the variable `AEGIS_GITHUB_API`), on a GitLab issue if it has
+//! `AEGIS_GITLAB_COMMENT_TOKEN` (API root: `AEGIS_GITLAB_API`, by default
+//! `https://gitlab.com/api/v4`). Sign-in (#29): `[auth]` in the
 //! configuration; the API needs the secrets `AEGIS_SESSION_KEY` and, with
 //! `[auth.oidc]`, `AEGIS_OIDC_CLIENT_SECRET`.
 
@@ -34,7 +36,7 @@ use aegis_server::auth::{self, Auth};
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
-use aegis_server::webhook::GitHubNotifier;
+use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
 use aegis_server::{Role, api, metrics, worker};
 use aegis_store::Store;
 use tokio::task::JoinSet;
@@ -163,7 +165,10 @@ async fn run(args: Args) -> Result<(), String> {
         // Checked before the API opens: a worker that cannot run jobs is
         // a configuration error, not a silent queue.
         let runner = LifecycleRunner::new(store.clone(), modes(&config)?, secrets.clone()).await?;
-        let notifier = Arc::new(GitHubNotifier::from_secrets(&secrets).await?);
+        let notifier = Arc::new((
+            GitHubNotifier::from_secrets(&secrets).await?,
+            GitLabNotifier::from_secrets(&secrets).await?,
+        ));
         let worker_config = config.worker(worker_id());
         let (store, shutdown) = (store.clone(), shutdown.clone());
         parts.spawn(async move {
