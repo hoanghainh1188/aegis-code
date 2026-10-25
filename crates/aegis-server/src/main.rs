@@ -24,7 +24,11 @@
 //! its job ends if the store has `AEGIS_GITHUB_COMMENT_TOKEN` (API root:
 //! the variable `AEGIS_GITHUB_API`), on a GitLab issue if it has
 //! `AEGIS_GITLAB_COMMENT_TOKEN` (API root: `AEGIS_GITLAB_API`, by default
-//! `https://gitlab.com/api/v4`). Sign-in (#29): `[auth]` in the
+//! `https://gitlab.com/api/v4`). The API role polls the Jira and Backlog
+//! filters of the repos whose settings have a `tracker` every
+//! `trackers.poll_s`, one process per period; workers report on those
+//! tickets (#26), with the secret each tracker's `token_env` names.
+//! Sign-in (#29): `[auth]` in the
 //! configuration; the API needs the secrets `AEGIS_SESSION_KEY` and, with
 //! `[auth.oidc]`, `AEGIS_OIDC_CLIENT_SECRET`.
 
@@ -37,6 +41,7 @@ use aegis_server::auth::{self, Auth};
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
+use aegis_server::tracker::{self, TrackerNotifier};
 use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
 use aegis_server::{Role, api, metrics, worker};
 use aegis_store::Store;
@@ -167,8 +172,11 @@ async fn run(args: Args) -> Result<(), String> {
         // a configuration error, not a silent queue.
         let runner = LifecycleRunner::new(store.clone(), modes(&config)?, secrets.clone()).await?;
         let notifier = Arc::new((
-            GitHubNotifier::from_secrets(&secrets).await?,
-            GitLabNotifier::from_secrets(&secrets).await?,
+            (
+                GitHubNotifier::from_secrets(&secrets).await?,
+                GitLabNotifier::from_secrets(&secrets).await?,
+            ),
+            TrackerNotifier::new(store.clone(), secrets.clone()),
         ));
         let worker_config = config.worker(worker_id());
         let (store, shutdown) = (store.clone(), shutdown.clone());
@@ -181,6 +189,19 @@ async fn run(args: Args) -> Result<(), String> {
                 shutdown,
             )
             .await;
+            Ok(())
+        });
+    }
+    if args.role.serves_api() && config.trackers.poll_s > 0 {
+        let poller = tracker::run_poller(
+            store.clone(),
+            secrets.clone(),
+            TrackerNotifier::new(store.clone(), secrets.clone()),
+            std::time::Duration::from_secs(config.trackers.poll_s),
+            shutdown.clone(),
+        );
+        parts.spawn(async move {
+            poller.await;
             Ok(())
         });
     }

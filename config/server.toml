@@ -81,3 +81,8 @@ poll_s = 5
 drain_s = 600
 # First wait after an infrastructure failure; doubles, at most 3 retries.
 retry_base_s = 30
+
+[trackers]
+# The Jira/Backlog filters of the repos (`tracker` in their settings) are
+# polled this often, by one `api` process at a time (#26); 0 polls none.
+poll_s = 300
