@@ -1,12 +1,14 @@
 //! `/`: the KPIs of the ledger in total, per language, per repo and per
 //! week, and each repo's budget this month (#31). The total is `aegis report`'s "All runs"; the groups use the same
-//! formula ([`Kpi::grouped`]) on the same records. Someone who is not an
-//! admin sees only the runs of the repos they have a role in.
+//! formula ([`Kpi::grouped`]) on the same records, read from the saved
+//! summary records with their jobs in one query ([`Store::kpi_records`],
+//! #170). Someone who is not an admin sees only the runs of the repos they
+//! have a role in.
 
 use std::collections::BTreeMap;
 
-use aegis_ledger::{ACCEPT_RATE_MIN, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN, report};
-use aegis_store::{Job, JobFilter, Page, Repo, RepoId, Store};
+use aegis_ledger::{ACCEPT_RATE_MIN, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN};
+use aegis_store::{KpiJob, Page, Repo, RepoId, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::State;
@@ -36,22 +38,6 @@ pub struct Dashboard {
     pub weeks: Vec<Group>,
 }
 
-async fn all_jobs(store: &Store, within: Option<&[RepoId]>) -> Result<Vec<Job>, WebError> {
-    let mut jobs = Vec::new();
-    let mut page = Page::first(Page::MAX_LIMIT);
-    loop {
-        let batch = store
-            .list_jobs_in(&JobFilter::default(), within, page)
-            .await?;
-        let next = batch.next_page();
-        jobs.extend(batch.items);
-        match next {
-            Some(p) => page = p,
-            None => return Ok(jobs),
-        }
-    }
-}
-
 pub(super) async fn all_repos(store: &Store) -> Result<BTreeMap<RepoId, Repo>, WebError> {
     let mut repos = BTreeMap::new();
     let mut page = Page::first(Page::MAX_LIMIT);
@@ -72,7 +58,7 @@ fn groups(map: BTreeMap<String, Kpi>) -> Vec<Group> {
         .collect()
 }
 
-/// Every KPI the page shows, from the ledger and the jobs in `store`.
+/// Every KPI the page shows, from the ledger's records and the jobs in `store`.
 pub async fn dashboard_kpis(store: &Store) -> Result<Dashboard, WebError> {
     dashboard_kpis_within(store, None).await
 }
@@ -83,32 +69,21 @@ pub async fn dashboard_kpis_within(
     store: &Store,
     within: Option<&[RepoId]>,
 ) -> Result<Dashboard, WebError> {
-    let mut records = report::records(&store.ledger()).await?;
-    let repos = all_repos(store).await?;
-    let jobs: BTreeMap<String, (Job, Option<&Repo>)> = all_jobs(store, within)
-        .await?
-        .into_iter()
-        .map(|j| {
-            let repo = repos.get(&j.repo_id);
-            (j.ledger_key.as_str().to_owned(), (j, repo))
-        })
+    let rows = store.kpi_records(within).await?;
+    let records: Vec<IssueRecord> = rows.iter().map(|r| r.record.clone()).collect();
+    let jobs: BTreeMap<&str, &KpiJob> = rows
+        .iter()
+        .filter_map(|r| Some((r.record.issue_id.as_str(), r.job.as_ref()?)))
         .collect();
-    if within.is_some() {
-        records.retain(|r| jobs.contains_key(r.issue_id.as_str()));
-    }
-    let job_of = |r: &IssueRecord| jobs.get(r.issue_id.as_str());
+    let job_of = |r: &IssueRecord| jobs.get(r.issue_id.as_str()).copied();
     let languages = Kpi::grouped(&records, |r| {
-        Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |(_, repo)| {
-            repo.map_or("?".into(), |repo| repo.language.to_ascii_lowercase())
-        }))
+        Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.language.to_ascii_lowercase()))
     });
     let by_repo = Kpi::grouped(&records, |r| {
-        Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |(job, repo)| {
-            repo.map_or(format!("repo {}", job.repo_id.0), |repo| repo.slug.clone())
-        }))
+        Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.repo_slug.clone()))
     });
     let weeks = Kpi::grouped(&records, |r| {
-        job_of(r).map(|(job, _)| job.created_at.format("%G-W%V").to_string())
+        job_of(r).map(|job| job.created_at.format("%G-W%V").to_string())
     });
     let mut weeks = groups(weeks);
     weeks.drain(..weeks.len().saturating_sub(WEEKS_SHOWN));
