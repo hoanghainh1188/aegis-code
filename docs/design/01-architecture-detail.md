@@ -100,7 +100,7 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
   - `search_symbol`, `search_text`, `find_file` của ACI tìm bằng truy vấn symbol tree-sitter của profile (`aegis-lang`).
   - Module map ở BP2 (mục 4.1) cũng dựng bằng tree-sitter: thư mục nguồn và các định nghĩa chính trong từng thư mục. Map dựng một lần cho mỗi repo và lưu vào file.
   - `find_definition`, `find_references` hỏi language server của profile (`aci.lsp`, #115, mục 3.1). Prompt bảo agent kiểm bằng hai công cụ này trước khi dựa vào đồ thị để đổi chữ ký hàm.
-- Ledger của Phase 1 (#18, #142, #145) cho thấy agent ít khi định vị sai file ([số liệu](../measurements/2026-10-25-localization.md)). Điểm yếu là sửa thiếu khi bản sửa cần nhiều file, và chậm lần ra file khi lỗi hiện ở một crate mà nguyên nhân ở crate khác. Đồ thị nhắm vào hai việc này; lượt đo KPI sau khi bật cho biết có ích hay không.
+- Ledger của Phase 1 (#18, #142, #145) cho thấy agent ít khi định vị sai file ([số liệu](../measurements/2026-10-25-localization.md)). Điểm yếu là sửa thiếu khi bản sửa cần nhiều file, và chậm lần ra file khi lỗi hiện ở một crate mà nguyên nhân ở crate khác. Đồ thị nhắm vào hai việc này. Nhưng ở lượt đo KPI sau khi bật, agent không gọi `search_graph` hay `trace_path` lần nào trong 32 issue, nên chưa biết đồ thị có ích không ([số liệu](../measurements/2026-10-26-codebase-memory-kpi.md)). Có nhắc agent dùng, platform tự đưa kết quả, hay gỡ hai công cụ: chốt ở #203.
 - Luật "lỗi trải trên ≥ 3 file" (mục 5.3) vẫn chưa có nguồn tín hiệu: đồ thị cho biết ai gọi ai, không cho biết bản sửa cần bao nhiêu file.
 
 ### 3.3 Thu gọn lịch sử
