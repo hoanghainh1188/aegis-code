@@ -111,10 +111,14 @@ impl TestRunner {
                 .clone()
                 .map(|s| match part.dir.is_empty() {
                     true => s,
-                    // The part's image; its dependency dirs are not mounted yet.
+                    // The part's image and dependency dirs (#198).
                     false => Sandbox {
                         image: part.profile.image.clone(),
-                        mounts: vec![],
+                        mounts: workspace
+                            .part_mounts(&part.dir)
+                            .iter()
+                            .map(|(host, inside)| (host.into(), inside.clone()))
+                            .collect(),
                         ..s
                     },
                 }),

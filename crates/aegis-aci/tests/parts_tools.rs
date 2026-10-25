@@ -4,7 +4,7 @@
 
 mod common;
 
-use aegis_aci::{Aci, EditOutcome, EditRequest, Rejection};
+use aegis_aci::{Aci, EditOutcome, EditRequest, FormatContainer, Rejection};
 use aegis_lang::{Language, ProfileOverrides, RepoProfiles};
 use common::{Scratch, profile};
 
@@ -82,4 +82,27 @@ repro_test = ["sh", "-c", "test -f pyproject.toml && test -f \"$1\"", "sh", "{te
     let mut aci = aci(&repo, overrides);
     let run = aci.run_tests("py/tests/test_cart.py").unwrap();
     assert!(run.to_string().starts_with("PASSED"), "{run}");
+}
+
+#[test]
+fn a_part_s_formatter_runs_in_its_image_with_its_dependency_dirs() {
+    // #198: the formatter is the version in the part's own `.venv`.
+    let repo = Scratch::two_languages();
+    let venv = (
+        "/cache/parts/py/deps/.venv".to_owned(),
+        "/work/.venv".to_owned(),
+    );
+    let aci = aci(&repo, ProfileOverrides::default())
+        .with_format_container(FormatContainer {
+            docker: "docker".into(),
+            image: "aegis-sandbox-rust".into(),
+            mounts: vec![("/cache/registry".into(), "/usr/local/cargo/registry".into())],
+        })
+        .with_part_mounts([("py".to_owned(), vec![venv.clone()])].into());
+    let ws = aci.workspace();
+    let py = ws.format_container_of(&ws.profiles().parts()[1]).unwrap();
+    assert_eq!(py.image, "aegis-sandbox-python");
+    assert_eq!(py.mounts, [venv]);
+    let root = ws.format_container_of(&ws.profiles().parts()[0]).unwrap();
+    assert_eq!(root.mounts[0].1, "/usr/local/cargo/registry");
 }
