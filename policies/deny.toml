@@ -1,6 +1,7 @@
-# cargo deny cho repo đích (#12, design §7). Gate chạy file này khi bản vá đổi
-# Cargo.toml / Cargo.lock:
-#   cargo deny --config <aegis>/policies/deny.toml check
+# cargo deny cho repo đích (#12, design §7). Khi bản vá đổi Cargo.lock, gate
+# chạy `dependencies.audit` của profile Rust với `{deny_config}`: file này,
+# `licenses.allow` thay bằng `licenses` của repo nếu repo có, và
+# `ignored_advisories` của repo thêm vào `advisories.ignore` (#159).
 # Crate mới mà bản vá được phép thêm nằm ở policies/allowed-crates.toml.
 # Cấu hình cho chính aegis-code là deny.toml ở gốc repo (#42), không phải file này.
 

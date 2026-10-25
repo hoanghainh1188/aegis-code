@@ -19,6 +19,7 @@ mod maven_tree;
 mod npm_lock;
 mod nuget_lock;
 mod pnpm_lock;
+mod policy;
 mod profile;
 mod python_lock;
 mod resolve;
@@ -31,6 +32,7 @@ pub use deps::{DependencyViolation, LockedDependency, ViolationKind, new_depende
 pub use error::LangError;
 pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};
+pub use policy::{check_advisory, check_license, default_licenses, deny_config, osv_config};
 pub use profile::{
     Coverage, CoverageFormat, Dependencies, DependencyTree, Detect, GateSteps, LspOptions, Profile,
     Profiles, Sandbox, Sonar, SonarScanner, TestOutput, glob_match,

@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use aegis_gate::{
-    CancelToken, GateReport, GateRequest, ReferenceGroup, Repro, Sandbox, StepName, StepStatus,
-    run_gate,
+    AuditPolicy, CancelToken, GateReport, GateRequest, ReferenceGroup, Repro, Sandbox, StepName,
+    StepStatus, run_gate,
 };
 use aegis_lang::{Language, ProfileOverrides, Profiles, ResolvedProfile};
 
@@ -145,7 +145,32 @@ impl Repo {
         env: Vec<(String, String)>,
         sandbox: Option<Sandbox>,
     ) -> GateReport {
-        self.gate_full(profile, repro, step_timeout, cancel, env, sandbox, &[], &[])
+        self.gate_full(
+            profile,
+            repro,
+            step_timeout,
+            cancel,
+            env,
+            sandbox,
+            &[],
+            &[],
+            AuditPolicy::default(),
+        )
+    }
+
+    /// The gate with the repo's own audit policy (#159).
+    pub fn gate_auditing(&self, profile: &ResolvedProfile, audit: AuditPolicy) -> GateReport {
+        self.gate_full(
+            profile,
+            None,
+            Duration::from_secs(600),
+            CancelToken::new(),
+            vec![],
+            None,
+            &[],
+            &[],
+            audit,
+        )
     }
 
     /// The gate with `tests` declared as allowed test changes (#105).
@@ -159,6 +184,7 @@ impl Repo {
             None,
             tests,
             &[],
+            AuditPolicy::default(),
         )
     }
 
@@ -181,6 +207,7 @@ impl Repo {
             None,
             &[],
             &groups,
+            AuditPolicy::default(),
         )
     }
 
@@ -212,6 +239,7 @@ impl Repo {
         sandbox: Option<Sandbox>,
         allowed_tests: &[&str],
         reference_groups: &[ReferenceGroup],
+        audit: AuditPolicy,
     ) -> GateReport {
         let allowed = BTreeSet::new();
         let dir = self.dir();
@@ -232,6 +260,7 @@ impl Repo {
             allowed_tests: allowed_tests.iter().map(|t| (*t).to_owned()).collect(),
             reference_groups: reference_groups.to_vec(),
             sonar: None,
+            audit,
         })
         .unwrap()
     }

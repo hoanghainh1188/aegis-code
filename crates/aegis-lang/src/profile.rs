@@ -170,10 +170,16 @@ pub struct Dependencies {
     /// blocked (#83). Patterns as [`Profile::protected_changes`] matches them.
     #[serde(default)]
     pub protected: Vec<String>,
-    /// Advisory and license audit of one lockfile, with `{lockfile}` and
-    /// optionally `{licenses}`. Needs network (license data from deps.dev),
-    /// so it runs with the fetch step (#66), not in the offline gate.
+    /// Advisory and license audit of one lockfile the patch changed, with
+    /// `{lockfile}` or `{lockfile_dir}`, and optionally `{licenses}`,
+    /// `{deny_config}`, `{osv_config}` (the repo's policy, #159). Needs
+    /// network (advisory databases, license data from deps.dev), so it runs
+    /// with the fetch step (#66), through `audit_hosts`.
     pub audit: Option<CommandTemplate>,
+    /// Hosts the audit may reach, HTTPS only (advisory databases, license
+    /// data); not the fetch step's.
+    #[serde(default)]
+    pub audit_hosts: Vec<String>,
     /// The resolved dependency tree, for builds that lock nothing (Maven,
     /// #80): compared before and after the patch like a lockfile.
     #[serde(default)]
@@ -420,9 +426,20 @@ pub(crate) fn check_repo_path(path: &str) -> Result<(), String> {
 
 pub(crate) fn check_audit(c: &CommandTemplate) -> Result<(), String> {
     c.check_placeholders(
-        &[Placeholder::Lockfile, Placeholder::Licenses],
-        &[Placeholder::Lockfile],
-    )
+        &[
+            Placeholder::Lockfile,
+            Placeholder::LockfileDir,
+            Placeholder::Licenses,
+            Placeholder::DenyConfig,
+            Placeholder::OsvConfig,
+        ],
+        &[],
+    )?;
+    if c.uses(Placeholder::Lockfile) || c.uses(Placeholder::LockfileDir) {
+        Ok(())
+    } else {
+        Err("must contain `{lockfile}` or `{lockfile_dir}`".into())
+    }
 }
 
 pub(crate) fn check_tree(language: Language, tree: &DependencyTree) -> Result<(), String> {

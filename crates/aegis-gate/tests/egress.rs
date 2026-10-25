@@ -229,3 +229,76 @@ fn python_installs_through_the_proxy_and_other_hosts_are_refused() {
     drop(session);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #159: the Rust profile's `cargo deny` runs through a proxy to its
+/// `audit_hosts` only (advisory-db on github.com), with the repo's
+/// licenses in the deny config the gate writes.
+#[test]
+fn the_rust_audit_reaches_its_advisory_database_through_the_proxy() {
+    if !docker_ready() {
+        return;
+    }
+    let dir = scratch("audit");
+    let tree = dir.join("tree");
+    std::fs::create_dir_all(tree.join("src")).unwrap();
+    // The repo's own crate is not published, so its license is not checked.
+    let manifest = CARGO_TOML.replace(
+        "edition = \"2021\"\n",
+        "edition = \"2021\"\npublish = false\n",
+    );
+    std::fs::write(tree.join("Cargo.toml"), manifest).unwrap();
+    std::fs::write(tree.join("Cargo.lock"), CARGO_LOCK).unwrap();
+    std::fs::write(tree.join("src/lib.rs"), "").unwrap();
+    let registry = dir.join("registry");
+    std::fs::create_dir_all(&registry).unwrap();
+    let policy = dir.join("policy");
+    std::fs::create_dir_all(&policy).unwrap();
+    let sandbox = sandbox(
+        RUST_IMAGE,
+        vec![
+            (registry, "/usr/local/cargo/registry".into()),
+            (policy.clone(), "/aegis-audit".into()),
+        ],
+    );
+    let profile = aegis_lang::Profiles::builtin()
+        .unwrap()
+        .get(aegis_lang::Language::Rust)
+        .unwrap()
+        .clone();
+    let hosts: Vec<&str> = profile
+        .dependencies
+        .audit_hosts
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let audit = profile.dependencies.audit.clone().unwrap();
+    let argv = audit
+        .render(&[
+            (aegis_lang::Placeholder::LockfileDir, "."),
+            (
+                aegis_lang::Placeholder::DenyConfig,
+                "/aegis-audit/deny.toml",
+            ),
+        ])
+        .unwrap();
+    let run = |licenses: &[&str], name: &str| {
+        let licenses: Vec<String> = licenses.iter().map(|l| (*l).to_owned()).collect();
+        let config = aegis_lang::deny_config(Some(&licenses), &[]).unwrap();
+        std::fs::write(policy.join("deny.toml"), config).unwrap();
+        let session = egress(&hosts).start().unwrap();
+        let log = dir.join(format!("{name}.log"));
+        let ran = session
+            .fetch(&sandbox, &argv, &tree, &log, TIMEOUT, CancelToken::new())
+            .unwrap();
+        (ran.exit, log_of(&log), session.log())
+    };
+
+    // itoa is `MIT OR Apache-2.0`.
+    let (exit, log, proxy) = run(&["MIT"], "allowed");
+    assert_eq!(exit, Exit::Code(0), "{log}\n{proxy}");
+    assert!(proxy.contains("allow github.com"), "{proxy}");
+    let (exit, log, _) = run(&["ISC"], "refused");
+    assert_ne!(exit, Exit::Code(0), "{log}");
+    assert!(log.contains("itoa"), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

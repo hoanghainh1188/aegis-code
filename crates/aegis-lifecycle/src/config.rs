@@ -174,6 +174,14 @@ pub struct RepoConfig {
 }
 
 impl RepoConfig {
+    /// The repo's policy for the gate's audit step (#159).
+    pub fn audit_policy(&self) -> aegis_gate::AuditPolicy {
+        aegis_gate::AuditPolicy {
+            licenses: self.licenses.clone(),
+            ignored_advisories: self.ignored_advisories.clone(),
+        }
+    }
+
     pub fn profile_overrides(&self) -> Result<ProfileOverrides, LifecycleError> {
         self.overrides
             .clone()
@@ -362,6 +370,10 @@ impl RunConfig {
         if let Some(sonar) = &self.sonar {
             sonar.check()?;
         }
+        self.repo
+            .audit_policy()
+            .check_ids()
+            .map_err(LifecycleError::Config)?;
         Ok(self)
     }
 
@@ -475,6 +487,38 @@ pull_request = false"#,
             let repo = RunConfig::from_toml(toml).unwrap().repo;
             let conventions = repo.conventions.unwrap_or_default();
             assert!(conventions.contains(place), "{}: {conventions}", repo.key);
+        }
+    }
+
+    fn with_repo(key: &str, value: toml::Value) -> Result<RunConfig, LifecycleError> {
+        let mut cfg: toml::Table = toml::from_str(POC).unwrap();
+        cfg["repo"]
+            .as_table_mut()
+            .unwrap()
+            .insert(key.into(), value);
+        RunConfig::from_toml(&toml::to_string(&cfg).unwrap())
+    }
+
+    fn strings(v: &[&str]) -> toml::Value {
+        toml::Value::Array(v.iter().map(|s| (*s).into()).collect())
+    }
+
+    #[test]
+    fn the_repo_s_licenses_and_ignored_advisories_must_be_identifiers() {
+        let cfg = with_repo("licenses", strings(&["MIT", "Apache-2.0"])).unwrap();
+        assert_eq!(
+            cfg.repo.audit_policy().licenses,
+            Some(vec!["MIT".into(), "Apache-2.0".into()])
+        );
+        assert!(with_repo("ignored_advisories", strings(&["RUSTSEC-2024-0001"])).is_ok());
+        for (key, bad) in [
+            ("licenses", strings(&[])),
+            ("licenses", strings(&["MIT,GPL-3.0"])),
+            ("licenses", strings(&["--all"])),
+            ("ignored_advisories", strings(&["a b"])),
+        ] {
+            let err = with_repo(key, bad.clone()).unwrap_err().to_string();
+            assert!(err.contains("repo."), "{key} = {bad}: {err}");
         }
     }
 
