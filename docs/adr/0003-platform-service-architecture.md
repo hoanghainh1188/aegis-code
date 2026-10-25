@@ -69,7 +69,11 @@ ADR 0002 đặt mục tiêu là platform đầy đủ: chạy như dịch vụ, 
 
 ### 6. Triển khai
 
-- Image container cho `aegis-server`. Chạy trên VM (EC2) có Docker; worker tạo container sandbox qua Docker API (`bollard`). Chưa dùng Kubernetes.
+- Image container cho `aegis-server`. Chạy trên VM (EC2) có Docker; worker tạo container sandbox bằng lệnh `docker` (CLI). Chưa dùng Kubernetes.
+  - Không dùng Docker API (`bollard`) (#184). Gate chạy đồng bộ ngoài runtime async (`spawn_blocking`); chạy `docker run` như một tiến trình con cho bước trong container cùng cách xử lý timeout, hủy và ghi log với bước chạy trên máy, và không thêm phụ thuộc. Cách này đã qua Phase 1.
+  - Ràng buộc sandbox nằm trong dòng lệnh `docker run` (`--network none`, `--cap-drop ALL`, `no-new-privileges`, `--pids-limit`, chạy bằng user của máy, cache mount chỉ đọc), secret truyền theo tên qua môi trường của client `docker`, không nằm trên dòng lệnh. Client chỉ nhận các biến cần để tìm daemon.
+  - Trước khi chạy gate, worker kiểm tra daemon (`docker version`); daemon không chạy thì gate dừng với lỗi của chính nó, không thành mọi bước thất bại với mã 125. Khi hết thời gian hoặc job bị hủy, container bị `docker kill` theo tên; kill lỗi thì lý do ghi vào log của bước.
+  - Xem lại khi cần thứ CLI không làm gọn được: theo dõi sự kiện container, nhiều daemon từ xa, hoặc chuyển sang Kubernetes.
 - **Dữ liệu ở Nhật:** mọi thứ của một repo `customer-jp` (DB, workspace, cache build, log) nằm trong `ap-northeast-1`. Cách đơn giản nhất: bản triển khai phục vụ repo khách đặt toàn bộ ở `ap-northeast-1` (EC2 + RDS PostgreSQL). Repo nội bộ có thể dùng chung bản đó hoặc một bản riêng; không có bản triển khai nào ngoài Nhật chứa dữ liệu repo khách.
 - Hạ tầng dạng code bằng OpenTofu (Terraform). Có môi trường staging.
 - Secret lấy từ AWS Secrets Manager khi khởi động và khi xoay vòng (#30); không có trong file cấu hình hay image.
@@ -94,7 +98,7 @@ Phase 2 chỉ bắt đầu khi lõi xong và đo được (ADR 0002), nhưng lõ
 ## Hệ quả
 
 - Thêm crate `aegis-store` (thư viện) và `aegis-server` (binary); dashboard nằm trong `aegis-server`.
-- Phụ thuộc mới khi làm Phase 2: `sqlx`, `axum`, `tower-http`, `askama`, `bollard`, `tokio-util`, `openidconnect`. Mỗi crate thêm vào phải qua `cargo deny` của chính aegis-code (#42). Allow-list cho repo đích (#12) là việc khác.
+- Phụ thuộc mới khi làm Phase 2: `sqlx`, `axum`, `tower-http`, `askama`, `tokio-util`, `openidconnect`. Mỗi crate thêm vào phải qua `cargo deny` của chính aegis-code (#42). Allow-list cho repo đích (#12) là việc khác.
 - CI cần một service PostgreSQL cho test tích hợp của `aegis-store` và `aegis-server`.
 - Chỉ có một thành phần hạ tầng có trạng thái để vận hành (PostgreSQL). Đổi lại, hàng đợi tự làm phải có test cho lease, lấy lại job và giới hạn theo repo.
 - Chạy lại từ đầu khi restart tốn thêm tiền cho job bị gián đoạn. Ledger ghi theo từng lượt nên đo được khoản này; nếu đáng kể thì làm checkpoint.

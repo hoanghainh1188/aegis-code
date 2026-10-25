@@ -246,8 +246,10 @@ impl Runner {
         kill_group(&child);
         if let Some((sandbox, name)) = &container
             && matches!(exit, Exit::TimedOut | Exit::Cancelled)
+            && let Err(why) = sandbox.kill(name)
+            && let Ok(mut f) = file.lock()
         {
-            sandbox.kill(name);
+            let _ = writeln!(f, "[aegis] could not stop container {name}: {why}");
         }
         let deadline = Instant::now() + PIPE_GRACE;
         for pipe in pipes {

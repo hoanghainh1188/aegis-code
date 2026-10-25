@@ -5,10 +5,17 @@
 //! no `.env`, key or token, is visible. The patched and the base run never
 //! share a container, so one cannot leave anything for the other except
 //! through the build caches.
+//!
+//! Containers are driven through the `docker` CLI, not the Docker API
+//! (ADR 0003 §6, #184): the gate runs off the async runtime, and a child
+//! process gives it the same timeout, cancel and log handling as a step
+//! run on the host.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::GateError;
 
 /// Where the tree under check is mounted.
 pub const WORKDIR: &str = "/work";
@@ -117,13 +124,59 @@ impl Sandbox {
         out
     }
 
-    /// Stops the container now; `--rm` removes it.
-    pub(crate) fn kill(&self, name: &str) {
-        let _ = Command::new(&self.docker)
+    /// The `docker` client with only [`CLIENT_ENV`] from this process.
+    fn client(&self) -> Command {
+        let mut c = Command::new(&self.docker);
+        c.env_clear()
+            .envs(
+                CLIENT_ENV
+                    .iter()
+                    .filter_map(|k| Some((*k, std::env::var_os(k)?))),
+            )
+            .stdin(Stdio::null());
+        c
+    }
+
+    /// Fails when the daemon cannot be reached, so a stopped daemon is an
+    /// error of the gate and not every step failing with `docker run`'s
+    /// exit code 125.
+    pub fn check(&self) -> Result<(), GateError> {
+        let out = self
+            .client()
+            .args(["version", "--format", "{{.Server.Version}}"])
+            .output()
+            .map_err(|e| GateError::Spawn {
+                program: self.docker.clone(),
+                message: e.to_string(),
+            })?;
+        if out.status.success() {
+            return Ok(());
+        }
+        Err(GateError::Spawn {
+            program: self.docker.clone(),
+            message: format!(
+                "the Docker daemon is not reachable: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        })
+    }
+
+    /// Stops the container now; `--rm` removes it. A container that is
+    /// already gone is not an error: it ended on its own meanwhile. The
+    /// error says why one may still be running.
+    pub(crate) fn kill(&self, name: &str) -> Result<(), String> {
+        let out = self
+            .client()
             .args(["kill", name])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+            .output()
+            .map_err(|e| format!("cannot start `{}`: {e}", self.docker))?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if out.status.success() || stderr.contains("No such container") {
+            Ok(())
+        } else {
+            Err(stderr.trim().to_owned())
+        }
     }
 }
 
@@ -159,5 +212,108 @@ mod tests {
         ] {
             assert!(text.contains(expected), "{text}");
         }
+    }
+
+    #[test]
+    fn the_fetch_container_joins_its_network_and_may_write_the_caches() {
+        let sandbox = Sandbox {
+            docker: "docker".into(),
+            image: "aegis-sandbox-rust".into(),
+            mounts: vec![(PathBuf::from("/c"), "/usr/local/cargo/registry".into())],
+            env: vec![],
+            network: Some("aegis-fetch-1-0".into()),
+            read_only_mounts: false,
+        };
+        let text = sandbox
+            .wrap("n", &["cargo".into(), "fetch".into()], Path::new("/r"), &[])
+            .join(" ");
+        assert!(text.contains("--network aegis-fetch-1-0 "), "{text}");
+        assert!(
+            text.contains("--volume /c:/usr/local/cargo/registry "),
+            "{text}"
+        );
+        assert!(!text.contains(":ro"), "{text}");
+    }
+
+    #[test]
+    fn limits_processes_and_runs_as_the_host_user() {
+        let sandbox = fake_sandbox("docker");
+        let argv = sandbox.wrap("n", &["true".into()], Path::new("/r"), &[]);
+        let text = argv.join(" ");
+        assert!(text.contains("--pids-limit 4096"), "{text}");
+        assert!(text.contains(&format!("--user {}", host_user())), "{text}");
+        assert!(!text.contains("--privileged"), "{text}");
+        // Nothing of the host but the tree and the caches.
+        let volumes = argv.iter().filter(|a| *a == "--volume").count();
+        assert_eq!(volumes, 1 + sandbox.mounts.len(), "{text}");
+    }
+
+    #[test]
+    fn secret_values_never_reach_the_command_line() {
+        let sandbox = fake_sandbox("docker");
+        let text = sandbox
+            .wrap("n", &["true".into()], Path::new("/r"), &["SONAR_TOKEN"])
+            .join(" ");
+        assert!(text.contains("--env SONAR_TOKEN "), "{text}");
+        assert!(!text.contains("SONAR_TOKEN="), "{text}");
+    }
+
+    fn fake_sandbox(docker: &str) -> Sandbox {
+        Sandbox {
+            docker: docker.into(),
+            image: "img".into(),
+            mounts: vec![],
+            env: vec![],
+            network: None,
+            read_only_mounts: true,
+        }
+    }
+
+    /// A `docker` that writes `stderr` and exits with `code`.
+    #[cfg(unix)]
+    fn fake_docker(name: &str, stderr: &str, code: i32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("aegis-fake-docker-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\necho '{stderr}' >&2\nexit {code}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stopped_daemon_is_an_error_that_says_so() {
+        let docker = fake_docker(
+            "down",
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+            1,
+        );
+        let err = fake_sandbox(docker.to_str().unwrap()).check().unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("daemon is not reachable"), "{text}");
+        assert!(text.contains("Cannot connect"), "{text}");
+        let up = fake_docker("up", "", 0);
+        fake_sandbox(up.to_str().unwrap()).check().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kill_that_fails_says_why_unless_the_container_is_gone() {
+        let gone = fake_docker(
+            "gone",
+            "Error response from daemon: No such container: n",
+            1,
+        );
+        fake_sandbox(gone.to_str().unwrap()).kill("n").unwrap();
+        let down = fake_docker("killdown", "Cannot connect to the Docker daemon", 1);
+        let why = fake_sandbox(down.to_str().unwrap()).kill("n").unwrap_err();
+        assert!(why.contains("Cannot connect"), "{why}");
+        let missing = fake_sandbox("/nonexistent/docker").kill("n").unwrap_err();
+        assert!(missing.contains("cannot start"), "{missing}");
     }
 }
