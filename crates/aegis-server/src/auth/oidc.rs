@@ -2,8 +2,10 @@
 //! with PKCE (`openidconnect`).
 //!
 //! `/auth/login` sends the browser to the SSO with a fresh state, nonce
-//! and PKCE verifier, kept until it comes back in a short, signed,
-//! `HttpOnly` cookie. `/auth/callback` checks the state, trades the code
+//! and PKCE verifier, kept in Postgres until it comes back; the browser
+//! holds only a random id in a short `HttpOnly` cookie (#174), and the
+//! callback takes the row, so it serves once. `/auth/callback` checks the
+//! state, trades the code
 //! for an ID token, checks the token (signature by the SSO's keys, issuer,
 //! audience, nonce, expiry), then opens a session in Postgres. The
 //! provider's discovery and keys are read at the first sign-in and kept,
@@ -13,7 +15,7 @@
 use std::time::Duration;
 
 use aegis_secrets::Secrets;
-use aegis_store::{ActorKind, Store};
+use aegis_store::{ActorKind, PendingLogin, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::{Query, State};
@@ -25,7 +27,7 @@ use openidconnect::{
     EndpointSet, HttpRequest, HttpResponse, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
     RedirectUrl, Scope, TokenResponse,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
@@ -34,7 +36,6 @@ use crate::config::{AuthSection, OidcSection};
 use crate::web::{SessionToken, WebError};
 
 const LOGIN_COOKIE: &str = "__Host-aegis_login";
-const LOGIN_PURPOSE: &str = "oidc-login";
 /// From `/auth/login` to `/auth/callback`.
 const LOGIN_TTL_S: i64 = 600;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -133,16 +134,6 @@ async fn send(http: reqwest::Client, request: HttpRequest) -> Result<HttpRespons
     Ok(out)
 }
 
-/// What `/auth/callback` needs from `/auth/login`.
-#[derive(Debug, Serialize, Deserialize)]
-struct Pending {
-    state: String,
-    nonce: String,
-    verifier: String,
-    next: String,
-    expires: i64,
-}
-
 fn cookie(name: &str, value: &str, max_age_s: i64) -> Option<HeaderValue> {
     HeaderValue::from_str(&format!(
         "{name}={value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={max_age_s}"
@@ -232,19 +223,25 @@ pub async fn login(Extension(auth): Extension<Auth>, Query(q): Query<LoginQuery>
         .add_scope(Scope::new("profile".into()))
         .set_pkce_challenge(challenge)
         .url();
-    let pending = Pending {
+    let pending = PendingLogin {
         state: state.secret().clone(),
         nonce: nonce.secret().clone(),
         verifier: verifier.secret().clone(),
         next: local_path(q.next.as_deref()),
-        expires: chrono::Utc::now().timestamp() + LOGIN_TTL_S,
     };
-    let Ok(json) = serde_json::to_string(&pending) else {
-        return internal("state", "cannot encode");
+    let Ok(id) = random_token() else {
+        return internal("state", "no randomness");
     };
-    let sealed = auth.signer().seal(LOGIN_PURPOSE, &json);
+    let expires = chrono::Utc::now() + chrono::Duration::seconds(LOGIN_TTL_S);
+    if let Err(e) = auth
+        .store()
+        .start_login(&token_hash(&id), &pending, expires)
+        .await
+    {
+        return internal("state", e);
+    }
     let mut response = Redirect::to(url.as_str()).into_response();
-    if let Some(c) = cookie(LOGIN_COOKIE, &sealed, LOGIN_TTL_S) {
+    if let Some(c) = cookie(LOGIN_COOKIE, &id, LOGIN_TTL_S) {
         response.headers_mut().insert(header::SET_COOKIE, c);
     }
     response
@@ -278,13 +275,17 @@ async fn finish_sign_in(auth: &Auth, headers: &HeaderMap, q: CallbackQuery) -> R
     let Some(oidc) = auth.oidc() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // Taken before anything else, so even a refused callback spends it.
+    let pending = match cookie_value(headers, LOGIN_COOKIE) {
+        Some(id) => match auth.store().take_login(&token_hash(id)).await {
+            Ok(p) => p,
+            Err(e) => return internal("state", e),
+        },
+        None => None,
+    };
     if q.error.is_some() {
         return refused("SSO không cho đăng nhập.");
     }
-    let pending = cookie_value(headers, LOGIN_COOKIE)
-        .and_then(|c| auth.signer().open(LOGIN_PURPOSE, c))
-        .and_then(|json| serde_json::from_str::<Pending>(&json).ok())
-        .filter(|p| p.expires > chrono::Utc::now().timestamp());
     let (Some(pending), Some(code), Some(state)) = (pending, q.code, q.state) else {
         return refused("Phiên đăng nhập đã hết hạn hoặc không hợp lệ.");
     };

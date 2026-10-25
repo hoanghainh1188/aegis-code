@@ -616,19 +616,26 @@ async fn people_sign_in_through_the_sso() {
     let pending = set_cookie(&login.headers, "__Host-aegis_login");
     let set = login.headers[header::SET_COOKIE].to_str().unwrap();
     assert!(set.contains("HttpOnly") && set.contains("Secure"), "{set}");
+    // The cookie is only a random id: no state, nonce or verifier in it.
+    let id = pending.split_once('=').unwrap().1;
+    assert_eq!(id.len(), 64, "{pending}");
+    assert!(!id.contains(&state) && !id.contains(&nonce), "{pending}");
 
-    // Another state than the one sent, or no pending cookie: refused.
-    let forged = format!("/auth/callback?code=c&state=x{state}");
-    let refused = send(&app, page(&forged, Some(&pending))).await;
-    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    // No pending cookie, or one the server never handed out: refused.
     let callback = format!("/auth/callback?code=c&state={state}");
     let no_cookie = send(&app, page(&callback, None)).await;
     assert_eq!(no_cookie.status, StatusCode::FORBIDDEN);
+    let unknown = format!("__Host-aegis_login={}", "0".repeat(64));
+    let made_up = send(&app, page(&callback, Some(&unknown))).await;
+    assert_eq!(made_up.status, StatusCode::FORBIDDEN);
 
     sso.will_sign_in("sub-42", "Dev@X.test", &nonce).await;
     let back = send(&app, page(&callback, Some(&pending))).await;
     assert_eq!(back.status, StatusCode::SEE_OTHER, "{}", back.body);
     assert_eq!(back.headers[header::LOCATION], "/jobs");
+    // A pending sign-in serves once: the same cookie again is refused.
+    let replay = send(&app, page(&callback, Some(&pending))).await;
+    assert_eq!(replay.status, StatusCode::FORBIDDEN);
     let session = set_cookie(&back.headers, "__Host-aegis_session");
     let jobs = send(&app, page("/jobs", Some(&session))).await;
     assert_eq!(jobs.status, StatusCode::OK);
@@ -652,9 +659,8 @@ async fn people_sign_in_through_the_sso() {
     sso.rotate_keys().await;
     let login = send(&app, page("/auth/login", None)).await;
     let to_sso = login.headers[header::LOCATION].to_str().unwrap().to_owned();
-    let (state, nonce) = (query_value(&to_sso, "state"), query_value(&to_sso, "nonce"));
+    let state = query_value(&to_sso, "state");
     let pending = set_cookie(&login.headers, "__Host-aegis_login");
-    sso.will_sign_in("sub-42", "dev@x.test", &nonce).await;
     // A failed callback spends the pending sign-in.
     let forged = format!("/auth/callback?code=c&state=x{state}");
     let refused = send(&app, page(&forged, Some(&pending))).await;
@@ -663,7 +669,16 @@ async fn people_sign_in_through_the_sso() {
         set_cookie(&refused.headers, "__Host-aegis_login"),
         "__Host-aegis_login="
     );
+    // ... on the server too: the right state with that cookie is refused.
     let callback = format!("/auth/callback?code=c2&state={state}");
+    let spent = send(&app, page(&callback, Some(&pending))).await;
+    assert_eq!(spent.status, StatusCode::FORBIDDEN);
+    let login = send(&app, page("/auth/login", None)).await;
+    let to_sso = login.headers[header::LOCATION].to_str().unwrap().to_owned();
+    let (state, nonce) = (query_value(&to_sso, "state"), query_value(&to_sso, "nonce"));
+    let pending = set_cookie(&login.headers, "__Host-aegis_login");
+    sso.will_sign_in("sub-42", "dev@x.test", &nonce).await;
+    let callback = format!("/auth/callback?code=c3&state={state}");
     let back = send(&app, page(&callback, Some(&pending))).await;
     assert_eq!(back.status, StatusCode::SEE_OTHER, "{}", back.body);
     assert_eq!(back.headers[header::LOCATION], "/");

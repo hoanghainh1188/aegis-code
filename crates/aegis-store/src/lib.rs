@@ -41,7 +41,7 @@ pub use types::{
     NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
     UserKind, WebhookSource,
 };
-pub use users::{Session, TokenHash};
+pub use users::{PendingLogin, Session, TokenHash};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 

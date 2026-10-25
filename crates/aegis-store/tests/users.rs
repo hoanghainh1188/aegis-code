@@ -3,8 +3,8 @@
 use aegis_ledger::{IssueId, Review, ReviewVerdict};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, ActorKind, Delivered, JobSource, NewDelivery, NewJob, NewRepo, Page, RepoId, RepoMode,
-    RepoRole, Store, StoreError, UserKind, WebhookSource,
+    Actor, ActorKind, Delivered, JobSource, NewDelivery, NewJob, NewRepo, Page, PendingLogin,
+    RepoId, RepoMode, RepoRole, Store, StoreError, UserKind, WebhookSource,
 };
 use serde_json::json;
 
@@ -95,6 +95,32 @@ async fn people_are_found_by_subject_then_by_the_email_they_were_granted() {
             .await,
         Err(StoreError::NotFound(_))
     ));
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_pending_sign_in_is_taken_once_and_only_while_live() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let login = PendingLogin {
+        state: "st".into(),
+        nonce: "no".into(),
+        verifier: "ve".into(),
+        next: "/jobs".into(),
+    };
+    let (live, old) = ([1u8; 32], [2u8; 32]);
+    let soon = chrono::Utc::now() + chrono::Duration::minutes(10);
+    let past = chrono::Utc::now() - chrono::Duration::minutes(1);
+    s.start_login(&old, &login, past).await.unwrap();
+    assert_eq!(s.take_login(&old).await.unwrap(), None, "expired");
+    s.start_login(&live, &login, soon).await.unwrap();
+    assert!(
+        s.start_login(&live, &login, soon).await.is_err(),
+        "an id is used once"
+    );
+    assert_eq!(s.take_login(&[3u8; 32]).await.unwrap(), None);
+    assert_eq!(s.take_login(&live).await.unwrap(), Some(login));
+    assert_eq!(s.take_login(&live).await.unwrap(), None, "taken");
     db.drop().await;
 }
 

@@ -1,7 +1,7 @@
 //! HMAC-SHA256 with the session key, for what the server hands out and
-//! must get back unchanged: the review form's `opened_at` (#167) and the
-//! sign-in state cookie. Each use has its own purpose, so a signature made
-//! for one is worth nothing for another.
+//! must get back unchanged, such as the review form's `opened_at` (#167).
+//! Each use has its own purpose, so a signature made for one is worth
+//! nothing for another.
 
 use aegis_secrets::{Secret, Secrets};
 use hmac::{Hmac, KeyInit, Mac};
@@ -99,22 +99,6 @@ impl Signer {
                 .is_ok()
         })
     }
-
-    /// `message` and its signature in one cookie-safe string.
-    pub fn seal(&self, purpose: &str, message: &str) -> String {
-        let body = hex(message.as_bytes());
-        let signature = self.sign(purpose, &body);
-        format!("{body}.{signature}")
-    }
-
-    /// The message of a [`Signer::seal`], if it is one and unchanged.
-    pub fn open(&self, purpose: &str, sealed: &str) -> Option<String> {
-        let (body, signature) = sealed.split_once('.')?;
-        if !self.verify(purpose, body, signature) {
-            return None;
-        }
-        String::from_utf8(unhex(body)?).ok()
-    }
 }
 
 #[cfg(test)]
@@ -156,19 +140,5 @@ mod tests {
             .build()
             .unwrap()
             .block_on(f)
-    }
-
-    #[test]
-    fn sealed_messages_open_unchanged_only() {
-        let s = Signer::new(b"k");
-        let sealed = s.seal("login", "{\"next\":\"/jobs?a=1\"}");
-        assert_eq!(
-            s.open("login", &sealed).as_deref(),
-            Some("{\"next\":\"/jobs?a=1\"}")
-        );
-        let tampered = format!("00{sealed}");
-        assert_eq!(s.open("login", &tampered), None);
-        assert_eq!(s.open("review", &sealed), None);
-        assert_eq!(s.open("login", "nonsense"), None);
     }
 }
