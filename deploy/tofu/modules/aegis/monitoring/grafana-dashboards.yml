@@ -1,0 +1,11 @@
+# Dashboard nạp từ file (deploy/grafana/*.json trong repo). Sửa trong repo,
+# không sửa trên Grafana: bản trên máy bị ghi đè ở lần đồng bộ sau.
+apiVersion: 1
+providers:
+  - name: aegis
+    folder: aegis
+    type: file
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana-dashboards

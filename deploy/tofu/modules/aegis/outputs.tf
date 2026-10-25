@@ -41,3 +41,13 @@ output "log_group" {
   description = "CloudWatch Logs của container aegis-server."
   value       = aws_cloudwatch_log_group.server.name
 }
+
+output "monitoring_instance_id" {
+  description = "Máy giám sát; mở Grafana bằng SSM port forwarding tới cổng 3000 (docs/runbook/README.md, \"Giám sát\")."
+  value       = var.monitoring.enabled ? aws_instance.monitoring[0].id : null
+}
+
+output "alerts_topic_arn" {
+  description = "SNS topic nhận cảnh báo của Alertmanager; đăng ký thêm kênh ở đây."
+  value       = var.monitoring.enabled ? aws_sns_topic.alerts[0].arn : null
+}

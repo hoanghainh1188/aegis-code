@@ -1,0 +1,115 @@
+#!/bin/bash
+# Khởi tạo máy giám sát (Amazon Linux 2023), chạy một lần khi tạo máy.
+# Viết bởi OpenTofu (deploy/tofu/modules/aegis/monitoring.tf); xem
+# docs/runbook/README.md, "Giám sát".
+set -euxo pipefail
+
+dnf install -y docker
+systemctl enable --now docker
+
+# Volume EBS dữ liệu (TSDB, Alertmanager, Grafana): định dạng lần đầu,
+# giữ nguyên khi thay máy.
+DATA=/data
+DEV=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume}
+for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 5; done
+blkid "$DEV" || mkfs.xfs "$DEV"
+mkdir -p "$DATA"
+echo "$DEV $DATA xfs defaults,nofail 0 2" >> /etc/fstab
+mount "$DATA"
+# uid của user trong image: nobody (Prometheus, Alertmanager), 472 (Grafana).
+mkdir -p "$DATA/prometheus" "$DATA/alertmanager" "$DATA/grafana"
+chown 65534:65534 "$DATA/prometheus" "$DATA/alertmanager"
+chown 472:0 "$DATA/grafana"
+
+# Mật khẩu admin của Grafana: sinh một lần, chỉ root và Grafana đọc.
+# Grafana chỉ nghe trên 127.0.0.1, mở qua SSM; ai mở được thì cũng vào
+# được máy.
+if [ ! -f "$DATA/grafana-admin-password" ]; then
+  (umask 077; openssl rand -hex 16 > "$DATA/grafana-admin-password")
+fi
+chown 472:0 "$DATA/grafana-admin-password"
+chmod 0400 "$DATA/grafana-admin-password"
+
+CONF=/etc/aegis-monitoring
+mkdir -p "$CONF"
+
+cat > /usr/local/bin/aegis-monitoring-sync <<'SYNC'
+#!/bin/bash
+# Kéo cấu hình từ s3://${bucket} về /etc/aegis-monitoring; có thay đổi thì
+# reload Prometheus và Alertmanager (Grafana tự đọc lại dashboard mỗi phút).
+set -euo pipefail
+before=$(find /etc/aegis-monitoring -type f -exec md5sum {} + | sort | md5sum)
+aws s3 sync --region ${region} --delete --only-show-errors s3://${bucket}/ /etc/aegis-monitoring/
+after=$(find /etc/aegis-monitoring -type f -exec md5sum {} + | sort | md5sum)
+if [ "$before" != "$after" ]; then
+  echo "aegis-monitoring: config changed, reloading"
+  curl -fsS -X POST http://127.0.0.1:9090/-/reload || true
+  curl -fsS -X POST http://127.0.0.1:9093/-/reload || true
+fi
+SYNC
+chmod 0755 /usr/local/bin/aegis-monitoring-sync
+# Role của máy có thể chưa có hiệu lực ngay khi máy vừa lên: thử lại.
+for _ in $(seq 1 30); do
+  /usr/local/bin/aegis-monitoring-sync && break
+  sleep 10
+done
+test -f "$CONF/prometheus/prometheus.yml"
+
+cat > /etc/systemd/system/aegis-monitoring-sync.service <<'UNIT'
+[Unit]
+Description=Pull aegis monitoring config from S3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aegis-monitoring-sync
+UNIT
+cat > /etc/systemd/system/aegis-monitoring-sync.timer <<'UNIT'
+[Unit]
+Description=Pull aegis monitoring config from S3 every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+# Mọi container chạy `--network host` và chỉ nghe trên 127.0.0.1: security
+# group không mở cổng nào, Prometheus vẫn tới được cổng 9464 của server và
+# đọc được role của máy qua IMDS (hop limit 1).
+# unit TÊN "THAM SỐ docker run" "IMAGE THAM SỐ CHƯƠNG TRÌNH"
+unit() {
+  cat > "/etc/systemd/system/$1.service" <<UNIT
+[Unit]
+Description=$1 (aegis monitoring)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm -f $1
+ExecStart=/usr/bin/docker run --rm --name $1 --network host $2 $3
+ExecStop=/usr/bin/docker stop $1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+unit prometheus \
+  "--volume $CONF/prometheus:/etc/prometheus:ro --volume $DATA/prometheus:/prometheus" \
+  "${prometheus_image} --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=${retention_days}d --web.listen-address=127.0.0.1:9090 --web.enable-lifecycle"
+
+# Một máy: tắt cluster (gossip) của Alertmanager.
+unit alertmanager \
+  "--volume $CONF/alertmanager:/etc/alertmanager:ro --volume $DATA/alertmanager:/alertmanager" \
+  "${alertmanager_image} --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager --web.listen-address=127.0.0.1:9093 --cluster.listen-address="
+
+unit grafana \
+  "--volume $CONF/grafana/provisioning:/etc/grafana/provisioning:ro --volume $CONF/grafana/dashboards:/var/lib/grafana-dashboards:ro --volume $DATA/grafana:/var/lib/grafana --volume $DATA/grafana-admin-password:/run/secrets/grafana-admin-password:ro --env GF_SERVER_HTTP_ADDR=127.0.0.1 --env GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana-admin-password --env GF_USERS_ALLOW_SIGN_UP=false --env GF_ANALYTICS_REPORTING_ENABLED=false --env GF_ANALYTICS_CHECK_FOR_UPDATES=false" \
+  "${grafana_image}"
+
+systemctl daemon-reload
+systemctl enable --now prometheus alertmanager grafana aegis-monitoring-sync.timer

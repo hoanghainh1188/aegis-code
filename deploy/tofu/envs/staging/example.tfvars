@@ -8,3 +8,6 @@ repo_secret_names = ["GITHUB_TOKEN_EXAMPLE_REPO"]
 server_config = {
   oidc_issuer = "https://login.example.com/realms/acme"
 }
+monitoring = {
+  alert_emails = ["oncall@example.com"]
+}

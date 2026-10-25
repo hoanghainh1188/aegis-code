@@ -19,6 +19,11 @@ customer_jp = "config/customer-jp.toml"
 # Sau ALB (TLS ở ALB); security group chỉ cho ALB vào cổng này.
 listen = "0.0.0.0:8080"
 
+[metrics]
+# /metrics không có token (#32): security group chỉ cho máy Prometheus của
+# bản triển khai này vào cổng 9464 (monitoring.tf), không qua ALB.
+listen = "0.0.0.0:9464"
+
 [auth]
 public_url = "${public_url}"
 session_hours = ${config.session_hours}

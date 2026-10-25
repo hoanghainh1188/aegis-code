@@ -1,6 +1,7 @@
 # VPC riêng: hai subnet public cho ALB và EC2 (ra Internet qua Internet
 # gateway, không cần NAT), hai subnet private cho RDS. EC2 chỉ nhận kết
-# nối từ ALB; không mở SSH, vào máy bằng SSM Session Manager.
+# nối từ ALB và từ máy Prometheus (cổng metrics, monitoring.tf); không mở
+# SSH, vào máy bằng SSM Session Manager.
 
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -80,7 +81,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_server" {
 
 resource "aws_security_group" "server" {
   name        = "${local.prefix}-server"
-  description = "aegis-server: 8080 from the ALB only"
+  description = "aegis-server: 8080 from the ALB, 9464 from Prometheus"
   vpc_id      = aws_vpc.main.id
   tags        = local.tags
 }

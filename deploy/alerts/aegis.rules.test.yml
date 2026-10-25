@@ -93,3 +93,46 @@ tests:
             exp_annotations:
               summary: "Hàng đợi job dồn"
               description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."
+
+  # Server trả lời đến phút 10, rồi dừng. Prometheus vẫn thấy máy (up = 0).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="aegis",instance="i-0abc"}'
+        values: '1x10 0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AegisServerDown
+        exp_alerts: []
+      # Mới dừng 4 phút.
+      - eval_time: 14m
+        alertname: AegisServerDown
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: AegisServerDown
+        exp_alerts:
+          - exp_labels:
+              job: aegis
+              instance: i-0abc
+              severity: critical
+            exp_annotations:
+              summary: "Không scrape được aegis-server"
+              description: "Prometheus không đọc được /metrics của aegis-server trong 5 phút. Xem `systemctl status aegis` trên máy và security group cổng 9464."
+
+  # Không tìm thấy máy server nào (không có series `up` của job aegis).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="prometheus",instance="127.0.0.1:9090"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AegisServerDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: AegisServerDown
+        exp_alerts:
+          - exp_labels:
+              job: aegis
+              severity: critical
+            exp_annotations:
+              summary: "Không scrape được aegis-server"
+              description: "Prometheus không đọc được /metrics của aegis-server trong 5 phút. Xem `systemctl status aegis` trên máy và security group cổng 9464."

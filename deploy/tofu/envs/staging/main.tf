@@ -48,6 +48,7 @@ module "aegis" {
   image_repository   = var.image_repository
   repo_secret_names  = var.repo_secret_names
   server_config      = var.server_config
+  monitoring         = var.monitoring
 
   instance_type          = "m7i.large"
   workspace_volume_gb    = 100

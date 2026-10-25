@@ -1,6 +1,6 @@
 # Runbook vận hành aegis-server
 
-Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). Bốn việc thường làm: [triển khai](#1-triển-khai), [rollback](#2-rollback), [xoay secret](#3-xoay-secret), [xử lý sự cố](#4-xử-lý-sự-cố). Phần [chuẩn bị tài khoản](#0-chuẩn-bị-tài-khoản) chỉ làm một lần.
+Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). Bốn việc thường làm: [triển khai](#1-triển-khai), [rollback](#2-rollback), [xoay secret](#3-xoay-secret), [xử lý sự cố](#4-xử-lý-sự-cố). Metric, cảnh báo và Grafana: [giám sát](#5-giám-sát). Phần [chuẩn bị tài khoản](#0-chuẩn-bị-tài-khoản) chỉ làm một lần.
 
 ## Tổng quan
 
@@ -16,6 +16,7 @@ Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/00
 | Tag đang chạy | SSM parameter `/aegis/<môi trường>/image_tag` |
 | Log | CloudWatch Logs `/aegis/<môi trường>/server` (cùng vùng) |
 | Workspace job, cache build, image Docker | Volume EBS riêng gắn ở `/data`; workspace bind vào `/srv/aegis/.workspace` |
+| Giám sát | EC2 thứ hai `aegis-<môi trường>-monitoring`: Prometheus, Alertmanager, Grafana; cảnh báo qua SNS `aegis-<môi trường>-alerts`. Xem [5. Giám sát](#5-giám-sát) |
 
 **customer-jp:** mọi thứ trên (EC2, RDS, EBS, secret, log, ECR, state) ở `ap-northeast-1`. Vùng viết cứng trong `envs/customer-jp`, module kiểm lại; server từ chối khởi động với `customer_jp` nếu secret store không ở `ap-northeast-1`.
 
@@ -137,7 +138,7 @@ Thêm secret mới cho repo: thêm tên vào `repo_secret_names` trong `TOFU_TFV
 
 ## 4. Xử lý sự cố
 
-Vào máy: `aws ssm start-session --target <instance_id>`. Log: CloudWatch Logs `/aegis/<env>/server` (JSON; lọc `{ $.level = "ERROR" }`), trên máy `sudo journalctl -u aegis` (systemd, script deploy). Trạng thái: `systemctl status aegis`, `sudo docker ps`. Metric và cảnh báo: #32.
+Vào máy: `aws ssm start-session --target <instance_id>`. Log: CloudWatch Logs `/aegis/<env>/server` (JSON; lọc `{ $.level = "ERROR" }`), trên máy `sudo journalctl -u aegis` (systemd, script deploy). Trạng thái: `systemctl status aegis`, `sudo docker ps`. Metric, cảnh báo và dashboard: [5. Giám sát](#5-giám-sát).
 
 ### Server không lên
 
@@ -187,3 +188,39 @@ Dấu hiệu: lỗi ghi (`could not extend file`, `No space left`), RDS báo `st
 
 3. Không xóa tay `audit_log` (append-only có trigger) hay ledger (dữ liệu KPI). Dọn dữ liệu cũ cần chính sách giữ dữ liệu: mở issue.
 4. `VACUUM` bị chặn bởi transaction treo: `SELECT pid, state, xact_start FROM pg_stat_activity ORDER BY xact_start`; `SELECT pg_terminate_backend(<pid>)` cho transaction treo lâu.
+
+## 5. Giám sát
+
+Mỗi bản triển khai có một máy giám sát riêng, cùng VPC và cùng vùng (`deploy/tofu/modules/aegis/monitoring.tf`; tắt bằng `monitoring = { enabled = false }`). Máy chạy ba container `--network host`, mỗi cái là một systemd unit cùng tên, và **chỉ nghe trên 127.0.0.1**. Security group của máy không mở cổng nào.
+
+| Thành phần | Chi tiết |
+| --- | --- |
+| Prometheus (`prometheus`) | Tìm máy server qua EC2 service discovery (tag `Name=aegis-<env>-server`, đang chạy) và scrape `/metrics` ở cổng 9464 mỗi 30 s. Server nghe metrics trên `0.0.0.0:9464`; security group của server chỉ cho máy giám sát vào cổng này, ALB không chuyển cổng này ra ngoài. Nạp `deploy/alerts/aegis.rules.yml`, giữ dữ liệu `retention_days` (30) ngày |
+| Alertmanager (`alertmanager`) | Gửi mọi cảnh báo, gom theo `alertname` và `repo`, lên SNS topic `aegis-<env>-alerts` (output `alerts_topic_arn`), nhắc lại mỗi 4 giờ khi còn bắn |
+| Grafana (`grafana`) | Datasource Prometheus và dashboard `deploy/grafana/*.json` (thư mục `aegis`), nạp từ file |
+| Cấu hình | Bucket `aegis-<env>-monitoring-<account>`, OpenTofu viết từ repo. Timer `aegis-monitoring-sync` kéo về `/etc/aegis-monitoring` mỗi 5 phút; có thay đổi thì reload Prometheus và Alertmanager |
+| Dữ liệu | Volume EBS riêng gắn ở `/data` (TSDB, trạng thái silence, CSDL Grafana): còn nguyên khi thay máy |
+
+**Mở Grafana** (từ máy của người vận hành, cần quyền SSM như khi vào máy server):
+
+```bash
+aws ssm start-session --target <monitoring_instance_id> \
+  --document-name AWS-StartPortForwardingSession --parameters portNumber=3000,localPortNumber=3000
+# Lần đầu, cửa sổ khác: mật khẩu user admin, sinh khi tạo máy
+aws ssm start-session --target <monitoring_instance_id>   # rồi: sudo cat /data/grafana-admin-password
+```
+
+Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmanager (cổng 9093) mở cùng cách. Tạm im một cảnh báo (bảo trì): silence ở trang Alertmanager.
+
+**Nhận cảnh báo:** thêm email vào `monitoring.alert_emails` trong `TOFU_TFVARS_<ENV>`, `action=apply`, rồi bấm link xác nhận trong email AWS gửi tới. Kênh khác (Slack qua AWS Chatbot, PagerDuty…) đăng ký vào topic bằng tay. Với customer-jp, nội dung cảnh báo có tên repo khách: chỉ gửi cho người được xem repo đó.
+
+**Đổi luật hoặc dashboard:** sửa `deploy/alerts/aegis.rules.yml` (kèm test trong `aegis.rules.test.yml`, CI chạy `promtool`) hoặc `deploy/grafana/*.json`, merge, `action=apply`. Máy nhận trong vòng 5 phút; không thay máy. Sửa dashboard trên Grafana không được lưu: xuất JSON rồi commit. Đổi phiên bản image (`monitoring.*_version`) thì thay máy; dữ liệu ở `/data` còn nguyên.
+
+| Cảnh báo | Mức | Xem |
+| --- | --- | --- |
+| `AegisServerDown` | critical | [Server không lên](#server-không-lên); máy dừng, hoặc security group chặn cổng 9464 |
+| `AegisProviderErrorsSustained` | critical | [Provider lỗi kéo dài](#provider-api-model-lỗi-kéo-dài) |
+| `AegisQueueBacklog` | warning | [Hàng đợi dồn](#hàng-đợi-dồn) |
+| `AegisCacheReadRatioLow` | warning | Prompt đổi thứ tự hoặc cache breakpoint sai: so bản mới với bản trước (deploy gần nhất), xem tỉ lệ cache theo repo trên dashboard |
+
+**Máy giám sát lỗi:** `aws ssm start-session --target <monitoring_instance_id>`, rồi `systemctl status prometheus alertmanager grafana aegis-monitoring-sync.timer` và `sudo journalctl -u aegis-monitoring-sync`. Target `aegis` ở trang Targets của Prometheus báo `down` mà server vẫn chạy: kiểm security group cổng 9464 và `[metrics] listen` trong `/etc/aegis/server.toml`. Không thấy target nào: tag `Name` của máy server, quyền `ec2:DescribeInstances` của role `aegis-<env>-monitoring`. Máy giám sát chết thì không có cảnh báo nào; hiện chưa có gì canh chính nó (CloudWatch alarm trên status check của máy là bước tiếp theo nếu cần).

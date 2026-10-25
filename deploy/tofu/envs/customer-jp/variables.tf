@@ -31,6 +31,12 @@ variable "server_config" {
   default     = {}
 }
 
+variable "monitoring" {
+  description = "Máy giám sát: Prometheus, Alertmanager, Grafana (xem module)."
+  type        = any
+  default     = {}
+}
+
 variable "offline_plan" {
   description = "Chạy `plan` không cần thông tin đăng nhập AWS, chỉ để kiểm cấu hình."
   type        = bool

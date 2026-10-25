@@ -1,0 +1,21 @@
+# Alertmanager: viết bởi OpenTofu (deploy/tofu/modules/aegis/monitoring).
+# Mọi cảnh báo đi qua SNS topic của bản triển khai; đăng ký email hay kênh
+# khác ở SNS (docs/runbook/README.md, "Giám sát").
+route:
+  receiver: sns
+  group_by: [alertname, repo]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: sns
+    sns_configs:
+      - topic_arn: ${topic_arn}
+        sigv4:
+          region: ${region}
+        subject: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.deployment }})'
+        message: |-
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
