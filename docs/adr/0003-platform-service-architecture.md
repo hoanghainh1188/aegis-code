@@ -1,7 +1,7 @@
 # ADR 0003 – Kiến trúc lớp dịch vụ (Phase 2)
 
 - Ngày: 2026-10-18
-- Trạng thái: Đề xuất
+- Trạng thái: Đã chấp nhận (2026-10-25: đã làm theo trong các issue #22–#33; sandbox giữ docker CLI, §6 sửa ở #184)
 - Người quyết định: @Nguyen Han Hoang Hai
 - Liên quan: [ADR 0001](0001-platform-in-rust.md), [ADR 0002](0002-full-platform-mvp-as-checkpoint.md), Proposal §7, §9
 

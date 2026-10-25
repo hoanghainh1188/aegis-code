@@ -8,7 +8,7 @@
 
 [![Rust 2021](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
 [![License: Proprietary](https://img.shields.io/badge/license-Internal-blue.svg)]()
-[![Status: Phase 1 MVP](https://img.shields.io/badge/status-Phase%201%20MVP-brightgreen.svg)]()
+[![Status: Phase 2 Platform](https://img.shields.io/badge/status-Phase%202%20Platform-yellow.svg)]()
 
 ---
 
@@ -61,7 +61,7 @@ flowchart TD
    * **Light (`Haiku 5.5`):** Issue classification, build/test log summarization, stack trace pruning.
    * **Core (`Sonnet 5.5`):** Root-cause localization, reproducing test creation, patch synthesis.
    * **Expert (`Opus 5.5`):** Architecture refactoring, complex bugs across $\ge 3$ files.
-   * **Economic Circuit Breaker:** Halts execution immediately if cost exceeds $\$4$ or reaches 20 model calls.
+   * **Economic Circuit Breaker:** Halts execution immediately if cost exceeds $\$4$ or reaches 40 model calls (Light calls not counted; raised from 20 after the first eval run, see [design §5.3](docs/design/01-architecture-detail.md)).
 4. **Layer 4 – 6-Step Verification Gate in Docker:**
    * Format $\rightarrow$ Lint $\rightarrow$ Repro Test (proves FAIL $\rightarrow$ PASS) $\rightarrow$ Full Test Suite $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate (when `[sonar]` is configured, #91). Commands are loaded from the target repository's language profile (e.g. Rust: `cargo fmt`, `cargo clippy`, `cargo llvm-cov`) — see [ADR 0004](docs/adr/0004-multi-language-profiles.md).
    * **Golden Master Technique:** For legacy code without test coverage, the agent writes characterization tests capturing existing behavior prior to patching; any modified output must be declared under *"Permitted Behavior Changes"* in the PR description.
@@ -99,12 +99,18 @@ crates/
 ├── aegis-provider/       # ModelProvider: Claude API & Bedrock jp.
 ├── aegis-orchestrator/   # Agent loop, session state, batch collapse
 ├── aegis-router/         # Light/Core/Expert hierarchy, escalation & stopping rules
-├── aegis-aci/            # MCP code manipulation tools: search, open, edit
+├── aegis-aci/            # MCP code manipulation tools: search, open, edit, call graph
+├── aegis-lang/           # Language profiles: detection, grammar, gate steps, dependencies (ADR 0004)
 ├── aegis-gate/           # 6-step Docker verification gate runner
+├── aegis-lifecycle/      # One issue end to end: classify, agent loop, gate, escalate, PR or stop
 ├── aegis-ledger/         # Cost calculation trait and per-issue ledger
 ├── aegis-pr/             # Branch management and PR description generator
 ├── aegis-sonar-batch/    # Sonar alert clustering and integration branch merge
-└── aegis-cli/            # CLI entrypoint to run single issues or batches
+├── aegis-tracker/        # Jira and Backlog: tickets by JQL/filter, job result written back
+├── aegis-secrets/        # Secrets from AWS Secrets Manager (env for dev and tests)
+├── aegis-store/          # PostgreSQL state: repos, jobs, queue, ledger, users, audit
+├── aegis-server/         # The service: HTTP API, webhooks, scheduler, workers, dashboard (ADR 0003)
+└── aegis-cli/            # CLI entrypoint to run single issues, batches and evals
 ```
 
 ---
@@ -140,16 +146,20 @@ cargo test -p aegis-provider --features bedrock
 
 ## 🗺️ 6. Roadmap
 
-* **Phase 0 – Setup:** CI pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
-* **Phase 1 – MVP / PoC:** Core crates, Rust and Python profiles; empirical 3-KPI evaluation on target repositories ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md)).
-* **Phase 2 – Platform Service:** TypeScript/JavaScript, Java, Go, C#/.NET profiles; single binary `aegis-server` (Axum), PostgreSQL job queue, Jira/GitLab connectors, Askama+htmx dashboard ([ADR 0003](docs/adr/0003-platform-service-architecture.md)).
-* **Phase 3 – Advanced Scaling:** SBFL fault localization, deep context compression (SWEzze/SaraCoder), language support beyond the initial 6 profiles.
+Progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188/aegis-code/milestones); status as of 2026-10-25:
+
+* ✅ **Phase 0 – Setup** (closed 2026-10-24): CI pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
+* ✅ **Phase 1 – MVP / PoC** (closed 2026-10-24): Core crates, Rust and Python profiles; empirical 3-KPI evaluation on target repositories ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md), thresholds in [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md)).
+* 🚧 **Phase 2 – Platform Service** (in progress): TypeScript/JavaScript, Java, Go, C#/.NET profiles and per-directory profiles for monorepos; single binary `aegis-server` (Axum), PostgreSQL job queue, GitHub/GitLab webhooks, Jira/Backlog and scheduled Sonar polling, Askama+htmx dashboard, OIDC and audit, Prometheus/Grafana monitoring, OpenTofu deployment ([ADR 0003](docs/adr/0003-platform-service-architecture.md)). Remaining: `tofu apply` to staging (#33), eval sets for the four new profiles, KPI re-runs, and a pilot with a real team.
+* ⏳ **Phase 3 – Advanced Scaling** (not started): SBFL fault localization, deep context compression (SWEzze/SaraCoder), language support beyond the initial 6 profiles.
 
 ---
 
 ## 📖 7. References & Conventions
 
 * [Project Proposal](docs/design/00-proposal.md) (Foundational vision and requirements)
-* [Technical Architecture Specification](docs/design/01-architecture-detail.md) (Phase 1 core specification)
+* [Technical Architecture Specification](docs/design/01-architecture-detail.md) (Phase 1 core specification; the service layer is in [ADR 0003](docs/adr/0003-platform-service-architecture.md))
+* [Operations Runbook](docs/runbook/README.md) (Deploy, rollback, secret rotation, incidents, monitoring)
+* [Measurements](docs/measurements/) (Eval runs and KPI reports)
 * [Architectural Decision Records (ADRs)](docs/adr/)
 * [Development Conventions & Workflow](CLAUDE.md) (Branching, commit conventions, and pre-PR checks)
