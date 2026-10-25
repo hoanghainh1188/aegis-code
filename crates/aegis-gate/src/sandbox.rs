@@ -282,6 +282,16 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Another test's fork may still hold the write end until it execs
+        // (ETXTBSY on Linux); wait until the script runs.
+        for _ in 0..100 {
+            match Command::new(&path).output() {
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                _ => break,
+            }
+        }
         path
     }
 
