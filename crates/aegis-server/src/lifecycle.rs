@@ -221,6 +221,7 @@ impl LifecycleRunner {
         let runtime = self.runtime(repo.mode)?;
         config
             .check_aci_bin()
+            .and_then(|()| config.check_codebase_memory())
             .map_err(|e| Attempt::Rejected(e.to_string()))?;
         // The repo's own budget may be below the worker's cap.
         let spent = self

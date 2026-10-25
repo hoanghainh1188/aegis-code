@@ -22,8 +22,8 @@ use aegis_ledger::{
     GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
-    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, TurnRecord,
-    run_loop, system_blocks,
+    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, ToolExecutor,
+    TurnRecord, run_loop, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Decision, Router, Signal, Spent};
@@ -33,6 +33,7 @@ use tokio_util::sync::CancellationToken;
 use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
+use crate::code_graph::{self, CodeGraph};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -211,8 +212,8 @@ where
     .await
 }
 
-/// In the Codebase-Memory server's `args` and `env`: the repo's index
-/// directory under the state dir.
+/// In the Codebase-Memory server's `args` and `env`: the index directory
+/// under the state dir.
 const INDEX_DIR: &str = "{index_dir}";
 
 fn tool_specs(
@@ -267,17 +268,21 @@ fn tool_specs(
         tools: None,
     }];
     if let Some(cbm) = &cfg.codebase_memory {
-        // Each repo keeps its own index (#24), which the server updates
-        // from the files' hashes itself.
-        let index = cfg.run.state_dir.join("index").join(&cfg.repo.key);
+        // One index directory for every repo: the server's daemon is one
+        // per user and serves a single cache directory, so a job with
+        // another one could not start while a job is running (#185). Each
+        // job indexes its tree as its own project and drops it at the end
+        // (`CodeGraph`). The server runs in the tree, which it then takes
+        // as its own project.
+        let index = cfg.run.state_dir.join("index");
         std::fs::create_dir_all(&index).map_err(|e| LifecycleError::io(&index, &e))?;
         let index = index.display().to_string();
         let fill = |v: &String| v.replace(INDEX_DIR, &index);
         specs.push(McpServerSpec {
-            name: "codebase-memory".into(),
+            name: code_graph::SERVER.into(),
             program: cbm.program.clone(),
             args: cbm.args.iter().map(fill).collect(),
-            cwd: None,
+            cwd: Some(tree.to_path_buf()),
             env: cbm.env.iter().map(|(k, v)| (k.clone(), fill(v))).collect(),
             tools: Some(cbm.tools.clone()),
         });
@@ -326,6 +331,14 @@ where
             .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
     }
     let tools = McpTools::connect(&tool_specs(cfg, profile, tree.path(), &job_dir)?).await?;
+    let queries = cfg.codebase_memory.as_ref().map(|c| c.tools.as_slice());
+    let graph = match CodeGraph::open(&tools, queries, tree.path()).await {
+        Ok(graph) => graph,
+        Err(e) => {
+            tools.shutdown().await;
+            return Err(e);
+        }
+    };
     let session = Session::new(
         system,
         Message::user_text(first_message),
@@ -336,7 +349,7 @@ where
         ledger,
         profile,
         issue,
-        &tools,
+        &graph,
         session,
         tree.path(),
         &base,
@@ -345,6 +358,7 @@ where
         cancel,
     )
     .await;
+    graph.close().await;
     tools.shutdown().await;
     drop(tree);
     result
@@ -762,12 +776,12 @@ pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
 
 /// The Core/Expert loop with gate runs between attempts.
 #[allow(clippy::too_many_arguments)]
-async fn drive<P, S>(
+async fn drive<P, S, T>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
     profile: &ResolvedProfile,
     issue: &IssueInput,
-    tools: &McpTools,
+    tools: &T,
     session: Session,
     tree: &Path,
     base: &str,
@@ -778,6 +792,7 @@ async fn drive<P, S>(
 where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
+    T: ToolExecutor + Sync,
 {
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });

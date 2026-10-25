@@ -4,6 +4,8 @@
 mod common;
 
 use std::collections::VecDeque;
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use aegis_orchestrator::{
@@ -290,12 +292,21 @@ async fn aci_and_codebase_memory_share_one_tool_list() {
     let repo = Scratch::fixture("rust");
     let home = repo.outside();
     std::fs::create_dir_all(&home).unwrap();
+    // The server's daemon is one per user and serves one cache directory:
+    // a daemon already running for another (an eval, an editor) refuses
+    // this test's server. A short, private directory of its own instead.
+    let runtime = PathBuf::from(format!("/tmp/aegis-cbm-aci-{}", std::process::id()));
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
     let cbm_spec = McpServerSpec {
         name: "codebase-memory".into(),
         program: cbm,
         args: vec![],
         cwd: None,
-        env: vec![("HOME".into(), home.display().to_string())],
+        env: vec![
+            ("HOME".into(), home.display().to_string()),
+            ("CBM_RUNTIME_DIR".into(), runtime.display().to_string()),
+        ],
         tools: Some(vec![
             "index_repository".into(),
             "search_graph".into(),
@@ -334,6 +345,7 @@ async fn aci_and_codebase_memory_share_one_tool_list() {
         found.content
     );
     tools.shutdown().await;
+    let _ = std::fs::remove_dir_all(&runtime);
 }
 
 /// The tool list is part of the cached prompt prefix (design §4.4): any

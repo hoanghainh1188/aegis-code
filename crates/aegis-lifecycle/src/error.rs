@@ -37,6 +37,9 @@ pub enum LifecycleError {
     #[error(transparent)]
     Tools(#[from] aegis_orchestrator::McpToolsError),
 
+    #[error("Codebase-Memory: {0}")]
+    CodeGraph(String),
+
     #[error("I/O error on `{path}`: {message}")]
     Io { path: String, message: String },
 }

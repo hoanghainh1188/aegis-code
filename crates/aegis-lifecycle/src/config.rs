@@ -268,8 +268,8 @@ fn default_sonar_poll() -> u64 {
 }
 
 /// Another MCP server whose tools the agent gets (Codebase-Memory).
-/// `{index_dir}` in `args` and `env` values is the repo's own index
-/// directory, `<state_dir>/index/<repo key>`.
+/// `{index_dir}` in `args` and `env` values is the index directory,
+/// `<state_dir>/index`, shared by every repo.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraServer {
@@ -279,6 +279,19 @@ pub struct ExtraServer {
     #[serde(default)]
     pub env: Vec<(String, String)>,
     pub tools: Vec<String>,
+}
+
+impl ExtraServer {
+    /// `program` taken from `base` when it is a relative path; a bare name
+    /// stays one, to be looked up on `PATH`.
+    pub(crate) fn program_from(&self, base: &Path) -> String {
+        let program = Path::new(&self.program);
+        if program.is_relative() && program.components().count() > 1 {
+            base.join(program).display().to_string()
+        } else {
+            self.program.clone()
+        }
+    }
 }
 
 impl SonarConfig {
@@ -394,6 +407,9 @@ impl RunConfig {
         if let Some(p) = self.repo.fork.push_to_local.as_mut() {
             abs(p);
         }
+        if let Some(cbm) = self.codebase_memory.as_mut() {
+            cbm.program = cbm.program_from(base);
+        }
         self
     }
 
@@ -427,6 +443,30 @@ impl RunConfig {
         Err(LifecycleError::Config(format!(
             "no `aegis-aci` at `{}` ({from}); build it with `{build}` or set `run.aci_bin`",
             bin.display()
+        )))
+    }
+
+    /// Fails unless the Codebase-Memory program, when configured, is a file
+    /// or found on `PATH`; checked with [`Self::check_aci_bin`], for the
+    /// same reason.
+    pub fn check_codebase_memory(&self) -> Result<(), LifecycleError> {
+        let Some(cbm) = &self.codebase_memory else {
+            return Ok(());
+        };
+        let program = Path::new(&cbm.program);
+        let found = if program.components().count() > 1 {
+            program.is_file()
+        } else {
+            std::env::var_os("PATH")
+                .is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(program).is_file()))
+        };
+        if found {
+            return Ok(());
+        }
+        Err(LifecycleError::Config(format!(
+            "no Codebase-Memory program `{}` (`codebase_memory.program`); install \
+             codebase-memory-mcp (eval/README.md, \"Codebase-Memory\") or remove `[codebase_memory]`",
+            cbm.program
         )))
     }
 }
@@ -476,6 +516,52 @@ pull_request = false"#,
             let conventions = repo.conventions.unwrap_or_default();
             assert!(conventions.contains(place), "{}: {conventions}", repo.key);
         }
+    }
+
+    #[test]
+    fn the_poc_repos_give_the_agent_the_call_graph() {
+        let typst = include_str!("../../../config/typst.toml");
+        for toml in [POC, typst] {
+            let cbm = RunConfig::from_toml(toml).unwrap().codebase_memory.unwrap();
+            assert_eq!(cbm.program, "codebase-memory-mcp");
+            assert_eq!(cbm.tools, ["search_graph", "trace_path"]);
+            assert_eq!(cbm.env, [("HOME".into(), "{index_dir}".into())]);
+        }
+    }
+
+    #[test]
+    fn a_relative_codebase_memory_path_is_taken_from_the_base() {
+        let base = Path::new("/srv/aegis");
+        let program = |p: &str| {
+            let mut cfg = RunConfig::from_toml(POC).unwrap();
+            cfg.codebase_memory.as_mut().unwrap().program = p.into();
+            cfg.with_paths_from(base).codebase_memory.unwrap().program
+        };
+        assert_eq!(
+            program(".workspace/tools/cbm/codebase-memory-mcp"),
+            "/srv/aegis/.workspace/tools/cbm/codebase-memory-mcp"
+        );
+        assert_eq!(program("codebase-memory-mcp"), "codebase-memory-mcp");
+        assert_eq!(program("/opt/cbm"), "/opt/cbm");
+    }
+
+    #[test]
+    fn a_missing_codebase_memory_program_is_named() {
+        let mut cfg = RunConfig::from_toml(POC).unwrap();
+        cfg.codebase_memory.as_mut().unwrap().program =
+            "aegis-surely-not-on-path-codebase-memory".into();
+        let err = cfg.check_codebase_memory().unwrap_err().to_string();
+        assert!(
+            err.contains("aegis-surely-not-on-path-codebase-memory"),
+            "{err}"
+        );
+
+        // Any file will do: the check only looks for it.
+        let exe = std::env::current_exe().unwrap();
+        cfg.codebase_memory.as_mut().unwrap().program = exe.display().to_string();
+        assert!(cfg.check_codebase_memory().is_ok());
+        cfg.codebase_memory = None;
+        assert!(cfg.check_codebase_memory().is_ok());
     }
 
     #[test]

@@ -238,6 +238,39 @@ impl McpTools {
         self
     }
 
+    /// Calls `name` on the server named `server`, whether or not the agent
+    /// was given that tool: the platform's own calls, as indexing the repo
+    /// for Codebase-Memory (#185).
+    pub async fn call_server(&self, server: &str, name: &str, input: &Value) -> ToolOutcome {
+        let Some((_, service)) = self.servers.iter().find(|(n, _)| n == server) else {
+            return failure(format!("no tool server `{server}`"));
+        };
+        self.call_on(server, service, name, input).await
+    }
+
+    async fn call_on(
+        &self,
+        server: &str,
+        service: &RunningService<RoleClient, ()>,
+        name: &str,
+        input: &Value,
+    ) -> ToolOutcome {
+        let arguments = match input {
+            Value::Object(map) => map.clone(),
+            Value::Null => serde_json::Map::new(),
+            _ => return failure(format!("the input of `{name}` must be a JSON object")),
+        };
+        let params = CallToolRequestParams::new(name.to_owned()).with_arguments(arguments);
+        match tokio::time::timeout(self.call_timeout, service.call_tool(params)).await {
+            Ok(Ok(result)) => outcome(result),
+            Ok(Err(e)) => failure(format!("tool server `{server}` failed on `{name}`: {e}")),
+            Err(_) => failure(format!(
+                "`{name}` did not finish within {}s",
+                self.call_timeout.as_secs()
+            )),
+        }
+    }
+
     /// Closes every server and waits for it to exit.
     pub async fn shutdown(self) {
         for (_, service) in self.servers {
@@ -256,19 +289,6 @@ impl ToolExecutor for McpTools {
             return failure(format!("unknown tool `{name}`"));
         };
         let (server, service) = &self.servers[index];
-        let arguments = match input {
-            Value::Object(map) => map.clone(),
-            Value::Null => serde_json::Map::new(),
-            _ => return failure(format!("the input of `{name}` must be a JSON object")),
-        };
-        let params = CallToolRequestParams::new(name.to_owned()).with_arguments(arguments);
-        match tokio::time::timeout(self.call_timeout, service.call_tool(params)).await {
-            Ok(Ok(result)) => outcome(result),
-            Ok(Err(e)) => failure(format!("tool server `{server}` failed on `{name}`: {e}")),
-            Err(_) => failure(format!(
-                "`{name}` did not finish within {}s",
-                self.call_timeout.as_secs()
-            )),
-        }
+        self.call_on(server, service, name, input).await
     }
 }
