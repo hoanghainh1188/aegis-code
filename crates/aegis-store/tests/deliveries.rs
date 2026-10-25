@@ -123,3 +123,45 @@ async fn a_delivery_makes_one_job_however_often_it_comes() {
     ));
     db.drop().await;
 }
+
+#[tokio::test]
+async fn a_polled_ticket_is_taken_once() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let app = repo(s, "app", "https://github.com/me/app").await;
+    for (source, job_source) in [
+        (WebhookSource::Jira, JobSource::Jira),
+        (WebhookSource::Backlog, JobSource::Backlog),
+    ] {
+        let delivery = NewDelivery {
+            source,
+            delivery_id: format!("{}:APP-7", app.0),
+            event: "poll".into(),
+        };
+        let job = NewJob {
+            repo_id: app,
+            issue_ref: "APP-7".into(),
+            ledger_key: IssueId::parse(format!("APP-7-{}", source.as_str())).unwrap(),
+            source: job_source,
+        };
+        let first = s.deliver_job(&delivery, &job).await.unwrap();
+        let Delivered::Queued(queued) = first else {
+            panic!("{first:?}")
+        };
+        assert_eq!(queued.source, job_source);
+        assert_eq!(
+            s.deliver_job(&delivery, &job).await.unwrap(),
+            Delivered::Duplicate
+        );
+        // The job ends: the ticket still matches, but is not taken again.
+        end_job(s, queued.id).await;
+        assert_eq!(
+            s.deliver_job(&delivery, &job).await.unwrap(),
+            Delivered::Duplicate
+        );
+    }
+}
+
+async fn end_job(s: &Store, job: aegis_store::JobId) {
+    s.request_cancel(job).await.unwrap();
+}

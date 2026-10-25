@@ -48,9 +48,10 @@ use crate::worker::JobNotifier;
 use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
+pub(crate) use notify::pr_url;
 pub use notify::{
     COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
-    GitLabNotifier, status_comment,
+    GitLabNotifier, plain_status_comment, status_comment,
 };
 
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
@@ -374,6 +375,9 @@ async fn deliver(
         (Kind::CiFailure { .. }, _) => JobSource::Ci,
         (Kind::Issue, WebhookSource::Github) => JobSource::Github,
         (Kind::Issue, WebhookSource::Gitlab) => JobSource::Gitlab,
+        // Polled (`crate::tracker`), never posted here.
+        (Kind::Issue, WebhookSource::Jira) => JobSource::Jira,
+        (Kind::Issue, WebhookSource::Backlog) => JobSource::Backlog,
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
         Ok(key) => key,

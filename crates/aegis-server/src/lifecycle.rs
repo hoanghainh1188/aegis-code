@@ -11,6 +11,9 @@
 //! the job's, not the attempt's (ADR 0003 §3). Each event also records the
 //! run that wrote it, so the cost of an interrupted attempt is measurable.
 //!
+//! A `jira` or `backlog` job reads its ticket from its repo's tracker
+//! (#26); a `github` or `cli` job its GitHub issue.
+//!
 //! The attempt adds its repo's slug and language to the worker's `job`
 //! span, which the issue's task runs in, and its model calls are counted
 //! under them ([`JobObserver`]).
@@ -34,6 +37,7 @@ use tracing::Instrument;
 
 use crate::metrics::JobObserver;
 use crate::runner::{Attempt, JobRunner};
+use crate::tracker::ticket_issue;
 
 /// The Postgres ledger, with each event tied to the run of its job that is
 /// writing it at the moment.
@@ -264,7 +268,10 @@ impl LifecycleRunner {
             let name = &sonar.token_env;
             sonar.token = Some(self.secret(&repo.slug, "Sonar's token", name).await?);
         }
-        let issue = issue(claim, &config.repo.fork.api, &github_token).await?;
+        let issue = match job.source {
+            JobSource::Jira | JobSource::Backlog => ticket_issue(job, &repo, &self.secrets).await?,
+            _ => issue(claim, &config.repo.fork.api, &github_token).await?,
+        };
         let tiers = [
             (&config.models.light, "light"),
             (&config.models.core, "core"),
@@ -304,7 +311,8 @@ impl JobRunner for LifecycleRunner {
     }
 }
 
-/// The issue of a GitHub or CLI job, under the job's ledger key.
+/// The issue of a GitHub or CLI job, under the job's ledger key. Jira and
+/// Backlog jobs: [`ticket_issue`].
 async fn issue(claim: &Claim, api: &str, token: &str) -> Result<IssueInput, Attempt> {
     let job = &claim.job;
     if !matches!(job.source, JobSource::Github | JobSource::Cli) {

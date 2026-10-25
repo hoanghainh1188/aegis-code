@@ -98,6 +98,7 @@ dependencies = [
  "aegis-secrets",
  "aegis-sonar-batch",
  "aegis-store",
+ "aegis-tracker",
  "futures",
  "reqwest",
  "serde",
@@ -190,6 +191,7 @@ dependencies = [
  "aegis-provider",
  "aegis-secrets",
  "aegis-store",
+ "aegis-tracker",
  "askama",
  "axum",
  "chrono",
@@ -238,6 +240,18 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "aegis-tracker"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]

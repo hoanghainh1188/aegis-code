@@ -57,7 +57,7 @@ ADR 0002 đặt mục tiêu là platform đầy đủ: chạy như dịch vụ, 
   - GitLab: kiểm tra `X-Gitlab-Token` bằng so sánh thời gian hằng.
   - Chống trùng bằng ràng buộc unique trên ID lần gửi (`X-GitHub-Delivery`, `X-Gitlab-Event-UUID`), ghi cùng transaction với job.
   - Trả 2xx ngay sau khi ghi job; xử lý chạy nền.
-- Poll Jira, Backlog, Sonar chạy trong vai trò `api`/`all`, lịch lưu trong DB. Nhiều tiến trình cùng chạy thì chỉ một tiến trình poll, nhờ advisory lock của Postgres.
+- Poll Jira, Backlog, Sonar chạy trong vai trò `api`/`all`, lịch lưu trong DB (bảng `polls`). Nhiều tiến trình cùng chạy thì mỗi kỳ chỉ một tiến trình poll: tiến trình nào dời được `next_at` của lần poll đã tới hạn (một câu `UPDATE … WHERE next_at <= now()`) thì poll (#26). Không dùng advisory lock: lock phải giữ một kết nối suốt lúc gọi API của tracker, còn dời lịch thì không giữ gì, tiến trình chết giữa chừng chỉ làm lần sau tới muộn. Ticket đã có job thì không tạo thêm, nhờ ID lần gửi `<repo id>:<key>` như webhook.
 - Nội dung issue, ticket, comment là dữ liệu không tin cậy (Thiết kế §7), kể cả khi tới qua webhook đã xác thực.
 
 ### 5. Dashboard: HTML render phía server

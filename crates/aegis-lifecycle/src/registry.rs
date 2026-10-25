@@ -12,6 +12,7 @@ use aegis_ledger::Tier;
 use aegis_provider::ProviderConfig;
 use aegis_router::ModelsConfig;
 use aegis_store::{Actor, NewRepo, Repo, RepoId, RepoMode, Store};
+use aegis_tracker::TrackerConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::LifecycleError;
@@ -137,6 +138,10 @@ pub struct RepoSettings {
     /// Its Sonar project; no Sonar step without it.
     #[serde(default)]
     pub sonar: Option<SonarConfig>,
+    /// The Jira or Backlog whose tickets it takes (#26): a filter polled
+    /// by the server, the ticket told how its job ended.
+    #[serde(default)]
+    pub tracker: Option<TrackerConfig>,
     pub fork: ForkConfig,
 }
 
@@ -226,6 +231,11 @@ impl Modes {
             serde_json::from_value(config.clone()).map_err(|e| in_repo(e.to_string()))?;
         let language: Language = serde_json::from_value(serde_json::Value::String(language.into()))
             .map_err(|e| in_repo(format!("language: {e}")))?;
+        if let Some(tracker) = &settings.tracker {
+            tracker
+                .check()
+                .map_err(|e| in_repo(format!("tracker: {e}")))?;
+        }
         let mut overrides = settings.overrides;
         if let Some(image) = settings.image {
             overrides.insert("image".into(), toml::Value::String(image));
@@ -469,11 +479,17 @@ mod tests {
         no_language.language = "cobol".into();
         let mut bad_override = settings();
         bad_override["overrides"] = serde_json::json!({ "no_such_step": ["true"] });
+        let mut plain_jira = settings();
+        plain_jira["tracker"] = serde_json::json!({
+            "kind": "jira", "url": "http://jira.acme.com", "user": "bot@acme.com",
+            "token_env": "AEGIS_JIRA_TOKEN", "jql": "project = APP"
+        });
         for bad in [
             repo("app", RepoMode::Poc, unknown),
             repo("app", RepoMode::Poc, serde_json::json!({})),
             no_language,
             repo("app", RepoMode::Poc, bad_override),
+            repo("app", RepoMode::Poc, plain_jira),
         ] {
             let err = modes.run_config(&bad).unwrap_err().to_string();
             assert!(err.contains("repo `app`"), "{err}");
@@ -485,9 +501,21 @@ mod tests {
         let mut value = settings();
         value["overrides"] = serde_json::json!({ "gate": { "test": ["pytest", "-q"] } });
         value["hidden_test"] = serde_json::json!(["pytest", "{tests}"]);
+        value["tracker"] = serde_json::json!({
+            "kind": "backlog", "url": "https://acme.backlog.jp",
+            "token_env": "AEGIS_BACKLOG_API_KEY", "project_ids": [12], "pr_status_id": 3
+        });
         let parsed: RepoSettings = serde_json::from_value(value).unwrap();
         let back: RepoSettings =
             serde_json::from_value(serde_json::to_value(&parsed).unwrap()).unwrap();
         assert_eq!(back, parsed);
+        assert!(parsed.tracker.is_some());
+        modes()
+            .run_config(&repo(
+                "app",
+                RepoMode::Poc,
+                serde_json::to_value(&parsed).unwrap(),
+            ))
+            .unwrap();
     }
 }

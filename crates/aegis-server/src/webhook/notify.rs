@@ -161,16 +161,36 @@ fn gitlab_issue_ref(text: &str) -> Option<(&str, u64)> {
     Some((project, iid.parse().ok()?))
 }
 
-/// What the comment says. The stop reason may hold model text: it is made
-/// inert. Infrastructure failures are not detailed in public.
+/// What the comment says, in Markdown. The stop reason may hold model
+/// text: it is made inert. Infrastructure failures are not detailed in
+/// public.
 pub fn status_comment(job: &Job) -> String {
+    let (what, reason) = status_parts(job);
+    let mut text = format!("**aegis-code** {what}");
+    if let Some(reason) = reason {
+        text.push_str(&format!("\n\nReason: {reason}"));
+    }
+    text.push_str(&format!("\n\n<sub>aegis-code job {}</sub>", job.id.0));
+    text
+}
+
+/// [`status_comment`] in plain text, for Jira and Backlog (#26), whose
+/// markup is not Markdown.
+pub fn plain_status_comment(job: &Job) -> String {
+    let (what, reason) = status_parts(job);
+    let mut text = format!("aegis-code {what}");
+    if let Some(reason) = reason {
+        text.push_str(&format!("\n\nReason: {reason}"));
+    }
+    text.push_str(&format!("\n\n(aegis-code job {})", job.id.0));
+    text
+}
+
+/// What happened, and the reason made inert.
+fn status_parts(job: &Job) -> (String, Option<String>) {
     let (what, reason) = match (job.status, job.outcome) {
         (JobStatus::Done, Some(Outcome::PrOpened)) => {
-            let url = job
-                .pr_url
-                .as_deref()
-                .filter(|u| u.starts_with("https://") && !u.contains(char::is_whitespace));
-            let what = match url {
+            let what = match pr_url(job) {
                 Some(url) => format!("opened a pull request for this issue: {url}"),
                 None => "opened a pull request for this issue.".into(),
             };
@@ -192,12 +212,17 @@ pub fn status_comment(job: &Job) -> String {
             None,
         ),
     };
-    let mut text = format!("**aegis-code** {what}");
-    if let Some(reason) = reason.map(inert).filter(|r| !r.is_empty()) {
-        text.push_str(&format!("\n\nReason: {reason}"));
+    (what, reason.map(inert).filter(|r| !r.is_empty()))
+}
+
+/// The PR of a job that opened one, if its URL is a plain `https` one.
+pub(crate) fn pr_url(job: &Job) -> Option<&str> {
+    if (job.status, job.outcome) != (JobStatus::Done, Some(Outcome::PrOpened)) {
+        return None;
     }
-    text.push_str(&format!("\n\n<sub>aegis-code job {}</sub>", job.id.0));
-    text
+    job.pr_url
+        .as_deref()
+        .filter(|u| u.starts_with("https://") && !u.contains(char::is_whitespace))
 }
 
 fn stop(outcome: Outcome) -> &'static str {
@@ -288,5 +313,29 @@ mod tests {
             ..job(JobStatus::Failed, None)
         };
         assert!(!status_comment(&failed).contains("10.0.0.3"));
+    }
+
+    #[test]
+    fn the_plain_comment_says_the_same_without_markup() {
+        let pr = Job {
+            pr_url: Some("https://github.com/me/app/pull/3".into()),
+            ..job(JobStatus::Done, Some(Outcome::PrOpened))
+        };
+        let text = plain_status_comment(&pr);
+        assert!(
+            text.starts_with("aegis-code opened a pull request"),
+            "{text}"
+        );
+        assert!(text.contains("https://github.com/me/app/pull/3"), "{text}");
+        assert!(!text.contains("**") && !text.contains("<sub>"), "{text}");
+        assert_eq!(pr_url(&pr), Some("https://github.com/me/app/pull/3"));
+
+        let stopped = Job {
+            pr_url: Some("https://github.com/me/app/pull/3".into()),
+            reason: Some("[x|https://evil.example]".into()),
+            ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
+        };
+        assert_eq!(pr_url(&stopped), None, "only a job that opened it");
+        assert!(!plain_status_comment(&stopped).contains("https://evil"));
     }
 }

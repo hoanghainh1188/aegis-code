@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO polls (name, next_at) VALUES ($1, now() + make_interval(secs => $2))\n             ON CONFLICT (name) DO UPDATE SET next_at = EXCLUDED.next_at\n             WHERE polls.next_at <= now()\n             RETURNING name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "polls",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "80c292ba34781b1b5149d709d4d1785c879aca7e60f780d81d3f5b35d43eb503"
+}

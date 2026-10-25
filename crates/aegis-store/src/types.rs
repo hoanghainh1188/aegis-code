@@ -62,8 +62,9 @@ text_enum! {
 }
 
 text_enum! {
-    /// Who sent a webhook delivery.
-    WebhookSource { Github = "github", Gitlab = "gitlab" }
+    /// Who sent a webhook delivery, or which tracker a polled ticket is
+    /// from (#26).
+    WebhookSource { Github = "github", Gitlab = "gitlab", Jira = "jira", Backlog = "backlog" }
 }
 
 text_enum! {
