@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use aegis_ledger::IssueKind;
 use serde::Deserialize;
 
 use crate::LifecycleError;
@@ -19,6 +20,9 @@ pub struct IssueInput {
     /// Eval runs only (#98): the fix's tests, run on the agent's patch
     /// after the gate. The agent never sees them.
     pub hidden: Option<HiddenTests>,
+    /// The kind its source knows it is, as a polled Sonar batch (#27):
+    /// Light is not asked to classify it.
+    pub kind: Option<IssueKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +94,7 @@ impl IssueInput {
             url: issue.html_url,
             base: None,
             hidden: None,
+            kind: None,
         })
     }
 
@@ -105,6 +110,7 @@ impl IssueInput {
             url: format!("file://{}", path.display()),
             base: None,
             hidden: None,
+            kind: None,
         })
     }
 

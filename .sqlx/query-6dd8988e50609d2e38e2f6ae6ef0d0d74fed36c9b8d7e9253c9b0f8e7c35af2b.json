@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO sonar_warnings (repo_id, warning_key, batch)\n             SELECT $1, k, $3 FROM unnest($2::text[]) AS k\n             ON CONFLICT (repo_id, warning_key) DO NOTHING\n             RETURNING warning_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "warning_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sonar_warnings",
+            "name": "warning_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6dd8988e50609d2e38e2f6ae6ef0d0d74fed36c9b8d7e9253c9b0f8e7c35af2b"
+}

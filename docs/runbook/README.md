@@ -127,6 +127,19 @@ Thêm mục `tracker` vào cài đặt của repo (`repos.config`, cùng chỗ v
 - Vai trò `api` poll mỗi `[trackers] poll_s` (300 s), một tiến trình mỗi kỳ. Mỗi ticket chỉ tạo job một lần; muốn chạy lại thì retry job qua API. Job đọc mô tả và tối đa 3 file log dạng text (≤ 1 MiB, giữ 6 000 ký tự cuối). Khi job xong: comment trạng thái; có PR thì gắn link PR (Jira) và chuyển trạng thái nếu đã cấu hình.
 - Tracker lỗi (token sai, mạng): log `polling the tracker` / `tracker not polled` theo repo, các repo khác vẫn chạy.
 
+### Kéo cảnh báo Sonar định kỳ (#27)
+
+Repo đã có `sonar` (SonarQube Server hoặc Cloud, như bước Sonar của gate) thì thêm `sonar_poll` vào `repos.config` để server tự kéo cảnh báo mới trên nhánh chính và gom thành batch:
+
+```json
+{ "every_s": 3600, "min_severity": "MAJOR", "max_warnings": 50 }
+```
+
+- `every_s` (≥ 60, mặc định 3600): lịch riêng của repo. Vai trò `api` xem mỗi `[sonar] check_s` (60 s) repo nào đến hạn, một tiến trình mỗi kỳ.
+- `min_severity` (`INFO`, `MINOR`, `MAJOR`, `CRITICAL`, `BLOCKER`; mặc định `MAJOR`): cảnh báo dưới mức này bị bỏ qua. `max_warnings` (1–100, mặc định 50): số cảnh báo mới nhất một batch nhận; phần còn lại vào lần kéo sau.
+- Mỗi cảnh báo chỉ vào một batch (bảng `sonar_warnings`), kể cả khi vẫn còn mở. Job `sonar` đọc lại các cảnh báo của batch theo key lúc bắt đầu, chỉ lấy cái còn mở, rồi đi luồng batch (#17) và mở một PR. Muốn chạy lại thì retry job qua API.
+- Token là secret mà `sonar.token_env` chỉ tới (cùng secret với bước Sonar của gate), cần quyền Browse project. Sonar lỗi: log `polling Sonar` / `Sonar not polled` theo repo, các repo khác vẫn chạy.
+
 ## 2. Rollback
 
 Bản mới lỗi (health không lên, lỗi nhiều trong log, hành vi sai):

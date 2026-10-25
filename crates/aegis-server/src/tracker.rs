@@ -136,6 +136,7 @@ pub async fn ticket_issue(
         url: ticket.url,
         base: None,
         hidden: None,
+        kind: None,
     })
 }
 

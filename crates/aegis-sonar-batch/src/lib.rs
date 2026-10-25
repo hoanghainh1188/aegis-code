@@ -14,11 +14,16 @@
 //! The warnings are the gate's own Sonar type ([`SonarIssue`]), read from
 //! the server with [`aegis_gate::open_issues`] or from a saved
 //! `/api/issues/search` response with [`parse_search`].
+//!
+//! [`poll`] asks the server for the new warnings of a project's main
+//! branch on the repo's schedule (#27); the server turns each poll's new
+//! warnings into one batch, whose issue [`issue_body`] writes.
 
 mod error;
 mod git;
 mod group;
 mod integrate;
+pub mod poll;
 mod warning;
 
 pub use aegis_gate::SonarIssue;
@@ -26,4 +31,5 @@ pub use error::BatchError;
 pub use git::{Author, IntegrationTree, commit_tree, integration_branch};
 pub use group::{Group, Scope, group};
 pub use integrate::{Checked, Dropped, Integrated, Steps, integrate};
+pub use poll::{PollConfig, Severity, SonarServer, issue_body};
 pub use warning::{is_flow, parse_search, path_of};

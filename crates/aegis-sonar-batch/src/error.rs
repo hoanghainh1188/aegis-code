@@ -10,4 +10,12 @@ pub enum BatchError {
 
     #[error("invalid batch id `{0}`")]
     InvalidBatchId(String),
+
+    /// The poll's settings are wrong: retrying will not help.
+    #[error("{0}")]
+    Config(String),
+
+    /// `status` 0: the request did not get an answer.
+    #[error("Sonar API {status}: {message}")]
+    Sonar { status: u16, message: String },
 }

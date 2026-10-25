@@ -137,6 +137,7 @@ impl EvalIssue {
                 command: hidden_command(template, &self.hidden_tests),
                 known_failures: self.hidden_known_failures.clone(),
             }),
+            kind: None,
         })
     }
 }
