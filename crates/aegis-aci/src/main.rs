@@ -5,7 +5,9 @@
 //! one repo over MCP on stdin/stdout. The overrides file holds the language
 //! part of the repo's `RepoConfig` ([`ProfileOverrides`]); the parts file
 //! the directories with a profile of their own (`[[part]]` with `dir`,
-//! `language` and `overrides`, #71). With
+//! `language`, `overrides` and `mounts`, #71): a part's `mounts`
+//! (`{ host, path }`, its dependency dirs) are mounted read-only in its
+//! containers, as the root's `--format-mount`s are in the root's. With
 //! `--format-image` the formatter of `edit` and the test of `run_tests` run
 //! in that image, as the gate's steps do: no network, the mounts read-only,
 //! the `--test-env` variables set. `--test-dir` holds `run_tests`' logs.
@@ -93,6 +95,16 @@ struct Part {
     language: Language,
     #[serde(default)]
     overrides: ProfileOverrides,
+    #[serde(default)]
+    mounts: Vec<Mount>,
+}
+
+/// A host directory and where a part's containers see it (#198).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Mount {
+    host: String,
+    path: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -137,7 +149,17 @@ fn build(args: Args) -> Result<Aci, String> {
         .collect::<Result<Vec<_>, String>>()?;
     let profiles =
         RepoProfiles::new(resolve(language, &overrides)?, dirs).map_err(|e| e.to_string())?;
-    let aci = Aci::new(&repo, profiles).map_err(|e| e.to_string())?;
+    let mounts = parts
+        .part
+        .into_iter()
+        .map(|p| {
+            let mounts = p.mounts.into_iter().map(|m| (m.host, m.path)).collect();
+            (p.dir, mounts)
+        })
+        .collect();
+    let aci = Aci::new(&repo, profiles)
+        .map_err(|e| e.to_string())?
+        .with_part_mounts(mounts);
     let defaults = TestSettings::default();
     let mut tests = TestSettings {
         sandbox: None,
