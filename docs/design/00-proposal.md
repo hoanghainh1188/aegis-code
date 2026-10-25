@@ -290,10 +290,12 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 
 | Phase | Thời gian | Làm gì | Mốc đo |
 | --- | --- | --- | --- |
-| 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động |
+| 0. Chuẩn bị | 1–2 tuần | Chọn repo, xin đồng ý của khách, dựng Docker chạy test, gom bộ 30–50 issue | Khách đồng ý bằng văn bản; test chạy được tự động. **Đã đóng mốc 2026-10-24**, repo đích tạm là fork công khai typst và scrapy; đồng ý của khách cho repo nội bộ còn chờ (#157) |
 | 1. MVP / PoC | 4–6 tuần | Platform Rust: provider → vòng lặp → ACI → gate → ledger, Tầng 2, 3, 4 tối thiểu; language profile Rust và Python; chạy bộ issue của một repo mỗi ngôn ngữ | Đạt các ngưỡng ở mục 8, chốt ở [ADR 0005](../adr/0005-kpi-thresholds-after-phase-1.md). **Đã đóng mốc 2026-10-24** |
-| 2. Platform | 2–3 tháng | Profile TypeScript/JavaScript, Java, Go, C#/.NET; chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai. Kiến trúc: [ADR 0003](../adr/0003-platform-service-architecture.md) | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP |
-| 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài 6 profile ban đầu ([ADR 0004](../adr/0004-multi-language-profiles.md)), model local | Có ROI rõ ràng |
+| 2. Platform | 2–3 tháng | Profile TypeScript/JavaScript, Java, Go, C#/.NET; chạy như dịch vụ (hàng đợi, worker, lưu trạng thái bền), nối luồng ticket thật (Jira/Backlog, GitHub/GitLab, CI, Sonar), nhiều repo, dashboard chi phí/KPI, phân quyền + audit, triển khai. Kiến trúc: [ADR 0003](../adr/0003-platform-service-architecture.md) | Team dùng hằng ngày; chi phí/tháng trong ngân sách; KPI giữ được như MVP. **Đang làm (25/10):** đã xong service, hàng đợi, kết nối GitHub/GitLab/Jira/Backlog/Sonar, dashboard, phân quyền + audit, giám sát, code triển khai tới `tofu plan`, profile theo thư mục cho monorepo. Còn: `tofu apply` lên staging (#33), bộ thử cho 4 profile mới (#155), đo lại KPI (#156, #157), chạy thử với team thật (#158) |
+| 3. Mở rộng | Sau Phase 2 | SBFL, nén context nâng cao, SpecRover, thêm ngôn ngữ ngoài 6 profile ban đầu ([ADR 0004](../adr/0004-multi-language-profiles.md)), model local | Có ROI rõ ràng. Chưa bắt đầu (#34–#38) |
+
+Tiến độ chi tiết theo [milestone trên GitHub](https://github.com/hoanghainh1188/aegis-code/milestones).
 
 **Nhân lực gợi ý cho MVP:** 1 tech lead (bán thời gian) + 1–2 dev. Không cần team riêng.
 
@@ -324,11 +326,13 @@ Bốn phase. Mỗi phase có mốc đo; mốc không đạt thì quay lại sử
 
 **Còn mở:**
 
-- [ ] Chọn repo đích Rust và repo đích Python cho PoC.
-- [ ] Đo thời gian build + test trên CI của từng repo đích (Phase 0). Dưới 3 phút → cache 5 phút; từ 3 phút trở lên → cache 1 giờ.
-- [ ] Kiểm tra ngưỡng cache tối thiểu riêng của Bedrock cho Opus 5.5 và Haiku 5.5.
-- [ ] Theo dõi khi nào Sonnet 5.5 có profile `jp.` (gọi `GetInferenceProfile` từ Tokyo).
-- [ ] Kiểm tra Vertex AI có Opus / Sonnet 5.5 ở `asia-northeast1` không.
+Cập nhật 25/10:
+
+- [x] Chọn repo đích Rust và repo đích Python cho PoC: tạm dùng fork công khai typst (Rust) và scrapy (Python) trong lúc chờ repo nội bộ (#157).
+- [x] Đo thời gian build + test của từng repo đích (Phase 0, #2): cả hai dưới 3 phút → cache 5 phút ([đo ngày 20/10](../measurements/2026-10-20-build-test-target-repos.md)).
+- [ ] Kiểm tra ngưỡng cache tối thiểu riêng của Bedrock cho Opus 5.5 và Haiku 5.5 (cần gọi thật ở `ap-northeast-1`, cùng lúc với #55).
+- [ ] Theo dõi khi nào Sonnet 5.5 có profile `jp.` (gọi `GetInferenceProfile` từ Tokyo, #19).
+- [ ] Kiểm tra Vertex AI có Opus / Sonnet 5.5 ở `asia-northeast1` không (#19).
 
 ## 11. Nguồn tham khảo
 
