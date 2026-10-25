@@ -30,7 +30,7 @@ pub use body::{
 };
 pub use branch::{AgentBranch, EvalBranch};
 pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};
-pub use coverage::{cobertura_percent, lcov_percent};
+pub use coverage::{cobertura_lines, cobertura_percent, lcov_lines, lcov_percent};
 pub use error::PrError;
 pub use git::{Identity, Remote};
 pub use github::{GitHub, IssueComment, PullRequest};

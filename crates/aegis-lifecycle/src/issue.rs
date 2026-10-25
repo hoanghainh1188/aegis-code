@@ -30,6 +30,9 @@ pub struct HiddenTests {
     /// Where the test files come from, in the platform's clone.
     pub fix_commit: String,
     pub test_files: Vec<String>,
+    /// The part of the repo holding them (#199), where the command runs;
+    /// `""` is the root.
+    pub dir: String,
     /// The command that runs them, placeholders already filled.
     pub command: Vec<String>,
     /// Hidden tests that fail in the sandbox even with the real fix (they

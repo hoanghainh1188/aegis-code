@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use aegis_gate::{
-    AuditPolicy, CancelToken, GatePart, GateReport, GateRequest, Repro, Skip, StepName, StepStatus,
-    run_gate,
+    AuditPolicy, CancelToken, GatePart, GateReport, GateRequest, Repro, Skip, SonarStep, StepName,
+    StepStatus, run_gate,
 };
 use aegis_lang::{Language, ProfileOverrides, Profiles, ResolvedProfile};
 
@@ -141,6 +141,18 @@ impl Repo {
     }
 
     fn gate(&self, root: &str, py: &str, repro: Option<&Repro>, allowed: &[&str]) -> GateReport {
+        self.gate_with(root, py, repro, allowed, None, vec![])
+    }
+
+    fn gate_with(
+        &self,
+        root: &str,
+        py: &str,
+        repro: Option<&Repro>,
+        allowed: &[&str],
+        sonar: Option<SonarStep>,
+        env: Vec<(String, String)>,
+    ) -> GateReport {
         let (root, py) = (profile(Language::Rust, root), profile(Language::Python, py));
         let allowed: BTreeSet<String> = allowed.iter().map(|a| (*a).to_owned()).collect();
         let (dir, work) = (self.dir(), self.0.join("work"));
@@ -151,7 +163,7 @@ impl Repo {
             allowed: &allowed,
             repro,
             work_dir: &work,
-            env: vec![],
+            env,
             step_timeout: Duration::from_secs(60),
             cancel: CancelToken::new(),
             sandbox: None,
@@ -159,7 +171,7 @@ impl Repo {
             build_cache: None,
             allowed_tests: vec![],
             reference_groups: vec![],
-            sonar: None,
+            sonar,
             audit: AuditPolicy::default(),
             parts: vec![GatePart {
                 dir: "py".into(),
@@ -285,4 +297,97 @@ fn a_part_s_changed_lockfile_is_audited_in_its_directory() {
     let log = std::fs::read_to_string(&deps.logs[0]).unwrap();
     assert!(log.contains("/repo/py\n"), "{log}");
     assert!(log.contains("audited requirements.txt"), "{log}");
+}
+
+/// Records the analysis settings and which coverage reports exist when it
+/// runs, then leaves a task for the gate to wait for.
+const FAKE_SCANNER: &str = r#"
+cp .aegis-gate-sonar/project.properties "$FAKE_RECORD/settings"
+ls lcov.info py/coverage.xml > "$FAKE_RECORD/reports" 2>&1
+mkdir -p .aegis-gate-sonar/work
+printf 'projectKey=proj\nceTaskId=T1\n' > .aegis-gate-sonar/work/report-task.txt
+"#;
+
+/// A Sonar server whose analysis passes.
+fn sonar_server(rt: &tokio::runtime::Runtime) -> wiremock::MockServer {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        let task = serde_json::json!({"task": {"id": "T1", "status": "SUCCESS",
+            "componentKey": "proj", "analysisId": "A1"}});
+        let gate = serde_json::json!({"projectStatus": {"status": "OK", "conditions": []}});
+        let issues = serde_json::json!({"paging": {"pageIndex": 1, "pageSize": 100, "total": 0},
+            "issues": []});
+        for (at, body) in [
+            ("/api/ce/task", task),
+            ("/api/qualitygates/project_status", gate),
+            ("/api/issues/search", issues),
+        ] {
+            Mock::given(method("GET"))
+                .and(path(at))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+        }
+        server
+    })
+}
+
+#[test]
+fn sonar_analyses_the_repo_once_with_every_part_s_reports() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let server = sonar_server(&rt);
+    let repo = Repo::new();
+    let (scanner, record) = (repo.0.join("scanner.sh"), repo.0.join("record"));
+    std::fs::write(&scanner, FAKE_SCANNER).unwrap();
+    std::fs::create_dir_all(&record).unwrap();
+    repo.append("src/lib.rs", "// touched\n");
+    repo.append("py/cart/__init__.py", "# FIXED\n");
+    // Each part's coverage step writes its own report.
+    let root = ROOT.replace(
+        "coverage = false",
+        "coverage = [\"sh\", \"-c\", \"echo TN: > lcov.info\"]",
+    ) + "[coverage]\nformat = \"lcov\"\npath = \"lcov.info\"\n";
+    let py = PY.replace(
+        "coverage = false",
+        "coverage = [\"sh\", \"-c\", \"echo '<coverage/>' > coverage.xml\"]",
+    ) + "[coverage]\nformat = \"cobertura\"\npath = \"coverage.xml\"\n";
+    let step = SonarStep {
+        url: server.uri(),
+        token: "squ_test".into(),
+        organization: None,
+        project_key: "proj".into(),
+        pull_request: false,
+        scanner: vec!["sh".into(), scanner.display().to_string()],
+        image: None,
+        network: "bridge".into(),
+        cache: None,
+        properties: Default::default(),
+        wait: Duration::from_secs(5),
+        poll: Duration::from_millis(20),
+    };
+    let env = vec![("FAKE_RECORD".to_owned(), record.display().to_string())];
+
+    let report = repo.gate_with(&root, &py, None, &[], Some(step), env);
+
+    let sonar = report.step(StepName::Sonar).unwrap();
+    assert_eq!(sonar.status, StepStatus::Passed, "{report}");
+    let settings = std::fs::read_to_string(record.join("settings")).unwrap();
+    assert!(
+        settings.contains("sonar.rust.lcov.reportPaths=lcov.info\n"),
+        "{settings}"
+    );
+    assert!(
+        settings.contains("sonar.python.coverage.reportPaths=py/coverage.xml\n"),
+        "{settings}"
+    );
+    // It ran after both parts' coverage, so both reports were there.
+    let reports = std::fs::read_to_string(record.join("reports")).unwrap();
+    assert_eq!(reports, "lcov.info\npy/coverage.xml\n");
+    assert_eq!(sonar.logs.len(), 1, "one analysis: {:?}", sonar.logs);
 }

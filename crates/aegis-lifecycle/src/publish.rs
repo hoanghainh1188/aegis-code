@@ -7,26 +7,47 @@ use aegis_gate::GateReport;
 use aegis_lang::{CoverageFormat, RepoProfiles};
 use aegis_ledger::{IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
-    CommitInput, Cost, GitHub, Identity, PrContent, Remote, abandon, cobertura_percent,
-    lcov_percent, push_eval_base, push_gated, render, write_commit_message,
+    CommitInput, Cost, GitHub, Identity, PrContent, Remote, abandon, cobertura_lines,
+    cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated, render,
+    write_commit_message,
 };
 use aegis_provider::ModelProvider;
 
 use crate::answer::FinalAnswer;
 use crate::{IssueInput, LifecycleError, Platform};
 
-/// Line coverage from the report the gate's coverage step left in `tree`:
-/// the first part's that has one, the rest of the repo first (#71).
-fn coverage_percent(profiles: &RepoProfiles, tree: &Path) -> Option<f64> {
-    profiles.parts().iter().find_map(|part| {
-        let coverage = part.profile.coverage.as_ref()?;
-        let text = std::fs::read_to_string(tree.join(&part.dir).join(&coverage.path)).ok()?;
-        match coverage.format {
-            CoverageFormat::Lcov => lcov_percent(&text),
-            CoverageFormat::Cobertura => cobertura_percent(&text),
-            _ => None,
-        }
-    })
+/// Line coverage from the reports the gate's coverage step left in
+/// `tree`, of the parts it checked (`parts`, #199): a part it did not check
+/// may hold a report of an earlier attempt. Several reports count their
+/// lines together; when one gives only a rate there is no single number.
+fn coverage_percent(profiles: &RepoProfiles, tree: &Path, parts: &[String]) -> Option<f64> {
+    let reports: Vec<(f64, Option<(u64, u64)>)> = profiles
+        .parts()
+        .iter()
+        .filter(|part| parts.contains(&part.dir))
+        .filter_map(|part| {
+            let coverage = part.profile.coverage.as_ref()?;
+            let text = std::fs::read_to_string(tree.join(&part.dir).join(&coverage.path)).ok()?;
+            match coverage.format {
+                CoverageFormat::Lcov => Some((lcov_percent(&text)?, lcov_lines(&text))),
+                CoverageFormat::Cobertura => {
+                    Some((cobertura_percent(&text)?, cobertura_lines(&text)))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    if let [(percent, _)] = reports.as_slice() {
+        return Some(*percent);
+    }
+    let lines = reports
+        .iter()
+        .map(|(_, lines)| *lines)
+        .collect::<Option<Vec<_>>>()?;
+    let (hit, found) = lines
+        .iter()
+        .fold((0, 0), |(h, f), (hit, found)| (h + hit, f + found));
+    (found > 0).then(|| hit as f64 * 100.0 / found as f64)
 }
 
 pub(crate) struct Published {
@@ -95,7 +116,7 @@ where
         allowed_test_changes: answer.allowed_test_changes.clone(),
         allowed_reference_changes: answer.allowed_reference_changes.clone(),
         gate,
-        coverage_percent: coverage_percent(profiles, tree),
+        coverage_percent: coverage_percent(profiles, tree, &gate.parts),
         cost: Cost {
             models: record.tokens.keys().cloned().collect(),
             model_calls: record.model_calls,
@@ -113,5 +134,72 @@ where
             let _ = abandon(tree, &pushed, &remote);
             Err(e.into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aegis_lang::{Language, ProfileOverrides, Profiles, ResolvedProfile};
+
+    use super::*;
+
+    fn profile(language: Language, coverage: &str) -> ResolvedProfile {
+        let overrides: ProfileOverrides = toml::from_str(coverage).unwrap();
+        Profiles::builtin()
+            .unwrap()
+            .get(language)
+            .unwrap()
+            .resolve(&overrides)
+            .unwrap()
+    }
+
+    fn rust_and_python() -> RepoProfiles {
+        let rust = r#"
+[gate]
+coverage = ["true"]
+[coverage]
+format = "lcov"
+path = "lcov.info"
+"#;
+        let python = r#"
+[gate]
+coverage = ["true"]
+[coverage]
+format = "cobertura"
+path = "coverage.xml"
+"#;
+        RepoProfiles::new(
+            profile(Language::Rust, rust),
+            vec![("py".into(), profile(Language::Python, python))],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn coverage_comes_from_the_parts_the_gate_checked() {
+        let tree = std::env::temp_dir().join(format!("aegis-coverage-{}", std::process::id()));
+        std::fs::create_dir_all(tree.join("py")).unwrap();
+        // The root's report is left from an earlier attempt.
+        std::fs::write(tree.join("lcov.info"), "LF:10\nLH:1\n").unwrap();
+        std::fs::write(
+            tree.join("py/coverage.xml"),
+            r#"<coverage line-rate="0.9" lines-covered="27" lines-valid="30">"#,
+        )
+        .unwrap();
+        let profiles = rust_and_python();
+        let py = vec!["py".to_owned()];
+        assert_eq!(coverage_percent(&profiles, &tree, &py), Some(90.0));
+        // Both checked: their lines together, 28 of 40.
+        let both = vec![String::new(), "py".to_owned()];
+        assert_eq!(coverage_percent(&profiles, &tree, &both), Some(70.0));
+        // Only rates to go by: no single number.
+        std::fs::write(
+            tree.join("py/coverage.xml"),
+            r#"<coverage line-rate="0.9">"#,
+        )
+        .unwrap();
+        assert_eq!(coverage_percent(&profiles, &tree, &both), None);
+        assert_eq!(coverage_percent(&profiles, &tree, &py), Some(90.0));
+        let _ = std::fs::remove_dir_all(&tree);
     }
 }

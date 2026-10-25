@@ -1,6 +1,8 @@
 //! A minimal LSP client on stdio (#89): the profile's `aci.lsp` command, in
 //! the profile's image when the gate runs in containers (a language server
-//! runs the repo's build scripts and proc macros while it indexes). Only
+//! runs the repo's build scripts and proc macros while it indexes). Each
+//! part of a repo of several languages has its own, on its directory
+//! (#199); paths in and out stay relative to the repo root. Only
 //! what `find_definition` and `find_references` need: initialize, wait for
 //! indexing, keep edited files in sync, ask, shut down.
 
@@ -14,6 +16,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use aegis_lang::{in_dir, join_dir};
 use serde_json::{Value, json};
 
 use crate::{AciError, FormatContainer};
@@ -55,8 +58,13 @@ pub(crate) struct Lsp {
     shared: Arc<Mutex<Shared>>,
     next_id: u64,
     started: Instant,
-    /// `file:///work` in the container, the root's URI on the machine.
+    /// `file:///work` in the container, the part's URI on the machine.
     base_uri: String,
+    /// The part's directory from the repo root; `""` is the root.
+    dir: String,
+    /// The repo root's URI on the machine: a place in another part is
+    /// still in the repo.
+    repo_uri: Option<String>,
     /// Files the server has open, with their version.
     open: BTreeMap<String, i64>,
     /// The container's name, to stop it.
@@ -224,15 +232,23 @@ fn host_user() -> String {
 }
 
 impl Lsp {
-    /// Starts `argv` on `root` and asks it to initialize; indexing goes on
-    /// in the background.
+    /// Starts `argv` on the part of `repo` in `dir` and asks it to
+    /// initialize; indexing goes on in the background.
     pub(crate) fn start(
         argv: &[String],
-        root: &Path,
+        repo: &Path,
+        dir: &str,
         options: Option<Value>,
         container: Option<&FormatContainer>,
     ) -> Result<Self, AciError> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
+        let root = &match dir {
+            "" => repo.to_path_buf(),
+            dir => repo.join(dir),
+        };
+        let repo_uri = container
+            .is_none()
+            .then(|| format!("file://{}", encode_path(&repo.display().to_string())));
         let (argv, base_uri, container_name) = match container {
             Some(c) => {
                 let name = format!(
@@ -302,6 +318,8 @@ impl Lsp {
             next_id: 0,
             started: Instant::now(),
             base_uri,
+            dir: dir.to_owned(),
+            repo_uri,
             open: BTreeMap::new(),
             container: container_name,
         };
@@ -384,8 +402,10 @@ impl Lsp {
         }
     }
 
+    /// The URI of `relative`, a path from the repo root inside the part.
     pub(crate) fn uri(&self, relative: &str) -> String {
-        format!("{}/{}", self.base_uri, encode_path(relative))
+        let in_part = in_dir(&self.dir, relative).unwrap_or(relative);
+        format!("{}/{}", self.base_uri, encode_path(in_part))
     }
 
     /// The file's current text, as the server should see it: opened the
@@ -477,13 +497,22 @@ impl Lsp {
     }
 
     fn locate(&self, uri: &str, line: u32, character: u32) -> Located {
-        let prefix = format!("{}/", self.base_uri);
-        match uri.strip_prefix(&prefix) {
-            Some(rest) => Located::InRepo(Position {
-                path: decode_path(rest),
+        let in_repo = |path: String| {
+            Located::InRepo(Position {
+                path,
                 line,
                 character,
-            }),
+            })
+        };
+        if let Some(rest) = uri.strip_prefix(&format!("{}/", self.base_uri)) {
+            return in_repo(join_dir(&self.dir, &decode_path(rest)));
+        }
+        let elsewhere = self
+            .repo_uri
+            .as_ref()
+            .and_then(|repo| uri.strip_prefix(&format!("{repo}/")));
+        match elsewhere {
+            Some(rest) => in_repo(decode_path(rest)),
             None => Located::Outside(decode_path(uri.trim_start_matches("file://"))),
         }
     }
@@ -524,8 +553,11 @@ impl Changed {
         self.0.insert(path.to_path_buf());
     }
 
-    pub(crate) fn take(&mut self) -> BTreeSet<PathBuf> {
-        std::mem::take(&mut self.0)
+    /// The changed files `of` says are its; the others wait for theirs.
+    pub(crate) fn take_where(&mut self, of: impl Fn(&Path) -> bool) -> BTreeSet<PathBuf> {
+        let (taken, kept) = std::mem::take(&mut self.0).into_iter().partition(|p| of(p));
+        self.0 = kept;
+        taken
     }
 }
 
@@ -582,7 +614,7 @@ while True:
             return None;
         }
         let argv: Vec<String> = ["python3", "-c", FAKE, mode].map(String::from).to_vec();
-        Some(Lsp::start(&argv, &std::env::temp_dir(), None, None).unwrap())
+        Some(Lsp::start(&argv, &std::env::temp_dir(), "", None, None).unwrap())
     }
 
     #[test]

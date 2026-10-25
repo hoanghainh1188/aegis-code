@@ -22,10 +22,11 @@ mod summary;
 mod viewer;
 mod workspace;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use aegis_gate::CancelToken;
-use aegis_lang::RepoProfiles;
+use aegis_lang::{ProfilePart, RepoProfiles};
 
 pub use edit::{CONTEXT, EditOutcome, EditRequest, Rejection, Snippet};
 pub use error::AciError;
@@ -44,9 +45,10 @@ pub use workspace::{FormatContainer, Workspace};
 pub struct Aci {
     workspace: Workspace,
     viewer: viewer::Viewer,
-    /// The profile's language server, once started.
-    lsp: Option<lsp::Lsp>,
-    /// Files written since the language server last saw them.
+    /// Each part's language server, by the part's directory, once started
+    /// (#199).
+    lsp: BTreeMap<String, lsp::Lsp>,
+    /// Files written since their part's language server last saw them.
     changed: lsp::Changed,
     tests: run_tests::TestRunner,
 }
@@ -56,7 +58,7 @@ impl Aci {
         Ok(Self {
             workspace: Workspace::new(root, profiles)?,
             viewer: viewer::Viewer::default(),
-            lsp: None,
+            lsp: BTreeMap::new(),
             changed: lsp::Changed::default(),
             tests: run_tests::TestRunner::new(TestSettings::default()),
         })
@@ -100,35 +102,44 @@ impl Aci {
         }
     }
 
-    /// Whether the profile names a language server: `find_definition` and
-    /// `find_references` are offered only then.
+    /// Whether a profile of the repo names a language server:
+    /// `find_definition` and `find_references` are offered only then.
     pub fn has_language_server(&self) -> bool {
-        self.workspace.profile().profile.aci.lsp.is_some()
+        self.workspace
+            .profiles()
+            .parts()
+            .iter()
+            .any(|p| p.profile.profile.aci.lsp.is_some())
     }
 
-    /// Starts the profile's language server, in the format container when
-    /// there is one, so it indexes while the agent reads the issue.
+    /// Starts the language server of each part whose profile names one, on
+    /// the part's directory and in its format container when there is one,
+    /// so they index while the agent reads the issue. One that cannot start
+    /// leaves the others running.
     pub fn start_language_server(&mut self) -> Result<(), AciError> {
-        let Some(command) = self.workspace.profile().profile.aci.lsp.clone() else {
-            return Ok(());
-        };
-        let options = self
-            .workspace
-            .profile()
-            .profile
-            .aci
-            .lsp_options
-            .as_ref()
-            .map(|o| serde_json::to_value(&o.0))
-            .transpose()
-            .map_err(|e| AciError::LanguageServer(format!("aci.lsp_options: {e}")))?;
-        self.lsp = Some(lsp::Lsp::start(
-            command.argv(),
-            self.workspace.root(),
-            options,
-            self.workspace.format_container(),
-        )?);
-        Ok(())
+        let mut failed = Vec::new();
+        for part in self.workspace.profiles().parts() {
+            if part.profile.profile.aci.lsp.is_none() {
+                continue;
+            }
+            match start_server(&self.workspace, part) {
+                Ok(server) => {
+                    self.lsp.insert(part.dir.clone(), server);
+                }
+                Err(e) => failed.push((part.label(), e)),
+            }
+        }
+        match (failed.len(), self.workspace.profiles().parts().len()) {
+            (0, _) => Ok(()),
+            (_, 1) => Err(failed.remove(0).1),
+            _ => Err(AciError::LanguageServer(
+                failed
+                    .iter()
+                    .map(|(label, e)| format!("{label}: {e}"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )),
+        }
     }
 
     /// The definitions of what is at `at`, by the language server.
@@ -142,21 +153,33 @@ impl Aci {
     }
 
     fn lookup(&mut self, kind: Lookup, at: LookupAt<'_>) -> Result<LookupResult, AciError> {
-        let Some(server) = self.lsp.as_mut() else {
+        if self.lsp.is_empty() {
             return Err(AciError::LanguageServer(
                 "no language server is running for this repo; use search_symbol".into(),
             ));
+        }
+        let target = navigate::resolve(&self.workspace, at)?;
+        let part = self.workspace.profiles().part_of(&target.relative);
+        let Some(server) = self.lsp.get_mut(&part.dir) else {
+            return Err(AciError::LanguageServer(format!(
+                "no language server is running for {}; use search_symbol",
+                part.label()
+            )));
         };
         server.ready(lsp::CALL_WAIT)?;
         // The server reads files from disk only when it opens them: what the
-        // ACI wrote since goes to it first.
-        for path in self.changed.take() {
-            if let Some(text) = self.workspace.read_text(&path) {
-                let relative = self.workspace.display(&path);
-                server.sync(&relative, &text, self.workspace.profile().language().id())?;
+        // ACI wrote in its part since goes to it first.
+        let language = part.profile.language().id();
+        let workspace = &self.workspace;
+        let mine = self
+            .changed
+            .take_where(|path| workspace.part_of(path).dir == part.dir);
+        for path in mine {
+            if let Some(text) = workspace.read_text(&path) {
+                server.sync(&workspace.display(&path), &text, language)?;
             }
         }
-        navigate::lookup(&self.workspace, server, kind, at)
+        navigate::lookup(workspace, server, language, kind, target)
     }
 
     pub fn workspace(&self) -> &Workspace {
@@ -223,4 +246,23 @@ impl Aci {
         }
         Ok(outcome)
     }
+}
+
+/// `part`'s language server, with the part's options.
+fn start_server(workspace: &Workspace, part: &ProfilePart) -> Result<lsp::Lsp, AciError> {
+    let aci = &part.profile.profile.aci;
+    let command = aci.lsp.as_ref().expect("checked by the caller");
+    let options = aci
+        .lsp_options
+        .as_ref()
+        .map(|o| serde_json::to_value(&o.0))
+        .transpose()
+        .map_err(|e| AciError::LanguageServer(format!("aci.lsp_options: {e}")))?;
+    lsp::Lsp::start(
+        command.argv(),
+        workspace.root(),
+        &part.dir,
+        options,
+        workspace.format_container_of(part).as_ref(),
+    )
 }

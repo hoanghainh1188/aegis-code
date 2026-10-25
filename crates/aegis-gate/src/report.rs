@@ -130,6 +130,9 @@ pub struct GateReport {
     pub base: String,
     /// Empty unless the test step passed by updating references.
     pub references: UpdatedReferences,
+    /// Directories of the parts the gate checked, the rest of the repo
+    /// (`""`) first (#71): their coverage reports are this run's.
+    pub parts: Vec<String>,
 }
 
 impl GateReport {

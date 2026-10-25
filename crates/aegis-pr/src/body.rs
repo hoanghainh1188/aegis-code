@@ -268,6 +268,7 @@ mod tests {
                 tests: (0..=MAX_REFERENCES).map(|i| format!("math-{i}")).collect(),
                 files: vec!["tests/ref/html/hashes.txt".into()],
             },
+            parts: vec![String::new()],
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),

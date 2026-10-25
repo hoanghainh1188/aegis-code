@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use aegis_lang::{Profile, SonarScanner};
+use aegis_lang::{Profile, SonarScanner, join_dir};
 
 use crate::GateError;
 use crate::command::{Ran, Runner};
@@ -99,15 +99,66 @@ fn escape(key: &str, value: &str) -> Result<String, GateError> {
     Ok(format!("{key}={}", value.replace('\\', "\\\\")))
 }
 
-/// Every property of the analysis: the profile's, the configuration's,
-/// then the gate's own, which nothing overrides.
+/// Whether `key` holds paths: `…Path(s)`, sources, tests, inclusions and
+/// exclusions.
+fn holds_paths(key: &str) -> bool {
+    let last = key.rsplit('.').next().unwrap_or(key).to_ascii_lowercase();
+    last.ends_with("path")
+        || last.ends_with("paths")
+        || matches!(
+            last.as_str(),
+            "sources" | "tests" | "inclusions" | "exclusions"
+        )
+}
+
+/// The `[sonar.properties]` of every part of the repo (#199), for the one
+/// analysis of the whole tree, the root's first. A part's paths are
+/// relative to its directory, so they are given from the repo root and
+/// joined to the other parts' under the same key; any other value is the
+/// first part's that sets it.
+pub(crate) fn repo_properties<'p>(
+    parts: impl IntoIterator<Item = (&'p str, &'p Profile)>,
+) -> BTreeMap<String, String> {
+    let mut merged: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (dir, profile) in parts {
+        for (key, value) in &profile.sonar.properties {
+            if !holds_paths(key) {
+                merged
+                    .entry(key.clone())
+                    .or_insert_with(|| vec![value.clone()]);
+                continue;
+            }
+            let values = merged.entry(key.clone()).or_default();
+            // A part's sources must not narrow the root's default, the tree.
+            if values.is_empty() && !dir.is_empty() && key == "sonar.sources" {
+                values.push(".".into());
+            }
+            for path in value.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+                let path = match path.starts_with('/') {
+                    true => path.to_owned(),
+                    false => join_dir(dir, path),
+                };
+                if !values.contains(&path) {
+                    values.push(path);
+                }
+            }
+        }
+    }
+    merged
+        .into_iter()
+        .map(|(key, values)| (key, values.join(",")))
+        .collect()
+}
+
+/// Every property of the analysis: the parts' (see [`repo_properties`]),
+/// the configuration's, then the gate's own, which nothing overrides.
 pub(crate) fn properties(
     step: &SonarStep,
-    profile: &Profile,
+    parts: &BTreeMap<String, String>,
     pr: Option<&PullRequest>,
     cache: Option<&str>,
 ) -> BTreeMap<String, String> {
-    let mut p: BTreeMap<String, String> = profile.sonar.properties.clone();
+    let mut p: BTreeMap<String, String> = parts.clone();
     p.extend(step.properties.clone());
     p.entry("sonar.sources".into())
         .or_insert_with(|| ".".into());
@@ -182,13 +233,14 @@ fn scanner_runner(step: &SonarStep, runner: &Runner) -> (Runner, Option<String>)
 pub(crate) fn scan(
     step: &SonarStep,
     profile: &Profile,
+    parts: &BTreeMap<String, String>,
     pr: Option<&PullRequest>,
     runner: &Runner,
     repo: &Path,
     logs: &Path,
 ) -> Result<Scan, GateError> {
     let (scanner, cache) = scanner_runner(step, runner);
-    let props = properties(step, profile, pr, cache.as_deref());
+    let props = properties(step, parts, pr, cache.as_deref());
     let secret = [(TOKEN_ENV, step.token.as_str())];
     let mut ran = Vec::new();
     match profile.sonar.scanner {
@@ -304,6 +356,54 @@ mod tests {
         assert_eq!(escape("a.b", r"C:\x").unwrap(), r"a.b=C:\\x");
         assert!(escape("a.b", "x\nsonar.host.url=evil").is_err());
         assert!(escape("a=b", "x").is_err());
+    }
+
+    fn profile(language: aegis_lang::Language, extra: &[(&str, &str)]) -> Profile {
+        let mut profile = aegis_lang::Profiles::builtin()
+            .unwrap()
+            .get(language)
+            .unwrap()
+            .clone();
+        for (k, v) in extra {
+            profile.sonar.properties.insert((*k).into(), (*v).into());
+        }
+        profile
+    }
+
+    #[test]
+    fn every_part_s_properties_join_with_paths_from_the_repo_root() {
+        use aegis_lang::Language;
+        let root = profile(Language::Rust, &[("sonar.python.version", "3.12")]);
+        let py = profile(
+            Language::Python,
+            &[
+                ("sonar.python.version", "3.11"),
+                ("sonar.exclusions", "**/migrations/**, /abs/x.py"),
+            ],
+        );
+        let web = profile(Language::Rust, &[]);
+        let merged = repo_properties([("", &root), ("py", &py), ("tools/web", &web)]);
+        let get = |k: &str| merged.get(k).map(String::as_str);
+        assert_eq!(
+            get("sonar.rust.lcov.reportPaths"),
+            Some("lcov.info,tools/web/lcov.info")
+        );
+        assert_eq!(
+            get("sonar.python.coverage.reportPaths"),
+            Some("py/coverage.xml")
+        );
+        assert_eq!(
+            get("sonar.exclusions"),
+            Some("py/**/migrations/**,/abs/x.py")
+        );
+        // Not a path: the first part that sets it, the root first.
+        assert_eq!(get("sonar.python.version"), Some("3.12"));
+        // A part's sources do not narrow the root's default of the tree.
+        let narrow = profile(Language::Python, &[("sonar.sources", "src")]);
+        let merged = repo_properties([("", &web), ("py", &narrow)]);
+        assert_eq!(merged["sonar.sources"], ".,py/src");
+        // One profile: its properties as they are.
+        assert_eq!(repo_properties([("", &root)]), root.sonar.properties);
     }
 
     #[test]
