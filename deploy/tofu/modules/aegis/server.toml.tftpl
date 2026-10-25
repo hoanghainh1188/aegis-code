@@ -23,6 +23,8 @@ listen = "0.0.0.0:8080"
 public_url = "${public_url}"
 session_hours = ${config.session_hours}
 api_requests_per_minute = ${config.api_requests_per_minute}
+# Địa chỉ client lấy từ X-Forwarded-For do ALB thêm vào (#173).
+trusted_proxies = 1
 %{ if config.oidc_issuer != "" ~}
 
 [auth.oidc]

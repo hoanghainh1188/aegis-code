@@ -288,6 +288,51 @@ async fn each_service_has_its_rate() {
     db.drop().await;
 }
 
+/// An API request from `client`, behind one proxy that appended it.
+fn api_from(client: &str, token: &str) -> Request<Body> {
+    let mut request = api("GET", "/api/v1/jobs", Some(token), None);
+    request.headers_mut().insert(
+        "x-forwarded-for",
+        format!("6.6.6.6, {client}").parse().unwrap(),
+    );
+    request
+}
+
+#[tokio::test]
+async fn made_up_tokens_are_refused_per_address_before_the_database() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    common::admin(s, "ci").await;
+    let live = common::token(s, "ci").await;
+    let config = AuthSection {
+        api_failures_per_minute: 3,
+        trusted_proxies: 1,
+        ..AuthSection::default()
+    };
+    let app = router(s.clone(), common::auth_with(s, config, None));
+    let made_up = "0".repeat(64);
+    // Live tokens do not use up the address's failures.
+    for _ in 0..5 {
+        let ok = send(&app, api_from("1.2.3.4", &live)).await;
+        assert_eq!(ok.status, StatusCode::OK);
+    }
+    for _ in 0..3 {
+        let refused = send(&app, api_from("1.2.3.4", &made_up)).await;
+        assert_eq!(refused.status, StatusCode::UNAUTHORIZED);
+    }
+    let limited = send(&app, api_from("1.2.3.4", &made_up)).await;
+    assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(limited.headers.contains_key(header::RETRY_AFTER));
+    // Refused before the token is looked up: a live one is refused too.
+    let also = send(&app, api_from("1.2.3.4", &live)).await;
+    assert_eq!(also.status, StatusCode::TOO_MANY_REQUESTS);
+    // Another address, even one the client wrote first in the header,
+    // is not.
+    let other = send(&app, api_from("5.6.7.8", &live)).await;
+    assert_eq!(other.status, StatusCode::OK);
+    db.drop().await;
+}
+
 #[tokio::test]
 async fn pages_show_and_change_only_the_repos_of_a_role() {
     let Some(db) = test_db().await else { return };

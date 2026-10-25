@@ -46,6 +46,11 @@ ADR 0002 đặt mục tiêu là platform đầy đủ: chạy như dịch vụ, 
 
 - API và webhook dùng `axum` + `tower-http` (tracing, timeout, giới hạn kích thước body, rate limit).
 - API nội bộ có version (`/api/v1/...`) và trả cùng một envelope: `data`, `error`, `meta` (phân trang).
+- Rate limit của API (#161, #173):
+  - Mỗi service token có hạn mức riêng (`api_requests_per_minute`).
+  - Request không có token sống bị đếm theo địa chỉ client (`api_failures_per_minute`). Địa chỉ nào vượt hạn mức thì bị từ chối ngay, trước khi tra token trong Postgres. Nhờ vậy, gửi dồn token giả không làm tăng tải lên DB dùng chung với worker quá hạn mức đó.
+  - Địa chỉ client lấy từ TCP peer. Sau ALB thì lấy từ `X-Forwarded-For`, nhưng chỉ tính số proxy tin cậy đặt ở `trusted_proxies`, nên client không tự ghi đè được.
+  - Bucket nằm trong bộ nhớ của từng process. Chạy N process `--role api` thì hạn mức thực tế nhân N; đặt cấu hình theo tổng chia N. Không dùng hạn mức chung qua Postgres, vì như thế mỗi request lại tốn thêm một truy vấn, đúng thứ cần tránh. Nếu cần trần chung cho tất cả process thì đặt ở trước load balancer (AWS WAF rate-based rule), không đặt trong platform.
 - Webhook:
   - GitHub: kiểm tra `X-Hub-Signature-256` (HMAC-SHA256) bằng so sánh thời gian hằng.
   - GitLab: kiểm tra `X-Gitlab-Token` bằng so sánh thời gian hằng.

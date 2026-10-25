@@ -94,6 +94,17 @@ pub struct AuthSection {
     /// Per service token, per API process.
     #[serde(default = "default_api_requests_per_minute")]
     pub api_requests_per_minute: u32,
+    /// Requests to the API without a live token, per client address, per
+    /// API process; past it the address is refused before any database
+    /// query (#173).
+    #[serde(default = "default_api_failures_per_minute")]
+    pub api_failures_per_minute: u32,
+    /// How many proxies in front of the API append to `X-Forwarded-For`:
+    /// 1 behind the ALB of `deploy/tofu`. The client's address is the one
+    /// the outermost of them saw; 0 takes the TCP peer and ignores the
+    /// header, which anyone can write.
+    #[serde(default)]
+    pub trusted_proxies: u8,
     #[serde(default)]
     pub oidc: Option<OidcSection>,
 }
@@ -139,6 +150,10 @@ fn default_session_hours() -> u32 {
 
 fn default_api_requests_per_minute() -> u32 {
     120
+}
+
+fn default_api_failures_per_minute() -> u32 {
+    20
 }
 
 /// Repos' monthly budgets (#31); each repo's cap is set through the API.
@@ -251,10 +266,11 @@ impl ServerConfig {
             ));
         }
         let a = &config.auth;
-        if a.session_hours == 0 || a.api_requests_per_minute == 0 {
-            return Err(
-                "auth: session_hours and api_requests_per_minute must be at least 1".into(),
-            );
+        if a.session_hours == 0 || a.api_requests_per_minute == 0 || a.api_failures_per_minute == 0
+        {
+            return Err("auth: session_hours, api_requests_per_minute and \
+                 api_failures_per_minute must be at least 1"
+                .into());
         }
         if a.oidc.is_some() && a.public_url.is_none() {
             return Err("auth: oidc needs public_url, where the SSO sends people back".into());

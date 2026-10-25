@@ -187,6 +187,8 @@ async fn run(args: Args) -> Result<(), String> {
         let app = api::router(store.clone(), auth);
         let shutdown = shutdown.clone();
         parts.spawn(async move {
+            // The peer's address for the limit of failed requests (#173).
+            let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
             axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown.cancelled_owned())
                 .await

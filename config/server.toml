@@ -46,6 +46,12 @@ listen = "127.0.0.1:9464"
 session_hours = 12
 # Per service token, per API process.
 api_requests_per_minute = 120
+# Requests without a live token, per client address, per API process;
+# past it the address is refused before the token is looked up.
+api_failures_per_minute = 20
+# Proxies in front of the API that append to X-Forwarded-For (1 behind the
+# ALB of deploy/tofu); 0 trusts no header and takes the TCP peer.
+trusted_proxies = 0
 
 # The company SSO; without it the dashboard cannot be signed in to.
 # [auth.oidc]
