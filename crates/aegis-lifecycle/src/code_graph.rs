@@ -70,13 +70,15 @@ struct Graph {
 
 impl<'a, T: ServerCalls + Sync> CodeGraph<'a, T> {
     /// `queries` are the Codebase-Memory tools given to the agent; `None`
-    /// when the configuration has no Codebase-Memory.
+    /// when the configuration has no Codebase-Memory. With none, the tree
+    /// is not indexed. Tool calls run one after another (`run_loop`), so
+    /// a query never overlaps an edit or another index.
     pub(crate) async fn open(
         tools: &'a T,
         queries: Option<&[String]>,
         tree: &Path,
     ) -> Result<Self, LifecycleError> {
-        let Some(queries) = queries else {
+        let Some(queries) = queries.filter(|q| !q.is_empty()) else {
             return Ok(Self {
                 tools,
                 definitions: tools.definitions().to_vec(),
@@ -506,6 +508,12 @@ mod tests {
     #[tokio::test]
     async fn without_codebase_memory_the_tools_pass_through() {
         let fake = Fake::new();
+        let none: &[String] = &[];
+        CodeGraph::open(&fake, Some(none), Path::new("/t"))
+            .await
+            .unwrap()
+            .close()
+            .await;
         let graph = CodeGraph::open(&fake, None, Path::new("/t")).await.unwrap();
         assert_eq!(graph.definitions(), &fake.definitions[..]);
         graph.call("edit", &json!({})).await;
