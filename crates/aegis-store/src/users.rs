@@ -1,4 +1,5 @@
-//! Users, their roles per repo, dashboard sessions and API tokens (#29).
+//! Users, their roles per repo, sign-ins on their way through the SSO,
+//! dashboard sessions and API tokens (#29).
 //! Sessions and tokens are looked up by the SHA-256 of what the client
 //! holds; the token itself is never stored.
 
@@ -20,6 +21,15 @@ pub struct Session {
     /// What the session's forms send back.
     pub csrf_token: String,
     pub expires_at: DateTime<Utc>,
+}
+
+/// What `/auth/callback` needs from `/auth/login`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingLogin {
+    pub state: String,
+    pub nonce: String,
+    pub verifier: String,
+    pub next: String,
 }
 
 struct UserRow {
@@ -168,6 +178,53 @@ impl Store {
         audit::record(&mut tx, &actor, action, Target::default(), detail).await?;
         tx.commit().await?;
         Ok(user)
+    }
+
+    /// Keeps a sign-in on its way through the SSO under `id`; expired
+    /// ones go at the same time.
+    pub async fn start_login(
+        &self,
+        id: &TokenHash,
+        login: &PendingLogin,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query!("DELETE FROM pending_logins WHERE expires_at < now()")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query!(
+            "INSERT INTO pending_logins (id_hash, state, nonce, verifier, next, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            id.as_slice(),
+            login.state,
+            login.nonce,
+            login.verifier,
+            login.next,
+            expires_at,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(StoreError::from_db)?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The sign-in kept under `id`, if it has not expired; taken, so a
+    /// second call finds nothing.
+    pub async fn take_login(&self, id: &TokenHash) -> Result<Option<PendingLogin>, StoreError> {
+        let row = sqlx::query!(
+            "DELETE FROM pending_logins WHERE id_hash = $1
+             RETURNING state, nonce, verifier, next, expires_at > now() AS \"live!\"",
+            id.as_slice(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.filter(|r| r.live).map(|r| PendingLogin {
+            state: r.state,
+            nonce: r.nonce,
+            verifier: r.verifier,
+            next: r.next,
+        }))
     }
 
     /// Opens a session for `user`; expired sessions go at the same time.
