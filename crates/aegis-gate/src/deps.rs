@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use aegis_lang::{Profile, glob_match, new_dependency_violations, read_lockfile};
+use aegis_lang::{Profile, glob_match, join_dir, new_dependency_violations, read_lockfile};
 
 use crate::GateError;
 use crate::git::{self, Change};
@@ -31,22 +31,27 @@ fn matters(profile: &Profile, path: &str) -> bool {
 }
 
 /// `Ok(None)` when no manifest, lockfile or protected path changed;
-/// `Ok(Some(Err(reason)))` when the step fails. `ignored` are the paths
-/// git ignores in the patched tree. `tree` are the `on_change` patterns of
-/// the dependency tree the gate resolves after this check, if it does.
+/// `Ok(Some(Err(reason)))` when the step fails. `changes` and `ignored`
+/// (the paths git ignores in the patched tree) are relative to `dir`, the
+/// part of `repo` that `profile` owns (#71). `tree` are the `on_change`
+/// patterns of the dependency tree the gate resolves after this check, if
+/// it does.
+#[allow(clippy::too_many_arguments)]
 pub fn check(
     profile: &Profile,
     repo: &Path,
+    dir: &str,
     base: &str,
     changes: &[Change],
     ignored: &[String],
     allowed: &BTreeSet<String>,
     tree: &[String],
 ) -> Result<Option<Result<(), String>>, GateError> {
-    let nested: Vec<&str> = changes
+    let shown = |path: &str| join_dir(dir, path);
+    let nested: Vec<String> = changes
         .iter()
         .filter(|c| c.gitlink)
-        .map(|c| c.path.as_str())
+        .map(|c| shown(&c.path))
         .collect();
     if !nested.is_empty() {
         return Ok(Some(Err(format!(
@@ -55,10 +60,10 @@ pub fn check(
         ))));
     }
     // An ignored lockfile is invisible to the diff but not to the build.
-    let hidden: Vec<&str> = ignored
+    let hidden: Vec<String> = ignored
         .iter()
         .filter(|p| !p.ends_with('/') && matters(profile, p))
-        .map(String::as_str)
+        .map(|p| shown(p))
         .collect();
     if !hidden.is_empty() {
         return Ok(Some(Err(format!(
@@ -72,7 +77,11 @@ pub fn check(
     if !protected.is_empty() {
         return Ok(Some(Err(format!(
             "the patch changes protected build configuration: {}",
-            protected.join(", ")
+            protected
+                .iter()
+                .map(|p| shown(p))
+                .collect::<Vec<_>>()
+                .join(", ")
         ))));
     }
     let deps = &profile.dependencies;
@@ -95,7 +104,7 @@ pub fn check(
             "{} changed but no lockfile did, so the new dependencies cannot be checked",
             manifests
                 .iter()
-                .map(|s| s.as_str())
+                .map(|s| shown(s))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))));
@@ -103,6 +112,8 @@ pub fn check(
     let mut problems = Vec::new();
     for path in lockfiles {
         let name = file_name(path);
+        let full = shown(path);
+        let path = &full;
         let Ok(after) = std::fs::read_to_string(repo.join(path)) else {
             problems.push(format!("{path}: removed or unreadable"));
             continue;

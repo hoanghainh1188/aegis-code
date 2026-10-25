@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::LifecycleError;
 use crate::config::{
-    BudgetSection, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig, RunSection,
-    SonarConfig,
+    BudgetSection, DirConfig, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig,
+    RunSection, SonarConfig,
 };
 
 /// Bedrock in Tokyo for `customer-jp` (design §1, §7).
@@ -124,6 +124,9 @@ pub struct RepoSettings {
     /// Overrides of the language profile, as `[repo.overrides]`.
     #[serde(default)]
     pub overrides: toml::Table,
+    /// Directories with their own profile, as `[[repo.dirs]]` (#71).
+    #[serde(default)]
+    pub dirs: Vec<DirConfig>,
     /// Packages a patch may add to this repo.
     #[serde(default)]
     pub allowed_packages: Vec<String>,
@@ -256,6 +259,7 @@ impl Modes {
                 key: slug.to_owned(),
                 conventions: settings.conventions,
                 overrides,
+                dirs: settings.dirs,
                 allowed_packages: None,
                 allowed_package_names: settings.allowed_packages,
                 licenses: settings.licenses,
@@ -504,6 +508,10 @@ mod tests {
         let mut value = settings();
         value["overrides"] = serde_json::json!({ "gate": { "test": ["pytest", "-q"] } });
         value["hidden_test"] = serde_json::json!(["pytest", "{tests}"]);
+        value["dirs"] = serde_json::json!([{
+            "path": "web", "language": "typescript",
+            "overrides": { "gate": { "test": ["npm", "test"] } }
+        }]);
         value["tracker"] = serde_json::json!({
             "kind": "backlog", "url": "https://acme.backlog.jp",
             "token_env": "AEGIS_BACKLOG_API_KEY", "project_ids": [12], "pr_status_id": 3
@@ -513,12 +521,13 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&parsed).unwrap()).unwrap();
         assert_eq!(back, parsed);
         assert!(parsed.tracker.is_some());
-        modes()
+        let cfg = modes()
             .run_config(&repo(
                 "app",
                 RepoMode::Poc,
                 serde_json::to_value(&parsed).unwrap(),
             ))
             .unwrap();
+        assert_eq!(cfg.repo.dirs[0].path, "web");
     }
 }

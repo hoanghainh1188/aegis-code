@@ -1,23 +1,27 @@
-//! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
+//! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>] [--parts <file.toml>]
 //! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]
 //! [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]`:
 //! serves the ACI tools for
 //! one repo over MCP on stdin/stdout. The overrides file holds the language
-//! part of the repo's `RepoConfig` ([`ProfileOverrides`]). With
+//! part of the repo's `RepoConfig` ([`ProfileOverrides`]); the parts file
+//! the directories with a profile of their own (`[[part]]` with `dir`,
+//! `language` and `overrides`, #71). With
 //! `--format-image` the formatter of `edit` and the test of `run_tests` run
 //! in that image, as the gate's steps do: no network, the mounts read-only,
 //! the `--test-env` variables set. `--test-dir` holds `run_tests`' logs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use aegis_aci::{Aci, AciServer, FormatContainer, RUN_TESTS_TIMEOUT, TestSettings};
 use aegis_gate::Sandbox;
-use aegis_lang::{Language, ProfileOverrides, Profiles};
+use aegis_lang::{Language, ProfileOverrides, Profiles, RepoProfiles};
 use rmcp::ServiceExt;
+use serde::Deserialize;
 
 const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
+       [--parts <file.toml>]
        [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]
        [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]";
 
@@ -30,6 +34,7 @@ struct Args {
     repo: Option<PathBuf>,
     language: Option<String>,
     overrides: Option<PathBuf>,
+    parts: Option<PathBuf>,
     format_image: Option<String>,
     docker: Option<String>,
     format_mounts: Vec<(String, String)>,
@@ -46,6 +51,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--repo" => parsed.repo = Some(value()?.into()),
             "--language" => parsed.language = Some(value()?),
             "--overrides" => parsed.overrides = Some(value()?.into()),
+            "--parts" => parsed.parts = Some(value()?.into()),
             "--format-image" => parsed.format_image = Some(value()?),
             "--docker" => parsed.docker = Some(value()?),
             "--format-mount" => {
@@ -79,6 +85,29 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(parsed)
 }
 
+/// One `[[part]]` of the parts file.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Part {
+    dir: String,
+    language: Language,
+    #[serde(default)]
+    overrides: ProfileOverrides,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PartsFile {
+    #[serde(default)]
+    part: Vec<Part>,
+}
+
+fn read_toml<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    toml::from_str(&text).map_err(|e| format!("invalid {}: {e}", path.display()))
+}
+
 fn build(args: Args) -> Result<Aci, String> {
     let repo = args.repo.ok_or("--repo is required")?;
     let id = args.language.ok_or("--language is required")?;
@@ -86,19 +115,29 @@ fn build(args: Args) -> Result<Aci, String> {
         .into_iter()
         .find(|l| l.id() == id)
         .ok_or_else(|| format!("unknown language `{id}`"))?;
-    let overrides = match args.overrides {
-        Some(path) => {
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-            toml::from_str::<ProfileOverrides>(&text)
-                .map_err(|e| format!("invalid {}: {e}", path.display()))?
-        }
+    let overrides: ProfileOverrides = match &args.overrides {
+        Some(path) => read_toml(path)?,
         None => ProfileOverrides::default(),
     };
-    let profile = Profiles::builtin()
-        .and_then(|p| p.get(language)?.resolve(&overrides))
-        .map_err(|e| e.to_string())?;
-    let aci = Aci::new(&repo, profile).map_err(|e| e.to_string())?;
+    let parts: PartsFile = match &args.parts {
+        Some(path) => read_toml(path)?,
+        None => PartsFile::default(),
+    };
+    let builtin = Profiles::builtin().map_err(|e| e.to_string())?;
+    let resolve = |language: Language, overrides: &ProfileOverrides| {
+        builtin
+            .get(language)
+            .and_then(|p| p.resolve(overrides))
+            .map_err(|e| e.to_string())
+    };
+    let dirs = parts
+        .part
+        .iter()
+        .map(|p| Ok((p.dir.clone(), resolve(p.language, &p.overrides)?)))
+        .collect::<Result<Vec<_>, String>>()?;
+    let profiles =
+        RepoProfiles::new(resolve(language, &overrides)?, dirs).map_err(|e| e.to_string())?;
+    let aci = Aci::new(&repo, profiles).map_err(|e| e.to_string())?;
     let defaults = TestSettings::default();
     let mut tests = TestSettings {
         sandbox: None,

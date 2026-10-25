@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use aegis_lang::{Language, ProfileOverrides};
+use aegis_lang::{Language, ProfileOverrides, Profiles, RepoProfiles, check_dir};
 use aegis_provider::ProviderConfig;
 use aegis_router::{BudgetLimits, EscalationRules, ModelsConfig};
 use serde::{Deserialize, Serialize};
@@ -153,6 +153,11 @@ pub struct RepoConfig {
     /// `RepoConfig` overrides of the language profile.
     #[serde(default)]
     pub overrides: toml::Table,
+    /// Directories that go by another profile (monorepo, ADR 0004 §1,
+    /// #71): `[[repo.dirs]]` with `path`, `language` and `overrides`.
+    /// `language` above is then the rest of the repo's.
+    #[serde(default)]
+    pub dirs: Vec<DirConfig>,
     /// Packages a patch may add (`policies/allowed-*.toml`).
     #[serde(default)]
     pub allowed_packages: Option<PathBuf>,
@@ -173,7 +178,63 @@ pub struct RepoConfig {
     pub fork: ForkConfig,
 }
 
+/// A directory of the repo with its own language profile (#71).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirConfig {
+    /// Relative to the repo root, e.g. `web` or `services/api`.
+    pub path: String,
+    pub language: Language,
+    /// The profile's overrides, as `repo.overrides`; commands run in
+    /// `path`, and paths in them are relative to it.
+    #[serde(default)]
+    pub overrides: toml::Table,
+}
+
+impl DirConfig {
+    pub fn profile_overrides(&self) -> Result<ProfileOverrides, LifecycleError> {
+        self.overrides
+            .clone()
+            .try_into()
+            .map_err(|e: toml::de::Error| {
+                LifecycleError::Config(format!("repo.dirs `{}`: overrides: {e}", self.path))
+            })
+    }
+}
+
 impl RepoConfig {
+    /// The repo's profile and its directories' own, resolved.
+    pub fn profiles(&self, builtin: &Profiles) -> Result<RepoProfiles, LifecycleError> {
+        let root = builtin
+            .get(self.language)?
+            .resolve(&self.profile_overrides()?)?;
+        let dirs = self
+            .dirs
+            .iter()
+            .map(|d| {
+                let profile = builtin.get(d.language)?.resolve(&d.profile_overrides()?)?;
+                Ok((d.path.clone(), profile))
+            })
+            .collect::<Result<Vec<_>, LifecycleError>>()?;
+        Ok(RepoProfiles::new(root, dirs)?)
+    }
+
+    /// The directories are plain and named once, their overrides read.
+    fn check_dirs(&self) -> Result<(), LifecycleError> {
+        for (i, dir) in self.dirs.iter().enumerate() {
+            check_dir(&dir.path)
+                .map_err(|e| LifecycleError::Config(format!("repo.dirs path {e}")))?;
+            if self.dirs[..i].iter().any(|d| d.path == dir.path) {
+                return Err(LifecycleError::Config(format!(
+                    "repo.dirs: `{}` is given twice",
+                    dir.path
+                )));
+            }
+            dir.profile_overrides()?;
+        }
+        Ok(())
+    }
+
     /// The repo's policy for the gate's audit step (#159).
     pub fn audit_policy(&self) -> aegis_gate::AuditPolicy {
         aegis_gate::AuditPolicy {
@@ -370,6 +431,7 @@ impl RunConfig {
     /// key: `.` is allowed past the first character.
     pub(crate) fn check(self) -> Result<Self, LifecycleError> {
         self.repo.profile_overrides()?;
+        self.repo.check_dirs()?;
         let key = &self.repo.key;
         let key_ok = key.starts_with(|c: char| c.is_ascii_alphanumeric())
             && key
@@ -606,6 +668,55 @@ pull_request = false"#,
         assert!(cfg.check_codebase_memory().is_ok());
         cfg.codebase_memory = None;
         assert!(cfg.check_codebase_memory().is_ok());
+    }
+
+    fn with_dirs(dirs: &str) -> Result<RunConfig, LifecycleError> {
+        RunConfig::from_toml(&POC.replacen("[repo.fork]", &format!("{dirs}\n[repo.fork]"), 1))
+    }
+
+    #[test]
+    fn a_monorepo_gives_directories_their_own_profile() {
+        let cfg = with_dirs(
+            r#"[[repo.dirs]]
+path = "web"
+language = "typescript"
+[repo.dirs.overrides.gate]
+test = ["npm", "test"]
+[[repo.dirs]]
+path = "services/api"
+language = "go""#,
+        )
+        .unwrap();
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let language = |p: &str| profiles.part_of(p).profile.language();
+        assert_eq!(language("web/src/app.ts"), Language::TypeScript);
+        assert_eq!(language("services/api/main.go"), Language::Go);
+        assert_eq!(language("scrapy/http.py"), cfg.repo.language);
+        let web = &profiles.parts()[1].profile;
+        assert_eq!(web.gate.test.render(&[]).unwrap(), ["npm", "test"]);
+    }
+
+    #[test]
+    fn a_monorepo_s_directories_are_checked() {
+        for (bad, says) in [
+            (
+                "[[repo.dirs]]\npath = \"../web\"\nlanguage = \"go\"",
+                "plain relative",
+            ),
+            (
+                "[[repo.dirs]]\npath = \"web\"\nlanguage = \"go\"\n\
+                 [[repo.dirs]]\npath = \"web\"\nlanguage = \"go\"",
+                "twice",
+            ),
+            (
+                "[[repo.dirs]]\npath = \"web\"\nlanguage = \"go\"\n\
+                 [repo.dirs.overrides]\nnope = 1",
+                "repo.dirs `web`",
+            ),
+        ] {
+            let err = with_dirs(bad).unwrap_err().to_string();
+            assert!(err.contains(says), "{bad}: {err}");
+        }
     }
 
     #[test]

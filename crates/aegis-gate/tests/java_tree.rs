@@ -108,6 +108,7 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        parts: vec![],
     })
     .unwrap()
 }

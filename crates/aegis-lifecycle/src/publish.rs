@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use aegis_gate::GateReport;
-use aegis_lang::{CoverageFormat, ResolvedProfile};
+use aegis_lang::{CoverageFormat, RepoProfiles};
 use aegis_ledger::{IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
     CommitInput, Cost, GitHub, Identity, PrContent, Remote, abandon, cobertura_percent,
@@ -15,15 +15,18 @@ use aegis_provider::ModelProvider;
 use crate::answer::FinalAnswer;
 use crate::{IssueInput, LifecycleError, Platform};
 
-/// Line coverage from the report the gate's coverage step left in `tree`.
-fn coverage_percent(profile: &ResolvedProfile, tree: &Path) -> Option<f64> {
-    let coverage = profile.coverage.as_ref()?;
-    let text = std::fs::read_to_string(tree.join(&coverage.path)).ok()?;
-    match coverage.format {
-        CoverageFormat::Lcov => lcov_percent(&text),
-        CoverageFormat::Cobertura => cobertura_percent(&text),
-        _ => None,
-    }
+/// Line coverage from the report the gate's coverage step left in `tree`:
+/// the first part's that has one, the rest of the repo first (#71).
+fn coverage_percent(profiles: &RepoProfiles, tree: &Path) -> Option<f64> {
+    profiles.parts().iter().find_map(|part| {
+        let coverage = part.profile.coverage.as_ref()?;
+        let text = std::fs::read_to_string(tree.join(&part.dir).join(&coverage.path)).ok()?;
+        match coverage.format {
+            CoverageFormat::Lcov => lcov_percent(&text),
+            CoverageFormat::Cobertura => cobertura_percent(&text),
+            _ => None,
+        }
+    })
 }
 
 pub(crate) struct Published {
@@ -34,7 +37,7 @@ pub(crate) struct Published {
 pub(crate) async fn publish<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
-    profile: &ResolvedProfile,
+    profiles: &RepoProfiles,
     tree: &Path,
     issue: &IssueInput,
     answer: &FinalAnswer,
@@ -92,7 +95,7 @@ where
         allowed_test_changes: answer.allowed_test_changes.clone(),
         allowed_reference_changes: answer.allowed_reference_changes.clone(),
         gate,
-        coverage_percent: coverage_percent(profile, tree),
+        coverage_percent: coverage_percent(profiles, tree),
         cost: Cost {
             models: record.tokens.keys().cloned().collect(),
             model_calls: record.model_calls,

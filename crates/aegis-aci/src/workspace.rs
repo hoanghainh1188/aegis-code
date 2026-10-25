@@ -4,7 +4,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use aegis_lang::{MAX_SOURCE_BYTES, ResolvedProfile};
+use aegis_lang::{MAX_SOURCE_BYTES, ProfilePart, RepoProfiles, ResolvedProfile};
 
 use crate::AciError;
 
@@ -37,35 +37,37 @@ pub struct FormatContainer {
 #[derive(Debug)]
 pub struct Workspace {
     root: PathBuf,
-    profile: ResolvedProfile,
+    /// The repo's profile, and its directories' own (#71).
+    profiles: RepoProfiles,
     container: Option<FormatContainer>,
-    /// Directory names skipped when walking: `.git` and the profile's
+    /// Directory names skipped when walking: `.git` and the profiles'
     /// build caches (`target`, `.venv`…).
     skipped_dirs: Vec<String>,
 }
 
 impl Workspace {
-    pub fn new(root: &Path, profile: ResolvedProfile) -> Result<Self, AciError> {
+    pub fn new(root: &Path, profiles: impl Into<RepoProfiles>) -> Result<Self, AciError> {
+        let profiles = profiles.into();
         let root = root.canonicalize().map_err(|e| AciError::io(root, &e))?;
         if !root.is_dir() {
             return Err(AciError::NotADirectory(root.display().to_string()));
         }
-        let skipped_dirs = HIDDEN_DIRS
+        let mut skipped_dirs: Vec<String> = HIDDEN_DIRS
             .iter()
             .map(|d| (*d).to_owned())
             .chain(
-                profile
-                    .profile
-                    .sandbox
-                    .cache_dirs
+                profiles
+                    .parts()
                     .iter()
+                    .flat_map(|p| p.profile.profile.sandbox.cache_dirs.iter())
                     .filter(|d| !d.contains('/'))
                     .cloned(),
             )
             .collect();
+        skipped_dirs.dedup();
         Ok(Self {
             root,
-            profile,
+            profiles,
             container: None,
             skipped_dirs,
         })
@@ -83,12 +85,53 @@ impl Workspace {
         self.container.as_ref()
     }
 
+    /// Where `part`'s formatter runs in a container: the root's container,
+    /// or one of the part's image. A part's dependency dirs are not
+    /// mounted yet (#71).
+    pub fn format_container_of(&self, part: &ProfilePart) -> Option<FormatContainer> {
+        let root = self.container.as_ref()?;
+        Some(match part.dir.is_empty() {
+            true => root.clone(),
+            false => FormatContainer {
+                docker: root.docker.clone(),
+                image: part.profile.image.clone(),
+                mounts: vec![],
+            },
+        })
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
 
+    /// The repo's own profile, for the whole tree.
     pub fn profile(&self) -> &ResolvedProfile {
-        &self.profile
+        self.profiles.root()
+    }
+
+    pub fn profiles(&self) -> &RepoProfiles {
+        &self.profiles
+    }
+
+    /// The part of the repo holding `path`.
+    pub fn part_of(&self, path: &Path) -> &ProfilePart {
+        self.profiles.part_of(&self.display(path))
+    }
+
+    /// The profile `path` is read with as source (its grammar), if any.
+    pub fn profile_for(&self, path: &Path) -> Option<&ResolvedProfile> {
+        self.profiles.for_file(&self.display(path))
+    }
+
+    /// The part a test given to `run_tests` belongs to, and its name there:
+    /// a test named by a path inside a part's directory (`web/a.test.ts`)
+    /// is that part's; any other the root's.
+    pub fn part_of_test<'t>(&self, test: &'t str) -> (&ProfilePart, &'t str) {
+        let part = self.profiles.part_of(test);
+        match part.relative(test) {
+            Some(rest) if !part.dir.is_empty() && !rest.is_empty() => (part, rest),
+            _ => (&self.profiles.parts()[0], test),
+        }
     }
 
     /// Absolute path of an existing file or directory, `""` or `"."` for

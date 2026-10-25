@@ -46,6 +46,14 @@ impl Scratch {
         scratch
     }
 
+    /// The Rust fixture at the root and the Python one under `py/` (#71).
+    pub fn two_languages() -> Self {
+        let scratch = Self::fixture("rust");
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/python");
+        copy_dir(&from, &scratch.repo().join("py"));
+        scratch
+    }
+
     pub fn repo(&self) -> PathBuf {
         self.root.join("repo")
     }

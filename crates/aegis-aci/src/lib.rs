@@ -25,7 +25,7 @@ mod workspace;
 use std::path::Path;
 
 use aegis_gate::CancelToken;
-use aegis_lang::ResolvedProfile;
+use aegis_lang::RepoProfiles;
 
 pub use edit::{CONTEXT, EditOutcome, EditRequest, Rejection, Snippet};
 pub use error::AciError;
@@ -52,9 +52,9 @@ pub struct Aci {
 }
 
 impl Aci {
-    pub fn new(root: &Path, profile: ResolvedProfile) -> Result<Self, AciError> {
+    pub fn new(root: &Path, profiles: impl Into<RepoProfiles>) -> Result<Self, AciError> {
         Ok(Self {
-            workspace: Workspace::new(root, profile)?,
+            workspace: Workspace::new(root, profiles)?,
             viewer: viewer::Viewer::default(),
             lsp: None,
             changed: lsp::Changed::default(),
@@ -70,10 +70,14 @@ impl Aci {
         }
     }
 
-    /// Whether the profile can run one test: `run_tests` is offered only
-    /// then.
+    /// Whether a profile of the repo can run one test: `run_tests` is
+    /// offered only then.
     pub fn can_run_tests(&self) -> bool {
-        self.workspace.profile().gate.repro_test.command().is_some()
+        self.workspace
+            .profiles()
+            .parts()
+            .iter()
+            .any(|p| p.profile.gate.repro_test.command().is_some())
     }
 
     /// Stops a `run_tests` call in progress, and refuses later ones; for a

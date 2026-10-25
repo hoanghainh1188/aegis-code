@@ -116,8 +116,10 @@ fn syntax_rejection(
     after: &str,
     (start, end): (usize, usize),
 ) -> Result<Option<Rejection>, AciError> {
-    let profile = &ws.profile().profile;
-    if !profile.owns_file(path) || !has_grammar(profile.language) {
+    let Some(profile) = ws.profile_for(path).map(|p| &p.profile) else {
+        return Ok(None);
+    };
+    if !has_grammar(profile.language) {
         return Ok(None);
     }
     let errors = |s| syntax_errors_in(profile.language, Some(path), s);
@@ -165,7 +167,9 @@ fn write_formatted(
     text: &str,
     original: Option<&str>,
 ) -> Result<Result<String, Rejection>, AciError> {
-    let profile = ws.profile();
+    // The formatter of the file's part, run in the part's directory (#71).
+    let part = ws.part_of(path);
+    let profile = &part.profile;
     let command = profile
         .edit_format
         .command()
@@ -177,11 +181,12 @@ fn write_formatted(
     // A stdin formatter sees only this file's text; one given the path may
     // follow it to others (rustfmt and `mod`, #88).
     let input = profile.edit_stdin.then_some(text);
+    let shown = ws.display(path);
     let result = formatter::run(
         command,
-        ws.root(),
-        &ws.display(path),
-        ws.format_container(),
+        &ws.root().join(&part.dir),
+        part.relative(&shown).unwrap_or(&shown),
+        ws.format_container_of(part).as_ref(),
         input,
     );
     let rejection = match result {
