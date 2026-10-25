@@ -53,12 +53,14 @@ pub fn router(store: Store, auth: Auth) -> Router {
         .route("/api/v1/health", get(health))
         .merge(api)
         .merge(crate::web::router(auth))
+        .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such route") })
+        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
+        // After the limit above: a delivery carries the whole issue and
+        // has its own limit (#169).
         .nest_service(
             "/webhooks",
             crate::webhook::router(store.clone(), crate::webhook::WebhookConfig::from_env()),
         )
-        .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such route") })
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,

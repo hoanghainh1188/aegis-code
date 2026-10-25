@@ -19,7 +19,8 @@
 //! Webhooks (#25) at `/webhooks/github` and `/webhooks/gitlab`, each open
 //! once its secret is in the store: `AEGIS_GITHUB_WEBHOOK_SECRET`,
 //! `AEGIS_GITLAB_WEBHOOK_TOKEN`; the trigger label is the variable
-//! `AEGIS_WEBHOOK_LABEL` (`aegis`). Workers comment on a GitHub issue when
+//! `AEGIS_WEBHOOK_LABEL` (`aegis`), the body limit `AEGIS_WEBHOOK_MAX_BODY_BYTES`
+//! (1 MiB). Workers comment on a GitHub issue when
 //! its job ends if the store has `AEGIS_GITHUB_COMMENT_TOKEN` (API root:
 //! the variable `AEGIS_GITHUB_API`). Sign-in (#29): `[auth]` in the
 //! configuration; the API needs the secrets `AEGIS_SESSION_KEY` and, with
