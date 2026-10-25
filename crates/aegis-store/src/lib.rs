@@ -1,7 +1,8 @@
 //! Durable platform state in PostgreSQL (ADR 0003 §2, #22): repos, jobs,
 //! their runs, the job queue, webhook deliveries, and the ledger behind
 //! [`aegis_ledger::LedgerStore`]; users, sessions, roles and the audit log
-//! (#29); repos' monthly budgets (#31).
+//! (#29); repos' monthly budgets (#31); the records behind the dashboard's
+//! KPIs (#170).
 //!
 //! Queries are checked against the schema at compile time; `.sqlx/` at the
 //! workspace root lets the crate build without a database. Every list is
@@ -12,6 +13,7 @@ mod budget;
 mod deliveries;
 mod error;
 mod jobs;
+mod kpi;
 mod ledger;
 mod page;
 mod queue;
@@ -32,6 +34,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 pub use audit::{Actor, AuditEntry};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use error::StoreError;
+pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
 pub use queue::{AttemptEnd, Claim, Lease};
