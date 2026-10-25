@@ -1204,6 +1204,11 @@ impl<'a> Run<'a> {
                 base: self.req.base,
                 tree: &self.tree,
                 profile: &self.req.profile.profile,
+                properties: sonar::repo_properties(
+                    all_parts(self.req)
+                        .iter()
+                        .map(|p| (p.dir.as_str(), &p.profile.profile)),
+                ),
                 runner: &self.root_runner,
                 logs: &self.work.join("logs"),
             },
@@ -1386,8 +1391,9 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
             }
             let step = match stop {
                 Some(skip) => StepReport::skipped(name, skip),
-                // Sonar analyses the whole repo, once.
-                None if name == StepName::Sonar && n > 0 => {
+                // Sonar analyses the whole repo once, after every part's
+                // coverage step wrote its report.
+                None if name == StepName::Sonar && n + 1 < touched.len() => {
                     StepReport::skipped(name, Skip::NotConfigured)
                 }
                 None => run.step(name)?,
@@ -1397,7 +1403,11 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
                 StepStatus::Skipped(Skip::Cancelled) => Some(Skip::Cancelled),
                 _ => None,
             });
-            reports[k].push((label.clone(), step));
+            let label = match name {
+                StepName::Sonar => "the whole repo".to_owned(),
+                _ => label.clone(),
+            };
+            reports[k].push((label, step));
         }
     }
     let steps = StepName::ALL
@@ -1417,6 +1427,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         tree,
         base,
         references: run.references,
+        parts: touched.iter().map(|&i| dirs[i].clone()).collect(),
     })
 }
 

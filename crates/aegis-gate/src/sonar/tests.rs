@@ -165,6 +165,7 @@ impl Fixture {
                 base: "main",
                 tree: TREE,
                 profile: &self.profile,
+                properties: self.profile.sonar.properties.clone(),
                 runner: &runner,
                 logs: &self.logs,
             },

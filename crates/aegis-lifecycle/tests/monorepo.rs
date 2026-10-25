@@ -10,11 +10,12 @@ mod common;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use aegis_lang::Profiles;
 use aegis_ledger::{IssueId, MemoryLedger, Outcome, PriceTable};
-use aegis_lifecycle::{IssueInput, Platform, RunConfig, run_issue};
+use aegis_lifecycle::{HiddenTests, IssueInput, Platform, RunConfig, run_issue};
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, StopReason, Usage,
 };
@@ -100,7 +101,12 @@ fn call(id: &str, name: &str, input: Value) -> Vec<ContentBlock> {
 
 /// `py` holds the Python fixture; both have the bug, committed on `main`.
 fn monorepo_with_bugs() -> Scratch {
-    let root = std::env::temp_dir().join(format!("aegis-monorepo-{}", std::process::id()));
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "aegis-monorepo-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     let repo = root.join("clone");
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
     for (from, to) in [
@@ -149,8 +155,12 @@ fn monorepo_with_bugs() -> Scratch {
 /// No coverage tool and no ruff needed: stand-ins write the reports, and
 /// the Python part is formatted and linted by nothing.
 fn config(scratch: &Scratch, api: &str) -> RunConfig {
+    RunConfig::from_toml(&config_toml(scratch, api)).unwrap()
+}
+
+fn config_toml(scratch: &Scratch, api: &str) -> String {
     let root = &scratch.0;
-    RunConfig::from_toml(&format!(
+    format!(
         r#"
 [provider]
 kind = "claude_api"
@@ -204,8 +214,7 @@ email = "aegis-bot@example.invalid"
         aci = aci_bin().display(),
         clone = root.join("clone").display(),
         fork = root.join("fork.git").display(),
-    ))
-    .unwrap()
+    )
 }
 
 fn pytest_ready() -> bool {
@@ -223,13 +232,9 @@ fn pytest_ready() -> bool {
     ok
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_bug_in_a_repo_of_two_languages_goes_from_issue_to_pr() {
-    if !tools_ready() || !pytest_ready() {
-        return;
-    }
-    let scratch = monorepo_with_bugs();
-    let server = github().await;
+/// Core's script: find both `add`s, write and run a Python reproduction
+/// test, fix both, answer.
+fn scripted() -> Scripted {
     let answer = json!({
         "status": "fixed",
         "cause": "Both `add`s compared with `>`, so a fourth item was accepted.",
@@ -244,7 +249,7 @@ async fn a_bug_in_a_repo_of_two_languages_goes_from_issue_to_pr() {
         "allowed_test_changes": [],
         "stop_reason": null
     });
-    let model = Scripted {
+    Scripted {
         core: Mutex::new(
             vec![
                 call("t1", "search_symbol", json!({"name": "Cart::add"})),
@@ -275,24 +280,41 @@ async fn a_bug_in_a_repo_of_two_languages_goes_from_issue_to_pr() {
             .into(),
         ),
         requests: Mutex::new(vec![]),
-    };
-    let platform = Arc::new(Platform {
-        config: config(&scratch, &server.uri()),
-        provider: model,
+    }
+}
+
+fn platform(config: RunConfig) -> Arc<Platform<Scripted, MemoryLedger>> {
+    Arc::new(Platform {
+        config,
+        provider: scripted(),
         store: MemoryLedger::new(),
         prices: PriceTable::from_toml(PRICES).unwrap(),
         profiles: Profiles::builtin().unwrap(),
         github_token: "t".into(),
-    });
-    let issue = IssueInput {
-        id: "mono-3".into(),
+    })
+}
+
+fn issue(id: &str, hidden: Option<HiddenTests>) -> IssueInput {
+    IssueInput {
+        id: id.into(),
         title: "Both carts accept a fourth item".into(),
         body: "`cart![1, 2, 3].add(4)` and `cart_of(1, 2, 3).add(4)` succeed.".into(),
         url: "https://github.com/me/fixture/issues/3".into(),
         base: None,
-        hidden: None,
+        hidden,
         kind: None,
-    };
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bug_in_a_repo_of_two_languages_goes_from_issue_to_pr() {
+    if !tools_ready() || !pytest_ready() {
+        return;
+    }
+    let scratch = monorepo_with_bugs();
+    let server = github().await;
+    let platform = platform(config(&scratch, &server.uri()));
+    let issue = issue("mono-3", None);
 
     let report = run_issue(Arc::clone(&platform), issue, CancellationToken::new())
         .await
@@ -356,4 +378,153 @@ async fn a_bug_in_a_repo_of_two_languages_goes_from_issue_to_pr() {
         .unwrap();
     let body = pr["body"].as_str().unwrap();
     assert!(body.contains("repro_test ✔ · test ✔ · coverage"), "{body}");
+}
+
+/// The fix's own test of `py/`, on a branch of the clone: what an eval
+/// issue's hidden test is.
+const PY_HIDDEN: &str = "import pytest
+
+from cart import CartFullError, cart_of
+
+
+def test_a_full_cart_stays_full():
+    cart = cart_of(1, 2, 3)
+    for item in (4, 5):
+        with pytest.raises(CartFullError):
+            cart.add(item)
+    assert len(cart.items) == 3
+";
+
+/// Writes the analysis settings and which coverage reports exist to
+/// `record`, and leaves a task for the gate to wait for.
+fn fake_scanner(scratch: &Scratch) -> std::path::PathBuf {
+    let record = scratch.0.join("sonar-record");
+    std::fs::create_dir_all(&record).unwrap();
+    let script = scratch.0.join("scanner.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "cp .aegis-gate-sonar/project.properties {record}/settings\n\
+             ls lcov.info py/coverage.xml > {record}/reports 2>&1\n\
+             mkdir -p .aegis-gate-sonar/work\n\
+             printf 'projectKey=mono\\nceTaskId=T1\\n' > .aegis-gate-sonar/work/report-task.txt\n",
+            record = record.display()
+        ),
+    )
+    .unwrap();
+    script
+}
+
+/// A Sonar server whose analysis passes.
+async fn sonar_server() -> wiremock::MockServer {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    for (at, body) in [
+        (
+            "/api/ce/task",
+            json!({"task": {"id": "T1", "status": "SUCCESS", "componentKey": "mono",
+                            "analysisId": "A1"}}),
+        ),
+        (
+            "/api/qualitygates/project_status",
+            json!({"projectStatus": {"status": "OK", "conditions": []}}),
+        ),
+        (
+            "/api/issues/search",
+            json!({"paging": {"pageIndex": 1, "pageSize": 100, "total": 0}, "issues": []}),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(at))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    server
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hidden_tests_and_sonar_go_by_the_part_of_the_repo() {
+    // #199: the hidden tests of `py/` run there with its command; Sonar
+    // analyses the repo once, with both parts' coverage reports.
+    if !tools_ready() || !pytest_ready() {
+        return;
+    }
+    let scratch = monorepo_with_bugs();
+    let clone = scratch.0.join("clone");
+    git(&clone, &["checkout", "-q", "-b", "fix"]);
+    std::fs::write(clone.join("py/tests/test_hidden.py"), PY_HIDDEN).unwrap();
+    git(&clone, &["add", "-A"]);
+    git(
+        &clone,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "fix",
+        ],
+    );
+    let fix = String::from_utf8(
+        Command::new("git")
+            .arg("-C")
+            .arg(&clone)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    git(&clone, &["checkout", "-q", "main"]);
+    let (github, sonar) = (github().await, sonar_server().await);
+    let scanner = fake_scanner(&scratch);
+    let mut cfg = RunConfig::from_toml(&format!(
+        "{}\n[sonar]\nurl = \"{}\"\ntoken_env = \"UNUSED\"\nproject_key = \"mono\"\n\
+         pull_request = false\nscanner = [\"sh\", \"{}\"]\npoll_s = 1\n",
+        config_toml(&scratch, &github.uri()),
+        sonar.uri(),
+        scanner.display()
+    ))
+    .unwrap();
+    cfg.sonar.as_mut().unwrap().token = Some(aegis_secrets::Secret::new("squ_test"));
+    let platform = platform(cfg);
+    let hidden = HiddenTests {
+        fix_commit: fix.trim().to_owned(),
+        test_files: vec!["py/tests/test_hidden.py".into()],
+        dir: "py".into(),
+        command: ["python", "-m", "pytest", "-q", "tests/test_hidden.py"]
+            .map(String::from)
+            .to_vec(),
+        known_failures: vec![],
+    };
+
+    let report = run_issue(
+        Arc::clone(&platform),
+        issue("mono-4", Some(hidden)),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(report.hidden_tests_passed, Some(true), "{report:?}");
+    let log =
+        std::fs::read_to_string(scratch.0.join("state/jobs/mono-4/hidden-tests.log")).unwrap();
+    assert!(log.contains("1 passed"), "{log}");
+
+    let record = scratch.0.join("sonar-record");
+    let settings = std::fs::read_to_string(record.join("settings")).unwrap();
+    assert!(
+        settings.contains("sonar.rust.lcov.reportPaths=lcov.info\n"),
+        "{settings}"
+    );
+    assert!(
+        settings.contains("sonar.python.coverage.reportPaths=py/coverage.xml\n"),
+        "{settings}"
+    );
+    let reports = std::fs::read_to_string(record.join("reports")).unwrap();
+    assert_eq!(reports, "lcov.info\npy/coverage.xml\n");
 }

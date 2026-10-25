@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use aegis_lang::Language;
+use aegis_lang::{Language, deepest, in_dir};
 use aegis_ledger::{IssueId, LedgerStore};
 use serde::Deserialize;
 
@@ -114,17 +114,32 @@ pub async fn next_run_id<S: LedgerStore>(
 
 impl EvalIssue {
     /// The job for run `run_id`: the issue's text and base, with its
-    /// hidden tests run by the repo's `hidden_test` command.
+    /// hidden tests run by the `hidden_test` command of the part of the
+    /// repo that holds their files (#199), in that part's directory.
     pub fn job(&self, cfg: &RunConfig, run_id: &str) -> Result<IssueInput, LifecycleError> {
-        if self.language != cfg.repo.language {
+        let (dir, language, template) = self.hidden_part(cfg)?;
+        let where_ = match dir {
+            "" => format!("the repo root ({language})"),
+            dir => format!("`{dir}/` ({language})"),
+        };
+        if self.language != language {
             return Err(LifecycleError::Config(format!(
-                "{} is a {} issue but the run configuration is for {}",
-                self.id, self.language, cfg.repo.language
+                "{} is a {} issue but its hidden tests are in {where_}",
+                self.id, self.language
             )));
         }
-        let template = cfg.repo.hidden_test.as_ref().ok_or_else(|| {
-            LifecycleError::Config("repo.hidden_test is needed to run an eval set".into())
+        let template = template.ok_or_else(|| {
+            LifecycleError::Config(format!(
+                "{where_} needs a hidden_test command to run an eval set"
+            ))
         })?;
+        // Named from the repo root or from the part's directory, where
+        // the command runs.
+        let tests: Vec<String> = self
+            .hidden_tests
+            .iter()
+            .map(|t| in_dir(dir, t).unwrap_or(t).to_owned())
+            .collect();
         Ok(IssueInput {
             id: run_id.to_owned(),
             title: self.title.clone(),
@@ -134,11 +149,40 @@ impl EvalIssue {
             hidden: Some(HiddenTests {
                 fix_commit: self.fix_commit.clone(),
                 test_files: self.test_files.clone(),
-                command: hidden_command(template, &self.hidden_tests),
+                dir: dir.to_owned(),
+                command: hidden_command(template, &tests),
                 known_failures: self.hidden_known_failures.clone(),
             }),
             kind: None,
         })
+    }
+
+    /// The directory, language and `hidden_test` of the one part of the
+    /// repo holding the hidden tests' files; the root when there are none.
+    fn hidden_part<'c>(
+        &self,
+        cfg: &'c RunConfig,
+    ) -> Result<(&'c str, Language, Option<&'c Vec<String>>), LifecycleError> {
+        let repo = &cfg.repo;
+        let dirs = || std::iter::once("").chain(repo.dirs.iter().map(|d| d.path.as_str()));
+        let mut held: Vec<usize> = self
+            .test_files
+            .iter()
+            .map(|f| deepest(dirs(), f).unwrap_or(0))
+            .collect();
+        held.sort_unstable();
+        held.dedup();
+        match held.as_slice() {
+            [] | [0] => Ok(("", repo.language, repo.hidden_test.as_ref())),
+            [i] => {
+                let d = &repo.dirs[i - 1];
+                Ok((d.path.as_str(), d.language, d.hidden_test.as_ref()))
+            }
+            _ => Err(LifecycleError::Config(format!(
+                "{}: the hidden tests' files are in more than one part of the repo",
+                self.id
+            ))),
+        }
     }
 }
 
@@ -164,6 +208,83 @@ mod tests {
             hidden_command(&pytest, &["tests/a.py".into(), "tests/b.py".into()]),
             ["python", "-m", "pytest", "tests/a.py", "tests/b.py"]
         );
+    }
+
+    fn issue(language: Language, test_files: &[&str], tests: &[&str]) -> EvalIssue {
+        EvalIssue {
+            id: "x-1".into(),
+            language,
+            repo: "me/x".into(),
+            issue: 1,
+            url: "https://github.com/me/x/issues/1".into(),
+            title: "t".into(),
+            base_commit: "b".repeat(40),
+            fix_commit: "f".repeat(40),
+            source_files: vec![],
+            test_files: test_files.iter().map(|f| (*f).to_owned()).collect(),
+            hidden_tests: tests.iter().map(|t| (*t).to_owned()).collect(),
+            hidden_known_failures: vec![],
+            changed_tests: vec![],
+            body: String::new(),
+        }
+    }
+
+    /// The PoC's Python repo with a Rust part in `rs/` and another Python
+    /// one in `tools/`, each with its own hidden test command.
+    fn monorepo() -> RunConfig {
+        let poc = include_str!("../../../config/poc.toml");
+        RunConfig::from_toml(&format!(
+            r#"{poc}
+[[repo.dirs]]
+path = "rs"
+language = "rust"
+hidden_test = ["cargo", "test", "--", "{{tests_regex}}"]
+[[repo.dirs]]
+path = "tools"
+language = "python"
+hidden_test = ["pytest", "{{tests}}"]
+"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn hidden_tests_run_in_the_part_that_holds_their_files() {
+        let cfg = monorepo();
+        let rust = issue(Language::Rust, &["rs/tests/cart.rs"], &["fourth"]);
+        let hidden = rust.job(&cfg, "x-1-r1").unwrap().hidden.unwrap();
+        assert_eq!(hidden.dir, "rs");
+        assert_eq!(hidden.command, ["cargo", "test", "--", "^(fourth)$"]);
+
+        // Tests named from the repo root are named from the part's dir.
+        let tools = issue(
+            Language::Python,
+            &["tools/tests/test_a.py"],
+            &["tools/tests/test_a.py::test_x"],
+        );
+        let hidden = tools.job(&cfg, "x-1-r1").unwrap().hidden.unwrap();
+        assert_eq!(hidden.dir, "tools");
+        assert_eq!(hidden.command, ["pytest", "tests/test_a.py::test_x"]);
+
+        let root = issue(Language::Python, &["tests/test_b.py"], &["tests/test_b.py"]);
+        let hidden = root.job(&cfg, "x-1-r1").unwrap().hidden.unwrap();
+        assert_eq!(hidden.dir, "");
+        assert_eq!(hidden.command.last().unwrap(), "tests/test_b.py");
+    }
+
+    #[test]
+    fn hidden_tests_must_be_of_one_part_of_the_issue_s_language() {
+        let cfg = monorepo();
+        let wrong = issue(Language::Rust, &["tests/test_b.py"], &["t"]);
+        let err = wrong.job(&cfg, "x-1-r1").unwrap_err().to_string();
+        assert!(err.contains("the repo root (python)"), "{err}");
+        let split = issue(
+            Language::Python,
+            &["tests/test_b.py", "tools/tests/test_a.py"],
+            &["t"],
+        );
+        let err = split.job(&cfg, "x-1-r1").unwrap_err().to_string();
+        assert!(err.contains("more than one part"), "{err}");
     }
 
     #[test]

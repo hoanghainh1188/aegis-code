@@ -821,11 +821,12 @@ fn hidden_in_tool_results(messages: &[Message]) -> u32 {
 
 /// The fix's own tests on the agent's patch, after the PR is open (the
 /// PR holds the gated tree, so copying the tests in changes nothing sent).
-/// Same runner and sandbox as the gate; the log stays in the job dir and
-/// never reaches the model.
+/// Same runner and sandbox as the gate's for `part`, the part holding the
+/// tests, in its directory (#199); the log stays in the job dir and never
+/// reaches the model.
 async fn run_hidden(
     cfg: &RunConfig,
-    root: &ProfilePart,
+    part: &ProfilePart,
     tree: &Path,
     job_dir: &Path,
     hidden: &HiddenTests,
@@ -849,16 +850,16 @@ async fn run_hidden(
             inner.cancel();
         }
     }));
-    let profile: &ResolvedProfile = &root.profile;
+    let profile: &ResolvedProfile = &part.profile;
     let runner = Runner {
         env: vec![],
         timeout: Duration::from_secs(cfg.run.step_timeout_s),
         cancel: gate_cancel,
-        sandbox: sandbox(cfg, root)?,
+        sandbox: sandbox(cfg, part)?,
     };
     let (argv, tree, log) = (
         hidden.command.clone(),
-        tree.to_path_buf(),
+        tree.join(&part.dir),
         job_dir.join("hidden-tests.log"),
     );
     let ran = tokio::task::spawn_blocking(move || runner.run(&argv, &tree, &log, &[]))
@@ -1079,8 +1080,17 @@ where
                 None
             };
             if let Some(hidden) = &issue.hidden {
-                let (passed, took) =
-                    run_hidden(cfg, &profiles.parts()[0], tree, job_dir, hidden, cancel).await?;
+                let part = profiles
+                    .parts()
+                    .iter()
+                    .find(|p| p.dir == hidden.dir)
+                    .ok_or_else(|| {
+                        LifecycleError::Config(format!(
+                            "the hidden tests are in `{}/`, which has no profile",
+                            hidden.dir
+                        ))
+                    })?;
+                let (passed, took) = run_hidden(cfg, part, tree, job_dir, hidden, cancel).await?;
                 ledger.hidden_tests(passed, took.as_secs_f64()).await?;
             }
             // With `open_prs` off the run ends where it would open the PR.

@@ -189,6 +189,10 @@ pub struct DirConfig {
     /// `path`, and paths in them are relative to it.
     #[serde(default)]
     pub overrides: toml::Table,
+    /// How eval runs run hidden tests of this directory, as
+    /// `repo.hidden_test`; it runs in `path` (#199).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_test: Option<Vec<String>>,
 }
 
 impl DirConfig {

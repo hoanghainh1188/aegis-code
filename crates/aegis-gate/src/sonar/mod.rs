@@ -28,6 +28,7 @@ use crate::report::{Skip, StepName, StepReport, StepStatus, tail};
 use api::{Api, Condition, Issues, QualityGate, Waited};
 pub use api::{Flow, FlowLocation, Issue as SonarIssue, TextRange};
 use scanner::PullRequest;
+pub(crate) use scanner::repo_properties;
 
 /// Issues listed for the agent; the rest are counted.
 const MAX_LISTED_ISSUES: usize = 20;
@@ -55,7 +56,7 @@ pub struct SonarStep {
     pub network: String,
     /// Host directory the scanner caches its analyzers in.
     pub cache: Option<PathBuf>,
-    /// Added after the profile's `[sonar.properties]`.
+    /// Added after the profiles' `[sonar.properties]`.
     pub properties: BTreeMap<String, String>,
     /// How long the server may take on the analysis once the scanner is
     /// done, and how often to ask.
@@ -89,7 +90,10 @@ pub(crate) struct Context<'a> {
     pub base: &'a str,
     /// Tree under check; names the pull request analysis.
     pub tree: &'a str,
+    /// The root's profile: how the scanner runs.
     pub profile: &'a Profile,
+    /// Every part's `[sonar.properties]`, paths from the repo root.
+    pub properties: BTreeMap<String, String>,
     pub runner: &'a Runner,
     pub logs: &'a Path,
 }
@@ -177,7 +181,15 @@ pub fn open_issues(step: &SonarStep, limit: usize) -> Result<(Vec<SonarIssue>, u
 pub(crate) fn run(step: &SonarStep, cx: &Context<'_>) -> Result<StepReport, GateError> {
     let pr = step.pull_request.then(|| PullRequest::of(cx.tree, cx.base));
     let _cleanup = scanner::prepare(cx.repo)?;
-    let scan = scanner::scan(step, cx.profile, pr.as_ref(), cx.runner, cx.repo, cx.logs)?;
+    let scan = scanner::scan(
+        step,
+        cx.profile,
+        &cx.properties,
+        pr.as_ref(),
+        cx.runner,
+        cx.repo,
+        cx.logs,
+    )?;
     if let Some(failed) = &scan.failed {
         return Ok(match failed.exit {
             Exit::Cancelled => StepReport::skipped(StepName::Sonar, Skip::Cancelled),

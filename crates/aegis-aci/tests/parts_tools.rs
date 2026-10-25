@@ -1,11 +1,15 @@
 //! ACI tools on a repo of two languages (#71): the Rust fixture at the
 //! root, the Python one under `py/` with its own profile. Each file is read
-//! with its part's grammar, and `run_tests` runs a test of `py/` there.
+//! with its part's grammar, `run_tests` runs a test of `py/` there, and
+//! each part's language server answers for its files (#199).
 
 mod common;
 
-use aegis_aci::{Aci, EditOutcome, EditRequest, FormatContainer, Rejection};
-use aegis_lang::{Language, ProfileOverrides, RepoProfiles};
+use std::path::Path;
+use std::process::Command;
+
+use aegis_aci::{Aci, EditOutcome, EditRequest, FormatContainer, LookupAt, Rejection};
+use aegis_lang::{Language, ProfileOverrides, RepoProfiles, ResolvedProfile};
 use common::{Scratch, profile};
 
 fn aci(repo: &Scratch, python: ProfileOverrides) -> Aci {
@@ -105,4 +109,167 @@ fn a_part_s_formatter_runs_in_its_image_with_its_dependency_dirs() {
     assert_eq!(py.mounts, [venv]);
     let root = ws.format_container_of(&ws.profiles().parts()[0]).unwrap();
     assert_eq!(root.mounts[0].1, "/usr/local/cargo/registry");
+}
+
+/// A language server that writes to `argv[1]` its root and what it is
+/// given, and finds every definition on the first line of the file asked
+/// about.
+const FAKE_SERVER: &str = r#"
+import json, sys
+record = open(sys.argv[1], "a")
+def read():
+    n = 0
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line: sys.exit(0)
+        if line.strip() == b"": break
+        k, v = line.decode().split(":", 1)
+        if k.lower() == "content-length": n = int(v)
+    return json.loads(sys.stdin.buffer.read(n))
+def send(m):
+    b = json.dumps(m).encode()
+    sys.stdout.buffer.write(b"Content-Length: %d\r\n\r\n" % len(b) + b); sys.stdout.buffer.flush()
+while True:
+    m = read()
+    method = m.get("method")
+    if method == "initialize":
+        record.write("root %s\n" % m["params"]["rootUri"]); record.flush()
+        send({"jsonrpc": "2.0", "id": m["id"], "result": {"capabilities": {}}})
+    elif method in ("textDocument/didOpen", "textDocument/didChange"):
+        d = m["params"]["textDocument"]
+        record.write("%s %s %s\n" % (method, d.get("languageId", "-"), d["uri"])); record.flush()
+    elif method == "textDocument/definition":
+        uri = m["params"]["textDocument"]["uri"]
+        at = {"line": 0, "character": 0}
+        send({"jsonrpc": "2.0", "id": m["id"], "result": [{"uri": uri, "range": {"start": at, "end": at}}]})
+    elif method == "shutdown":
+        send({"jsonrpc": "2.0", "id": m["id"], "result": None})
+"#;
+
+fn with_fake_server(mut profile: ResolvedProfile, record: &Path) -> ResolvedProfile {
+    let argv: Vec<String> = vec![
+        "python3".into(),
+        "-c".into(),
+        FAKE_SERVER.into(),
+        record.display().to_string(),
+    ];
+    profile.profile.aci.lsp = Some(argv.try_into().unwrap());
+    profile.profile.aci.lsp_options = None;
+    profile
+}
+
+fn python3_ready() -> bool {
+    Command::new("python3").arg("--version").output().is_ok()
+}
+
+fn at(file: &str) -> LookupAt<'_> {
+    LookupAt {
+        file: Some(file),
+        line: Some(2),
+        column: Some(1),
+        ..LookupAt::default()
+    }
+}
+
+#[test]
+fn each_part_has_its_own_language_server_chosen_by_the_file() {
+    if !python3_ready() {
+        return;
+    }
+    let repo = Scratch::two_languages();
+    let (root_record, py_record) = (repo.outside().join("root"), repo.outside().join("py"));
+    std::fs::create_dir_all(repo.outside()).unwrap();
+    let profiles = RepoProfiles::new(
+        with_fake_server(
+            profile(Language::Rust, &ProfileOverrides::default()),
+            &root_record,
+        ),
+        vec![(
+            "py".into(),
+            with_fake_server(
+                profile(
+                    Language::Python,
+                    &toml::from_str("edit_format = false").unwrap(),
+                ),
+                &py_record,
+            ),
+        )],
+    )
+    .unwrap();
+    let mut aci = Aci::new(&repo.repo(), profiles).unwrap();
+    assert!(aci.has_language_server());
+    aci.start_language_server().unwrap();
+
+    let py = aci.find_definition(at("py/cart/__init__.py")).unwrap();
+    assert_eq!(py.hits.len(), 1, "{py}");
+    assert_eq!(
+        (py.hits[0].path.as_str(), py.hits[0].line),
+        ("py/cart/__init__.py", 1)
+    );
+    let rust = aci.find_definition(at("src/lib.rs")).unwrap();
+    assert_eq!(
+        (rust.hits[0].path.as_str(), rust.hits[0].line),
+        ("src/lib.rs", 1)
+    );
+
+    // A file the agent writes goes to its own part's server only.
+    let text = repo.read("py/cart/__init__.py");
+    let outcome = aci
+        .edit(EditRequest {
+            file: "py/cart/__init__.py",
+            from: 1,
+            to: 1,
+            content: text.lines().next().unwrap(),
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    aci.find_definition(at("src/lib.rs")).unwrap();
+    aci.find_definition(at("py/cart/__init__.py")).unwrap();
+    let repo_uri = format!("file://{}", aci.workspace().root().display());
+    drop(aci);
+
+    let root = std::fs::read_to_string(&root_record).unwrap();
+    let py = std::fs::read_to_string(&py_record).unwrap();
+    assert!(root.starts_with(&format!("root {repo_uri}\n")), "{root}");
+    assert!(py.starts_with(&format!("root {repo_uri}/py\n")), "{py}");
+    assert!(
+        root.contains(&format!("didOpen rust {repo_uri}/src/lib.rs")),
+        "{root}"
+    );
+    assert!(!root.contains("cart/__init__.py"), "{root}");
+    assert!(
+        py.contains(&format!("didOpen python {repo_uri}/py/cart/__init__.py")),
+        "{py}"
+    );
+    assert!(
+        py.contains(&format!("didChange - {repo_uri}/py/cart/__init__.py")),
+        "{py}"
+    );
+}
+
+#[test]
+fn a_part_without_a_language_server_says_so() {
+    if !python3_ready() {
+        return;
+    }
+    let repo = Scratch::two_languages();
+    std::fs::create_dir_all(repo.outside()).unwrap();
+    let mut python = profile(Language::Python, &ProfileOverrides::default());
+    python.profile.aci.lsp = None;
+    let profiles = RepoProfiles::new(
+        with_fake_server(
+            profile(Language::Rust, &ProfileOverrides::default()),
+            &repo.outside().join("root"),
+        ),
+        vec![("py".into(), python)],
+    )
+    .unwrap();
+    let mut aci = Aci::new(&repo.repo(), profiles).unwrap();
+    aci.start_language_server().unwrap();
+    let err = aci
+        .find_definition(at("py/cart/__init__.py"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("`py/` (Python)"), "{err}");
+    assert!(aci.find_definition(at("src/lib.rs")).is_ok());
 }

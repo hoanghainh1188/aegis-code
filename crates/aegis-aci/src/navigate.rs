@@ -78,14 +78,15 @@ fn last_segment(symbol: &str) -> &str {
         .unwrap_or(symbol)
 }
 
-struct Resolved {
-    relative: String,
+pub(crate) struct Resolved {
+    /// From the repo root.
+    pub relative: String,
     line: usize,
     column: usize,
     label: Option<String>,
 }
 
-fn resolve(ws: &Workspace, at: LookupAt<'_>) -> Result<Resolved, AciError> {
+pub(crate) fn resolve(ws: &Workspace, at: LookupAt<'_>) -> Result<Resolved, AciError> {
     let symbol = at.symbol.map(str::trim).filter(|s| !s.is_empty());
     let (relative, line) = match (at.file, at.line, symbol) {
         (Some(file), Some(line), _) => (file.trim().to_owned(), line),
@@ -174,20 +175,20 @@ fn utf16_offset(text: &str, column: usize) -> u32 {
         .sum::<usize>() as u32
 }
 
-/// Asks `lsp` for `lookup` at `at`; `sync` brings the server up to date
-/// with the files the ACI wrote first.
+/// Asks `lsp`, the server of the part holding `target`, for `lookup`
+/// there; `language` is the part's, for a file the server has not opened.
 pub(crate) fn lookup(
     ws: &Workspace,
     lsp: &mut Lsp,
+    language: &str,
     lookup: Lookup,
-    at: LookupAt<'_>,
+    target: Resolved,
 ) -> Result<LookupResult, AciError> {
-    let target = resolve(ws, at)?;
     let path = ws.resolve(&target.relative)?;
     let text = ws.read_named_text(&path)?;
     let line_text = text.lines().nth(target.line - 1).unwrap_or_default();
     if !lsp.is_open(&target.relative) {
-        lsp.sync(&target.relative, &text, ws.profile().language().id())?;
+        lsp.sync(&target.relative, &text, language)?;
     }
     let position = Position {
         path: target.relative.clone(),
