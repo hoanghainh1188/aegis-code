@@ -35,6 +35,8 @@ pub struct ServerConfig {
     pub budget: BudgetSection,
     #[serde(default)]
     pub trackers: TrackersSection,
+    #[serde(default)]
+    pub sonar: SonarSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
@@ -78,6 +80,21 @@ pub struct TrackersSection {
 impl Default for TrackersSection {
     fn default() -> Self {
         Self { poll_s: 300 }
+    }
+}
+
+/// The Sonar projects of the repos (#27), each polled on its own
+/// `sonar_poll.every_s` by the `api` role, one process per period.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SonarSection {
+    /// Seconds between two looks at which repos are due; 0 polls none.
+    pub check_s: u64,
+}
+
+impl Default for SonarSection {
+    fn default() -> Self {
+        Self { check_s: 60 }
     }
 }
 
@@ -344,6 +361,7 @@ mod tests {
         assert_eq!(config.metrics.listen.port(), 9464);
         assert!(config.auth.oidc.is_none());
         assert_eq!(config.auth.session_hours, 12);
+        assert_eq!(config.sonar.check_s, 60);
         let worker = config.worker("w".into());
         assert!(worker.renew_every < worker.lease);
         assert_eq!(worker.max_cost_usd, 4.0);

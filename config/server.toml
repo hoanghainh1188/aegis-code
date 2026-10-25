@@ -86,3 +86,9 @@ retry_base_s = 30
 # The Jira/Backlog filters of the repos (`tracker` in their settings) are
 # polled this often, by one `api` process at a time (#26); 0 polls none.
 poll_s = 300
+
+[sonar]
+# Each repo with `sonar` and `sonar_poll` in its settings is polled for new
+# warnings on its own `sonar_poll.every_s` (#27); this is how often the
+# `api` role looks which are due, one process at a time. 0 polls none.
+check_s = 60

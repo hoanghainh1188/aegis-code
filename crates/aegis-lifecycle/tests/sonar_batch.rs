@@ -148,6 +148,52 @@ async fn a_sonar_issue_goes_from_warnings_to_one_pr() {
     if !tools_ready() {
         return;
     }
+    let issue = IssueInput {
+        id: "fixture-8".into(),
+        title: "Sonar warnings in the cart".into(),
+        body: format!("Two new warnings.\n\n```json\n{WARNINGS}\n```\n"),
+        url: "https://github.com/me/fixture/issues/8".into(),
+        base: None,
+        hidden: None,
+        kind: None,
+    };
+    let requests = one_pr(issue).await;
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.system.concat().contains("You triage"))
+    );
+}
+
+/// #27: a batch the server polled knows it is Sonar's; its body is the
+/// warnings as the poll writes them, and Light is not asked to triage it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_polled_batch_goes_to_one_pr_without_triage() {
+    if !tools_ready() {
+        return;
+    }
+    let warnings = aegis_sonar_batch::parse_search(WARNINGS).unwrap();
+    let issue = IssueInput {
+        id: "fixture-8".into(),
+        title: "Sonar: 2 new warnings in fixture".into(),
+        body: aegis_sonar_batch::issue_body("fixture", &warnings),
+        url: "https://sonar.example.com/project/issues?id=fixture".into(),
+        base: None,
+        hidden: None,
+        kind: Some(IssueKind::Sonar),
+    };
+    let requests = one_pr(issue).await;
+    assert!(
+        !requests
+            .iter()
+            .any(|r| r.system.concat().contains("You triage")),
+        "Light was asked to triage a polled batch"
+    );
+}
+
+/// Runs `issue` (id `fixture-8`, the two warnings of [`WARNINGS`]) and
+/// checks it ends in one PR of both groups; the model's requests.
+async fn one_pr(issue: IssueInput) -> Vec<Request> {
     let scratch = repo_with_bug();
     let server = github().await;
     let p = Arc::new(Platform {
@@ -160,15 +206,6 @@ async fn a_sonar_issue_goes_from_warnings_to_one_pr() {
         profiles: Profiles::builtin().unwrap(),
         github_token: "t".into(),
     });
-    let issue = IssueInput {
-        id: "fixture-8".into(),
-        title: "Sonar warnings in the cart".into(),
-        body: format!("Two new warnings.\n\n```json\n{WARNINGS}\n```\n"),
-        url: "https://github.com/me/fixture/issues/8".into(),
-        base: None,
-        hidden: None,
-    };
-
     let report = run_issue(Arc::clone(&p), issue, CancellationToken::new())
         .await
         .unwrap();
@@ -219,4 +256,5 @@ async fn a_sonar_issue_goes_from_warnings_to_one_pr() {
         body.contains("explain the push") && body.contains("sum copied values"),
         "{body}"
     );
+    p.provider.requests.lock().unwrap().clone()
 }

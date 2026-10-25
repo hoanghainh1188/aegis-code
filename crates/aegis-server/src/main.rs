@@ -27,7 +27,10 @@
 //! `https://gitlab.com/api/v4`). The API role polls the Jira and Backlog
 //! filters of the repos whose settings have a `tracker` every
 //! `trackers.poll_s`, one process per period; workers report on those
-//! tickets (#26), with the secret each tracker's `token_env` names.
+//! tickets (#26), with the secret each tracker's `token_env` names. It
+//! also polls the Sonar project of each repo with `sonar_poll` in its
+//! settings on that repo's schedule, looking every `sonar.check_s` which
+//! are due; new warnings become a batch job (#27).
 //! Sign-in (#29): `[auth]` in the
 //! configuration; the API needs the secrets `AEGIS_SESSION_KEY` and, with
 //! `[auth.oidc]`, `AEGIS_OIDC_CLIENT_SECRET`.
@@ -43,7 +46,7 @@ use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::tracker::{self, TrackerNotifier};
 use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
-use aegis_server::{Role, api, metrics, worker};
+use aegis_server::{Role, api, metrics, sonar, worker};
 use aegis_store::Store;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -198,6 +201,18 @@ async fn run(args: Args) -> Result<(), String> {
             secrets.clone(),
             TrackerNotifier::new(store.clone(), secrets.clone()),
             std::time::Duration::from_secs(config.trackers.poll_s),
+            shutdown.clone(),
+        );
+        parts.spawn(async move {
+            poller.await;
+            Ok(())
+        });
+    }
+    if args.role.serves_api() && config.sonar.check_s > 0 {
+        let poller = sonar::run_poller(
+            store.clone(),
+            secrets.clone(),
+            std::time::Duration::from_secs(config.sonar.check_s),
             shutdown.clone(),
         );
         parts.spawn(async move {
