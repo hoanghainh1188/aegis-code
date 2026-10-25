@@ -64,6 +64,9 @@ impl ModeConfig {
         if let Some(p) = mode.run.aci_bin.as_mut().filter(|p| p.is_relative()) {
             *p = base.join(&*p);
         }
+        if let Some(cbm) = mode.codebase_memory.as_mut() {
+            cbm.program = cbm.program_from(base);
+        }
         Ok(mode)
     }
 

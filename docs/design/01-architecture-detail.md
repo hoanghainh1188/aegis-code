@@ -13,7 +13,7 @@ Tài liệu này mô tả kiến trúc kỹ thuật của phần lõi (Phase 1 �
 | Thời gian build | Chưa đo — đo ở Phase 0 |
 | Ngôn ngữ platform | Rust, Cargo workspace (`crates/`) — xem [ADR 0001](../adr/0001-platform-in-rust.md) |
 | Agent harness | Tự làm bằng Rust; gọi model qua trait `ModelProvider` (Claude API qua HTTP, Bedrock qua AWS SDK for Rust) |
-| Chỉ mục repo | Đã chọn Codebase-Memory MCP. Code hiện chưa dùng: ACI tìm theo AST và dựng module map bằng tree-sitter của profile (mục 3.2) |
+| Chỉ mục repo | Codebase-Memory MCP (đồ thị gọi hàm, bật từ #185), cùng tree-sitter (tìm theo AST, module map) và language server của profile (mục 3.1, 3.2) |
 | Sandbox | Docker, mỗi profile một image (dựa trên image CI của repo nếu có), không có mạng ra ngoài; phụ thuộc lấy ở bước riêng qua proxy registry |
 | Sonar | Hỗ trợ cả SonarQube Server và SonarQube Cloud. Bước Sonar của gate chạy khi cấu hình có `[sonar]` (#91), không thì ghi "bỏ qua" |
 | Đầu ra | Nhánh `agent/<issue-id>` + PR; người merge |
@@ -36,7 +36,7 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 | Router | Chọn model theo tầng và luật leo thang, kiểm soát ngân sách | Tự làm (`crates/aegis-router`) |
 | ACI tools | Tìm, xem, sửa code | Tự làm (`crates/aegis-aci`, MCP server Rust, dùng tree-sitter + language server theo profile) |
 | Language profile | Mọi phần phụ thuộc ngôn ngữ của repo đích: grammar, kiểm tra khi `edit`, bước gate, lockfile, sandbox, quy ước prompt | Tự làm (`crates/aegis-lang`, [ADR 0004](../adr/0004-multi-language-profiles.md)) |
-| Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn (SQLite index). **Chưa nối:** đã đo ở #3, chưa crate nào gọi (mục 3.2) |
+| Codebase-Memory MCP | Đồ thị gọi hàm của repo | Dùng sẵn (`codebase-memory-mcp` v0.12.1, SQLite index); `aegis-lifecycle` lập chỉ mục cây của mỗi job (mục 3.2) |
 | Gate runner | Chạy format, lint, test, coverage, Sonar trong Docker (Sonar: #91) | Tự làm (`crates/aegis-gate`) |
 | PR writer | Mở PR, viết giải thích từng đoạn sửa | Tự làm (`crates/aegis-pr`) |
 | Ledger | Ghi log, token, chi phí cho từng issue | Tự làm (`crates/aegis-ledger`, trait ghi JSON / DB) |
@@ -46,7 +46,7 @@ Mọi chỗ khác nhau giữa hai cấu hình chỉ nằm trong file cấu hình
 
 1. Light đọc issue, phân loại, tóm tắt log đính kèm.
 2. Tạo nhánh `agent/<issue-id>` từ nhánh chính.
-3. Core tìm vị trí lỗi bằng ACI và module map. Theo thiết kế còn có Codebase-Memory, nhưng chưa nối (mục 3.2).
+3. Core tìm vị trí lỗi bằng ACI, module map và đồ thị gọi hàm của Codebase-Memory (mục 3.2).
 4. Core viết test tái hiện. Chạy để chắc là FAIL.
 5. Core viết bản vá.
 6. Gate runner chạy chuỗi kiểm chứng trong Docker (6 bước ở mục 6.1).
@@ -66,6 +66,7 @@ Mọi công cụ trả kết quả có định dạng rõ, kèm đường dẫn 
 | `search_symbol` | Tên hàm / struct / trait / impl | Chữ ký, file, dòng bắt đầu–kết thúc | Tối đa 50 kết quả; quá 50 → báo agent thu hẹp |
 | `search_text` | Chuỗi, phạm vi thư mục | File + dòng khớp | Tối đa 50 kết quả |
 | `find_file` | Tên hoặc mẫu tên file | Danh sách đường dẫn | Tối đa 50 kết quả |
+| `find_definition` / `find_references` | File + dòng (kèm cột hoặc tên symbol trên dòng), hoặc tên symbol | Chỗ định nghĩa / chỗ dùng, file + dòng | Qua language server của profile (`aci.lsp`, #115). Tối đa 50 chỗ; mỗi lần gọi chờ index tối đa 30 s. Không có khi profile không khai language server |
 | `open` | File, dòng bắt đầu | Khung 100 dòng có số dòng, số dòng ẩn trên/dưới | 100 dòng / lần |
 | `scroll_up` / `scroll_down` / `goto` | Hướng hoặc số dòng | Khung 100 dòng mới | — |
 | `edit` | File, dòng từ–đến, nội dung mới | Đoạn sau khi sửa ±5 dòng | Kiểm tra cú pháp bằng tree-sitter + formatter của profile (ví dụ `rustfmt`, `ruff format`); lỗi → từ chối, không ghi file |
@@ -75,24 +76,32 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
 
 ### 3.2 Chỉ mục Codebase-Memory MCP
 
-- Lập chỉ mục một lần ở Phase 0. Lưu vào file SQLite trong workspace của PoC.
+- Mỗi job lập chỉ mục cây của nó vào file SQLite dưới `<state_dir>/index`. Cả repo chỉ mất vài giây, nên không cần cơ chế cập nhật theo hash: sau mỗi bản sửa thì lập lại cả cây (#3).
 - Đồ thị gồm các quan hệ: `CALLS`, `IMPORTS`, `USAGES`, `IMPLEMENTS`, `INHERITS`, `TESTS`.
-- Khi code đổi, chỉ lập chỉ mục lại file có hash thay đổi.
-- Agent dùng qua MCP: tìm hàm gọi / được gọi, tìm test liên quan, xem cụm module.
+- Agent dùng qua MCP: tìm hàm gọi / được gọi (`trace_path`), tìm symbol kèm số nơi gọi (`search_graph`).
 - Bổ sung language server của profile (`rust-analyzer`, `basedpyright`…) cho "đi tới định nghĩa" và "tìm chỗ dùng" khi đồ thị chưa đủ chính xác (Rust: macro, trait generic; Python: decorator, import động).
 - Việc của Phase 0: kiểm tra Codebase-Memory phân tích đúng các trường hợp trên ở repo Rust và repo Python thật (#3).
 
-**Trạng thái (22/10): đã đo, chưa nối vào code.**
+**Trạng thái (25/10): đã nối (#185).**
 
 - Kết quả đo ở #3 ([số liệu](../measurements/2026-10-20-codebase-memory-accuracy.md)):
   - **Python (scrapy):** CALLS, IMPORTS, INHERITS khớp hoàn toàn với grep. Đồ thị không thấy import động qua chuỗi đường dẫn (`load_object`, settings, `mock.patch`).
   - **Rust (typst):** CALLS nối theo tên. Vì vậy `parse`, `abs` khớp nhầm sang hàm khác, còn lời gọi qua trait gần như không được nối. Đồ thị cũng không thấy impl do macro sinh ra. Muốn sửa chữ ký hàm hay trait thì phải kiểm lại bằng `rust-analyzer`.
-- Code hiện tại không gọi Codebase-Memory, cũng chưa gọi language server:
+- Cách nối (`aegis-lifecycle`, `code_graph.rs`), khi cấu hình có `[codebase_memory]` (`config/poc.toml`, `config/typst.toml`):
+  - Server chạy cạnh ACI, trong cây của job, với `HOME` là `<state_dir>/index` và `--ui=false`. Agent có `search_graph` và `trace_path`.
+  - Mọi repo dùng chung một thư mục chỉ mục. Lý do: server chạy qua một daemon chung cho mỗi user, và daemon đó chỉ phục vụ một thư mục cache. Một server dùng thư mục khác sẽ không khởi động được trong lúc daemon còn chạy.
+  - Trước lượt gọi model đầu tiên, lifecycle lập chỉ mục cây của job (`index_repository`, chế độ `fast`: bỏ `docs/` và lớp semantic). Mất 2–6 s trên typst và scrapy. Lập chỉ mục thất bại thì job dừng.
+  - Sau một `edit` hay `create_file` thành công, lần hỏi đồ thị kế tiếp lập chỉ mục lại trước. Không dựa vào watcher của server: nó không cập nhật kịp trong lúc đo.
+  - Tên project do server đặt theo đường dẫn của cây, nên đổi theo job. Lifecycle tự điền `project` và bỏ trường này khỏi schema, để danh sách công cụ (nằm trong prefix được cache, mục 4.4) giống nhau ở mọi job của một repo.
+  - Hết job thì xoá project khỏi chỉ mục (`delete_project`), làm theo kiểu best effort như khi xoá worktree.
+  - Server không có trên máy thì job bị từ chối ngay, trước khi ghi ledger (`check_codebase_memory`). Image `aegis-server` có sẵn bản `linux-*-portable`; trên máy dev xem [eval/README.md](../../eval/README.md).
+  - `customer-jp` chưa bật.
+- Công cụ tìm còn lại không đổi:
   - `search_symbol`, `search_text`, `find_file` của ACI tìm bằng truy vấn symbol tree-sitter của profile (`aegis-lang`).
   - Module map ở BP2 (mục 4.1) cũng dựng bằng tree-sitter: thư mục nguồn và các định nghĩa chính trong từng thư mục. Map dựng một lần cho mỗi repo và lưu vào file.
-  - Trường `aci.lsp` đã có trong profile nhưng ACI chưa dùng.
-- Hệ quả: agent không có công cụ "ai gọi hàm này" hay "test nào liên quan", và luật leo thang "lỗi trải trên ≥ 3 file" (mục 5.3) không có nguồn tín hiệu.
-- **Còn mở, chưa có issue:** nối Codebase-Memory qua MCP theo quyết định 3 của [ADR 0001](../adr/0001-platform-in-rust.md), dùng language server thay thế, hay giữ tree-sitter. Nên chốt sau lượt chạy model thật đầu tiên (#6): nếu ledger cho thấy agent định vị lỗi sai nhiều thì mới đáng làm.
+  - `find_definition`, `find_references` hỏi language server của profile (`aci.lsp`, #115, mục 3.1). Prompt bảo agent kiểm bằng hai công cụ này trước khi dựa vào đồ thị để đổi chữ ký hàm.
+- Ledger của Phase 1 (#18, #142, #145) cho thấy agent ít khi định vị sai file ([số liệu](../measurements/2026-10-25-localization.md)). Điểm yếu là sửa thiếu khi bản sửa cần nhiều file, và chậm lần ra file khi lỗi hiện ở một crate mà nguyên nhân ở crate khác. Đồ thị nhắm vào hai việc này; lượt đo KPI sau khi bật cho biết có ích hay không.
+- Luật "lỗi trải trên ≥ 3 file" (mục 5.3) vẫn chưa có nguồn tín hiệu: đồ thị cho biết ai gọi ai, không cho biết bản sửa cần bao nhiêu file.
 
 ### 3.3 Thu gọn lịch sử
 
@@ -186,7 +195,7 @@ Light trả về JSON cố định:
 | Core | Gate qua hết | PR |
 | Core | `edit` bị từ chối 2 lần liên tiếp | Expert |
 | Core | Test tái hiện vẫn fail sau 2 bản vá liên tiếp | Expert |
-| Core | Codebase-Memory cho thấy lỗi trải trên ≥ 3 file (router có luật này nhưng chưa có nguồn tín hiệu, mục 3.2) | Expert |
+| Core | Lỗi trải trên ≥ 3 file (router có luật này nhưng chưa có nguồn tín hiệu: đồ thị không cho biết bản sửa cần bao nhiêu file, mục 3.2) | Expert |
 | Core | Đã dùng 15 lượt gọi mà chưa có bản vá nào tới test tái hiện hay gate (#127) | Expert |
 | Core, Expert | Đã dùng 8 lượt gọi (rồi 16) mà chưa gọi `run_tests` lần nào (#144) | Nhắc agent viết và chạy test tái hiện, ở lại tầng đó |
 | Expert | Gate qua hết | PR |

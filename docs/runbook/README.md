@@ -6,7 +6,7 @@ Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/00
 
 | Thành phần | Ở đâu |
 | --- | --- |
-| Image `aegis-server` (kèm `aegis-aci`, `git`, client `docker`) | [docker/server/Dockerfile](../../docker/server/Dockerfile), ECR `aegis-server:<SHA commit>` |
+| Image `aegis-server` (kèm `aegis-aci`, `codebase-memory-mcp`, `git`, client `docker`) | [docker/server/Dockerfile](../../docker/server/Dockerfile), ECR `aegis-server:<SHA commit>` |
 | Image sandbox theo profile | `docker/<profile>/`, ECR `aegis-sandbox-<profile>:<SHA>`, trên máy đặt tên `aegis-sandbox-<profile>` |
 | Hạ tầng | [deploy/tofu/](../../deploy/tofu/): module `modules/aegis`, môi trường `envs/staging`, `envs/customer-jp`, phần một lần `bootstrap` |
 | CI/CD | [.github/workflows/deploy.yml](../../.github/workflows/deploy.yml) |

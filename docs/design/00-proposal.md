@@ -105,7 +105,7 @@ Lưu ý: con số 1–2k token chỉ là của phần bản đồ. Cả request 
 
 **Chọn cho PoC: Codebase-Memory MCP.** Repo > 100k dòng thì bản đồ RepoMap 1–2k token không đủ phủ. Truy vấn đồ thị gọi hàm qua MCP hợp hơn.
 
-**Trạng thái (22/10):** Codebase-Memory đã được đo trên repo đích (#3) nhưng chưa nối vào platform. Đồ thị đúng với Python, còn với Rust thì sai nhiều ở lời gọi qua trait và code do macro sinh. Hiện ACI tìm theo AST bằng tree-sitter, và prompt mang một module map cũng dựng bằng tree-sitter. Có nối đồ thị hay language server vào không thì chốt sau lượt chạy model thật đầu tiên (Thiết kế §3.2).
+**Trạng thái (25/10):** Codebase-Memory đã nối vào platform (#185): agent có `search_graph` và `trace_path` cạnh công cụ ACI, và mỗi job tự lập chỉ mục cây của nó. Đo ở #3 cho thấy đồ thị đúng với Python, còn với Rust thì sai nhiều ở lời gọi qua trait và code do macro sinh. Vì vậy agent cũng có language server của profile (`find_definition`, `find_references`, #115). ACI vẫn tìm theo AST bằng tree-sitter, và prompt vẫn mang module map dựng bằng tree-sitter (Thiết kế §3.2).
 
 **Bỏ khỏi phạm vi PoC:** SWEzze/OCD, SaraCoder, HGARena, InlineCoder. Đây là kỹ thuật nghiên cứu, chưa có công cụ dùng được ngay. InlineCoder còn dành cho sinh hàm mới, không phải sửa bug. Xem lại ở Phase 3 nếu cần.
 

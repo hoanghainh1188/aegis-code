@@ -169,6 +169,7 @@ fn finish_platform<P, S>(
 ) -> Result<Platform<P, S>, String> {
     // Before the first issue, so a missing ACI writes nothing to the ledger.
     config.check_aci_bin().map_err(|e| e.to_string())?;
+    config.check_codebase_memory().map_err(|e| e.to_string())?;
     let prices = PriceTable::load(&config.run.pricing).map_err(|e| e.to_string())?;
     for model in [
         &config.models.light,
