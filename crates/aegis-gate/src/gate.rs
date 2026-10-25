@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use aegis_lang::{
     DependencyTree, Placeholder, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
-    check_advisory, check_license, default_licenses, deny_config, new_dependency_violations,
-    osv_config, read_lockfile,
+    check_advisory, check_license, default_licenses, deny_config, in_dir, join_dir,
+    new_dependency_violations, osv_config, part_label, read_lockfile,
 };
 
 use crate::build_cache::BuildCache;
@@ -26,6 +26,7 @@ use crate::failures::{failing_tests_with, ran_tests};
 use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
+use crate::parts::{self, GatePart};
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 use crate::sandbox::Sandbox;
 use crate::sonar::{self, SonarStep};
@@ -85,6 +86,10 @@ pub struct GateRequest<'a> {
     pub sonar: Option<SonarStep>,
     /// The repo's own policy for the profile's `dependencies.audit` (#159).
     pub audit: AuditPolicy,
+    /// Directories another profile owns (#71); `profile`, `sandbox`,
+    /// `fetch` and `build_cache` are the rest of the repo's. Only the parts
+    /// the patch changes are checked, the rest of the repo first.
+    pub parts: Vec<GatePart<'a>>,
 }
 
 /// A repo's licenses and ignored advisories, on top of `policies/`.
@@ -152,20 +157,60 @@ pub struct FetchStep {
     pub audit_hosts: Vec<String>,
 }
 
+/// The part of the repo the steps are checking now: its profile, where its
+/// commands run, and the patch's changes in it, relative to its directory.
+struct Part<'a> {
+    dir: String,
+    profile: &'a ResolvedProfile,
+    sandbox: Option<Sandbox>,
+    fetch: Option<FetchStep>,
+    build_cache: Option<BuildCache>,
+    runner: Runner,
+    /// The patched repo's directory of the part.
+    repo: PathBuf,
+    changes: Vec<Change>,
+    ignored: Vec<String>,
+    repro: Option<Repro>,
+    /// The request's allowed tests, named as the part's harness does.
+    allowed_tests: Vec<String>,
+    reference_groups: Vec<ReferenceGroup>,
+    logs: PathBuf,
+    /// The base copy's directory of the part has its build cache.
+    base_seeded: bool,
+}
+
+impl Part<'_> {
+    fn label(&self) -> String {
+        part_label(&self.dir, self.profile)
+    }
+
+    /// `path` of the part, from the repo root.
+    fn shown(&self, path: &str) -> String {
+        parts::shown(&self.dir, path)
+    }
+}
+
 struct Run<'a> {
     req: &'a GateRequest<'a>,
-    runner: Runner,
+    part: Part<'a>,
+    /// Runs Sonar, on the whole repo.
+    root_runner: Runner,
     base: String,
     base_tree: Option<BaseTree>,
     work: PathBuf,
-    logs: PathBuf,
-    changes: Vec<Change>,
-    ignored: Vec<String>,
+    /// Every change of the patch, from the repo root.
+    all_changes: Vec<Change>,
+    /// The parts' directories, the rest of the repo (`""`) first.
+    dirs: Vec<String>,
+    /// The coverage report of every part, which their steps write.
+    coverage_files: Vec<String>,
     snapshot: Snapshot,
     index: PathBuf,
     /// What is checked; written again after a reference update.
     tree: String,
     references: UpdatedReferences,
+    /// Build caches to refresh from the base copy, with their part's dir.
+    seeded: Vec<(BuildCache, String)>,
 }
 
 /// `^(a|b)$` matching exactly `names`, regex characters escaped.
@@ -315,32 +360,43 @@ fn read_log(path: &Path) -> String {
 
 impl<'a> Run<'a> {
     fn log(&self, name: &str) -> PathBuf {
-        self.logs.join(format!("{name}.log"))
+        self.part.logs.join(format!("{name}.log"))
     }
 
     fn base_tree(&mut self) -> Result<&BaseTree, GateError> {
         if self.base_tree.is_none() {
             let path = self.work.join("base");
-            let tree = BaseTree::create(self.req.repo, &self.base, &path)?;
-            if let Some(cache) = &self.req.build_cache {
-                cache.seed(tree.path())?;
-            }
-            self.base_tree = Some(tree);
+            self.base_tree = Some(BaseTree::create(self.req.repo, &self.base, &path)?);
         }
-        Ok(self.base_tree.as_ref().expect("just created"))
+        let tree = self.base_tree.as_ref().expect("just created");
+        if !self.part.base_seeded {
+            if let Some(cache) = &self.part.build_cache {
+                cache.seed(&tree.path().join(&self.part.dir))?;
+                self.seeded.push((cache.clone(), self.part.dir.clone()));
+            }
+            self.part.base_seeded = true;
+        }
+        Ok(tree)
     }
 
-    /// Runs in the patched repo, or in the base copy when `on_base`; each
-    /// side has its own `TMPDIR`.
+    /// The base copy's directory of the part, once the copy exists.
+    fn base_dir(&mut self) -> Result<PathBuf, GateError> {
+        let dir = self.part.dir.clone();
+        Ok(self.base_tree()?.path().join(dir))
+    }
+
+    /// Runs in the part's directory of the patched repo, or of the base
+    /// copy when `on_base`; each side has its own `TMPDIR`.
     fn run_in(&self, argv: &[String], on_base: bool, log: &str) -> Result<Ran, GateError> {
         let (dir, tmp) = match (on_base, &self.base_tree) {
-            (true, Some(tree)) => (tree.path(), self.work.join("tmp-base")),
-            _ => (self.req.repo, self.work.join("tmp")),
+            (true, Some(tree)) => (tree.path().join(&self.part.dir), self.work.join("tmp-base")),
+            _ => (self.part.repo.clone(), self.work.join("tmp")),
         };
         std::fs::create_dir_all(&tmp).map_err(|e| GateError::io(&tmp, &e))?;
         let tmp = tmp.display().to_string();
-        self.runner
-            .run(argv, dir, &self.log(log), &[("TMPDIR", &tmp)])
+        self.part
+            .runner
+            .run(argv, &dir, &self.log(log), &[("TMPDIR", &tmp)])
     }
 
     /// Format, lint, typecheck: the command exits 0, or it fails on the
@@ -378,7 +434,7 @@ impl<'a> Run<'a> {
                 return Ok(failed(&both, why));
             }
         }
-        let changed: Vec<String> = self.changes.iter().map(|c| c.path.clone()).collect();
+        let changed: Vec<String> = self.part.changes.iter().map(|c| c.path.clone()).collect();
         let new = new_findings(&read_log(&ran.log), &read_log(&base.log), &changed);
         if new.is_empty() {
             return Ok(report(name, StepStatus::Passed, &both, String::new()));
@@ -395,12 +451,13 @@ impl<'a> Run<'a> {
     /// the patch changes a file of its `on_change`, and the gate has the
     /// fetch container to resolve it in.
     fn tree(&self) -> Option<&'a DependencyTree> {
-        let req: &'a GateRequest<'a> = self.req;
-        let tree = req.profile.tree.as_ref()?;
-        (req.fetch.is_some() && req.sandbox.is_some())
+        let profile: &'a ResolvedProfile = self.part.profile;
+        let tree = profile.tree.as_ref()?;
+        (self.part.fetch.is_some() && self.part.sandbox.is_some())
             .then_some(tree)
             .filter(|t| {
-                self.changes
+                self.part
+                    .changes
                     .iter()
                     .any(|c| deps::matches_any(&t.on_change, &c.path))
             })
@@ -410,11 +467,12 @@ impl<'a> Run<'a> {
         let name = StepName::Dependencies;
         let tree = self.tree();
         let checked = deps::check(
-            &self.req.profile.profile,
+            &self.part.profile.profile,
             self.req.repo,
+            &self.part.dir,
             &self.base,
-            &self.changes,
-            &self.ignored,
+            &self.part.changes,
+            &self.part.ignored,
             self.req.allowed,
             tree.map_or(&[], |t| t.on_change.as_slice()),
         )?;
@@ -451,19 +509,20 @@ impl<'a> Run<'a> {
     ) -> Result<Option<StepReport>, GateError> {
         let name = StepName::Dependencies;
         let req: &GateRequest<'_> = self.req;
-        let (Some(fetch), Some(sandbox)) = (&req.fetch, &req.sandbox) else {
+        let (Some(fetch), Some(sandbox)) = (self.part.fetch.clone(), self.part.sandbox.clone())
+        else {
             return Ok(None);
         };
         let session = fetch.egress.start()?;
         if let Some(tree) = tree
-            && let Some(failed) = self.compare_trees(tree, &session, sandbox, ran)?
+            && let Some(failed) = self.compare_trees(tree, &session, &sandbox, ran)?
         {
             return Ok(Some(failed));
         }
         let fetched = session.fetch(
-            sandbox,
+            &sandbox,
             &fetch.command,
-            req.repo,
+            &self.part.repo,
             &self.log("fetch"),
             req.step_timeout,
             req.cancel.clone(),
@@ -488,13 +547,14 @@ impl<'a> Run<'a> {
         })
     }
 
-    /// Lockfiles of the profile the patch changed and kept.
+    /// Lockfiles of the part's profile the patch changed and kept.
     fn changed_lockfiles(&self) -> Vec<String> {
-        let lockfiles = &self.req.profile.profile.dependencies.lockfiles;
-        self.changes
+        let lockfiles = &self.part.profile.profile.dependencies.lockfiles;
+        self.part
+            .changes
             .iter()
             .filter(|c| deps::matches_any(lockfiles, &c.path))
-            .filter(|c| self.req.repo.join(&c.path).is_file())
+            .filter(|c| self.part.repo.join(&c.path).is_file())
             .map(|c| c.path.clone())
             .collect()
     }
@@ -506,7 +566,7 @@ impl<'a> Run<'a> {
     fn audit(&mut self, ran: &mut Vec<Ran>) -> Result<Option<StepReport>, GateError> {
         let name = StepName::Dependencies;
         let req: &GateRequest<'_> = self.req;
-        let Step::Run(command) = &req.profile.audit else {
+        let Step::Run(command) = &self.part.profile.audit else {
             return Ok(None);
         };
         let lockfiles = self.changed_lockfiles();
@@ -532,7 +592,7 @@ impl<'a> Run<'a> {
             .clone()
             .unwrap_or_else(default_licenses)
             .join(",");
-        let contained = match (&req.fetch, &req.sandbox) {
+        let contained = match (&self.part.fetch, &self.part.sandbox) {
             (Some(fetch), Some(sandbox)) => {
                 let egress = Egress {
                     allow: fetch.audit_hosts.clone(),
@@ -569,7 +629,7 @@ impl<'a> Run<'a> {
                 Some((session, auditor)) => session.fetch(
                     auditor,
                     &argv,
-                    req.repo,
+                    &self.part.repo,
                     &self.log(&log),
                     req.step_timeout,
                     req.cancel.clone(),
@@ -584,8 +644,9 @@ impl<'a> Run<'a> {
                 e => {
                     let last = ran.last().expect("just pushed");
                     let mut why = format!(
-                        "auditing {lockfile} failed ({}): an advisory or a license outside \
+                        "auditing {} failed ({}): an advisory or a license outside \
                          the repo's policy, or the audit could not run:\n{}",
+                        self.part.shown(lockfile),
                         exit_text(e),
                         tail(&last.log)
                     );
@@ -613,9 +674,10 @@ impl<'a> Run<'a> {
         ran: &mut Vec<Ran>,
     ) -> Result<Option<StepReport>, GateError> {
         let name = StepName::Dependencies;
-        let base_dir = self.base_tree()?.path().to_path_buf();
+        let base_dir = self.base_dir()?;
+        let patch_dir = self.part.repo.clone();
         let mut trees = Vec::new();
-        for (side, dir) in [("base", base_dir.as_path()), ("patch", self.req.repo)] {
+        for (side, dir) in [("base", base_dir.as_path()), ("patch", patch_dir.as_path())] {
             let out = self.work.join(format!("tree-{side}"));
             // A fresh directory: the command may append to the file.
             if out.exists() {
@@ -660,7 +722,7 @@ impl<'a> Run<'a> {
             let read = std::fs::read_to_string(&file)
                 .map_err(|e| e.to_string())
                 .and_then(|text| {
-                    read_lockfile(self.req.profile.profile.language, &tree.file, &text)
+                    read_lockfile(self.part.profile.profile.language, &tree.file, &text)
                         .map_err(|e| e.to_string())
                 });
             match read {
@@ -675,7 +737,7 @@ impl<'a> Run<'a> {
             &trees[0],
             &trees[1],
             self.req.allowed,
-            &self.req.profile.profile.dependencies.official_source,
+            &self.part.profile.profile.dependencies.official_source,
         );
         if violations.is_empty() {
             return Ok(None);
@@ -693,11 +755,11 @@ impl<'a> Run<'a> {
     /// revision with only its own files copied in.
     fn repro(&mut self) -> Result<StepReport, GateError> {
         let name = StepName::ReproTest;
-        let command = match &self.req.profile.gate.repro_test {
+        let command = match &self.part.profile.gate.repro_test {
             Step::Skipped(reason) => return Ok(StepReport::skipped(name, skip_of(*reason))),
             Step::Run(c) => c.clone(),
         };
-        let Some(repro) = self.req.repro else {
+        let Some(repro) = self.part.repro.clone() else {
             return Ok(StepReport::skipped(name, Skip::NoReproTest));
         };
         let argv = command.render(&[(Placeholder::Test, &repro.test)])?;
@@ -716,23 +778,23 @@ impl<'a> Run<'a> {
             _ => {}
         }
         let repo = self
-            .req
+            .part
             .repo
             .canonicalize()
-            .map_err(|e| GateError::io(self.req.repo, &e))?;
+            .map_err(|e| GateError::io(&self.part.repo, &e))?;
         let sources = repro
             .files
             .iter()
             .map(|f| regular_file_in(&repo, f))
             .collect::<Result<Vec<_>, _>>()?;
-        let base_dir = self.base_tree()?.path().to_path_buf();
+        let base_dir = self.base_dir()?;
         // Files the base has and the patch changes: the copy brings every
         // change of the patch in them, a fix there too (#140).
         let carried: Vec<&str> = repro
             .files
             .iter()
             .filter(|f| base_dir.join(f).exists())
-            .filter(|f| self.changes.iter().any(|c| &c.path == *f))
+            .filter(|f| self.part.changes.iter().any(|c| &c.path == *f))
             .map(String::as_str)
             .collect();
         for (file, from) in repro.files.iter().zip(&sources) {
@@ -744,12 +806,13 @@ impl<'a> Run<'a> {
         }
         let base = self.run_in(&argv, true, "repro_test-base");
         if let Some(tree) = &self.base_tree {
-            tree.restore(self.req.repo, &self.base, &repro.files)?;
+            let files: Vec<String> = repro.files.iter().map(|f| self.part.shown(f)).collect();
+            tree.restore(self.req.repo, &self.base, &files)?;
         }
         let base = base?;
         let ran = [&patched, &base];
-        let harness = self.req.profile.gate.harness.as_ref();
-        let failed_on_base = match (base.exit, self.req.profile.gate.test_output) {
+        let harness = self.part.profile.gate.harness.as_ref();
+        let failed_on_base = match (base.exit, self.part.profile.gate.test_output) {
             (Exit::Cancelled, _) => return Ok(StepReport::skipped(name, Skip::Cancelled)),
             (Exit::TimedOut, _) => {
                 let why = format!("`{}` timed out on the base revision", repro.test);
@@ -766,7 +829,7 @@ impl<'a> Run<'a> {
             return Ok(report(name, StepStatus::Passed, &ran, String::new()));
         }
         let reported = |r: &Ran| {
-            let format = self.req.profile.gate.test_output?;
+            let format = self.part.profile.gate.test_output?;
             let ids = ran_tests(format, &read_log(&r.log))?;
             Some(ids.iter().any(|id| is_in(id, &repro.test)))
         };
@@ -811,7 +874,7 @@ impl<'a> Run<'a> {
     /// All tests; fails only on tests the base revision does not fail.
     fn test(&mut self) -> Result<StepReport, GateError> {
         let name = StepName::Test;
-        let argv = self.req.profile.gate.test.render(&[])?;
+        let argv = self.part.profile.gate.test.render(&[])?;
         let patched = self.run_in(&argv, false, "test")?;
         let fail = |ran: &[&Ran], why: String| Ok(report(name, StepStatus::Failed, ran, why));
         match patched.exit {
@@ -826,7 +889,7 @@ impl<'a> Run<'a> {
             }
             _ => {}
         }
-        let Some(format) = self.req.profile.gate.test_output else {
+        let Some(format) = self.part.profile.gate.test_output else {
             return fail(
                 &[&patched],
                 format!(
@@ -836,7 +899,7 @@ impl<'a> Run<'a> {
                 ),
             );
         };
-        let harness = self.req.profile.gate.harness.as_ref();
+        let harness = self.part.profile.gate.harness.as_ref();
         let read = |ran: &Ran| failing_tests_with(format, harness, &read_log(&ran.log));
         let failing = read(&patched);
         if failing.is_empty() {
@@ -900,7 +963,7 @@ impl<'a> Run<'a> {
             );
             return Ok(report(name, StepStatus::Passed, &ran, detail));
         }
-        let Some(update) = self.req.profile.gate.update_references.clone() else {
+        let Some(update) = self.part.profile.gate.update_references.clone() else {
             return fail(
                 &ran,
                 format!(
@@ -914,17 +977,15 @@ impl<'a> Run<'a> {
         // Every new failure is a test the agent says had to change, by name
         // or in a group: its reference output is rewritten, then all the
         // tests run again.
-        let declared = |id: &String| self.req.allowed_tests.iter().any(|t| is_test(id, t));
-        let (groups, ignored): (Vec<&ReferenceGroup>, Vec<&ReferenceGroup>) = self
-            .req
-            .reference_groups
+        let allowed_tests = self.part.allowed_tests.clone();
+        let declared = |id: &String| allowed_tests.iter().any(|t| is_test(id, t));
+        let reference_groups = self.part.reference_groups.clone();
+        let (groups, ignored): (Vec<&ReferenceGroup>, Vec<&ReferenceGroup>) = reference_groups
             .iter()
             .partition(|g| g.dir_in(&update.dirs).is_some());
         let grouped = |id: &String| groups.iter().any(|g| g.covers(id));
         if broken.iter().all(|id| declared(id) || grouped(id)) {
-            let mut names: Vec<String> = self
-                .req
-                .allowed_tests
+            let mut names: Vec<String> = allowed_tests
                 .iter()
                 .filter(|t| broken.iter().any(|id| is_test(id, t)))
                 .cloned()
@@ -1004,8 +1065,12 @@ impl<'a> Run<'a> {
             // A harness may exit non-zero after it updated what failed.
             Exit::Code(_) => {}
         }
-        let inside = |path: &str| dirs.iter().any(|d| is_inside(path, d));
-        let before: BTreeSet<String> = self.changes.iter().map(|c| c.path.clone()).collect();
+        // Paths from the repo root; `dirs` are inside the part.
+        let part_dir = self.part.dir.clone();
+        let inside = |path: &str| {
+            in_dir(&part_dir, path).is_some_and(|p| dirs.iter().any(|d| is_inside(p, d)))
+        };
+        let before: BTreeSet<String> = self.all_changes.iter().map(|c| c.path.clone()).collect();
         let changes = git::changes(self.req.repo, &self.base, &self.index)?;
         let mut written: BTreeSet<String> = self
             .snapshot
@@ -1020,20 +1085,22 @@ impl<'a> Run<'a> {
         );
         let outside: BTreeSet<String> = written.iter().filter(|p| !inside(p)).cloned().collect();
         if !outside.is_empty() {
+            let shown: Vec<String> = dirs.iter().map(|d| self.part.shown(d)).collect();
             let why = format!(
                 "updating the reference outputs wrote outside {}:\n{}",
-                dirs.join(", "),
+                shown.join(", "),
                 list(&outside)
             );
             ran.push(&updated);
             return Ok(report(name, StepStatus::Failed, &ran, why));
         }
         // What is checked, and sent, now includes the new references.
-        self.changes = changes;
+        self.part.changes = parts::scoped_changes(&self.dirs, self.part_index(), &changes);
+        self.all_changes = changes;
         self.snapshot = Snapshot::take(
             self.req.repo,
             &git::files(self.req.repo, &self.index)?,
-            self.req.profile.coverage.as_ref().map(|c| c.path.as_str()),
+            &self.coverage_files,
         );
         self.tree = git::write_tree(self.req.repo, &self.index)?;
 
@@ -1041,8 +1108,8 @@ impl<'a> Run<'a> {
         if after.exit == Exit::Cancelled {
             return Ok(StepReport::skipped(name, Skip::Cancelled));
         }
-        let format = self.req.profile.gate.test_output.expect("compared above");
-        let harness = self.req.profile.gate.harness.as_ref();
+        let format = self.part.profile.gate.test_output.expect("compared above");
+        let harness = self.part.profile.gate.harness.as_ref();
         let failing = if after.exit.success() {
             BTreeSet::new()
         } else {
@@ -1058,10 +1125,8 @@ impl<'a> Run<'a> {
         ran.push(&updated);
         ran.push(&after);
         if still.is_empty() {
-            self.references = UpdatedReferences {
-                tests: names.to_vec(),
-                files: written.into_iter().collect(),
-            };
+            self.references.tests.extend(names.iter().cloned());
+            self.references.files.extend(written);
             return Ok(report(name, StepStatus::Passed, &ran, detail));
         }
         Ok(report(
@@ -1079,16 +1144,16 @@ impl<'a> Run<'a> {
 
     fn coverage(&self) -> Result<StepReport, GateError> {
         let name = StepName::Coverage;
-        let command = match &self.req.profile.gate.coverage {
+        let command = match &self.part.profile.gate.coverage {
             Step::Skipped(reason) => return Ok(StepReport::skipped(name, skip_of(*reason))),
             Step::Run(c) => c,
         };
         let path = self
-            .req
+            .part
             .profile
             .coverage
             .as_ref()
-            .map(|c| self.req.repo.join(&c.path));
+            .map(|c| self.part.repo.join(&c.path));
         if let Some(p) = path.as_ref().filter(|p| p.exists()) {
             std::fs::remove_file(p).map_err(|e| GateError::io(p, &e))?;
         }
@@ -1139,14 +1204,21 @@ impl<'a> Run<'a> {
                 base: self.req.base,
                 tree: &self.tree,
                 profile: &self.req.profile.profile,
-                runner: &self.runner,
-                logs: &self.logs,
+                runner: &self.root_runner,
+                logs: &self.work.join("logs"),
             },
         )
     }
 
+    fn part_index(&self) -> usize {
+        self.dirs
+            .iter()
+            .position(|d| *d == self.part.dir)
+            .unwrap_or(0)
+    }
+
     fn step(&mut self, name: StepName) -> Result<StepReport, GateError> {
-        let gate = &self.req.profile.gate;
+        let gate = &self.part.profile.gate;
         match name {
             StepName::Integrity => Ok(self.integrity()),
             StepName::Dependencies => self.dependencies(),
@@ -1159,6 +1231,38 @@ impl<'a> Run<'a> {
             StepName::Sonar => self.sonar(),
         }
     }
+}
+
+/// The parts of the request, the rest of the repo first.
+fn all_parts<'a>(req: &GateRequest<'a>) -> Vec<GatePart<'a>> {
+    let rest = GatePart {
+        dir: String::new(),
+        profile: req.profile,
+        sandbox: req.sandbox.clone(),
+        fetch: req.fetch.clone(),
+        build_cache: req.build_cache.clone(),
+    };
+    std::iter::once(rest)
+        .chain(req.parts.iter().cloned())
+        .collect()
+}
+
+/// Every part's directory is a plain one inside the repo, named once.
+fn check_parts(parts: &[GatePart<'_>]) -> Result<(), GateError> {
+    for (i, part) in parts.iter().enumerate().skip(1) {
+        aegis_lang::check_dir(&part.dir)
+            .map_err(|e| GateError::InvalidRequest(format!("part {e}")))?;
+        if parts[..i].iter().any(|p| p.dir == part.dir) {
+            return Err(GateError::InvalidRequest(format!(
+                "part `{}` is given twice",
+                part.dir
+            )));
+        }
+        if let Some(sandbox) = &part.sandbox {
+            sandbox.check()?;
+        }
+    }
+    Ok(())
 }
 
 pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
@@ -1179,67 +1283,133 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
     if let Some(sandbox) = &req.sandbox {
         sandbox.check()?;
     }
+    let all = all_parts(req);
+    check_parts(&all)?;
+    let dirs: Vec<String> = all.iter().map(|p| p.dir.clone()).collect();
     let logs = work.join("logs");
     std::fs::create_dir_all(&logs).map_err(|e| GateError::io(&logs, &e))?;
     let base = git::resolve(req.repo, req.base)?;
     let index = work.join("index");
     let changes = git::changes(req.repo, &base, &index)?;
-    let caches: Vec<String> = req
-        .profile
-        .profile
-        .sandbox
-        .cache_dirs
+    let mut caches: Vec<String> = all
         .iter()
+        .flat_map(|p| p.profile.profile.sandbox.cache_dirs.iter())
         .filter(|d| !d.contains('/'))
         .cloned()
         .collect();
+    caches.sort();
+    caches.dedup();
     let ignored = git::ignored(req.repo, &index, &caches)?;
     let tree = git::write_tree(req.repo, &index)?;
-    let coverage = req.profile.coverage.as_ref().map(|c| c.path.as_str());
-    let snapshot = Snapshot::take(req.repo, &git::files(req.repo, &index)?, coverage);
+    let coverage_files: Vec<String> = all
+        .iter()
+        .filter_map(|p| Some(join_dir(&p.dir, &p.profile.coverage.as_ref()?.path)))
+        .collect();
+    let snapshot = Snapshot::take(req.repo, &git::files(req.repo, &index)?, &coverage_files);
+
+    let repro = req.repro.map(|r| parts::repro_part(&dirs, r));
+    let mut touched: Vec<usize> = (0..all.len())
+        .filter(|&i| !parts::scoped_changes(&dirs, i, &changes).is_empty())
+        .collect();
+    if let Some((i, _)) = &repro
+        && !touched.contains(i)
+    {
+        touched.push(*i);
+        touched.sort_unstable();
+    }
+    if touched.is_empty() {
+        touched.push(0);
+    }
+
+    let runner = |sandbox: &Option<Sandbox>| Runner {
+        env: req.env.clone(),
+        timeout: req.step_timeout,
+        cancel: req.cancel.clone(),
+        sandbox: sandbox.clone(),
+    };
+    let part = |i: usize| -> Result<Part<'_>, GateError> {
+        let p = &all[i];
+        let logs = match i {
+            0 => logs.clone(),
+            _ => logs.join(p.dir.replace('/', "_")),
+        };
+        std::fs::create_dir_all(&logs).map_err(|e| GateError::io(&logs, &e))?;
+        Ok(Part {
+            dir: p.dir.clone(),
+            profile: p.profile,
+            sandbox: p.sandbox.clone(),
+            fetch: p.fetch.clone(),
+            build_cache: p.build_cache.clone(),
+            runner: runner(&p.sandbox),
+            repo: repo.join(&p.dir),
+            changes: parts::scoped_changes(&dirs, i, &changes),
+            ignored: parts::scoped_paths(&dirs, i, &ignored),
+            repro: repro
+                .as_ref()
+                .filter(|(r, _)| *r == i)
+                .map(|(_, r)| r.clone()),
+            allowed_tests: parts::scoped_tests(&p.dir, &req.allowed_tests),
+            reference_groups: parts::scoped_groups(&dirs, i, &req.reference_groups),
+            logs,
+            base_seeded: false,
+        })
+    };
     let mut run = Run {
         req,
-        runner: Runner {
-            env: req.env.clone(),
-            timeout: req.step_timeout,
-            cancel: req.cancel.clone(),
-            sandbox: req.sandbox.clone(),
-        },
+        part: part(touched[0])?,
+        root_runner: runner(&req.sandbox),
         base,
         base_tree: None,
         work,
-        logs,
-        changes,
-        ignored,
+        all_changes: changes.clone(),
+        dirs: dirs.clone(),
+        coverage_files,
         snapshot,
         index,
         tree,
         references: UpdatedReferences::default(),
+        seeded: vec![],
     };
-    if let Some(cache) = &req.build_cache {
-        cache.seed(req.repo)?;
-    }
-    let mut steps = Vec::new();
+    let mut reports: Vec<Vec<(String, StepReport)>> = vec![vec![]; StepName::ALL.len()];
     let mut stop: Option<Skip> = None;
-    for name in StepName::ALL {
-        if stop.is_none() && req.cancel.is_cancelled() {
-            stop = Some(Skip::Cancelled);
+    for (n, &i) in touched.iter().enumerate() {
+        if n > 0 {
+            run.part = part(i)?;
         }
-        if let Some(skip) = stop {
-            steps.push(StepReport::skipped(name, skip));
-            continue;
+        if let Some(cache) = &run.part.build_cache {
+            cache.seed(&run.part.repo)?;
         }
-        let step = run.step(name)?;
-        stop = match step.status {
-            StepStatus::Failed => Some(Skip::NotRun),
-            StepStatus::Skipped(Skip::Cancelled) => Some(Skip::Cancelled),
-            _ => None,
-        };
-        steps.push(step);
+        let label = run.part.label();
+        for (k, name) in StepName::ALL.into_iter().enumerate() {
+            if stop.is_none() && req.cancel.is_cancelled() {
+                stop = Some(Skip::Cancelled);
+            }
+            let step = match stop {
+                Some(skip) => StepReport::skipped(name, skip),
+                // Sonar analyses the whole repo, once.
+                None if name == StepName::Sonar && n > 0 => {
+                    StepReport::skipped(name, Skip::NotConfigured)
+                }
+                None => run.step(name)?,
+            };
+            stop = stop.or(match step.status {
+                StepStatus::Failed => Some(Skip::NotRun),
+                StepStatus::Skipped(Skip::Cancelled) => Some(Skip::Cancelled),
+                _ => None,
+            });
+            reports[k].push((label.clone(), step));
+        }
     }
-    if let (Some(cache), Some(base)) = (&req.build_cache, &run.base_tree) {
-        // Upstream code only; a failed refresh costs time, not correctness.
-        let _ = cache.refresh_from(base.path());
+    let steps = StepName::ALL
+        .into_iter()
+        .zip(reports)
+        .map(|(name, reports)| parts::merge(name, reports))
+        .collect();
+    if let Some(base) = &run.base_tree {
+        for (cache, dir) in &run.seeded {
+            // Upstream code only; a failed refresh costs time, not correctness.
+            let _ = cache.refresh_from(&base.path().join(dir));
+        }
     }
     let (tree, base) = (run.tree.clone(), run.base.clone());
     Ok(GateReport {

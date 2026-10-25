@@ -63,10 +63,12 @@ fn group_of(relative: &Path) -> String {
 
 /// The module map of the workspace's repo, in path order.
 pub fn module_summary(ws: &Workspace) -> Result<String, AciError> {
-    let profile = &ws.profile().profile;
     let (files, _) = ws.files_under(ws.root())?;
     let mut groups: BTreeMap<String, Group> = BTreeMap::new();
-    for path in files.iter().filter(|p| profile.owns_file(p)) {
+    for path in &files {
+        let Some(profile) = ws.profile_for(path).map(|p| &p.profile) else {
+            continue;
+        };
         let relative = path.strip_prefix(ws.root()).unwrap_or(path);
         let group = groups.entry(group_of(relative)).or_default();
         group.files += 1;

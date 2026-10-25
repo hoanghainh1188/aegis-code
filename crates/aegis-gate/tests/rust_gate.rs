@@ -387,6 +387,7 @@ fn work_dir_inside_the_repo_is_refused() {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        parts: vec![],
     })
     .unwrap_err();
     assert!(
@@ -573,6 +574,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             reference_groups: vec![],
             sonar: None,
             audit: Default::default(),
+            parts: vec![],
         })
     };
     #[cfg(unix)]

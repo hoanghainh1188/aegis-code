@@ -84,13 +84,12 @@ fn symbol_matches(query: &str, symbol: &Symbol) -> bool {
 
 pub fn search_symbol(ws: &Workspace, name: &str) -> Result<SearchResult<SymbolHit>, AciError> {
     let query = non_empty("symbol name", name)?;
-    let profile = &ws.profile().profile;
     let mut hits = Vec::new();
     let (files, mut skipped) = ws.files_under(ws.root())?;
     for path in files {
-        if !profile.owns_file(&path) {
+        let Some(profile) = ws.profile_for(&path).map(|p| &p.profile) else {
             continue;
-        }
+        };
         let Some(source) = ws.read_text(&path) else {
             skipped += 1;
             continue;

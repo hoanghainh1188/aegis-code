@@ -82,17 +82,20 @@ impl TestRunner {
     }
 
     pub(crate) fn run(&mut self, workspace: &Workspace, test: &str) -> Result<TestRun, AciError> {
-        let profile: &ResolvedProfile = workspace.profile();
+        let test = test.trim();
+        if test.is_empty() {
+            return Err(AciError::InvalidInput("`test` is empty".into()));
+        }
+        // A test inside a part's directory runs with that part's profile,
+        // in that directory (#71).
+        let (part, name) = workspace.part_of_test(test);
+        let profile: &ResolvedProfile = &part.profile;
         let Some(command) = profile.gate.repro_test.command() else {
             return Err(AciError::InvalidInput(
                 "this repo has no command to run one test".into(),
             ));
         };
-        let test = test.trim();
-        if test.is_empty() {
-            return Err(AciError::InvalidInput("`test` is empty".into()));
-        }
-        let argv = command.render(&[(Placeholder::Test, test)])?;
+        let argv = command.render(&[(Placeholder::Test, name)])?;
         self.runs += 1;
         let dir = &self.settings.work_dir;
         let tmp = dir.join("tmp");
@@ -102,11 +105,28 @@ impl TestRunner {
             env: self.settings.env.clone(),
             timeout: self.settings.timeout.min(RUN_TESTS_TIMEOUT),
             cancel: self.cancel.clone(),
-            sandbox: self.settings.sandbox.clone(),
+            sandbox: self
+                .settings
+                .sandbox
+                .clone()
+                .map(|s| match part.dir.is_empty() {
+                    true => s,
+                    // The part's image; its dependency dirs are not mounted yet.
+                    false => Sandbox {
+                        image: part.profile.image.clone(),
+                        mounts: vec![],
+                        ..s
+                    },
+                }),
         };
         let tmp = tmp.display().to_string();
         let ran = runner
-            .run(&argv, workspace.root(), &log, &[("TMPDIR", &tmp)])
+            .run(
+                &argv,
+                &workspace.root().join(&part.dir),
+                &log,
+                &[("TMPDIR", &tmp)],
+            )
             .map_err(|e| AciError::Tests(e.to_string()))?;
         let output =
             String::from_utf8_lossy(&std::fs::read(&ran.log).unwrap_or_default()).into_owned();

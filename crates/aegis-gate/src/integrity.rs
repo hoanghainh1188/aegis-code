@@ -18,13 +18,13 @@ fn fingerprint(path: &Path) -> Option<(u64, u64)> {
 }
 
 impl Snapshot {
-    /// `files` relative to `repo`; `skip` (the coverage report, which a
-    /// step writes) is left out.
-    pub fn take(repo: &Path, files: &[String], skip: Option<&str>) -> Self {
+    /// `files` relative to `repo`; `skip` (the coverage reports, which a
+    /// step writes) are left out.
+    pub fn take(repo: &Path, files: &[String], skip: &[String]) -> Self {
         Self(
             files
                 .iter()
-                .filter(|f| Some(f.as_str()) != skip)
+                .filter(|f| !skip.contains(f))
                 .map(|f| (f.clone(), fingerprint(&repo.join(f))))
                 .collect(),
         )

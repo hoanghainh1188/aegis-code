@@ -14,10 +14,10 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    BuildCache, CancelToken, Egress, FetchStep, GateReport, GateRequest, ReferenceGroup, Runner,
-    Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
+    BuildCache, CancelToken, Egress, FetchStep, GatePart, GateReport, GateRequest, ReferenceGroup,
+    Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
 };
-use aegis_lang::{AllowList, Profiles, ResolvedProfile};
+use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
     GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
@@ -202,18 +202,15 @@ where
             .await?;
     }
     ledger.classified(class.kind).await?;
-    let profile = platform
-        .profiles
-        .get(cfg.repo.language)?
-        .resolve(&cfg.repo.profile_overrides()?)?;
+    let profiles = cfg.repo.profiles(&platform.profiles)?;
     if class.needs_sonar_batching() {
-        return sonar_batch(platform, ledger, &profile, issue, cancel).await;
+        return sonar_batch(platform, ledger, &profiles, issue, cancel).await;
     }
     let first = issue.first_message(&class.summary, class.has_repro_info);
     work(
         platform,
         ledger,
-        &profile,
+        &profiles,
         issue,
         first,
         &Finish::Publish,
@@ -226,9 +223,28 @@ where
 /// under the state dir.
 const INDEX_DIR: &str = "{index_dir}";
 
+/// `repo.dirs` as the ACI's `--parts` file (`[[part]]`, #71).
+fn parts_file(cfg: &RunConfig) -> Result<String, LifecycleError> {
+    let parts: Vec<toml::Value> = cfg
+        .repo
+        .dirs
+        .iter()
+        .map(|d| {
+            let mut part = toml::Table::new();
+            part.insert("dir".into(), d.path.clone().into());
+            part.insert("language".into(), d.language.id().into());
+            part.insert("overrides".into(), d.overrides.clone().into());
+            part.into()
+        })
+        .collect();
+    let mut file = toml::Table::new();
+    file.insert("part".into(), parts.into());
+    toml::to_string(&file).map_err(|e| LifecycleError::Config(format!("repo.dirs: {e}")))
+}
+
 fn tool_specs(
     cfg: &RunConfig,
-    profile: &ResolvedProfile,
+    profiles: &RepoProfiles,
     tree: &Path,
     job_dir: &Path,
 ) -> Result<Vec<McpServerSpec>, LifecycleError> {
@@ -236,6 +252,8 @@ fn tool_specs(
     let text = toml::to_string(&cfg.repo.overrides)
         .map_err(|e| LifecycleError::Config(format!("repo.overrides: {e}")))?;
     std::fs::write(&overrides, text).map_err(|e| LifecycleError::io(&overrides, &e))?;
+    let root = &profiles.parts()[0];
+    let profile = &root.profile;
     let mut args = vec![
         "--repo".into(),
         tree.display().to_string(),
@@ -249,10 +267,15 @@ fn tool_specs(
         "--test-dir".into(),
         job_dir.join("run_tests").display().to_string(),
     ];
+    if !cfg.repo.dirs.is_empty() {
+        let parts = job_dir.join("parts.toml");
+        std::fs::write(&parts, parts_file(cfg)?).map_err(|e| LifecycleError::io(&parts, &e))?;
+        args.extend(["--parts".into(), parts.display().to_string()]);
+    }
     // With the gate in containers, `edit`'s formatter and `run_tests` run
     // there too: the machine needs no language tools (#104), and the test
     // sees what the gate's would (#137).
-    if let Some(sandbox) = sandbox(cfg, profile)? {
+    if let Some(sandbox) = sandbox(cfg, root)? {
         args.extend([
             "--format-image".into(),
             profile.image.clone(),
@@ -304,7 +327,7 @@ fn tool_specs(
 pub(crate) async fn work<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
-    profile: &ResolvedProfile,
+    profiles: &RepoProfiles,
     issue: &IssueInput,
     first_message: String,
     finish: &Finish,
@@ -322,25 +345,28 @@ where
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     let tree = Worktree::create(&cfg.repo.path, &base, &job_dir.join("repo"))?;
 
-    let map = module_map(cfg, profile, tree.path(), &base)?;
+    let map = module_map(cfg, profiles, tree.path(), &base)?;
+    let conventions = language_conventions(profiles);
     let system = system_blocks(&RepoPrompt {
-        language_conventions: profile.profile.conventions(),
+        language_conventions: conventions.as_deref(),
         repo_conventions: cfg.repo.conventions.as_deref(),
         module_summary: Some(&map),
     });
 
-    if let Some(why) = fetch_base(cfg, profile, tree.path(), &job_dir, cancel).await? {
-        return Ok(Ending::stop(Outcome::StoppedSteps, why));
+    for part in profiles.parts() {
+        let dir = tree.path().join(&part.dir);
+        if let Some(why) = fetch_base(cfg, part, &dir, &job_dir, cancel).await? {
+            return Ok(Ending::stop(Outcome::StoppedSteps, why));
+        }
+        // The gate would start the tree's build from the cache anyway; doing
+        // it now spares the agent's first `run_tests` a cold build (#137).
+        if let Some(cache) = build_cache(cfg, part) {
+            tokio::task::spawn_blocking(move || cache.seed(&dir))
+                .await
+                .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
+        }
     }
-    // The gate would start the tree's build from the cache anyway; doing it
-    // now spares the agent's first `run_tests` a cold build (#137).
-    if let Some(cache) = build_cache(cfg, profile) {
-        let path = tree.path().to_path_buf();
-        tokio::task::spawn_blocking(move || cache.seed(&path))
-            .await
-            .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
-    }
-    let tools = McpTools::connect(&tool_specs(cfg, profile, tree.path(), &job_dir)?).await?;
+    let tools = McpTools::connect(&tool_specs(cfg, profiles, tree.path(), &job_dir)?).await?;
     let queries = cfg.codebase_memory.as_ref().map(|c| c.tools.as_slice());
     let graph = match CodeGraph::open(&tools, queries, tree.path()).await {
         Ok(graph) => graph,
@@ -357,7 +383,7 @@ where
     let result = drive(
         platform,
         ledger,
-        profile,
+        profiles,
         issue,
         &graph,
         session,
@@ -381,12 +407,14 @@ where
 /// (#24).
 pub(crate) fn module_map(
     cfg: &RunConfig,
-    profile: &ResolvedProfile,
+    profiles: &RepoProfiles,
     tree: &Path,
     base: &str,
 ) -> Result<String, LifecycleError> {
-    let digest = job::files_digest(&cfg.repo.path, base, |p| profile.profile.owns_file(p))?;
-    let checkout = Workspace::new(tree, profile.clone())?;
+    let digest = job::files_digest(&cfg.repo.path, base, |p| {
+        profiles.owns_file(&p.to_string_lossy())
+    })?;
+    let checkout = Workspace::new(tree, profiles.clone())?;
     let map_path = cfg
         .run
         .state_dir
@@ -394,6 +422,51 @@ pub(crate) fn module_map(
         .join(&cfg.repo.key)
         .join(format!("{digest}.md"));
     Ok(load_or_create_summary(&checkout, &map_path)?)
+}
+
+/// The profile's conventions for the system prompt; with directories of
+/// other languages (#71), each language's, and where each goes.
+fn language_conventions(profiles: &RepoProfiles) -> Option<String> {
+    let parts = profiles.parts();
+    if parts.len() == 1 {
+        return profiles.root().profile.conventions().map(str::to_owned);
+    }
+    let mut text = String::from(
+        "# Languages of this repo\n\nThis repo has more than one language; each directory below \
+         goes by its own conventions and checks, the rest of the repo by the first:\n",
+    );
+    for part in parts {
+        text.push_str(&format!("- {}\n", part.label()));
+    }
+    text.push_str(
+        "\nName files, and tests given to `run_tests` or as `repro_test`, by their path from \
+         the repo root (`web/tests/cart.test.ts`): a test is then run with its directory's \
+         command, in that directory.\n",
+    );
+    let mut seen = Vec::new();
+    for part in parts {
+        let language = part.profile.language();
+        if seen.contains(&language) {
+            continue;
+        }
+        seen.push(language);
+        if let Some(c) = part.profile.profile.conventions() {
+            text.push('\n');
+            text.push_str(c.trim_end());
+            text.push('\n');
+        }
+    }
+    Some(text)
+}
+
+/// Where a part's caches live on the host: the repo's cache dir, a
+/// directory of its own for a part (#71).
+fn part_cache(cfg: &RunConfig, part: &ProfilePart) -> PathBuf {
+    let cache = cfg.run.state_dir.join("cache").join(&cfg.repo.key);
+    match part.dir.is_empty() {
+        true => cache,
+        false => cache.join("parts").join(part.dir.replace('/', "_")),
+    }
 }
 
 /// The ledger's view of the tools of `turn` (#129).
@@ -425,7 +498,8 @@ fn model_spec(cfg: &RunConfig, tier: Tier) -> ModelSpec {
 /// sandbox: every container sees the tree at the same `/work`, so a build
 /// started from another tree's directory is reused (#104). Directories the
 /// fetch step fills (a venv) are mounted, not cached here.
-fn build_cache(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<BuildCache> {
+fn build_cache(cfg: &RunConfig, part: &ProfilePart) -> Option<BuildCache> {
+    let profile = &part.profile;
     let deps = &profile.profile.dependencies.dirs;
     let dirs: Vec<String> = profile
         .profile
@@ -436,12 +510,7 @@ fn build_cache(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<BuildCache>
         .cloned()
         .collect();
     (cfg.run.sandbox && !dirs.is_empty()).then(|| BuildCache {
-        dir: cfg
-            .run
-            .state_dir
-            .join("cache")
-            .join(&cfg.repo.key)
-            .join("build"),
+        dir: part_cache(cfg, part).join("build"),
         dirs,
     })
 }
@@ -476,13 +545,17 @@ fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
 /// agent starts (#66); `Some(reason)` when that fails.
 async fn fetch_base(
     cfg: &RunConfig,
-    profile: &ResolvedProfile,
+    part: &ProfilePart,
     tree: &Path,
     job_dir: &Path,
     cancel: &CancellationToken,
 ) -> Result<Option<String>, LifecycleError> {
-    let (Some(fetch), Some(sandbox)) = (fetch_step(cfg, profile), sandbox(cfg, profile)?) else {
+    let (Some(fetch), Some(sandbox)) = (fetch_step(cfg, &part.profile), sandbox(cfg, part)?) else {
         return Ok(None);
+    };
+    let log = match part.dir.is_empty() {
+        true => "fetch.log".to_owned(),
+        false => format!("fetch-{}.log", part.dir.replace('/', "_")),
     };
     let gate_cancel = CancelToken::new();
     let _stop = CancelOnDrop(gate_cancel.clone());
@@ -494,7 +567,7 @@ async fn fetch_base(
         }
     }));
     let timeout = Duration::from_secs(cfg.run.step_timeout_s);
-    let (tree, log) = (tree.to_path_buf(), job_dir.join("fetch.log"));
+    let (tree, log) = (tree.to_path_buf(), job_dir.join(log));
     let outcome = tokio::task::spawn_blocking(move || -> Result<_, aegis_gate::GateError> {
         let session = fetch.egress.start()?;
         let ran = session.fetch(&sandbox, &fetch.command, &tree, &log, timeout, gate_cancel)?;
@@ -509,16 +582,18 @@ async fn fetch_base(
     let log = std::fs::read_to_string(&ran.log).unwrap_or_default();
     let tail: Vec<&str> = log.lines().rev().take(20).collect();
     Ok(Some(format!(
-        "fetching the dependencies failed:\n{}\n\nproxy:\n{proxy}",
+        "fetching the dependencies of {} failed:\n{}\n\nproxy:\n{proxy}",
+        part.label(),
         tail.into_iter().rev().collect::<Vec<_>>().join("\n")
     )))
 }
 
-fn sandbox(cfg: &RunConfig, profile: &ResolvedProfile) -> Result<Option<Sandbox>, LifecycleError> {
+fn sandbox(cfg: &RunConfig, part: &ProfilePart) -> Result<Option<Sandbox>, LifecycleError> {
     if !cfg.run.sandbox {
         return Ok(None);
     }
-    let cache = cfg.run.state_dir.join("cache").join(&cfg.repo.key);
+    let profile = &part.profile;
+    let cache = part_cache(cfg, part);
     let mut mounts = Vec::new();
     for dir in profile
         .profile
@@ -564,7 +639,7 @@ fn allowed_packages(cfg: &RunConfig) -> Result<BTreeSet<String>, LifecycleError>
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gate(
     cfg: &RunConfig,
-    profile: &ResolvedProfile,
+    profiles: &RepoProfiles,
     tree: &Path,
     base: &str,
     job_dir: &Path,
@@ -572,7 +647,19 @@ pub(crate) async fn gate(
     cancel: &CancellationToken,
 ) -> Result<GateReport, LifecycleError> {
     let allowed = allowed_packages(cfg)?;
-    let sandbox = sandbox(cfg, profile)?;
+    let root = &profiles.parts()[0];
+    // Each directory's own container, fetch and cache (#71).
+    let parts = profiles.parts()[1..]
+        .iter()
+        .map(|p| {
+            Ok((
+                sandbox(cfg, p)?,
+                fetch_step(cfg, &p.profile),
+                build_cache(cfg, p),
+            ))
+        })
+        .collect::<Result<Vec<_>, LifecycleError>>()?;
+    let sandbox = sandbox(cfg, root)?;
     let sonar = sonar_step(cfg)?;
     let gate_cancel = CancelToken::new();
     // Stops the gate when the job is cancelled, and when this future is
@@ -588,14 +675,15 @@ pub(crate) async fn gate(
     let owned = (
         tree.to_path_buf(),
         base.to_owned(),
-        profile.clone(),
+        profiles.clone(),
+        parts,
         allowed,
         answer.repro.clone(),
         job_dir.join("gate"),
         Duration::from_secs(cfg.run.step_timeout_s),
         sandbox,
-        fetch_step(cfg, profile),
-        build_cache(cfg, profile),
+        fetch_step(cfg, &root.profile),
+        build_cache(cfg, root),
         answer
             .allowed_test_changes
             .iter()
@@ -616,7 +704,8 @@ pub(crate) async fn gate(
         let (
             repo,
             base,
-            profile,
+            profiles,
+            parts,
             allowed,
             repro,
             work_dir,
@@ -629,10 +718,21 @@ pub(crate) async fn gate(
             sonar,
             audit,
         ) = owned;
+        let parts = profiles.parts()[1..]
+            .iter()
+            .zip(parts)
+            .map(|(p, (sandbox, fetch, build_cache))| GatePart {
+                dir: p.dir.clone(),
+                profile: &p.profile,
+                sandbox,
+                fetch,
+                build_cache,
+            })
+            .collect();
         run_gate(&GateRequest {
             repo: &repo,
             base: &base,
-            profile: &profile,
+            profile: profiles.root(),
             allowed: &allowed,
             repro: repro.as_ref(),
             work_dir: &work_dir,
@@ -646,6 +746,7 @@ pub(crate) async fn gate(
             reference_groups,
             sonar,
             audit,
+            parts,
         })
     })
     .await
@@ -713,7 +814,7 @@ fn hidden_in_tool_results(messages: &[Message]) -> u32 {
 /// never reaches the model.
 async fn run_hidden(
     cfg: &RunConfig,
-    profile: &ResolvedProfile,
+    root: &ProfilePart,
     tree: &Path,
     job_dir: &Path,
     hidden: &HiddenTests,
@@ -737,11 +838,12 @@ async fn run_hidden(
             inner.cancel();
         }
     }));
+    let profile: &ResolvedProfile = &root.profile;
     let runner = Runner {
         env: vec![],
         timeout: Duration::from_secs(cfg.run.step_timeout_s),
         cancel: gate_cancel,
-        sandbox: sandbox(cfg, profile)?,
+        sandbox: sandbox(cfg, root)?,
     };
     let (argv, tree, log) = (
         hidden.command.clone(),
@@ -793,7 +895,7 @@ pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
 async fn drive<P, S, T>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
-    profile: &ResolvedProfile,
+    profiles: &RepoProfiles,
     issue: &IssueInput,
     tools: &T,
     session: Session,
@@ -930,7 +1032,7 @@ where
         }
 
         let gate_started = Instant::now();
-        let report = gate(cfg, profile, tree, base, job_dir, &answer, cancel).await?;
+        let report = gate(cfg, profiles, tree, base, job_dir, &answer, cancel).await?;
         ledger
             .gate_run(gate_run(&report, gate_started.elapsed()))
             .await?;
@@ -960,14 +1062,14 @@ where
             }
             let pr_url = if cfg.run.open_prs {
                 let published =
-                    publish(platform, ledger, profile, tree, issue, &answer, &report).await?;
+                    publish(platform, ledger, profiles, tree, issue, &answer, &report).await?;
                 Some(published.url)
             } else {
                 None
             };
             if let Some(hidden) = &issue.hidden {
                 let (passed, took) =
-                    run_hidden(cfg, profile, tree, job_dir, hidden, cancel).await?;
+                    run_hidden(cfg, &profiles.parts()[0], tree, job_dir, hidden, cancel).await?;
                 ledger.hidden_tests(passed, took.as_secs_f64()).await?;
             }
             // With `open_prs` off the run ends where it would open the PR.

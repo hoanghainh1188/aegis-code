@@ -261,6 +261,7 @@ impl Repo {
             reference_groups: reference_groups.to_vec(),
             sonar: None,
             audit,
+            parts: vec![],
         })
         .unwrap()
     }

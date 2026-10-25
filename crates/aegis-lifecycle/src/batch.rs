@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use aegis_gate::{GateReport, SonarIssue, open_issues};
-use aegis_lang::ResolvedProfile;
+use aegis_lang::RepoProfiles;
 use aegis_ledger::{GateRun, IssueId, IssueLedger, LedgerStore, Outcome};
 use aegis_provider::{ModelProvider, ProviderConfig};
 use aegis_sonar_batch::{
@@ -91,7 +91,7 @@ fn first_message(issue: &IssueInput, group: &Group) -> String {
 /// One group's session from `base`, under its own ledger id.
 async fn session<P, S>(
     platform: &Platform<P, S>,
-    profile: &ResolvedProfile,
+    profile: &RepoProfiles,
     issue: &IssueInput,
     group: &Group,
     base: &str,
@@ -146,7 +146,7 @@ where
 /// The platform's side of [`integrate`].
 struct BatchSteps<'a, P, S> {
     platform: &'a Platform<P, S>,
-    profile: &'a ResolvedProfile,
+    profile: &'a RepoProfiles,
     issue: &'a IssueInput,
     base: &'a str,
     job_dir: &'a Path,
@@ -337,7 +337,7 @@ async fn absorb<S: LedgerStore + Sync>(
 pub(crate) async fn sonar_batch<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
-    profile: &ResolvedProfile,
+    profile: &RepoProfiles,
     issue: &IssueInput,
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>

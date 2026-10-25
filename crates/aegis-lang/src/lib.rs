@@ -18,6 +18,7 @@ mod maven_lock;
 mod maven_tree;
 mod npm_lock;
 mod nuget_lock;
+mod parts;
 mod pnpm_lock;
 mod policy;
 mod profile;
@@ -32,6 +33,7 @@ pub use deps::{DependencyViolation, LockedDependency, ViolationKind, new_depende
 pub use error::LangError;
 pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};
+pub use parts::{ProfilePart, RepoProfiles, check_dir, deepest, in_dir, join_dir, part_label};
 pub use policy::{check_advisory, check_license, default_licenses, deny_config, osv_config};
 pub use profile::{
     Coverage, CoverageFormat, Dependencies, DependencyTree, Detect, GateSteps, LspOptions, Profile,
