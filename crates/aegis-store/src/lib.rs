@@ -2,7 +2,7 @@
 //! their runs, the job queue, webhook deliveries, and the ledger behind
 //! [`aegis_ledger::LedgerStore`]; users, sessions, roles and the audit log
 //! (#29); repos' monthly budgets (#31); the records behind the dashboard's
-//! KPIs (#170).
+//! KPIs (#170); the Sonar warnings each polled batch took (#27).
 //!
 //! Queries are checked against the schema at compile time; `.sqlx/` at the
 //! workspace root lets the crate build without a database. Every list is
@@ -19,6 +19,7 @@ mod page;
 mod polls;
 mod queue;
 mod repos;
+mod sonar;
 mod stats;
 mod types;
 mod users;
@@ -39,6 +40,7 @@ pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
 pub use queue::{AttemptEnd, Claim, Lease};
+pub use sonar::MAX_BATCH_WARNINGS;
 pub use stats::QueueStats;
 pub use types::{
     ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,

@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::GateError;
 use crate::command::CancelToken;
@@ -84,8 +84,9 @@ struct GateResponse {
 }
 
 /// One issue as `/api/issues/search` returns it; the Sonar batch (#17)
-/// reads the same type.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// reads the same type, and writes it back into the issue of a polled
+/// batch (#27).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Issue {
     #[serde(default)]
@@ -107,20 +108,20 @@ pub struct Issue {
 }
 
 /// 1-based lines, inclusive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextRange {
     pub start_line: u64,
     pub end_line: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Flow {
     #[serde(default)]
     pub locations: Vec<FlowLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowLocation {
     /// `<project key>:<path>`.

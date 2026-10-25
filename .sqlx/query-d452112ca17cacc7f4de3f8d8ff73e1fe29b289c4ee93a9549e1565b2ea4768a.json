@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT warning_key FROM sonar_warnings WHERE repo_id = $1 AND batch = $2\n             ORDER BY warning_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "warning_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sonar_warnings",
+            "name": "warning_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d452112ca17cacc7f4de3f8d8ff73e1fe29b289c4ee93a9549e1565b2ea4768a"
+}

@@ -159,6 +159,7 @@ fn issue() -> IssueInput {
         url: "https://github.com/me/fixture/issues/7".into(),
         base: None,
         hidden: None,
+        kind: None,
     }
 }
 

@@ -190,6 +190,7 @@ dependencies = [
  "aegis-pr",
  "aegis-provider",
  "aegis-secrets",
+ "aegis-sonar-batch",
  "aegis-store",
  "aegis-tracker",
  "askama",
@@ -222,10 +223,12 @@ version = "0.1.0"
 dependencies = [
  "aegis-gate",
  "aegis-lang",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]

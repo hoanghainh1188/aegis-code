@@ -5,7 +5,7 @@
 use crate::audit::{self, Target};
 use crate::budget;
 use crate::jobs::JobRow;
-use crate::{Actor, Delivered, JobId, NewDelivery, NewJob, Store, StoreError};
+use crate::{Actor, BudgetRules, Delivered, JobId, NewDelivery, NewJob, Store, StoreError};
 
 const MAX_DELIVERY_ID_LEN: usize = 128;
 
@@ -39,71 +39,15 @@ impl Store {
         let Some(recorded) = recorded else {
             return Ok(Delivered::Duplicate);
         };
-        let refused = match budget::check(&mut tx, &self.budget, job.repo_id).await {
-            Ok(()) => None,
-            Err(StoreError::BudgetSpent(reason)) => Some(reason),
-            Err(e) => return Err(e),
-        };
-        // The live job of the issue wins over a new one, as in
-        // `jobs_one_live_per_issue`, also over a refused one, which is not
-        // live and so not under that index.
-        let created = sqlx::query_as!(
-            JobRow,
-            "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, status, reason)
-             SELECT $1, $2, $3, $4,
-                    CASE WHEN $5::text IS NULL THEN 'queued' ELSE 'cancelled' END, $5
-             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2
-                               AND status IN ('queued', 'running'))
-             ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
-            job.repo_id.0,
-            job.issue_ref,
-            job.ledger_key.as_str(),
-            job.source.as_str(),
-            refused,
+        let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
+        let (job_id, delivered) = queue_in(
+            &mut tx,
+            &self.budget,
+            &Actor::webhook(delivery.source.as_str()),
+            detail,
+            job,
         )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| match StoreError::from_db(e) {
-            StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
-            other => other,
-        })?;
-        let (job_id, delivered) = match created {
-            Some(row) => {
-                let created: crate::Job = row.try_into()?;
-                let actor = Actor::webhook(delivery.source.as_str());
-                let detail = serde_json::json!({
-                    "delivery_id": delivery.delivery_id,
-                    "refused": refused.is_some(),
-                });
-                audit::record(
-                    &mut tx,
-                    &actor,
-                    "job.create",
-                    Target::of_job(&created),
-                    detail,
-                )
-                .await?;
-                let id = created.id;
-                match refused {
-                    None => (id, Delivered::Queued(Box::new(created))),
-                    Some(_) => (id, Delivered::Refused(Box::new(created))),
-                }
-            }
-            None => {
-                let live = sqlx::query_scalar!(
-                    "SELECT id FROM jobs
-                     WHERE repo_id = $1 AND issue_ref = $2 AND status IN ('queued', 'running')",
-                    job.repo_id.0,
-                    job.issue_ref,
-                )
-                .fetch_one(&mut *tx)
-                .await?;
-                (JobId(live), Delivered::AlreadyLive(JobId(live)))
-            }
-        };
+        .await?;
         sqlx::query!(
             "UPDATE webhook_deliveries SET job_id = $2 WHERE id = $1",
             recorded,
@@ -114,4 +58,70 @@ impl Store {
         tx.commit().await?;
         Ok(delivered)
     }
+}
+
+/// Queues `job` in `tx` under `rules`, by `actor` with `detail` in the audit log: when
+/// the repo's monthly budget is spent (#31) the job is recorded cancelled
+/// with the reason; when the issue already has a live job, none is made.
+pub(crate) async fn queue_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rules: &BudgetRules,
+    actor: &Actor,
+    mut detail: serde_json::Value,
+    job: &NewJob,
+) -> Result<(JobId, Delivered), StoreError> {
+    let refused = match budget::check(tx, rules, job.repo_id).await {
+        Ok(()) => None,
+        Err(StoreError::BudgetSpent(reason)) => Some(reason),
+        Err(e) => return Err(e),
+    };
+    // The live job of the issue wins over a new one, as in
+    // `jobs_one_live_per_issue`, also over a refused one, which is not
+    // live and so not under that index.
+    let created = sqlx::query_as!(
+        JobRow,
+        "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, status, reason)
+             SELECT $1, $2, $3, $4,
+                    CASE WHEN $5::text IS NULL THEN 'queued' ELSE 'cancelled' END, $5
+             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2
+                               AND status IN ('queued', 'running'))
+             ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING
+             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                       attempts, locked_by, locked_until, created_at, updated_at,
+                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
+        job.repo_id.0,
+        job.issue_ref,
+        job.ledger_key.as_str(),
+        job.source.as_str(),
+        refused,
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| match StoreError::from_db(e) {
+        StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
+        other => other,
+    })?;
+    Ok(match created {
+        Some(row) => {
+            let created: crate::Job = row.try_into()?;
+            detail["refused"] = refused.is_some().into();
+            audit::record(tx, actor, "job.create", Target::of_job(&created), detail).await?;
+            let id = created.id;
+            match refused {
+                None => (id, Delivered::Queued(Box::new(created))),
+                Some(_) => (id, Delivered::Refused(Box::new(created))),
+            }
+        }
+        None => {
+            let live = sqlx::query_scalar!(
+                "SELECT id FROM jobs
+                     WHERE repo_id = $1 AND issue_ref = $2 AND status IN ('queued', 'running')",
+                job.repo_id.0,
+                job.issue_ref,
+            )
+            .fetch_one(&mut **tx)
+            .await?;
+            (JobId(live), Delivered::AlreadyLive(JobId(live)))
+        }
+    })
 }

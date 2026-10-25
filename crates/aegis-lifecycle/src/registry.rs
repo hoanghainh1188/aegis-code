@@ -11,6 +11,7 @@ use aegis_lang::Language;
 use aegis_ledger::Tier;
 use aegis_provider::ProviderConfig;
 use aegis_router::ModelsConfig;
+use aegis_sonar_batch::PollConfig;
 use aegis_store::{Actor, NewRepo, Repo, RepoId, RepoMode, Store};
 use aegis_tracker::TrackerConfig;
 use serde::{Deserialize, Serialize};
@@ -148,6 +149,10 @@ pub struct RepoSettings {
     /// by the server, the ticket told how its job ended.
     #[serde(default)]
     pub tracker: Option<TrackerConfig>,
+    /// The schedule on which the server polls its Sonar project for new
+    /// warnings and batches them (#27); needs `sonar`.
+    #[serde(default)]
+    pub sonar_poll: Option<PollConfig>,
     pub fork: ForkConfig,
 }
 
@@ -241,6 +246,14 @@ impl Modes {
             tracker
                 .check()
                 .map_err(|e| in_repo(format!("tracker: {e}")))?;
+        }
+        if let Some(poll) = &settings.sonar_poll {
+            if settings.sonar.is_none() {
+                return Err(in_repo(
+                    "sonar_poll needs `sonar`, the project to poll".into(),
+                ));
+            }
+            poll.check().map_err(|e| in_repo(e.to_string()))?;
         }
         let mut overrides = settings.overrides;
         if let Some(image) = settings.image {
@@ -491,7 +504,17 @@ mod tests {
             "kind": "jira", "url": "http://jira.acme.com", "user": "bot@acme.com",
             "token_env": "AEGIS_JIRA_TOKEN", "jql": "project = APP"
         });
+        let mut poll_without_sonar = settings();
+        poll_without_sonar["sonar_poll"] = serde_json::json!({ "every_s": 3600 });
+        let mut poll_too_often = settings();
+        poll_too_often["sonar"] = serde_json::json!({
+            "url": "https://sonarcloud.io", "token_env": "SONAR_TOKEN",
+            "organization": "acme", "project_key": "acme_app"
+        });
+        poll_too_often["sonar_poll"] = serde_json::json!({ "every_s": 5 });
         for bad in [
+            repo("app", RepoMode::Poc, poll_without_sonar),
+            repo("app", RepoMode::Poc, poll_too_often),
             repo("app", RepoMode::Poc, unknown),
             repo("app", RepoMode::Poc, serde_json::json!({})),
             no_language,
@@ -516,11 +539,17 @@ mod tests {
             "kind": "backlog", "url": "https://acme.backlog.jp",
             "token_env": "AEGIS_BACKLOG_API_KEY", "project_ids": [12], "pr_status_id": 3
         });
+        value["sonar"] = serde_json::json!({
+            "url": "https://sonar.acme.com", "token_env": "SONAR_TOKEN", "project_key": "app"
+        });
+        value["sonar_poll"] = serde_json::json!({ "min_severity": "CRITICAL", "max_warnings": 20 });
         let parsed: RepoSettings = serde_json::from_value(value).unwrap();
         let back: RepoSettings =
             serde_json::from_value(serde_json::to_value(&parsed).unwrap()).unwrap();
         assert_eq!(back, parsed);
         assert!(parsed.tracker.is_some());
+        let poll = parsed.sonar_poll.as_ref().unwrap();
+        assert_eq!((poll.every_s, poll.max_warnings), (3600, 20));
         let cfg = modes()
             .run_config(&repo(
                 "app",

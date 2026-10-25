@@ -26,7 +26,7 @@ use aegis_orchestrator::{
     TurnRecord, run_loop, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
-use aegis_router::{BudgetCheck, Decision, Router, Signal, Spent};
+use aegis_router::{BudgetCheck, Classification, Decision, Router, Signal, Spent};
 use aegis_sonar_batch::{Author, commit_tree};
 use tokio_util::sync::CancellationToken;
 
@@ -185,7 +185,17 @@ where
         body: body.text,
         ..issue.clone()
     };
-    let (class, response) = light::classify(&platform.provider, &cfg.models.light, issue).await;
+    let (class, response) = match issue.kind {
+        // Its source knows: nothing for Light to decide.
+        Some(kind) => (
+            Classification {
+                kind,
+                ..light::default_classification(issue)
+            },
+            None,
+        ),
+        None => light::classify(&platform.provider, &cfg.models.light, issue).await,
+    };
     if let Some(r) = &response {
         ledger
             .model_call(Tier::Light, &cfg.models.light.id, &r.usage)

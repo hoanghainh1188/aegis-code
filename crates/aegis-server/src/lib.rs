@@ -12,6 +12,7 @@ pub mod logs;
 pub mod metrics;
 pub mod runner;
 pub mod secrets;
+pub mod sonar;
 pub mod tracker;
 pub mod web;
 pub mod webhook;

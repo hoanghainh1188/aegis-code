@@ -12,6 +12,7 @@ aegis-lifecycle = { path = "../aegis-lifecycle" }
 aegis-pr = { path = "../aegis-pr" }
 aegis-provider = { path = "../aegis-provider" }
 aegis-secrets = { path = "../aegis-secrets", features = ["aws"] }
+aegis-sonar-batch = { path = "../aegis-sonar-batch" }
 aegis-store = { path = "../aegis-store" }
 aegis-tracker = { path = "../aegis-tracker" }
 askama = { version = "0.16.1", default-features = false, features = ["derive", "std"] }

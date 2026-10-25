@@ -291,6 +291,7 @@ async fn a_bug_in_a_repo_of_two_languages_goes_from_issue_to_pr() {
         url: "https://github.com/me/fixture/issues/3".into(),
         base: None,
         hidden: None,
+        kind: None,
     };
 
     let report = run_issue(Arc::clone(&platform), issue, CancellationToken::new())
