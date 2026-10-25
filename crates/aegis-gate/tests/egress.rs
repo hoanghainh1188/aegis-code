@@ -302,3 +302,67 @@ fn the_rust_audit_reaches_its_advisory_database_through_the_proxy() {
     assert!(log.contains("itoa"), "{log}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #191: the Python profile's `osv-scanner` runs in its sandbox image
+/// through a proxy to its `audit_hosts` only (OSV advisories, deps.dev
+/// licenses), with the repo's licenses on the command line.
+#[test]
+fn the_python_audit_reaches_osv_and_deps_dev_through_the_proxy() {
+    if !docker_ready() {
+        return;
+    }
+    let dir = scratch("osv");
+    let tree = dir.join("tree");
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::write(tree.join("requirements.txt"), "six==1.17.0\n").unwrap();
+    let policy = dir.join("policy");
+    std::fs::create_dir_all(&policy).unwrap();
+    std::fs::write(
+        policy.join("osv-scanner.toml"),
+        aegis_lang::osv_config(&[]).unwrap(),
+    )
+    .unwrap();
+    let sandbox = sandbox(PYTHON_IMAGE, vec![(policy, "/aegis-audit".into())]);
+    let profile = aegis_lang::Profiles::builtin()
+        .unwrap()
+        .get(aegis_lang::Language::Python)
+        .unwrap()
+        .clone();
+    let hosts: Vec<&str> = profile
+        .dependencies
+        .audit_hosts
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let audit = profile.dependencies.audit.clone().unwrap();
+    let run = |licenses: &str, name: &str| {
+        let argv = audit
+            .render(&[
+                (aegis_lang::Placeholder::Lockfile, "requirements.txt"),
+                (aegis_lang::Placeholder::Licenses, licenses),
+                (
+                    aegis_lang::Placeholder::OsvConfig,
+                    "/aegis-audit/osv-scanner.toml",
+                ),
+            ])
+            .unwrap();
+        let session = egress(&hosts).start().unwrap();
+        let log = dir.join(format!("{name}.log"));
+        let ran = session
+            .fetch(&sandbox, &argv, &tree, &log, TIMEOUT, CancelToken::new())
+            .unwrap();
+        (ran.exit, log_of(&log), session.log())
+    };
+
+    // six 1.17.0 is MIT and has no known advisory.
+    let (exit, log, proxy) = run("MIT", "allowed");
+    assert_eq!(exit, Exit::Code(0), "{log}\n{proxy}");
+    assert!(proxy.contains("allow api.osv.dev"), "{proxy}");
+    assert!(proxy.contains("allow api.deps.dev"), "{proxy}");
+    assert!(!proxy.contains("deny"), "{proxy}");
+    let (exit, log, _) = run("ISC", "refused");
+    assert_ne!(exit, Exit::Code(0), "{log}");
+    assert!(log.contains("six"), "{log}");
+    assert!(log.contains("LICENSE VIOLATION"), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
