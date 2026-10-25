@@ -18,6 +18,7 @@ mod coverage;
 mod error;
 mod git;
 mod github;
+mod gitlab;
 
 use std::path::Path;
 
@@ -33,6 +34,7 @@ pub use coverage::{cobertura_percent, lcov_percent};
 pub use error::PrError;
 pub use git::{Identity, Remote};
 pub use github::{GitHub, IssueComment, PullRequest};
+pub use gitlab::{GitLab, IssueNote};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pushed {

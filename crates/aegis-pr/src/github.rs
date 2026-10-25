@@ -63,7 +63,7 @@ impl ApiError {
 
 /// `https://…`, or `http://` to this machine (tests). The bearer token
 /// goes there.
-fn checked_api(api: &str) -> Result<String, PrError> {
+pub(crate) fn checked_api(api: &str) -> Result<String, PrError> {
     let api = api.trim_end_matches('/');
     let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
         .iter()
@@ -77,7 +77,7 @@ fn checked_api(api: &str) -> Result<String, PrError> {
     }
 }
 
-fn plain_name(s: &str) -> bool {
+pub(crate) fn plain_name(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))

@@ -19,4 +19,8 @@ pub enum PrError {
 
     #[error("cannot reach GitHub: {0}")]
     Http(String),
+
+    /// `status` 0: the request did not get an answer.
+    #[error("GitLab API {status}: {message}")]
+    GitLab { status: u16, message: String },
 }

@@ -1,9 +1,11 @@
 //! Tells the issue how its job ended (#25): a comment by the platform's
-//! GitHub account on the issue of every `github` job, with the PR or the
-//! reason it stopped, or that its repo's monthly budget is spent (#31). Jobs of other sources are not reported yet.
+//! account on the issue of every `github` job ([`GitHubNotifier`]) and
+//! every `gitlab` job ([`GitLabNotifier`], #168), with the PR or the reason
+//! it stopped, or that its repo's monthly budget is spent (#31). Jobs of
+//! other sources are not reported.
 
 use aegis_ledger::Outcome;
-use aegis_pr::{GitHub, inert};
+use aegis_pr::{GitHub, GitLab, inert};
 use aegis_secrets::Secrets;
 use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus};
 
@@ -16,7 +18,15 @@ pub const GITHUB_API_ENV: &str = "AEGIS_GITHUB_API";
 /// repos; no comments while the store has none.
 pub const COMMENT_TOKEN_ENV: &str = "AEGIS_GITHUB_COMMENT_TOKEN";
 
+/// The GitLab API root, `https://gitlab.com/api/v4` when unset; a
+/// self-hosted instance's otherwise.
+pub const GITLAB_API_ENV: &str = "AEGIS_GITLAB_API";
+/// The secret: a token that may comment on the issues of the registered
+/// GitLab projects; no comments while the store has none.
+pub const GITLAB_COMMENT_TOKEN_ENV: &str = "AEGIS_GITLAB_COMMENT_TOKEN";
+
 const DEFAULT_GITHUB_API: &str = "https://api.github.com";
+const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
 
 #[derive(Debug, Clone)]
 pub struct GitHubNotifier {
@@ -78,6 +88,77 @@ impl JobNotifier for GitHubNotifier {
             Err(e) => tracing::warn!(job = job.id.0, error = %e, "commenting on the issue"),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct GitLabNotifier {
+    api: String,
+    /// Where [`GITLAB_COMMENT_TOKEN_ENV`] is read, at each comment.
+    secrets: Secrets,
+}
+
+impl GitLabNotifier {
+    pub fn new(api: &str, secrets: Secrets) -> Self {
+        Self {
+            api: api.to_owned(),
+            secrets,
+        }
+    }
+
+    /// The API root from [`GITLAB_API_ENV`]; the token is read from
+    /// `secrets` at each comment.
+    pub fn from_env(secrets: Secrets) -> Self {
+        let api = std::env::var(GITLAB_API_ENV).unwrap_or_else(|_| DEFAULT_GITLAB_API.into());
+        Self::new(&api, secrets)
+    }
+
+    /// The token from `secrets`, read now; the API root from
+    /// [`GITLAB_API_ENV`], not a secret.
+    pub async fn from_secrets(secrets: &Secrets) -> Result<Self, String> {
+        let token = secrets
+            .load(GITLAB_COMMENT_TOKEN_ENV)
+            .await
+            .map_err(|e| e.to_string())?;
+        if token.is_none() {
+            tracing::info!(
+                "no secret {GITLAB_COMMENT_TOKEN_ENV}: GitLab jobs' ends are not commented on"
+            );
+        }
+        Ok(Self::from_env(secrets.clone()))
+    }
+}
+
+impl JobNotifier for GitLabNotifier {
+    async fn job_ended(&self, job: &Job) {
+        if job.source != JobSource::Gitlab {
+            return;
+        }
+        let Some(token) = self.secrets.get(GITLAB_COMMENT_TOKEN_ENV) else {
+            return;
+        };
+        let Some((project, iid)) = gitlab_issue_ref(&job.issue_ref) else {
+            tracing::warn!(job = job.id.0, "not an issue to comment on");
+            return;
+        };
+        let posted = match GitLab::new(&self.api, project, token.expose()) {
+            Ok(gitlab) => gitlab
+                .comment_on_issue(iid, &status_comment(job))
+                .await
+                .map(|_| ()),
+            Err(e) => Err(e),
+        };
+        match posted {
+            Ok(()) => tracing::info!(job = job.id.0, "commented on the issue"),
+            Err(e) => tracing::warn!(job = job.id.0, error = %e, "commenting on the issue"),
+        }
+    }
+}
+
+/// `group/sub/project#iid`, as [`super::events::gitlab`] builds it; the
+/// path is checked by [`GitLab::new`].
+fn gitlab_issue_ref(text: &str) -> Option<(&str, u64)> {
+    let (project, iid) = text.rsplit_once('#')?;
+    Some((project, iid.parse().ok()?))
 }
 
 /// What the comment says. The stop reason may hold model text: it is made
@@ -155,6 +236,17 @@ mod tests {
             reason: None,
             pr_url: None,
             retry_of: None,
+        }
+    }
+
+    #[test]
+    fn gitlab_issue_refs_keep_their_subgroups() {
+        assert_eq!(
+            gitlab_issue_ref("group/sub/app#4"),
+            Some(("group/sub/app", 4))
+        );
+        for bad in ["group/app", "group/app#x", "group/app#"] {
+            assert_eq!(gitlab_issue_ref(bad), None, "{bad}");
         }
     }
 
