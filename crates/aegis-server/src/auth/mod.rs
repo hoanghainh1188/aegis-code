@@ -4,7 +4,8 @@
 //!   [`oidc`]); the session lives in Postgres, the cookie holds only its
 //!   token. Every form carries the session's CSRF token.
 //! - Services (connectors, CI) call `/api/v1` with a bearer token
-//!   ([`api`]), rate limited per service.
+//!   ([`api`]), rate limited per service; requests without a live token
+//!   are limited per client address before any database query.
 //! - An admin may do everything; otherwise a user has one role per repo:
 //!   viewer, reviewer (also fills reviews), maintainer (also creates,
 //!   cancels and retries jobs). Someone without a role in a repo does not
@@ -18,6 +19,7 @@ pub mod oidc;
 mod sign;
 
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -93,6 +95,7 @@ struct Inner {
     signer: Signer,
     oidc: Option<oidc::Oidc>,
     limiter: RateLimiter,
+    failures: RateLimiter<IpAddr>,
 }
 
 impl Auth {
@@ -105,12 +108,14 @@ impl Auth {
             .map(|o| oidc::Oidc::new(o, &config, secrets))
             .transpose()?;
         let limiter = RateLimiter::per_minute(config.api_requests_per_minute);
+        let failures = RateLimiter::per_minute(config.api_failures_per_minute);
         Ok(Self {
             inner: Arc::new(Inner {
                 store,
                 signer,
                 oidc,
                 limiter,
+                failures,
                 config,
             }),
         })
@@ -130,6 +135,15 @@ impl Auth {
 
     pub(crate) fn limiter(&self) -> &RateLimiter {
         &self.inner.limiter
+    }
+
+    /// Requests without a live token, per client address.
+    pub(crate) fn failure_limiter(&self) -> &RateLimiter<IpAddr> {
+        &self.inner.failures
+    }
+
+    pub(crate) fn trusted_proxies(&self) -> u8 {
+        self.inner.config.trusted_proxies
     }
 
     pub(crate) fn session_ttl(&self) -> Duration {
