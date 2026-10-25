@@ -143,6 +143,21 @@ variable "server_config" {
   default = {}
 }
 
+variable "monitoring" {
+  description = "Máy giám sát (monitoring.tf): Prometheus scrape cổng 9464 của server, nạp deploy/alerts/aegis.rules.yml, gửi cảnh báo qua SNS; Grafana nạp deploy/grafana/*.json. `alert_emails` đăng ký nhận cảnh báo (phải xác nhận qua email)."
+  type = object({
+    enabled              = optional(bool, true)
+    instance_type        = optional(string, "t3.small")
+    volume_gb            = optional(number, 30)
+    retention_days       = optional(number, 30)
+    alert_emails         = optional(list(string), [])
+    prometheus_version   = optional(string, "v3.5.0")
+    alertmanager_version = optional(string, "v0.28.1")
+    grafana_version      = optional(string, "12.1.0")
+  })
+  default = {}
+}
+
 variable "repo_secret_names" {
   description = "Secret riêng của repo (token Git, Sonar…) cần tạo chỗ trong Secrets Manager, ngoài các secret của server."
   type        = list(string)

@@ -4,7 +4,7 @@ Vận hành, triển khai, rollback: [docs/runbook/README.md](../../docs/runbook
 
 | Thư mục | Nội dung |
 | --- | --- |
-| `modules/aegis` | Một bản triển khai: VPC, EC2 có Docker (vai trò `all`), RDS PostgreSQL, ALB + ACM, chỗ cho secret trong Secrets Manager (không giá trị), SSM parameter tag image, CloudWatch Logs, IAM của máy |
+| `modules/aegis` | Một bản triển khai: VPC, EC2 có Docker (vai trò `all`), RDS PostgreSQL, ALB + ACM, chỗ cho secret trong Secrets Manager (không giá trị), SSM parameter tag image, CloudWatch Logs, IAM của máy; máy giám sát (Prometheus, Alertmanager, Grafana, SNS) đọc luật từ `deploy/alerts/` và dashboard từ `deploy/grafana/` |
 | `envs/staging` | Staging, chế độ `poc`, mặc định `ap-northeast-1` |
 | `envs/customer-jp` | Repo khách, vùng viết cứng `ap-northeast-1`, RDS Multi-AZ |
 | `bootstrap` | Một lần mỗi tài khoản: OIDC của GitHub, role `aegis-ci-plan`/`-image`/`-apply`, ECR |

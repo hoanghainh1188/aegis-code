@@ -195,7 +195,8 @@ resource "aws_iam_role" "apply" {
 }
 
 # Tạo VPC, EC2, RDS, ALB, ACM, Route 53, Secrets Manager (không giá trị),
-# SSM, CloudWatch Logs. IAM ở dưới, giới hạn ở tên `aegis-*`.
+# SSM, CloudWatch Logs, S3 và SNS của máy giám sát. IAM ở dưới, giới hạn ở
+# role `aegis-*-server` và `aegis-*-monitoring`.
 resource "aws_iam_role_policy_attachment" "apply_power" {
   role       = aws_iam_role.apply.name
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
@@ -215,6 +216,8 @@ data "aws_iam_policy_document" "apply_extra" {
     resources = [
       "arn:aws:iam::${var.aws_account_id}:role/aegis-*-server",
       "arn:aws:iam::${var.aws_account_id}:instance-profile/aegis-*-server",
+      "arn:aws:iam::${var.aws_account_id}:role/aegis-*-monitoring",
+      "arn:aws:iam::${var.aws_account_id}:instance-profile/aegis-*-monitoring",
     ]
   }
   statement {

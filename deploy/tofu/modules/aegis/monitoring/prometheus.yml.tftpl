@@ -1,0 +1,35 @@
+# Prometheus của bản triển khai ${name}: viết bởi OpenTofu
+# (deploy/tofu/modules/aegis/monitoring), máy kéo về từ S3. Sửa ở repo.
+global:
+  scrape_interval: ${scrape_interval}
+  evaluation_interval: 1m
+  external_labels:
+    deployment: ${name}
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["127.0.0.1:9093"]
+
+scrape_configs:
+  # Mọi máy đang chạy có tag Name ${server_name}: thay máy (đổi AMI,
+  # user_data) không cần sửa gì ở đây. `instance` là id của máy.
+  - job_name: aegis
+    ec2_sd_configs:
+      - region: ${region}
+        port: 9464
+        filters:
+          - name: tag:Name
+            values: ["${server_name}"]
+          - name: instance-state-name
+            values: ["running"]
+    relabel_configs:
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
