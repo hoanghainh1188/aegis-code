@@ -214,3 +214,53 @@ async fn a_test_over_the_time_limit_is_stopped_with_its_container() {
     let calls = std::fs::read_to_string(repo.outside().join("bin/calls.log")).unwrap();
     assert!(calls.contains("\nkill aegis-gate-"), "{calls}");
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_test_of_a_part_runs_in_its_image_with_its_dependency_dirs() {
+    // #198: the part's `.venv` and caches, as the gate mounts them.
+    let repo = Scratch::two_languages();
+    let docker = fake_docker(&repo.outside().join("bin"));
+    let venv = repo.outside().join("parts/py/deps/.venv");
+    let uv = repo.outside().join("parts/py/uv");
+    let parts = repo.outside().join("parts.toml");
+    std::fs::write(
+        &parts,
+        format!(
+            "[[part]]\ndir = \"py\"\nlanguage = \"python\"\n\
+             mounts = [{{ host = '{}', path = \"/work/.venv\" }}, \
+             {{ host = '{}', path = \"/home/aegis/.cache/uv\" }}]\n",
+            venv.display(),
+            uv.display()
+        ),
+    )
+    .unwrap();
+    let mut spec = sandboxed(&repo, &docker, 60);
+    spec.args
+        .extend(["--parts".to_owned(), parts.display().to_string()]);
+    let tools = McpTools::connect(&[spec]).await.unwrap();
+    let out = tools
+        .call(
+            "run_tests",
+            &json!({"test": "py/tests/test_cart.py::test_adds_up_prices"}),
+        )
+        .await;
+    tools.shutdown().await;
+    assert!(!out.is_error, "{}", out.content);
+    let calls = std::fs::read_to_string(repo.outside().join("bin/calls.log")).unwrap();
+    let test = calls
+        .lines()
+        .find(|l| l.starts_with("run --rm --name aegis-gate-"))
+        .unwrap_or_else(|| panic!("{calls}"));
+    let root = repo.repo().canonicalize().unwrap();
+    for expected in [
+        format!("--volume {}/py:/work --workdir /work", root.display()),
+        format!("--volume {}:/work/.venv:ro", venv.display()),
+        format!("--volume {}:/home/aegis/.cache/uv:ro", uv.display()),
+        "aegis-sandbox-python python -m pytest".to_owned(),
+    ] {
+        assert!(test.contains(&expected), "{expected}\n{test}");
+    }
+    // The root's mounts are the root's own.
+    assert!(!test.contains("/usr/local/cargo/registry"), "{test}");
+}

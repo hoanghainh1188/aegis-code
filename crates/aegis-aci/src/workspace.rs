@@ -2,6 +2,7 @@
 //! root and is refused when it leaves it: no `..`, no absolute paths, no
 //! symlink that resolves outside, nothing under `.git`.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use aegis_lang::{MAX_SOURCE_BYTES, ProfilePart, RepoProfiles, ResolvedProfile};
@@ -40,6 +41,9 @@ pub struct Workspace {
     /// The repo's profile, and its directories' own (#71).
     profiles: RepoProfiles,
     container: Option<FormatContainer>,
+    /// Each part's dependency dirs, as its gate steps mount them (#198):
+    /// (host directory, path in the container), by the part's `dir`.
+    part_mounts: BTreeMap<String, Vec<(String, String)>>,
     /// Directory names skipped when walking: `.git` and the profiles'
     /// build caches (`target`, `.venv`…).
     skipped_dirs: Vec<String>,
@@ -69,6 +73,7 @@ impl Workspace {
             root,
             profiles,
             container: None,
+            part_mounts: BTreeMap::new(),
             skipped_dirs,
         })
     }
@@ -81,13 +86,26 @@ impl Workspace {
         }
     }
 
+    /// Mounts `mounts[dir]` in the containers of the part at `dir`.
+    pub fn with_part_mounts(self, mounts: BTreeMap<String, Vec<(String, String)>>) -> Self {
+        Self {
+            part_mounts: mounts,
+            ..self
+        }
+    }
+
+    /// What the containers of the part at `dir` mount, read-only: its
+    /// dependency dirs and caches (the root's are the format container's).
+    pub fn part_mounts(&self, dir: &str) -> &[(String, String)] {
+        self.part_mounts.get(dir).map_or(&[], Vec::as_slice)
+    }
+
     pub fn format_container(&self) -> Option<&FormatContainer> {
         self.container.as_ref()
     }
 
     /// Where `part`'s formatter runs in a container: the root's container,
-    /// or one of the part's image. A part's dependency dirs are not
-    /// mounted yet (#71).
+    /// or one of the part's image with the part's mounts (#71, #198).
     pub fn format_container_of(&self, part: &ProfilePart) -> Option<FormatContainer> {
         let root = self.container.as_ref()?;
         Some(match part.dir.is_empty() {
@@ -95,7 +113,7 @@ impl Workspace {
             false => FormatContainer {
                 docker: root.docker.clone(),
                 image: part.profile.image.clone(),
-                mounts: vec![],
+                mounts: self.part_mounts(&part.dir).to_vec(),
             },
         })
     }

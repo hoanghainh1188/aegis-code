@@ -102,6 +102,18 @@ impl Aci {
         }
     }
 
+    /// Mounts `mounts[dir]` in the formatter's and `run_tests`' containers
+    /// of the part at `dir` (see [`Workspace::part_mounts`]).
+    pub fn with_part_mounts(
+        self,
+        mounts: std::collections::BTreeMap<String, Vec<(String, String)>>,
+    ) -> Self {
+        Self {
+            workspace: self.workspace.with_part_mounts(mounts),
+            ..self
+        }
+    }
+
     /// Whether a profile of the repo names a language server:
     /// `find_definition` and `find_references` are offered only then.
     pub fn has_language_server(&self) -> bool {

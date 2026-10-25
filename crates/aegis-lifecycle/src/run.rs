@@ -223,20 +223,30 @@ where
 /// under the state dir.
 const INDEX_DIR: &str = "{index_dir}";
 
-/// `repo.dirs` as the ACI's `--parts` file (`[[part]]`, #71).
-fn parts_file(cfg: &RunConfig) -> Result<String, LifecycleError> {
-    let parts: Vec<toml::Value> = cfg
-        .repo
-        .dirs
-        .iter()
-        .map(|d| {
-            let mut part = toml::Table::new();
-            part.insert("dir".into(), d.path.clone().into());
-            part.insert("language".into(), d.language.id().into());
-            part.insert("overrides".into(), d.overrides.clone().into());
-            part.into()
-        })
-        .collect();
+/// `repo.dirs` as the ACI's `--parts` file (`[[part]]`, #71), with the
+/// mounts of each part's gate steps (its `.venv`, caches, #198).
+fn parts_file(cfg: &RunConfig, profiles: &RepoProfiles) -> Result<String, LifecycleError> {
+    let mut parts = Vec::new();
+    // `RepoProfiles` keeps the order of `repo.dirs`, after the root.
+    for (d, p) in cfg.repo.dirs.iter().zip(&profiles.parts()[1..]) {
+        let mounts: Vec<toml::Value> = sandbox(cfg, p)?
+            .map(|s| s.mounts)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(host, inside)| {
+                let mut mount = toml::Table::new();
+                mount.insert("host".into(), host.display().to_string().into());
+                mount.insert("path".into(), inside.into());
+                mount.into()
+            })
+            .collect();
+        let mut part = toml::Table::new();
+        part.insert("dir".into(), d.path.clone().into());
+        part.insert("language".into(), d.language.id().into());
+        part.insert("overrides".into(), d.overrides.clone().into());
+        part.insert("mounts".into(), mounts.into());
+        parts.push(toml::Value::from(part));
+    }
     let mut file = toml::Table::new();
     file.insert("part".into(), parts.into());
     toml::to_string(&file).map_err(|e| LifecycleError::Config(format!("repo.dirs: {e}")))
@@ -269,7 +279,8 @@ fn tool_specs(
     ];
     if !cfg.repo.dirs.is_empty() {
         let parts = job_dir.join("parts.toml");
-        std::fs::write(&parts, parts_file(cfg)?).map_err(|e| LifecycleError::io(&parts, &e))?;
+        std::fs::write(&parts, parts_file(cfg, profiles)?)
+            .map_err(|e| LifecycleError::io(&parts, &e))?;
         args.extend(["--parts".into(), parts.display().to_string()]);
     }
     // With the gate in containers, `edit`'s formatter and `run_tests` run
@@ -1142,4 +1153,72 @@ where
 /// Where a job's files go, for callers that want to inspect them.
 pub fn job_dir(cfg: &RunConfig, issue_id: &str) -> PathBuf {
     cfg.run.state_dir.join("jobs").join(issue_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The PoC config with a Rust root and a Python `py/`, its state in a
+    /// directory of its own.
+    fn monorepo(sandbox: bool) -> RunConfig {
+        let mut cfg: toml::Table =
+            toml::from_str(include_str!("../../../config/poc.toml")).unwrap();
+        let state = std::env::temp_dir().join(format!("aegis-parts-{}", std::process::id()));
+        let run = cfg["run"].as_table_mut().unwrap();
+        run.insert("state_dir".into(), state.display().to_string().into());
+        run.insert("sandbox".into(), sandbox.into());
+        let repo = cfg["repo"].as_table_mut().unwrap();
+        repo.insert("language".into(), "rust".into());
+        repo.insert(
+            "dirs".into(),
+            toml::from_str::<toml::Table>("d = [{ path = \"py\", language = \"python\" }]")
+                .unwrap()["d"]
+                .clone(),
+        );
+        RunConfig::from_toml(&toml::to_string(&cfg).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn the_parts_file_gives_each_part_the_mounts_of_its_gate_steps() {
+        // #198: `run_tests` and the formatter of `py/` see the `.venv` the
+        // gate's steps there do.
+        let cfg = monorepo(true);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let file: toml::Table = toml::from_str(&parts_file(&cfg, &profiles).unwrap()).unwrap();
+        let part = &file["part"].as_array().unwrap()[0];
+        assert_eq!(part["dir"].as_str(), Some("py"));
+        let mounts: Vec<(String, String)> = part["mounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| {
+                let host = m["host"].as_str().unwrap().to_owned();
+                (host, m["path"].as_str().unwrap().to_owned())
+            })
+            .collect();
+        let gate: Vec<(String, String)> = sandbox(&cfg, &profiles.parts()[1])
+            .unwrap()
+            .unwrap()
+            .mounts
+            .into_iter()
+            .map(|(host, inside)| (host.display().to_string(), inside))
+            .collect();
+        assert_eq!(mounts, gate);
+        assert!(
+            mounts
+                .iter()
+                .any(|(host, inside)| inside == "/work/.venv" && host.contains("parts/py/deps")),
+            "{mounts:?}"
+        );
+    }
+
+    #[test]
+    fn without_the_sandbox_a_part_mounts_nothing() {
+        let cfg = monorepo(false);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let file: toml::Table = toml::from_str(&parts_file(&cfg, &profiles).unwrap()).unwrap();
+        let part = &file["part"].as_array().unwrap()[0];
+        assert_eq!(part["mounts"].as_array().map(Vec::len), Some(0));
+    }
 }
