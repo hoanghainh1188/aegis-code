@@ -38,8 +38,11 @@ fetch_hosts = ["pypi.org", "files.pythonhosted.org"]
 dirs = [".venv"]
 # Advisory + license, cho mọi hệ sinh thái ngoài Rust (ADR 0004 §3, chốt ở #65).
 # Cần mạng (dữ liệu license từ deps.dev) nên chạy cùng bước lấy phụ thuộc (#66).
-# {licenses} lấy từ policies/licenses.toml.
-audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+# {licenses} là `licenses` của repo, mặc định policies/licenses.toml;
+# {osv_config} bỏ qua `ignored_advisories` của repo (#159).
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+# OSV advisories and deps.dev license data; nothing else (#159).
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
 # Bản vá chạm vào là bị chặn (#83): đổi index mà lockfile không thấy.
 protected = [
     "pip.conf",

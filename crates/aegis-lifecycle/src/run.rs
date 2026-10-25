@@ -458,6 +458,7 @@ fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
             allow: profile.fetch_hosts.clone(),
         },
         command,
+        audit_hosts: profile.profile.dependencies.audit_hosts.clone(),
     })
 }
 
@@ -599,6 +600,7 @@ pub(crate) async fn gate(
             })
             .collect::<Vec<_>>(),
         sonar,
+        cfg.repo.audit_policy(),
     );
     let report = tokio::task::spawn_blocking(move || {
         let (
@@ -615,6 +617,7 @@ pub(crate) async fn gate(
             allowed_tests,
             reference_groups,
             sonar,
+            audit,
         ) = owned;
         run_gate(&GateRequest {
             repo: &repo,
@@ -632,6 +635,7 @@ pub(crate) async fn gate(
             allowed_tests,
             reference_groups,
             sonar,
+            audit,
         })
     })
     .await

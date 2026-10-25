@@ -15,20 +15,33 @@ pub enum Placeholder {
     File,
     /// Name or path of the reproduction test (`gate.repro_test`).
     Test,
-    /// Lockfile being audited (`dependencies.audit`).
+    /// Lockfile being audited (`dependencies.audit`), relative to the
+    /// repo root.
     Lockfile,
+    /// Directory of that lockfile, `.` at the root (`dependencies.audit`),
+    /// for tools that take the manifest next to it (`cargo deny`).
+    LockfileDir,
     /// Allowed licenses, comma-separated (`dependencies.audit`).
     Licenses,
+    /// `cargo deny` configuration: `policies/deny.toml` with the repo's
+    /// licenses and ignored advisories (`dependencies.audit`, #159).
+    DenyConfig,
+    /// `osv-scanner` configuration ignoring the repo's ignored advisories
+    /// (`dependencies.audit`, #159).
+    OsvConfig,
     /// File the resolved dependency tree is written to (`dependencies.tree`).
     Output,
 }
 
 impl Placeholder {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 8] = [
         Self::File,
         Self::Test,
         Self::Lockfile,
+        Self::LockfileDir,
         Self::Licenses,
+        Self::DenyConfig,
+        Self::OsvConfig,
         Self::Output,
     ];
 
@@ -37,7 +50,10 @@ impl Placeholder {
             Self::File => "{file}",
             Self::Test => "{test}",
             Self::Lockfile => "{lockfile}",
+            Self::LockfileDir => "{lockfile_dir}",
             Self::Licenses => "{licenses}",
+            Self::DenyConfig => "{deny_config}",
+            Self::OsvConfig => "{osv_config}",
             Self::Output => "{output}",
         }
     }
@@ -47,7 +63,10 @@ impl Placeholder {
             Self::File => "file",
             Self::Test => "test",
             Self::Lockfile => "lockfile",
+            Self::LockfileDir => "lockfile_dir",
             Self::Licenses => "licenses",
+            Self::DenyConfig => "deny_config",
+            Self::OsvConfig => "osv_config",
             Self::Output => "output",
         }
     }

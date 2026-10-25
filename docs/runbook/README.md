@@ -105,6 +105,28 @@ Rollback chỉ đổi image, không lùi DB. Vì thế mỗi migration phải ch
 - Không đổi tên hay đổi kiểu cột trong một bước; không xóa thứ bản trước còn đọc.
 - Server bỏ qua các migration đã áp mà nó không biết (#176), nên image cũ vẫn khởi động trên DB mà bản mới đã expand. Migration nó biết mà bị sửa (checksum khác) thì vẫn dừng với `VersionMismatch`: không sửa một migration đã phát hành, viết migration mới. Đừng xóa dòng trong `_sqlx_migrations`.
 
+### Nhận ticket Jira/Backlog (#26)
+
+Thêm mục `tracker` vào cài đặt của repo (`repos.config`, cùng chỗ với `fork`, `sonar`). Token không nằm ở đây: `token_env` là tên secret, đặt giá trị như mục 3 và thêm tên vào `repo_secret_names`.
+
+```json
+{ "kind": "jira", "url": "https://acme.atlassian.net", "user": "bot@acme.com",
+  "token_env": "AEGIS_JIRA_TOKEN",
+  "jql": "project = APP AND labels = aegis AND statusCategory = \"To Do\"",
+  "pr_transition": "In Review" }
+```
+
+```json
+{ "kind": "backlog", "url": "https://acme.backlog.jp", "token_env": "AEGIS_BACKLOG_API_KEY",
+  "project_ids": [12], "status_ids": [1], "keyword": "aegis", "pr_status_id": 3 }
+```
+
+- Jira Cloud: `user` là e-mail của tài khoản, token là API token của nó. Jira Data Center/Server: `"deployment": "data-center"`, bỏ `user`, token là personal access token.
+- Backlog: API key của một tài khoản bot (Cá nhân → API). Lọc theo project, trạng thái (`status_ids`), loại (`issue_type_ids`), danh mục (`category_ids`), từ khóa.
+- Tài khoản cần quyền đọc ticket và file đính kèm, viết comment; với `pr_transition`/`pr_status_id`, quyền chuyển trạng thái; Jira thêm quyền tạo link.
+- Vai trò `api` poll mỗi `[trackers] poll_s` (300 s), một tiến trình mỗi kỳ. Mỗi ticket chỉ tạo job một lần; muốn chạy lại thì retry job qua API. Job đọc mô tả và tối đa 3 file log dạng text (≤ 1 MiB, giữ 6 000 ký tự cuối). Khi job xong: comment trạng thái; có PR thì gắn link PR (Jira) và chuyển trạng thái nếu đã cấu hình.
+- Tracker lỗi (token sai, mạng): log `polling the tracker` / `tracker not polled` theo repo, các repo khác vẫn chạy.
+
 ## 2. Rollback
 
 Bản mới lỗi (health không lên, lỗi nhiều trong log, hành vi sai):
@@ -130,7 +152,7 @@ aws secretsmanager put-secret-value --secret-id aegis/<env>/<TÊN> --secret-stri
 | `AEGIS_SESSION_KEY` (≥ 32 byte, `openssl rand -hex 32`) | Đặt giá trị mới. Phiên đăng nhập và form review đang mở hết hiệu lực; người dùng đăng nhập lại |
 | `AEGIS_OIDC_CLIENT_SECRET` | Tạo secret mới ở SSO (giữ cả hai) → đặt → thu hồi cái cũ |
 | `AEGIS_GITHUB_WEBHOOK_SECRET`, `AEGIS_GITLAB_WEBHOOK_TOKEN` | Đặt giá trị mới vào store trước, rồi đổi ở cài đặt webhook. Request giữa hai bước sai chữ ký → server đọc lại secret; GitHub/GitLab gửi lại được từ trang webhook |
-| `AEGIS_GITHUB_COMMENT_TOKEN`, `AEGIS_GITLAB_COMMENT_TOKEN`, token Git/Sonar của repo | Tạo token mới → đặt → thu hồi cái cũ |
+| `AEGIS_GITHUB_COMMENT_TOKEN`, `AEGIS_GITLAB_COMMENT_TOKEN`, token Git/Sonar/Jira/Backlog của repo (`token_env` trong cài đặt repo) | Tạo token mới → đặt → thu hồi cái cũ |
 
 Lộ secret: thu hồi ở nơi cấp **trước**, rồi đặt giá trị mới. Kiểm CloudTrail ai đã `GetSecretValue`. Mật khẩu master RDS do RDS tự xoay; server không dùng nó.
 

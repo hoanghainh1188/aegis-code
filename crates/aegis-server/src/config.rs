@@ -33,6 +33,8 @@ pub struct ServerConfig {
     pub metrics: MetricsSection,
     #[serde(default)]
     pub budget: BudgetSection,
+    #[serde(default)]
+    pub trackers: TrackersSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
@@ -61,6 +63,21 @@ impl Default for ApiSection {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
         }
+    }
+}
+
+/// The Jira and Backlog filters of the repos (#26), polled by the `api`
+/// role, one process per period (ADR 0003 §4).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrackersSection {
+    /// Seconds between two polls; 0 polls none.
+    pub poll_s: u64,
+}
+
+impl Default for TrackersSection {
+    fn default() -> Self {
+        Self { poll_s: 300 }
     }
 }
 

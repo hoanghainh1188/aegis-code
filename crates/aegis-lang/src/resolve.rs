@@ -515,9 +515,7 @@ mod tests {
     #[test]
     fn audit_renders_lockfile_and_license_policy() {
         let r = python().resolve(&ProfileOverrides::default()).unwrap();
-        let policy =
-            crate::AllowList::from_toml(include_str!("../../../policies/licenses.toml")).unwrap();
-        let licenses = policy.names().iter().cloned().collect::<Vec<_>>().join(",");
+        let licenses = crate::default_licenses().join(",");
         let argv = r
             .audit
             .command()
@@ -525,6 +523,7 @@ mod tests {
             .render(&[
                 (Placeholder::Lockfile, "uv.lock"),
                 (Placeholder::Licenses, &licenses),
+                (Placeholder::OsvConfig, "/aegis-audit/osv-scanner.toml"),
             ])
             .unwrap();
         assert_eq!(argv[..4], ["osv-scanner", "scan", "source", "--lockfile"]);
@@ -534,6 +533,8 @@ mod tests {
             "{}",
             argv[5]
         );
+        assert_eq!(argv[6], "--config=/aegis-audit/osv-scanner.toml");
+        assert!(!r.profile.dependencies.audit_hosts.is_empty());
 
         let rust = Profiles::builtin()
             .unwrap()
@@ -541,18 +542,48 @@ mod tests {
             .unwrap()
             .clone();
         let r = rust.resolve(&ProfileOverrides::default()).unwrap();
+        let argv = r
+            .audit
+            .command()
+            .expect("Rust audits with cargo deny")
+            .render(&[
+                (Placeholder::LockfileDir, "fuzz"),
+                (Placeholder::DenyConfig, "/aegis-audit/deny.toml"),
+            ])
+            .unwrap();
         assert_eq!(
-            r.audit,
-            Step::Skipped(SkipReason::NotInProfile),
-            "Rust uses cargo deny"
+            argv,
+            [
+                "cargo",
+                "deny",
+                "--locked",
+                "--manifest-path",
+                "fuzz/Cargo.toml",
+                "--config",
+                "/aegis-audit/deny.toml",
+                "check"
+            ]
+        );
+        assert!(
+            r.profile
+                .dependencies
+                .audit_hosts
+                .contains(&"github.com".to_owned())
         );
         let err = python()
             .resolve(&overrides("audit = [\"osv-scanner\", \"scan\"]\n"))
             .unwrap_err();
         assert!(
-            err.to_string().contains("must contain `{lockfile}`"),
+            err.to_string()
+                .contains("must contain `{lockfile}` or `{lockfile_dir}`"),
             "{err}"
         );
+        let err = python()
+            .resolve(&overrides(
+                "audit = [\"tool\", \"{lockfile}\", \"{output}\"]\n",
+            ))
+            .unwrap_err();
+        assert!(err.to_string().contains("not allowed here"), "{err}");
     }
 
     #[test]

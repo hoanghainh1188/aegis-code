@@ -1,5 +1,6 @@
 # Language profile Rust (ADR 0004, #63, #64). Lệnh là mảng argv, không qua
-# shell. Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test.
+# shell. Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test,
+# `{lockfile_dir}` / `{deny_config}` ở dependencies.audit.
 # RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
 
 language = "rust"
@@ -59,7 +60,11 @@ protected = [
     "rust-toolchain",
     "rust-toolchain.toml",
 ]
-# Rust kiểm advisory + license bằng `cargo deny` với policies/deny.toml (#12, #11).
+# Advisory + license bằng `cargo deny` (#12, #159): {deny_config} là
+# policies/deny.toml với `licenses` và `ignored_advisories` của repo.
+audit = ["cargo", "deny", "--locked", "--manifest-path", "{lockfile_dir}/Cargo.toml", "--config", "{deny_config}", "check"]
+# advisory-db (git trên github.com) và index để `cargo metadata` đọc.
+audit_hosts = ["github.com", "index.crates.io", "static.crates.io"]
 
 [sandbox]
 image = "aegis-sandbox-rust"

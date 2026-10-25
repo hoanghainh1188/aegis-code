@@ -42,6 +42,9 @@ fn docker_ready() -> bool {
 /// The profile's tree command, with the proxy handed to Maven: Maven reads
 /// proxies from `settings.xml` only, not from `HTTPS_PROXY`.
 const TREE: &str = r#"
+# The image has no osv-scanner; the audit is tested in rust_gate (#159).
+audit = ["true", "{lockfile}"]
+
 [tree]
 file = "maven-dependency-tree.txt"
 on_change = ["pom.xml"]
@@ -98,11 +101,13 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
                 allow: vec!["repo.maven.apache.org".into()],
             },
             command: vec!["true".into()],
+            audit_hosts: vec![],
         }),
         build_cache: None,
         allowed_tests: vec![],
         reference_groups: vec![],
         sonar: None,
+        audit: Default::default(),
     })
     .unwrap()
 }
@@ -155,5 +160,9 @@ fn a_bump_pulling_in_an_unknown_transitive_artifact_is_blocked() {
         .find(|s| s.name == StepName::Dependencies)
         .unwrap();
     assert_eq!(step.status, StepStatus::Passed, "{}", step.detail);
-    assert_eq!(step.logs.len(), 3, "tree on the base, on the patch, fetch");
+    assert_eq!(
+        step.logs.len(),
+        4,
+        "tree on the base, on the patch, fetch, audit"
+    );
 }

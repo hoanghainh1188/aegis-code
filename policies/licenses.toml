@@ -1,6 +1,7 @@
 # License được phép cho phụ thuộc của repo đích ngoài Rust (#65, ADR 0004 §3).
-# Bước audit (`osv-scanner --licenses=…`) dùng danh sách này. Rust dùng
-# policies/deny.toml. Giữ hai danh sách giống nhau; thêm license sau khi duyệt.
+# Bước audit (`osv-scanner --licenses=…`) dùng danh sách này khi repo không
+# khai `licenses` riêng (#159). Rust dùng policies/deny.toml. Giữ hai danh sách
+# giống nhau; thêm license sau khi duyệt.
 allowed = [
     "0BSD",
     "Apache-2.0",

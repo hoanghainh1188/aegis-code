@@ -15,7 +15,8 @@ use std::time::Duration;
 
 use aegis_lang::{
     DependencyTree, Placeholder, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
-    new_dependency_violations, read_lockfile,
+    check_advisory, check_license, default_licenses, deny_config, new_dependency_violations,
+    osv_config, read_lockfile,
 };
 
 use crate::build_cache::BuildCache;
@@ -32,6 +33,9 @@ use crate::{GateError, deps};
 
 /// Where the fetch container writes the resolved dependency tree (#80).
 const TREE_DIR: &str = "/aegis-tree";
+
+/// Where the audit container reads the repo's policy files (#159).
+const AUDIT_DIR: &str = "/aegis-audit";
 
 /// Failing tests listed for the agent; the rest are counted.
 const MAX_LISTED_TESTS: usize = 20;
@@ -79,6 +83,35 @@ pub struct GateRequest<'a> {
     /// The Sonar server and project (#91); `None` skips the step as not
     /// configured.
     pub sonar: Option<SonarStep>,
+    /// The repo's own policy for the profile's `dependencies.audit` (#159).
+    pub audit: AuditPolicy,
+}
+
+/// A repo's licenses and ignored advisories, on top of `policies/`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuditPolicy {
+    /// In place of `policies/licenses.toml` for `{licenses}`, and of
+    /// `licenses.allow` in `policies/deny.toml` for `{deny_config}`.
+    pub licenses: Option<Vec<String>>,
+    /// Advisories the audit lets through.
+    pub ignored_advisories: Vec<String>,
+}
+
+impl AuditPolicy {
+    /// Licenses and advisories are plain identifiers, and a list of
+    /// licenses is not empty: they end up in the audit's arguments.
+    pub fn check_ids(&self) -> Result<(), String> {
+        if self.licenses.as_ref().is_some_and(Vec::is_empty) {
+            return Err("repo.licenses must not be empty when set".into());
+        }
+        let licenses = self.licenses.as_deref().unwrap_or_default();
+        licenses
+            .iter()
+            .try_for_each(|l| check_license(l).map_err(|e| format!("repo.licenses: {e}")))?;
+        self.ignored_advisories.iter().try_for_each(|a| {
+            check_advisory(a).map_err(|e| format!("repo.ignored_advisories: {e}"))
+        })
+    }
 }
 
 /// Tests whose reference output changed together, e.g. every HTML hash of
@@ -114,6 +147,9 @@ impl ReferenceGroup {
 pub struct FetchStep {
     pub egress: Egress,
     pub command: Vec<String>,
+    /// Where the audit may go (the profile's `audit_hosts`), through a
+    /// proxy of its own: the fetch command never reaches these.
+    pub audit_hosts: Vec<String>,
 }
 
 struct Run<'a> {
@@ -390,21 +426,39 @@ impl<'a> Run<'a> {
     }
 
     /// The patch's dependencies passed the check: compare the resolved
-    /// trees when there is one (#80), then fetch them through the egress
-    /// proxy into the caches the later steps read (#66). Without a sandbox
-    /// there is nothing to fetch into, and the step just passes.
+    /// trees when there is one (#80), fetch them through the egress proxy
+    /// into the caches the later steps read (#66), then audit the changed
+    /// lockfiles (#159). Without a sandbox there is nothing to fetch into,
+    /// and the audit runs on the machine.
     fn fetch_checked(&mut self, tree: Option<&DependencyTree>) -> Result<StepReport, GateError> {
+        let name = StepName::Dependencies;
+        let mut ran = Vec::new();
+        if let Some(failed) = self.fetch(tree, &mut ran)? {
+            return Ok(failed);
+        }
+        if let Some(failed) = self.audit(&mut ran)? {
+            return Ok(failed);
+        }
+        let all: Vec<&Ran> = ran.iter().collect();
+        Ok(report(name, StepStatus::Passed, &all, String::new()))
+    }
+
+    /// `Some` is the step's report when fetching does not pass.
+    fn fetch(
+        &mut self,
+        tree: Option<&DependencyTree>,
+        ran: &mut Vec<Ran>,
+    ) -> Result<Option<StepReport>, GateError> {
         let name = StepName::Dependencies;
         let req: &GateRequest<'_> = self.req;
         let (Some(fetch), Some(sandbox)) = (&req.fetch, &req.sandbox) else {
-            return Ok(report(name, StepStatus::Passed, &[], String::new()));
+            return Ok(None);
         };
         let session = fetch.egress.start()?;
-        let mut ran = Vec::new();
         if let Some(tree) = tree
-            && let Some(failed) = self.compare_trees(tree, &session, sandbox, &mut ran)?
+            && let Some(failed) = self.compare_trees(tree, &session, sandbox, ran)?
         {
-            return Ok(failed);
+            return Ok(Some(failed));
         }
         let fetched = session.fetch(
             sandbox,
@@ -418,9 +472,9 @@ impl<'a> Run<'a> {
         let all: Vec<&Ran> = ran.iter().collect();
         let fetched = ran.last().expect("just pushed");
         Ok(match fetched.exit {
-            Exit::Cancelled => StepReport::skipped(name, Skip::Cancelled),
-            e if e.success() => report(name, StepStatus::Passed, &all, String::new()),
-            e => report(
+            Exit::Cancelled => Some(StepReport::skipped(name, Skip::Cancelled)),
+            e if e.success() => None,
+            e => Some(report(
                 name,
                 StepStatus::Failed,
                 &all,
@@ -430,8 +484,120 @@ impl<'a> Run<'a> {
                     tail(&fetched.log),
                     session.log()
                 ),
-            ),
+            )),
         })
+    }
+
+    /// Lockfiles of the profile the patch changed and kept.
+    fn changed_lockfiles(&self) -> Vec<String> {
+        let lockfiles = &self.req.profile.profile.dependencies.lockfiles;
+        self.changes
+            .iter()
+            .filter(|c| deps::matches_any(lockfiles, &c.path))
+            .filter(|c| self.req.repo.join(&c.path).is_file())
+            .map(|c| c.path.clone())
+            .collect()
+    }
+
+    /// The profile's `dependencies.audit` on each changed lockfile, with
+    /// the repo's policy (#159). In a sandbox it runs in a container whose
+    /// only way out is a proxy to `audit_hosts`. `Some` is the step's
+    /// report when an audit does not pass.
+    fn audit(&mut self, ran: &mut Vec<Ran>) -> Result<Option<StepReport>, GateError> {
+        let name = StepName::Dependencies;
+        let req: &GateRequest<'_> = self.req;
+        let Step::Run(command) = &req.profile.audit else {
+            return Ok(None);
+        };
+        let lockfiles = self.changed_lockfiles();
+        if lockfiles.is_empty() {
+            return Ok(None);
+        }
+        req.audit.check_ids().map_err(GateError::InvalidRequest)?;
+        let dir = self.work.join("audit");
+        std::fs::create_dir_all(&dir).map_err(|e| GateError::io(&dir, &e))?;
+        let policy = &req.audit;
+        for (file, text) in [
+            (
+                "deny.toml",
+                deny_config(policy.licenses.as_deref(), &policy.ignored_advisories)?,
+            ),
+            ("osv-scanner.toml", osv_config(&policy.ignored_advisories)?),
+        ] {
+            let path = dir.join(file);
+            std::fs::write(&path, text).map_err(|e| GateError::io(&path, &e))?;
+        }
+        let licenses = policy
+            .licenses
+            .clone()
+            .unwrap_or_else(default_licenses)
+            .join(",");
+        let contained = match (&req.fetch, &req.sandbox) {
+            (Some(fetch), Some(sandbox)) => {
+                let egress = Egress {
+                    allow: fetch.audit_hosts.clone(),
+                    ..fetch.egress.clone()
+                };
+                let mut auditor = sandbox.clone();
+                auditor.mounts.push((dir.clone(), AUDIT_DIR.to_owned()));
+                Some((egress.start()?, auditor))
+            }
+            _ => None,
+        };
+        let policy_dir = match contained {
+            Some(_) => AUDIT_DIR.to_owned(),
+            None => dir.display().to_string(),
+        };
+        let (deny, osv) = (
+            format!("{policy_dir}/deny.toml"),
+            format!("{policy_dir}/osv-scanner.toml"),
+        );
+        for (i, lockfile) in lockfiles.iter().enumerate() {
+            let lockfile_dir = match lockfile.rsplit_once('/') {
+                Some((parent, _)) => parent,
+                None => ".",
+            };
+            let argv = command.render(&[
+                (Placeholder::Lockfile, lockfile),
+                (Placeholder::LockfileDir, lockfile_dir),
+                (Placeholder::Licenses, &licenses),
+                (Placeholder::DenyConfig, &deny),
+                (Placeholder::OsvConfig, &osv),
+            ])?;
+            let log = format!("audit-{i}");
+            let audited = match &contained {
+                Some((session, auditor)) => session.fetch(
+                    auditor,
+                    &argv,
+                    req.repo,
+                    &self.log(&log),
+                    req.step_timeout,
+                    req.cancel.clone(),
+                )?,
+                None => self.run_in(&argv, false, &log)?,
+            };
+            let exit = audited.exit;
+            ran.push(audited);
+            match exit {
+                Exit::Cancelled => return Ok(Some(StepReport::skipped(name, Skip::Cancelled))),
+                e if e.success() => {}
+                e => {
+                    let last = ran.last().expect("just pushed");
+                    let mut why = format!(
+                        "auditing {lockfile} failed ({}): an advisory or a license outside \
+                         the repo's policy, or the audit could not run:\n{}",
+                        exit_text(e),
+                        tail(&last.log)
+                    );
+                    if let Some((session, _)) = &contained {
+                        why.push_str(&format!("\n\nproxy:\n{}", session.log()));
+                    }
+                    let all: Vec<&Ran> = ran.iter().collect();
+                    return Ok(Some(report(name, StepStatus::Failed, &all, why)));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Resolves the dependency tree on the base and on the patch, in the

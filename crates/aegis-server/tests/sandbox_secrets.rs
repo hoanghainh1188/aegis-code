@@ -28,6 +28,8 @@ const STORED: &[(&str, &str)] = &[
     ("SONAR_TOKEN", "leak-sonar-4"),
     (COMMENT_TOKEN_ENV, "leak-comment-5"),
     (GITLAB_COMMENT_TOKEN_ENV, "leak-comment-8"),
+    ("AEGIS_JIRA_TOKEN", "leak-tracker-9"),
+    ("AEGIS_BACKLOG_API_KEY", "leak-tracker-10"),
 ];
 const IN_ENV: &[(&str, &str)] = &[
     (GITHUB_SECRET_ENV, "leak-hook-6"),

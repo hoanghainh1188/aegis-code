@@ -7,7 +7,7 @@ use std::process::Command;
 
 use std::time::{Duration, Instant};
 
-use aegis_gate::{CancelToken, Repro, Skip, StepName, StepStatus};
+use aegis_gate::{AuditPolicy, CancelToken, Repro, Skip, StepName, StepStatus};
 use aegis_lang::Language;
 use common::{Repo, profile, statuses, tools_available};
 
@@ -386,6 +386,7 @@ fn work_dir_inside_the_repo_is_refused() {
         allowed_tests: vec![],
         reference_groups: vec![],
         sonar: None,
+        audit: Default::default(),
     })
     .unwrap_err();
     assert!(
@@ -571,6 +572,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             allowed_tests: vec![],
             reference_groups: vec![],
             sonar: None,
+            audit: Default::default(),
         })
     };
     #[cfg(unix)]
@@ -806,4 +808,142 @@ fn the_log_keeps_the_order_of_stdout_and_stderr() {
         .collect();
     let lines: Vec<&str> = format.detail.lines().skip(2).collect();
     assert_eq!(lines, expected, "{}", format.detail);
+}
+
+/// The patch adds `vendored`, a path crate of the repo under `license`:
+/// the dependency check lets it through (it is the repo's own code), so
+/// only the audit judges its license.
+fn with_vendored_crate(repo: &Repo, license: &str) {
+    repo.write(
+        "vendored/Cargo.toml",
+        &format!(
+            "[package]\nname = \"vendored\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\
+             license = \"{license}\"\n"
+        ),
+    );
+    repo.write("vendored/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\n");
+    repo.replace(
+        "Cargo.toml",
+        "[dependencies]\n",
+        "[dependencies]\nvendored = { path = \"vendored\" }\n",
+    );
+    repo.replace(
+        "Cargo.lock",
+        "name = \"fixture-rust\"\nversion = \"0.1.0\"\n",
+        "name = \"fixture-rust\"\nversion = \"0.1.0\"\ndependencies = [\n \"vendored\",\n]\n\n\
+         [[package]]\nname = \"vendored\"\nversion = \"0.1.0\"\n",
+    );
+}
+
+/// The Rust profile's `cargo deny`, offline and licenses only: the
+/// advisory database needs the network.
+fn deny_licenses_profile() -> aegis_lang::ResolvedProfile {
+    profile(
+        Language::Rust,
+        &format!(
+            "audit = [\"cargo\", \"deny\", \"--offline\", \"--locked\", \"--manifest-path\", \
+             \"{{lockfile_dir}}/Cargo.toml\", \"--config\", \"{{deny_config}}\", \"check\", \"licenses\"]\n\
+             {FAKE_COVERAGE}"
+        ),
+    )
+}
+
+/// "Xong khi" of #159: a dependency under a license outside the repo's
+/// own policy stops the gate at the dependency step.
+#[test]
+fn a_dependency_outside_the_repo_s_licenses_is_blocked_by_the_audit() {
+    if !ready() || !tools_available(&[&["cargo", "deny", "--version"]]) {
+        return;
+    }
+    let rust = deny_licenses_profile();
+
+    let repo = Repo::new("rust", &[]);
+    with_vendored_crate(&repo, "Apache-2.0");
+    let report = repo.gate_auditing(
+        &rust,
+        AuditPolicy {
+            licenses: Some(vec!["MIT".into()]),
+            ignored_advisories: vec![],
+        },
+    );
+    let deps = report.step(StepName::Dependencies).unwrap();
+    assert_eq!(deps.status, StepStatus::Failed, "{report}");
+    assert!(
+        deps.detail.contains("Cargo.lock") && deps.detail.contains("Apache-2.0"),
+        "{}",
+        deps.detail
+    );
+    assert_eq!(
+        report.step(StepName::Format).unwrap().status,
+        StepStatus::Skipped(Skip::NotRun)
+    );
+
+    // policies/deny.toml allows Apache-2.0: without the repo's own list
+    // the same patch passes the audit.
+    let repo = Repo::new("rust", &[]);
+    with_vendored_crate(&repo, "Apache-2.0");
+    let report = repo.gate_auditing(&rust, AuditPolicy::default());
+    let deps = report.step(StepName::Dependencies).unwrap();
+    assert_eq!(deps.status, StepStatus::Passed, "{report}");
+
+    // Nor does a license nobody allows pass by default.
+    let repo = Repo::new("rust", &[]);
+    with_vendored_crate(&repo, "GPL-3.0-only");
+    let report = repo.gate_auditing(&rust, AuditPolicy::default());
+    let deps = report.step(StepName::Dependencies).unwrap();
+    assert_eq!(deps.status, StepStatus::Failed, "{report}");
+}
+
+/// What the gate gives the audit command: the changed lockfile, its
+/// directory, the repo's licenses and a config ignoring its advisories.
+#[test]
+fn the_audit_gets_the_lockfile_and_the_repo_s_policy() {
+    let rust = profile(
+        Language::Rust,
+        &format!(
+            "audit = [\"sh\", \"-c\", \"printf '%s\\\\n' \\\"$@\\\"; cat \\\"$4\\\" \\\"$5\\\"; exit 3\", \
+             \"sh\", \"{{lockfile}}\", \"{{lockfile_dir}}\", \"--licenses={{licenses}}\", \
+             \"{{osv_config}}\", \"{{deny_config}}\"]\n{FAKE_COVERAGE}"
+        ),
+    );
+    let repo = Repo::new("rust", &[]);
+    with_vendored_crate(&repo, "MIT");
+    let report = repo.gate_auditing(
+        &rust,
+        AuditPolicy {
+            licenses: Some(vec!["MIT".into(), "ISC".into()]),
+            ignored_advisories: vec!["RUSTSEC-2099-0001".into()],
+        },
+    );
+    let deps = report.step(StepName::Dependencies).unwrap();
+    assert_eq!(deps.status, StepStatus::Failed, "{report}");
+    let detail = &deps.detail;
+    for expected in [
+        "auditing Cargo.lock failed (exit code 3)",
+        "\nCargo.lock\n.\n--licenses=MIT,ISC\n",
+        "id = \"RUSTSEC-2099-0001\"",
+        "ignore = [\"RUSTSEC-2099-0001\"]",
+        "allow = [\"MIT\", \"ISC\"]",
+    ] {
+        assert!(detail.contains(expected), "`{expected}` not in:\n{detail}");
+    }
+
+    // Without the repo's own licenses, policies/licenses.toml.
+    let repo = Repo::new("rust", &[]);
+    with_vendored_crate(&repo, "MIT");
+    let report = repo.gate_auditing(&rust, AuditPolicy::default());
+    let detail = &report.step(StepName::Dependencies).unwrap().detail;
+    let licenses = aegis_lang::default_licenses().join(",");
+    assert!(
+        detail.contains(&format!("--licenses={licenses}\n")),
+        "{detail}"
+    );
+
+    // A patch that changes no lockfile is not audited.
+    let repo = Repo::new("rust", &[]);
+    let report = repo.gate_auditing(&rust, AuditPolicy::default());
+    assert_eq!(
+        report.step(StepName::Dependencies).unwrap().status,
+        StepStatus::Skipped(Skip::NoDependencyChange)
+    );
 }

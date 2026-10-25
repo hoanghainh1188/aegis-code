@@ -16,6 +16,7 @@ mod jobs;
 mod kpi;
 mod ledger;
 mod page;
+mod polls;
 mod queue;
 mod repos;
 mod stats;

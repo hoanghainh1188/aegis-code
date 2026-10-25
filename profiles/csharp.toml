@@ -3,7 +3,7 @@
 # `--no-restore`.
 # Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test (biểu thức
 # `--filter` của `dotnet test`, ví dụ FullyQualifiedName~CartTests.Adds),
-# `{lockfile}` / `{licenses}` ở audit.
+# `{lockfile}` / `{licenses}` / `{osv_config}` ở audit.
 # RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
 #
 # Sonar với .NET khác các profile khác: SonarScanner for .NET chạy quanh bước
@@ -49,7 +49,9 @@ manifests = ["*.csproj", "*.fsproj", "*.vbproj", "*.proj", "*.props", "*.targets
 lockfiles = ["packages.lock.json", "*.csproj", "*.fsproj", "*.vbproj", "*.proj", "*.props", "*.targets", "nuget.config", "global.json", "dotnet-tools.json"]
 official_source = "https://api.nuget.org/v3/index.json"
 fetch = ["dotnet", "restore"]
-audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+# OSV advisories and deps.dev license data; nothing else (#159).
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
 # Bản vá chạm vào là bị chặn (#83): response file thêm tham số MSBuild.
 protected = ["Directory.Build.rsp", "*.rsp"]
 
