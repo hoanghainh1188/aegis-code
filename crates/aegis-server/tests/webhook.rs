@@ -9,8 +9,8 @@ use aegis_ledger::Outcome;
 use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::webhook::{
-    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
-    GitHubNotifier, GitLabNotifier, WebhookConfig, router,
+    COMMENT_TOKEN_ENV, DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV,
+    GITLAB_TOKEN_ENV, GitHubNotifier, GitLabNotifier, WebhookConfig, router,
 };
 use aegis_server::worker::{WorkerConfig, run_worker_notifying};
 use aegis_store::testing::test_db;
@@ -38,6 +38,7 @@ fn config() -> WebhookConfig {
         per_minute: 600,
         notifier: None,
         gitlab_notifier: None,
+        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
     }
 }
 
@@ -184,6 +185,50 @@ async fn deliveries_without_the_right_signature_are_refused() {
     assert_eq!(
         github(&closed, "issues", "d-2", &body).await.0,
         StatusCode::NOT_FOUND
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_long_issue_still_queues_a_job() {
+    let Some(db) = test_db().await else { return };
+    repo(&db.store, "typst", "https://github.com/typst/typst").await;
+    let app = router(db.store.clone(), config());
+    let mut body = labeled("typst/typst", 7, "aegis");
+    body["issue"]["body"] = json!("x".repeat(200 * 1024));
+
+    let (status, reply) = github(&app, "issues", "d-long", &body).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{reply}");
+    assert_eq!(jobs(&db.store).await.len(), 1);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_delivery_over_the_limit_is_refused_and_queues_nothing() {
+    let Some(db) = test_db().await else { return };
+    repo(&db.store, "typst", "https://github.com/typst/typst").await;
+    let app = router(
+        db.store.clone(),
+        WebhookConfig {
+            max_body_bytes: 4 * 1024,
+            ..config()
+        },
+    );
+    let mut body = labeled("typst/typst", 8, "aegis");
+    body["issue"]["body"] = json!("x".repeat(8 * 1024));
+
+    let (status, reply) = github(&app, "issues", "d-big", &body).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{reply}");
+    assert_eq!(reply["error"]["code"], "payload_too_large");
+    let (status, _) = gitlab(&app, "Issue Hook", "g-big", &body).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(jobs(&db.store).await.is_empty());
+
+    // Under the limit, the same endpoint takes it.
+    let small = labeled("typst/typst", 8, "aegis");
+    assert_eq!(
+        github(&app, "issues", "d-small", &small).await.0,
+        StatusCode::ACCEPTED
     );
     db.drop().await;
 }

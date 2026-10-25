@@ -15,6 +15,10 @@
 //! endpoint whose secret is not in the store answers 404. The label is
 //! `AEGIS_WEBHOOK_LABEL` (`aegis` by default), not a secret.
 //!
+//! A delivery carries the whole issue, so its body has its own limit,
+//! `AEGIS_WEBHOOK_MAX_BODY_BYTES` (1 MiB by default), not the API's 64 KiB
+//! (#169). Over it: 413, logged with the delivery ID, never the content.
+//!
 //! When the repo's monthly budget is spent (#31) the job is recorded
 //! cancelled with the reason, and the GitHub issue told so.
 //!
@@ -31,7 +35,7 @@ use std::time::Instant;
 use aegis_ledger::IssueId;
 use aegis_secrets::Secrets;
 use aegis_store::{Delivered, JobSource, NewDelivery, NewJob, Store, StoreError, WebhookSource};
-use axum::body::Bytes;
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -52,6 +56,10 @@ pub use notify::{
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
 pub const GITLAB_TOKEN_ENV: &str = "AEGIS_GITLAB_WEBHOOK_TOKEN";
 pub const LABEL_ENV: &str = "AEGIS_WEBHOOK_LABEL";
+pub const MAX_BODY_ENV: &str = "AEGIS_WEBHOOK_MAX_BODY_BYTES";
+/// GitHub sends up to 25 MB, but an issue body is at most 65,536
+/// characters: a delivery over 1 MiB is not one worth a job.
+pub const DEFAULT_MAX_BODY_BYTES: usize = 1024 * 1024;
 
 const DEFAULT_LABEL: &str = "aegis";
 const MAX_HEADER_LEN: usize = 128;
@@ -70,6 +78,8 @@ pub struct WebhookConfig {
     pub notifier: Option<GitHubNotifier>,
     /// …on GitLab (#168).
     pub gitlab_notifier: Option<GitLabNotifier>,
+    /// The largest body read from a delivery; beyond, 413.
+    pub max_body_bytes: usize,
 }
 
 impl WebhookConfig {
@@ -87,6 +97,24 @@ impl WebhookConfig {
                 .unwrap_or_else(|| DEFAULT_LABEL.into()),
             burst: 60,
             per_minute: 120,
+            max_body_bytes: max_body_from_env(),
+        }
+    }
+}
+
+fn max_body_from_env() -> usize {
+    let Ok(value) = std::env::var(MAX_BODY_ENV) else {
+        return DEFAULT_MAX_BODY_BYTES;
+    };
+    match value.trim().parse::<usize>() {
+        Ok(n) if n > 0 => n,
+        _ => {
+            tracing::warn!(
+                value,
+                default = DEFAULT_MAX_BODY_BYTES,
+                "{MAX_BODY_ENV} is not a positive number of bytes; using the default"
+            );
+            DEFAULT_MAX_BODY_BYTES
         }
     }
 }
@@ -133,7 +161,8 @@ struct Hooks {
 }
 
 /// The endpoints, under `/github` and `/gitlab`; nested at `/webhooks` by
-/// [`crate::api::router`], whose body limit and timeout they keep.
+/// [`crate::api::router`], whose timeout they keep. The body limit is
+/// theirs, [`WebhookConfig::max_body_bytes`].
 pub fn router(store: Store, config: WebhookConfig) -> Router {
     let limit = Arc::new(RateLimit::new(config.burst, config.per_minute));
     Router::new()
@@ -232,7 +261,31 @@ async fn admit<'a>(
     }
 }
 
-async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> Response {
+/// The whole body, up to the limit, so that the signature is checked on
+/// all that was sent. Over it, 413: logged with the delivery ID only.
+async fn read(
+    hooks: &Hooks,
+    headers: &HeaderMap,
+    body: Body,
+    id_header: &str,
+) -> Result<Bytes, Refusal> {
+    let max = hooks.config.max_body_bytes;
+    to_bytes(body, max).await.map_err(|_| {
+        let delivery = header(headers, id_header).unwrap_or("-");
+        tracing::warn!(delivery, max_bytes = max, "webhook delivery too large");
+        refuse(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            format!("body over {max} bytes"),
+        )
+    })
+}
+
+async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> Response {
+    let body = match read(&hooks, &headers, body, "x-github-delivery").await {
+        Ok(body) => body,
+        Err(refusal) => return refusal.into_response(),
+    };
     let signature = header(&headers, "x-hub-signature-256");
     let admitted = admit(
         &hooks,
@@ -251,7 +304,11 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> 
     deliver(&hooks, WebhookSource::Github, id, event, wanted).await
 }
 
-async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Bytes) -> Response {
+async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> Response {
+    let body = match read(&hooks, &headers, body, "x-gitlab-event-uuid").await {
+        Ok(body) => body,
+        Err(refusal) => return refusal.into_response(),
+    };
     let token = header(&headers, "x-gitlab-token");
     let admitted = admit(
         &hooks,

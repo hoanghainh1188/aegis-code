@@ -178,3 +178,33 @@ async fn bad_requests_answer_in_the_envelope() {
     assert_error(&body, "not_found");
     db.drop().await;
 }
+
+/// The status of a POST with `len` bytes of body, as the router answers.
+async fn post_bytes(app: &App, uri: &str, len: usize) -> StatusCode {
+    let request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {}", app.token))
+        .body(Body::from(vec![b' '; len]))
+        .unwrap();
+    app.router.clone().oneshot(request).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn the_api_keeps_its_64_kb_limit_and_webhooks_have_their_own() {
+    let Some(db) = test_db().await else { return };
+    let app = app(&db.store).await;
+
+    assert_eq!(
+        post_bytes(&app, "/api/v1/jobs", 65 * 1024).await,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    // Past the API's limit, under the webhook's: not refused for its size
+    // (404 here, the test server having no webhook secret).
+    assert_eq!(
+        post_bytes(&app, "/webhooks/github", 200 * 1024).await,
+        StatusCode::NOT_FOUND
+    );
+    db.drop().await;
+}

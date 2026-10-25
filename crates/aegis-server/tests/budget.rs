@@ -11,7 +11,8 @@ use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Tier, TokenCounts};
 use aegis_secrets::Secrets;
 use aegis_server::api;
 use aegis_server::webhook::{
-    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GitHubNotifier, WebhookConfig, router,
+    COMMENT_TOKEN_ENV, DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GitHubNotifier, WebhookConfig,
+    router,
 };
 use aegis_store::testing::test_db;
 use aegis_store::{
@@ -348,6 +349,7 @@ async fn a_webhook_job_refused_for_the_budget_is_told_on_the_issue() {
         label: "aegis".into(),
         burst: 10,
         per_minute: 60,
+        max_body_bytes: DEFAULT_MAX_BODY_BYTES,
         notifier: Some(GitHubNotifier::new(
             &github_api.uri(),
             Secrets::fixed([(COMMENT_TOKEN_ENV, "comment-token")]),
