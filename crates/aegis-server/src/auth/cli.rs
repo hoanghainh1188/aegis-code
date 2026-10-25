@@ -14,6 +14,8 @@
 //! the server. `<who>` is a person's e-mail (as the SSO gives it; granted before the
 //! first sign-in is fine) or a service's name.
 
+use std::path::Path;
+
 use aegis_store::{Actor, RepoRole, Store, UserKind};
 
 use super::{random_token, token_hash};
@@ -43,8 +45,8 @@ fn kind_of(who: &str) -> UserKind {
     }
 }
 
-/// Runs one command; what to print.
-pub async fn run(store: &Store, args: &[String]) -> Result<String, String> {
+/// Runs one command, read from `config`; what to print.
+pub async fn run(store: &Store, config: &Path, args: &[String]) -> Result<String, String> {
     let actor = Actor::cli();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let e = |e: aegis_store::StoreError| e.to_string();
@@ -82,10 +84,7 @@ pub async fn run(store: &Store, args: &[String]) -> Result<String, String> {
                 .await
                 .map_err(e)?;
             // The only time the token is shown; only its hash is kept.
-            Ok(format!(
-                "{token}\n(token of `{}`; give it roles with `aegis-server grant {} <repo> <role>`)",
-                user.name, user.name
-            ))
+            Ok(token_shown(&token, &user.name, config))
         }
         ["revoke-tokens", service] => {
             let n = store.revoke_tokens(service, &actor).await.map_err(e)?;
@@ -102,6 +101,15 @@ pub async fn run(store: &Store, args: &[String]) -> Result<String, String> {
     }
 }
 
+/// The new token, and the command that gives it roles, to be run as is.
+fn token_shown(token: &str, service: &str, config: &Path) -> String {
+    format!(
+        "{token}\n(token of `{service}`; give it roles with \
+         `aegis-server --config {} grant {service} <repo> <role>`)",
+        config.display()
+    )
+}
+
 async fn repo_id(store: &Store, slug: &str) -> Result<aegis_store::RepoId, String> {
     store
         .repo_by_slug(slug)
@@ -109,4 +117,22 @@ async fn repo_id(store: &Store, slug: &str) -> Result<aegis_store::RepoId, Strin
         .map_err(|e| e.to_string())?
         .map(|r| r.id)
         .ok_or_else(|| format!("no repo `{slug}`"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_grant_hint_names_the_same_config() {
+        let shown = token_shown("ab12", "jira-sync", Path::new("/etc/aegis/server.toml"));
+        let (token, hint) = shown.split_once('\n').unwrap();
+        assert_eq!(token, "ab12");
+        assert!(
+            hint.contains(
+                "`aegis-server --config /etc/aegis/server.toml grant jira-sync <repo> <role>`"
+            ),
+            "{hint}"
+        );
+    }
 }

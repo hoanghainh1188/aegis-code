@@ -11,7 +11,9 @@ use std::time::Duration;
 use aegis_gate::{CancelToken, Runner, Sandbox};
 use aegis_secrets::{EnvSource, MemorySource, Secrets};
 use aegis_server::secrets::DATABASE_URL;
-use aegis_server::webhook::{COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV};
+use aegis_server::webhook::{
+    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
+};
 
 const FAKE_DOCKER: &str = r#"#!/bin/sh
 printf '%s\n' "$@" > "$(dirname "$0")/argv"
@@ -25,6 +27,7 @@ const STORED: &[(&str, &str)] = &[
     ("GITHUB_TOKEN", "leak-fork-3"),
     ("SONAR_TOKEN", "leak-sonar-4"),
     (COMMENT_TOKEN_ENV, "leak-comment-5"),
+    (GITLAB_COMMENT_TOKEN_ENV, "leak-comment-8"),
 ];
 const IN_ENV: &[(&str, &str)] = &[
     (GITHUB_SECRET_ENV, "leak-hook-6"),
