@@ -386,6 +386,148 @@ async fn core_runs_its_reproduction_test_before_and_after_the_fix_without_a_gate
     );
 }
 
+/// A caller of `Cart::add` committed on the base, in a file the fix does
+/// not touch (#203).
+fn caller_on_base(scratch: &Scratch) {
+    let clone = scratch.0.join("clone");
+    std::fs::write(
+        clone.join("src/fill.rs"),
+        "use crate::Cart;\n\npub fn fill(cart: &mut Cart) {\n    let _ = cart.add(1);\n}\n",
+    )
+    .unwrap();
+    git(&clone, &["add", "-A"]);
+    git(
+        &clone,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "fill",
+        ],
+    );
+}
+
+/// Codebase-Memory for `cfg`, with a daemon of the test's own in the
+/// directory it returns. Short, as it holds the daemon's socket (see
+/// `code_graph`'s tests).
+fn with_graph(cfg: &mut RunConfig, program: String, test: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let runtime = std::path::PathBuf::from(format!("/tmp/aegis-cbm-{test}-{}", std::process::id()));
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
+    cfg.codebase_memory = Some(aegis_lifecycle::ExtraServer {
+        program,
+        args: vec!["--ui=false".into()],
+        env: vec![
+            ("HOME".into(), "{index_dir}".into()),
+            ("CBM_RUNTIME_DIR".into(), runtime.display().to_string()),
+        ],
+        tools: vec![],
+    });
+    runtime
+}
+
+async fn impact_events(store: &MemoryLedger) -> Vec<LedgerEvent> {
+    store
+        .events(&IssueId::parse("fixture-7").unwrap())
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e, LedgerEvent::ImpactChecked { .. }))
+        .collect()
+}
+
+/// #203: before the first gate run the platform asks the code graph for
+/// the callers of what the patch changed, outside its files, and the agent
+/// reads them before answering again. Runs only with `AEGIS_CBM_BIN`, as
+/// the `code_graph` tests.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_agent_reads_the_callers_outside_its_patch_before_the_gate() {
+    let Ok(program) = std::env::var("AEGIS_CBM_BIN") else {
+        eprintln!("skipping: AEGIS_CBM_BIN is not set");
+        return;
+    };
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    caller_on_base(&scratch);
+    let model = Scripted::new(
+        vec![
+            create_repro("t1"),
+            fix("t2"),
+            fixed_answer(),
+            fixed_answer(),
+        ],
+        vec![],
+    );
+    let mut cfg = config(&scratch, &server.uri(), 20);
+    let runtime = with_graph(&mut cfg, program, "note");
+    let p = platform(cfg, model);
+
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    let core = p.provider.requests_for("core");
+    assert_eq!(core.len(), 4, "one more answer after the note");
+    let note = core[3].messages.last().unwrap();
+    let text = note
+        .content
+        .iter()
+        .find_map(|b| match b {
+            ContentBlock::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        text.contains("Called from:\n- src/fill.rs: `fill`"),
+        "{text}"
+    );
+    assert_eq!(
+        impact_events(&p.store).await,
+        [LedgerEvent::ImpactChecked {
+            files: vec!["src/fill.rs".into()],
+            error: None,
+        }]
+    );
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    assert_eq!(record.gate_runs.len(), 1, "no gate run before the note");
+    let _ = std::fs::remove_dir_all(&runtime);
+}
+
+/// #203: with too few calls left to act on a note, the patch goes to the
+/// gate as it is, instead of stopping at the budget (typst-7541 answered
+/// at its 40th call).
+#[tokio::test(flavor = "multi_thread")]
+async fn near_the_call_budget_the_patch_goes_straight_to_the_gate() {
+    let Ok(program) = std::env::var("AEGIS_CBM_BIN") else {
+        eprintln!("skipping: AEGIS_CBM_BIN is not set");
+        return;
+    };
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    caller_on_base(&scratch);
+    let model = Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]);
+    let mut cfg = config(&scratch, &server.uri(), 5);
+    let runtime = with_graph(&mut cfg, program, "budget");
+    let p = platform(cfg, model);
+
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(p.provider.requests_for("core").len(), 3);
+    assert_eq!(impact_events(&p.store).await, []);
+    let _ = std::fs::remove_dir_all(&runtime);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_gate_goes_back_to_core_with_a_summary() {
     if !tools_ready() {

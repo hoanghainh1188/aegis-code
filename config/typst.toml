@@ -34,17 +34,19 @@ CARGO_PROFILE_TEST_DEBUG = "line-tables-only"
 max_cost_usd = 4.0
 max_model_calls = 40
 
-# Codebase-Memory (design §3.2, #185): the call graph's `search_graph` and
-# `trace_path` next to the ACI. Each job indexes its tree under
-# `<state_dir>/index` (`{index_dir}`, the server's HOME), shared by every
-# repo: the server's daemon is one per user and serves one cache.
+# Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
+# Before the first gate run the platform asks it for the code linked to the
+# patch outside its files and shows it to the agent (#203). The agent gets
+# none of its tools: it made no graph query in the 32 runs of #185.
+# Each job indexes its tree under `<state_dir>/index` (`{index_dir}`, the
+# server's HOME), shared by every repo: the server's daemon is one per
+# user and serves one cache.
 # `codebase-memory-mcp` is on PATH: in docker/server, and locally as
 # eval/README.md says. `--ui=false`: no graph UI on port 9749.
 [codebase_memory]
 program = "codebase-memory-mcp"
 args = ["--ui=false"]
 env = [["HOME", "{index_dir}"]]
-tools = ["search_graph", "trace_path"]
 
 [repo]
 path = ".workspace/repos/typst"

@@ -78,7 +78,7 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
 
 - Mỗi job lập chỉ mục cây của nó vào file SQLite dưới `<state_dir>/index`. Cả repo chỉ mất vài giây, nên không cần cơ chế cập nhật theo hash: sau mỗi bản sửa thì lập lại cả cây (#3).
 - Đồ thị gồm các quan hệ: `CALLS`, `IMPORTS`, `USAGES`, `IMPLEMENTS`, `INHERITS`, `TESTS`.
-- Agent dùng qua MCP: tìm hàm gọi / được gọi (`trace_path`), tìm symbol kèm số nơi gọi (`search_graph`).
+- Platform hỏi đồ thị trước lần chạy gate đầu tiên: hàm gọi tới / được gọi từ các hàm vừa đổi, nằm ngoài các file của bản vá (`detect_changes`), rồi đưa cho agent xem lại (#203). Agent không có công cụ đồ thị nào.
 - Bổ sung language server của profile (`rust-analyzer`, `basedpyright`…) cho "đi tới định nghĩa" và "tìm chỗ dùng" khi đồ thị chưa đủ chính xác (Rust: macro, trait generic; Python: decorator, import động).
 - Việc của Phase 0: kiểm tra Codebase-Memory phân tích đúng các trường hợp trên ở repo Rust và repo Python thật (#3).
 
@@ -88,7 +88,7 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
   - **Python (scrapy):** CALLS, IMPORTS, INHERITS khớp hoàn toàn với grep. Đồ thị không thấy import động qua chuỗi đường dẫn (`load_object`, settings, `mock.patch`).
   - **Rust (typst):** CALLS nối theo tên. Vì vậy `parse`, `abs` khớp nhầm sang hàm khác, còn lời gọi qua trait gần như không được nối. Đồ thị cũng không thấy impl do macro sinh ra. Muốn sửa chữ ký hàm hay trait thì phải kiểm lại bằng `rust-analyzer`.
 - Cách nối (`aegis-lifecycle`, `code_graph.rs`), khi cấu hình có `[codebase_memory]` (`config/poc.toml`, `config/typst.toml`):
-  - Server chạy cạnh ACI, trong cây của job, với `HOME` là `<state_dir>/index` và `--ui=false`. Agent có `search_graph` và `trace_path`.
+  - Server chạy cạnh ACI, với `HOME` và thư mục làm việc là `<state_dir>/index`, và `--ui=false`. Không chạy trong cây của job: daemon do server của job đầu tiên khởi động giữ thư mục đó, và khi cây bị xoá thì `detect_changes` không chạy được git (#203). `codebase_memory.tools` là các công cụ đồ thị agent được dùng; cấu hình PoC để trống (#203).
   - Mọi repo dùng chung một thư mục chỉ mục. Lý do: server chạy qua một daemon chung cho mỗi user, và daemon đó chỉ phục vụ một thư mục cache. Một server dùng thư mục khác sẽ không khởi động được trong lúc daemon còn chạy.
   - Trước lượt gọi model đầu tiên, lifecycle lập chỉ mục cây của job (`index_repository`, chế độ `fast`: bỏ `docs/` và lớp semantic). Mất 2–6 s trên typst và scrapy. Lập chỉ mục thất bại thì job dừng.
   - Sau một `edit` hay `create_file` thành công, lần hỏi đồ thị kế tiếp lập chỉ mục lại trước. Không dựa vào watcher của server: nó không cập nhật kịp trong lúc đo.
@@ -100,7 +100,12 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
   - `search_symbol`, `search_text`, `find_file` của ACI tìm bằng truy vấn symbol tree-sitter của profile (`aegis-lang`).
   - Module map ở BP2 (mục 4.1) cũng dựng bằng tree-sitter: thư mục nguồn và các định nghĩa chính trong từng thư mục. Map dựng một lần cho mỗi repo và lưu vào file.
   - `find_definition`, `find_references` hỏi language server của profile (`aci.lsp`, #115, mục 3.1). Prompt bảo agent kiểm bằng hai công cụ này trước khi dựa vào đồ thị để đổi chữ ký hàm.
-- Ledger của Phase 1 (#18, #142, #145) cho thấy agent ít khi định vị sai file ([số liệu](../measurements/2026-10-25-localization.md)). Điểm yếu là sửa thiếu khi bản sửa cần nhiều file, và chậm lần ra file khi lỗi hiện ở một crate mà nguyên nhân ở crate khác. Đồ thị nhắm vào hai việc này. Nhưng ở lượt đo KPI sau khi bật, agent không gọi `search_graph` hay `trace_path` lần nào trong 32 issue, nên chưa biết đồ thị có ích không ([số liệu](../measurements/2026-10-26-codebase-memory-kpi.md)). Có nhắc agent dùng, platform tự đưa kết quả, hay gỡ hai công cụ: chốt ở #203.
+- Ledger của Phase 1 (#18, #142, #145) cho thấy agent ít khi định vị sai file ([số liệu](../measurements/2026-10-25-localization.md)). Điểm yếu là sửa thiếu khi bản sửa cần nhiều file, và chậm lần ra file khi lỗi hiện ở một crate mà nguyên nhân ở crate khác. Đồ thị nhắm vào hai việc này. Nhưng ở lượt đo KPI sau khi bật, agent không gọi `search_graph` hay `trace_path` lần nào trong 32 issue ([số liệu](../measurements/2026-10-26-codebase-memory-kpi.md)).
+- Vì vậy #203 gỡ hai công cụ khỏi agent và để platform tự hỏi đồ thị ([số liệu](../measurements/2026-10-26-graph-impact-note.md)):
+  - Agent trả lời cuối lần đầu thì lifecycle chưa chạy gate ngay. Nó gọi `detect_changes` hai lần (chiều `inbound` và `outbound`, sâu 1 bước, so với commit base) trên cây đã lập chỉ mục lại.
+  - Kết quả bỏ các file của bản vá (gồm file agent mới tạo, vì git coi là đổi), file test, nút đại diện cho cả file và nút của thư viện ngôn ngữ (`<python-builtins>`).
+  - Còn hàm nào thì agent nhận một lời nhắn: nơi gọi và nơi được gọi theo từng file, tối đa 8 file mỗi chiều và 4 hàm mỗi file. Agent kiểm rồi trả lời cuối lại; lần này mới vào gate. Không còn gì thì vào gate luôn.
+  - Mỗi job hỏi một lần. Hỏi lỗi thì bản vá vẫn vào gate. Ledger ghi `impact_checked` với các file đã đưa, hoặc lỗi.
 - Luật "lỗi trải trên ≥ 3 file" (mục 5.3) vẫn chưa có nguồn tín hiệu: đồ thị cho biết ai gọi ai, không cho biết bản sửa cần bao nhiêu file.
 
 ### 3.3 Thu gọn lịch sử

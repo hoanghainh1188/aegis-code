@@ -2,9 +2,10 @@
 """Shows, for the latest run of each eval issue, how the agent spent its
 model calls (#142): the tools it called (`tool_calls` events, #129), the
 call of its first `edit`/`create_file`, of its first `run_tests` (#137) and
-of its first gate run, the router's reminders to run a test (#144) and
-its escalation to Expert (`test_reminded` and `escalated` events, #148),
-and how the run ended.
+of its first gate run, the router's reminders to run a test (#144), its
+escalation to Expert (`test_reminded` and `escalated` events, #148), the
+files of the code-graph note before the first gate run (`impact_checked`,
+#203), and how the run ended.
 
     scripts/eval/tool_usage.py [prefix ...]
 
@@ -48,7 +49,7 @@ def summary(path):
     calls, tools = 0, Counter()
     first = {"write": None, "run_tests": None, "gate": None}
     outcome, any_tools = "running", False
-    reminders, escalation = [], None
+    reminders, escalation, impact = [], None, None
     for line in path.read_text().splitlines():
         event = json.loads(line)
         kind = event["event"]
@@ -64,13 +65,15 @@ def summary(path):
                     first["run_tests"] = calls
         elif kind == "test_reminded":
             reminders.append(event["calls"])
+        elif kind == "impact_checked":
+            impact = "error" if event.get("error") else f"{calls}: {len(event['files'])} file"
         elif kind == "escalated":
             escalation = f"{event['calls']}: {event['reason']}"
         elif kind == "gate_run" and first["gate"] is None:
             first["gate"] = calls
         elif kind == "finished":
             outcome = event["outcome"]
-    router = {"reminders": reminders, "escalation": escalation}
+    router = {"reminders": reminders, "escalation": escalation, "impact": impact}
     return calls, tools if any_tools else None, first, router, outcome
 
 
@@ -82,9 +85,9 @@ def main():
     rows = latest_runs(sys.argv[1:])
     print(
         "| Run | Kết quả | Lượt | `run_tests` | Sửa/tạo đầu | `run_tests` đầu | Gate đầu "
-        "| Nhắc ở lượt | Leo thang | Công cụ |"
+        "| Nhắc ở lượt | Leo thang | Đồ thị trước gate | Công cụ |"
     )
-    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     totals = Counter()
     for issue, (n, path) in rows.items():
         calls, tools, first, router, outcome = summary(path)
@@ -94,12 +97,13 @@ def main():
         print(
             f"| {issue}-r{n} | {outcome} | {calls} | {runs} | {cell(first['write'])} "
             f"| {cell(first['run_tests'])} | {cell(first['gate'])} | {reminded} "
-            f"| {cell(router['escalation'])} | {top} |"
+            f"| {cell(router['escalation'])} | {cell(router['impact'])} | {top} |"
         )
         totals[outcome] += 1
         totals["used run_tests"] += bool(tools and tools["run_tests"])
         totals["reminded"] += bool(router["reminders"])
         totals["escalated"] += router["escalation"] is not None
+        totals["impact checked"] += router["impact"] is not None
     print()
     print(", ".join(f"{k}: {v}" for k, v in sorted(totals.items())))
 

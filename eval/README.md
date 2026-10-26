@@ -59,7 +59,7 @@ Lệnh chạy test ẩn:
 
 ## Codebase-Memory
 
-`config/poc.toml` và `config/typst.toml` cho agent đồ thị gọi hàm (Thiết kế §3.2, #185). `aegis` tìm `codebase-memory-mcp` trên `PATH` và từ chối chạy khi không thấy. Image `aegis-server` đã có sẵn chương trình này. Trên máy dev, tải bản v0.12.1 cho máy mình từ [release](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1), kiểm SHA-256 với `checksums.txt` rồi giải nén vào `.workspace/tools/cbm/`:
+`config/poc.toml` và `config/typst.toml` bật đồ thị gọi hàm (Thiết kế §3.2, #185): trước gate, platform hỏi đồ thị nơi gọi của các hàm vừa đổi và đưa cho agent (#203). `aegis` tìm `codebase-memory-mcp` trên `PATH` và từ chối chạy khi không thấy. Image `aegis-server` đã có sẵn chương trình này. Trên máy dev, tải bản v0.12.1 cho máy mình từ [release](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1), kiểm SHA-256 với `checksums.txt` rồi giải nén vào `.workspace/tools/cbm/`:
 
 ```bash
 PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/typst.toml --set eval/issues
@@ -69,7 +69,7 @@ PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/typst.toml --set
 
 Server chạy qua một daemon chung cho mỗi user, và daemon đó chỉ phục vụ một thư mục cache. Vì vậy trong lúc một bản `codebase-memory-mcp` khác đang chạy với cache khác (ví dụ một editor hay agent khác trên máy), job của `aegis` không khởi động được Codebase-Memory và dừng. Đóng bản kia trước khi chạy.
 
-Test `code_graph::tests::the_real_graph_follows_the_agent_s_edits` (`aegis-lifecycle`) chạy với chương trình thật khi đặt `AEGIS_CBM_BIN`. Test này, và test `aci_and_codebase_memory_share_one_tool_list` của `aegis-aci`, dùng daemon riêng (`CBM_RUNTIME_DIR` trong `/tmp`) nên chạy được cùng lúc với một lượt eval.
+Các test `code_graph::tests::the_real_graph_*` và `the_agent_reads_the_callers_outside_its_patch_before_the_gate` (`aegis-lifecycle`) chạy với chương trình thật khi đặt `AEGIS_CBM_BIN`. Các test này, và test `aci_and_codebase_memory_share_one_tool_list` của `aegis-aci`, dùng daemon riêng (`CBM_RUNTIME_DIR` trong `/tmp`) nên chạy được cùng lúc với một lượt eval.
 
 ## Lưu ý
 

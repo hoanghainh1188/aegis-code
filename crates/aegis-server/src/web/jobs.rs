@@ -226,6 +226,14 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
         LedgerEvent::TestReminded { tier, calls } => {
             row("nhắc chạy test", format!("{tier:?}, sau {calls} lượt"))
         }
+        LedgerEvent::ImpactChecked { files, error } => {
+            let text = match (error, files.is_empty()) {
+                (Some(why), _) => format!("không hỏi được: {why}"),
+                (None, true) => "không có nơi gọi ngoài bản vá".to_owned(),
+                (None, false) => files.join(", "),
+            };
+            row("đồ thị gọi", text)
+        }
         LedgerEvent::Escalated { reason, calls } => {
             row("lên Expert", format!("sau {calls} lượt: {reason}"))
         }

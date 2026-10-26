@@ -22,8 +22,8 @@ use aegis_ledger::{
     GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
-    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, ToolExecutor,
-    TurnRecord, run_loop, system_blocks,
+    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, TurnRecord,
+    run_loop, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Classification, Decision, Router, Signal, Spent};
@@ -33,7 +33,7 @@ use tokio_util::sync::CancellationToken;
 use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
-use crate::code_graph::{self, CodeGraph};
+use crate::code_graph::{self, CodeGraph, ServerCalls};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -316,17 +316,20 @@ fn tool_specs(
         // per user and serves a single cache directory, so a job with
         // another one could not start while a job is running (#185). Each
         // job indexes its tree as its own project and drops it at the end
-        // (`CodeGraph`). The server runs in the tree, which it then takes
-        // as its own project.
+        // (`CodeGraph`). The server runs in the index directory, not in the
+        // tree: the daemon the first job's server starts keeps that
+        // directory as its own, and once the job's tree is gone
+        // `detect_changes` can run no git command (#203).
         let index = cfg.run.state_dir.join("index");
         std::fs::create_dir_all(&index).map_err(|e| LifecycleError::io(&index, &e))?;
+        let cwd = index.clone();
         let index = index.display().to_string();
         let fill = |v: &String| v.replace(INDEX_DIR, &index);
         specs.push(McpServerSpec {
             name: code_graph::SERVER.into(),
             program: cbm.program.clone(),
             args: cbm.args.iter().map(fill).collect(),
-            cwd: Some(tree.to_path_buf()),
+            cwd: Some(cwd),
             env: cbm.env.iter().map(|(k, v)| (k.clone(), fill(v))).collect(),
             tools: Some(cbm.tools.clone()),
         });
@@ -902,6 +905,10 @@ pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
     }
 }
 
+/// Model calls the agent needs at least to act on the code graph's note
+/// before the gate: read a file, edit it, answer again, with one to spare.
+const IMPACT_CALLS: u32 = 4;
+
 /// The Core/Expert loop with gate runs between attempts.
 #[allow(clippy::too_many_arguments)]
 async fn drive<P, S, T>(
@@ -909,7 +916,7 @@ async fn drive<P, S, T>(
     ledger: &mut IssueLedger<'_, S>,
     profiles: &RepoProfiles,
     issue: &IssueInput,
-    tools: &T,
+    tools: &CodeGraph<'_, T>,
     session: Session,
     tree: &Path,
     base: &str,
@@ -920,7 +927,7 @@ async fn drive<P, S, T>(
 where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
-    T: ToolExecutor + Sync,
+    T: ServerCalls + Sync,
 {
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
@@ -929,6 +936,7 @@ where
     let mut answer_retries = 0;
     let mut dearest_call_usd: f64 = 0.0;
     let mut first_expert_call = false;
+    let mut impact_checked = false;
     loop {
         let tier = router.tier();
         let mut budget = BudgetCheck::new(
@@ -1041,6 +1049,36 @@ where
                 Outcome::StoppedSteps,
                 format!("agent stopped: {why}"),
             ));
+        }
+
+        // Once a job, before its first gate run: the code the graph links
+        // to the patch, for the agent to check (#203). The graph only
+        // helps, so a failed query lets the patch go on to the gate.
+        // Not when the budget leaves the agent too few calls to act on the
+        // note: the patch would then stop at the budget instead of going to
+        // the gate.
+        let record = ledger.record();
+        let calls_left = cfg
+            .budget
+            .max_model_calls
+            .saturating_sub(record.model_calls);
+        let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
+        let room =
+            calls_left >= IMPACT_CALLS && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
+        if room
+            && !std::mem::replace(&mut impact_checked, true)
+            && let Some(impact) = tools.impact(base).await
+        {
+            match impact {
+                Ok(impact) => {
+                    ledger.impact_checked(impact.files(), None).await?;
+                    if let Some(note) = impact.note() {
+                        session = session.with_user_text(note);
+                        continue;
+                    }
+                }
+                Err(why) => ledger.impact_checked(Vec::new(), Some(why)).await?,
+            }
         }
 
         let gate_started = Instant::now();
@@ -1177,6 +1215,21 @@ mod tests {
                 .clone(),
         );
         RunConfig::from_toml(&toml::to_string(&cfg).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn codebase_memory_runs_in_the_index_directory_not_in_the_job_s_tree() {
+        // #203: the daemon keeps its first server's directory, and a job's
+        // tree is removed at the end of the job.
+        let cfg = monorepo(false);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let job_dir = cfg.run.state_dir.join("jobs/cwd");
+        std::fs::create_dir_all(&job_dir).unwrap();
+        let tree = job_dir.join("repo");
+        let specs = tool_specs(&cfg, &profiles, &tree, &job_dir).unwrap();
+        let cbm = specs.iter().find(|s| s.name == code_graph::SERVER).unwrap();
+        assert_eq!(cbm.cwd, Some(cfg.run.state_dir.join("index")));
+        assert_eq!(cbm.tools, Some(vec![]));
     }
 
     #[test]

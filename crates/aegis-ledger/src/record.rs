@@ -188,6 +188,15 @@ pub enum LedgerEvent {
         tier: Tier,
         calls: u32,
     },
+    /// Before the first gate run, the platform asked the code graph for
+    /// the code linked to the patch outside its files (#203): `files` are
+    /// the files the agent was shown, none when the graph linked nothing,
+    /// and `error` why the query failed.
+    ImpactChecked {
+        files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     /// The router moved the job from Core to Expert after `calls`
     /// Core/Expert calls; `reason` is the router's (design §5.4).
     Escalated {
@@ -221,6 +230,7 @@ impl LedgerEvent {
             | Self::SecretsRedacted { .. }
             | Self::ToolCalls { .. }
             | Self::TestReminded { .. }
+            | Self::ImpactChecked { .. }
             | Self::Escalated { .. } => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
@@ -329,6 +339,7 @@ impl IssueRecord {
             LedgerEvent::GateRun(run) => self.gate_runs.push(run.clone()),
             LedgerEvent::ToolCalls { .. }
             | LedgerEvent::TestReminded { .. }
+            | LedgerEvent::ImpactChecked { .. }
             | LedgerEvent::Escalated { .. } => {}
             LedgerEvent::HiddenTests { passed, .. } => self.hidden_tests_passed = Some(*passed),
             LedgerEvent::SecretsRedacted { count } => {

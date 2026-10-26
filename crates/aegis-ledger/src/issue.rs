@@ -86,6 +86,16 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::TestReminded { tier, calls }).await
     }
 
+    /// The platform's code-graph check of the patch before the first gate
+    /// run (#203).
+    pub async fn impact_checked(
+        &mut self,
+        files: Vec<String>,
+        error: Option<String>,
+    ) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::ImpactChecked { files, error }).await
+    }
+
     /// The router's move from Core to Expert, after `calls` Core/Expert
     /// calls, for `reason`.
     pub async fn escalated(
@@ -128,6 +138,7 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
                 LedgerEvent::ModelCall { .. }
                     | LedgerEvent::ToolCalls { .. }
                     | LedgerEvent::TestReminded { .. }
+                    | LedgerEvent::ImpactChecked { .. }
                     | LedgerEvent::Escalated { .. }
                     | LedgerEvent::GateRun(_)
                     | LedgerEvent::SecretsRedacted { .. }
