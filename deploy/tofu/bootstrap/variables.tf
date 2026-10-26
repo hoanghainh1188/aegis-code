@@ -29,7 +29,7 @@ variable "environments" {
 variable "sandbox_profiles" {
   description = "Image sandbox đẩy lên ECR cạnh aegis-server."
   type        = list(string)
-  default     = ["python", "rust"]
+  default     = ["python", "rust", "node", "java", "go", "dotnet"]
 }
 
 variable "keep_images" {

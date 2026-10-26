@@ -135,7 +135,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        profile: [python, rust]
+        profile: [python, rust, node, java, go, dotnet]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

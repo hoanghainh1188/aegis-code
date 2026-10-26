@@ -72,7 +72,7 @@ variable "initial_image_tag" {
 variable "sandbox_profiles" {
   description = "Image sandbox kéo về máy và đặt tên `aegis-sandbox-<profile>` như profiles/*.toml cần."
   type        = list(string)
-  default     = ["python", "rust"]
+  default     = ["python", "rust", "node", "java", "go", "dotnet"]
 }
 
 variable "instance_type" {

@@ -49,7 +49,10 @@ protected = [
 
 [sandbox]
 image = "aegis-sandbox-go"
-cache_dirs = ["/go/pkg/mod", "/root/.cache/go-build"]
+# Chỉ cache module: gate mount cache ngoài cây ở chế độ chỉ đọc, mà `go`
+# phải ghi vào build cache (GOCACHE), nên mỗi container có build cache riêng
+# của nó (#210).
+cache_dirs = ["/go/pkg/mod"]
 
 [sonar.properties]
 "sonar.go.coverage.reportPaths" = "coverage.out"

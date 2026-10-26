@@ -57,7 +57,7 @@ protected = ["Directory.Build.rsp", "*.rsp"]
 
 [sandbox]
 image = "aegis-sandbox-dotnet"
-cache_dirs = ["bin", "obj", "/root/.nuget/packages"]
+cache_dirs = ["bin", "obj", "/home/aegis/.nuget/packages"]
 
 # Gate gộp Sonar vào build: `dotnet sonarscanner begin` → lệnh này → `end`.
 # Build chạy trong sandbox không mạng như các bước khác; chỉ begin/end có
