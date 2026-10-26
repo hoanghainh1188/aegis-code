@@ -53,7 +53,7 @@ protected = [
 
 [sandbox]
 image = "aegis-sandbox-node"
-cache_dirs = ["node_modules", "/root/.npm"]
+cache_dirs = ["node_modules", "/home/aegis/.npm"]
 
 [sonar.properties]
 "sonar.javascript.lcov.reportPaths" = "coverage/lcov.info"

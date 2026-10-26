@@ -104,7 +104,7 @@ on_change = ["pom.xml", "extensions.xml"]
 
 [sandbox]
 image = "aegis-sandbox-java"
-cache_dirs = ["target", "/root/.m2/repository", "/root/.gradle/caches"]
+cache_dirs = ["target", "/home/aegis/.m2/repository", "/home/aegis/.gradle/caches"]
 
 [sonar.properties]
 "sonar.coverage.jacoco.xmlReportPaths" = "target/site/jacoco/jacoco.xml"
