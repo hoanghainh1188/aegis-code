@@ -14,7 +14,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use aegis_lang::{
-    DependencyTree, Placeholder, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
+    DependencyTree, Placeholder, Profile, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
     check_advisory, check_license, default_licenses, deny_config, in_dir, join_dir,
     new_dependency_violations, osv_config, part_label, read_lockfile,
 };
@@ -202,6 +202,8 @@ struct Run<'a> {
     all_changes: Vec<Change>,
     /// The parts' directories, the rest of the repo (`""`) first.
     dirs: Vec<String>,
+    /// The parts' profiles, in the order of `dirs`.
+    profiles: Vec<&'a Profile>,
     /// The coverage report of every part, which their steps write.
     coverage_files: Vec<String>,
     snapshot: Snapshot,
@@ -466,6 +468,14 @@ impl<'a> Run<'a> {
     fn dependencies(&mut self) -> Result<StepReport, GateError> {
         let name = StepName::Dependencies;
         let tree = self.tree();
+        let i = self.part_index();
+        let others: Vec<(&str, &Profile)> = self
+            .profiles
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| j != i)
+            .map(|(j, p)| (self.dirs[j].as_str(), *p))
+            .collect();
         let checked = deps::check(
             &self.part.profile.profile,
             self.req.repo,
@@ -475,6 +485,7 @@ impl<'a> Run<'a> {
             &self.part.ignored,
             self.req.allowed,
             tree.map_or(&[], |t| t.on_change.as_slice()),
+            &others,
         )?;
         Ok(match checked {
             None => StepReport::skipped(name, Skip::NoDependencyChange),
@@ -1368,6 +1379,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         work,
         all_changes: changes.clone(),
         dirs: dirs.clone(),
+        profiles: all.iter().map(|p| &p.profile.profile).collect(),
         coverage_files,
         snapshot,
         index,

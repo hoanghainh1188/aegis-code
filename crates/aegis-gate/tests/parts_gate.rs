@@ -299,6 +299,39 @@ fn a_part_s_changed_lockfile_is_audited_in_its_directory() {
     assert!(log.contains("audited requirements.txt"), "{log}");
 }
 
+#[test]
+fn a_build_file_the_root_reads_fails_in_a_part_that_does_not() {
+    // `py/native/Cargo.lock` is Rust's, which the root's workspace may
+    // build; the Python part cannot check it (#200).
+    for file in ["py/native/Cargo.lock", "py/native/.cargo/config.toml"] {
+        let repo = Repo::new();
+        repo.write(file, "# new\n");
+        let report = repo.gate(ROOT, PY, None, &[]);
+        let deps = report.step(StepName::Dependencies).unwrap();
+        assert_eq!(deps.status, StepStatus::Failed, "{report}");
+        assert!(
+            deps.detail.contains(&format!("{file} (Rust)"))
+                && deps.detail.contains("part of its own"),
+            "{}",
+            deps.detail
+        );
+    }
+}
+
+#[test]
+fn a_part_s_build_file_outside_it_is_left_to_the_root() {
+    // A `requirements.txt` at the root is not in `py/`, and the root's
+    // Rust profile does not read it: nothing to check.
+    let repo = Repo::new();
+    repo.write("requirements.txt", "requests==2.31.0\n");
+    let report = repo.gate(ROOT, PY, None, &[]);
+    assert!(report.passed(), "{report}");
+    assert_eq!(
+        report.step(StepName::Dependencies).unwrap().status,
+        StepStatus::Skipped(Skip::NoDependencyChange)
+    );
+}
+
 /// Records the analysis settings and which coverage reports exist when it
 /// runs, then leaves a task for the gate to wait for.
 const FAKE_SCANNER: &str = r#"
