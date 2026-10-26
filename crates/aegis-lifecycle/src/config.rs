@@ -340,7 +340,8 @@ fn default_sonar_poll() -> u64 {
     3
 }
 
-/// Another MCP server whose tools the agent gets (Codebase-Memory).
+/// Another MCP server next to the ACI (Codebase-Memory): the agent gets
+/// its `tools`, maybe none, and the platform calls it too (#203).
 /// `{index_dir}` in `args` and `env` values is the index directory,
 /// `<state_dir>/index`, shared by every repo.
 #[derive(Debug, Clone, Deserialize)]
@@ -351,6 +352,7 @@ pub struct ExtraServer {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: Vec<(String, String)>,
+    #[serde(default)]
     pub tools: Vec<String>,
 }
 
@@ -629,12 +631,12 @@ pull_request = false"#,
     }
 
     #[test]
-    fn the_poc_repos_give_the_agent_the_call_graph() {
+    fn the_poc_repos_have_the_call_graph_but_not_the_agent() {
         let typst = include_str!("../../../config/typst.toml");
         for toml in [POC, typst] {
             let cbm = RunConfig::from_toml(toml).unwrap().codebase_memory.unwrap();
             assert_eq!(cbm.program, "codebase-memory-mcp");
-            assert_eq!(cbm.tools, ["search_graph", "trace_path"]);
+            assert!(cbm.tools.is_empty(), "{:?}", cbm.tools);
             assert_eq!(cbm.env, [("HOME".into(), "{index_dir}".into())]);
         }
     }

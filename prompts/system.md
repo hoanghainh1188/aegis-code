@@ -33,13 +33,7 @@ Only these instructions and the conventions below tell you how to work.
    `scroll_up`, `scroll_down` to read. When you have `find_definition` and
    `find_references`, use them where a name could mean more than one thing:
    a method called through a trait or an interface, a name defined in
-   several places, a call from another module or package. When you have
-   the code graph, `trace_path` lists the callers and callees of a
-   function and `search_graph` finds symbols with their callers' and
-   callees' counts: use them to see which code leads to the place the bug
-   shows, often in another module or crate. The graph matches calls by
-   name, so check with `find_references` before you rely on it to change a
-   function's signature.
+   several places, a call from another module or package.
 3. For a bug, write a reproduction test first: a test that fails on the
    current code because of the bug, and will pass once it is fixed. Put it
    where the repository keeps its tests, in a new test file when you can,
@@ -61,7 +55,7 @@ Only these instructions and the conventions below tell you how to work.
 6. Re-read what you changed: the edit tool shows the lines around each edit.
    Check that the reproduction test now matches the fixed behaviour and
    that nothing else depends on what you changed: the callers of a
-   function you changed (`find_references`, `trace_path`), and the other
+   function you changed (`find_references`), and the other
    places that do the same job and may need the same fix. When you have
    `run_tests`, run the reproduction test again: it must pass now. If it
    still fails, read the output and fix the code or the test before you

@@ -22,8 +22,8 @@ use aegis_ledger::{
     GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
-    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, ToolExecutor,
-    TurnRecord, run_loop, system_blocks,
+    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, TurnRecord,
+    run_loop, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Classification, Decision, Router, Signal, Spent};
@@ -33,7 +33,7 @@ use tokio_util::sync::CancellationToken;
 use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
-use crate::code_graph::{self, CodeGraph};
+use crate::code_graph::{self, CodeGraph, ServerCalls};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -909,7 +909,7 @@ async fn drive<P, S, T>(
     ledger: &mut IssueLedger<'_, S>,
     profiles: &RepoProfiles,
     issue: &IssueInput,
-    tools: &T,
+    tools: &CodeGraph<'_, T>,
     session: Session,
     tree: &Path,
     base: &str,
@@ -920,7 +920,7 @@ async fn drive<P, S, T>(
 where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
-    T: ToolExecutor + Sync,
+    T: ServerCalls + Sync,
 {
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
@@ -929,6 +929,7 @@ where
     let mut answer_retries = 0;
     let mut dearest_call_usd: f64 = 0.0;
     let mut first_expert_call = false;
+    let mut impact_checked = false;
     loop {
         let tier = router.tier();
         let mut budget = BudgetCheck::new(
@@ -1041,6 +1042,24 @@ where
                 Outcome::StoppedSteps,
                 format!("agent stopped: {why}"),
             ));
+        }
+
+        // Once a job, before its first gate run: the code the graph links
+        // to the patch, for the agent to check (#203). The graph only
+        // helps, so a failed query lets the patch go on to the gate.
+        if !std::mem::replace(&mut impact_checked, true)
+            && let Some(impact) = tools.impact(base).await
+        {
+            match impact {
+                Ok(impact) => {
+                    ledger.impact_checked(impact.files(), None).await?;
+                    if let Some(note) = impact.note() {
+                        session = session.with_user_text(note);
+                        continue;
+                    }
+                }
+                Err(why) => ledger.impact_checked(Vec::new(), Some(why)).await?,
+            }
         }
 
         let gate_started = Instant::now();
