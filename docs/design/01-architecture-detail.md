@@ -203,6 +203,7 @@ Light trả về JSON cố định:
 | Core | Lỗi trải trên ≥ 3 file (router có luật này nhưng chưa có nguồn tín hiệu: đồ thị không cho biết bản sửa cần bao nhiêu file, mục 3.2) | Expert |
 | Core | Đã dùng 15 lượt gọi mà chưa có bản vá nào tới test tái hiện hay gate (#127) | Expert |
 | Core, Expert | Đã dùng 8 lượt gọi (rồi 16) mà chưa gọi `run_tests` lần nào (#144) | Nhắc agent viết và chạy test tái hiện, ở lại tầng đó |
+| Core, Expert | Đã gọi `run_tests`, nhưng 8 lượt gọi đã qua kể từ lần chạy gần nhất (#156) | Nhắc agent sửa và chạy lại test, ở lại tầng đó |
 | Expert | Gate qua hết | PR |
 | Expert | Fail 2 lần | Dừng |
 | Bất kỳ | Chi phí cộng dồn > $4 hoặc > 40 lượt gọi model | Dừng |
@@ -211,7 +212,7 @@ Khi chuyển sang Expert, giữ toàn bộ lịch sử. Lượt gọi Light khô
 
 Giới hạn ban đầu là 20 lượt. Lượt chạy 10 issue đầu của bộ thử (#18, đo ngày 2026-10-23) cho thấy trần $4 không bao giờ chạm (cao nhất $0.54), còn 6/10 issue dừng vì hết 20 lượt. Ca qua gate nộp bản vá đầu sau 7–13 lượt, ca fail sau 17–18 lượt hoặc không nộp. Vì vậy nâng lên 40 lượt và thêm luật 15 lượt chưa có bản vá (#127).
 
-Lời nhắc (#144) dừng vòng lặp trước lượt gọi kế tiếp, thêm một đoạn văn bản vào cuối tin nhắn chứa kết quả công cụ, rồi gọi tiếp ở cùng tầng. Nó không tốn lượt gọi, và mỗi job có tối đa 2 lời nhắc. Khi đo lại ở #142, agent đã có `run_tests` (#137) nhưng chỉ 6/11 lượt có gọi, phần lớn từ lượt 31–40; 4 lượt chỉ đọc code tới hết 40 lượt. Ca duy nhất gọi sớm (lượt 6) cũng là ca nộp gate sớm nhất.
+Lời nhắc (#144) dừng vòng lặp trước lượt gọi kế tiếp, thêm một đoạn văn bản vào cuối tin nhắn chứa kết quả công cụ, rồi gọi tiếp ở cùng tầng. Nó không tốn lượt gọi. Mỗi job có tối đa 2 lời nhắc trước lần chạy test đầu, và 2 lời nhắc chạy lại test: mỗi khoảng giữa hai lần chạy test chỉ được nhắc một lần (#156). Ở #145, agent ở `typst-7777` chạy test một lần ở lượt 11 rồi đọc code tới hết 40 lượt, vì luật cũ tắt hẳn lời nhắc sau lần chạy đầu. Khi đo lại ở #142, agent đã có `run_tests` (#137) nhưng chỉ 6/11 lượt có gọi, phần lớn từ lượt 31–40; 4 lượt chỉ đọc code tới hết 40 lượt. Ca duy nhất gọi sớm (lượt 6) cũng là ca nộp gate sớm nhất.
 
 ### 5.4 Tính ngân sách
 

@@ -22,10 +22,14 @@ pub struct EscalationRules {
     /// Failed Expert attempts before stopping.
     pub expert_failures: u32,
     /// Core/Expert calls between reminders to write and run the
-    /// reproduction test, while `run_tests` has not been called (#144).
+    /// reproduction test, while `run_tests` has not been called (#144);
+    /// once it has, calls since the last test run before one reminder to
+    /// run it again (#156).
     pub calls_per_test_reminder: u32,
-    /// Reminders a job gets at most.
+    /// Reminders before the first test run a job gets at most.
     pub test_reminders: u32,
+    /// Reminders to run the test again a job gets at most (#156).
+    pub retest_reminders: u32,
 }
 
 impl Default for EscalationRules {
@@ -38,6 +42,7 @@ impl Default for EscalationRules {
             expert_failures: 2,
             calls_per_test_reminder: 8,
             test_reminders: 2,
+            retest_reminders: 2,
         }
     }
 }
@@ -63,8 +68,11 @@ pub enum Signal {
     ModelCalls {
         calls: u32,
     },
-    /// The agent called `run_tests`.
-    TestRun,
+    /// The agent called `run_tests` in the job's `calls`-th Core/Expert
+    /// call.
+    TestRun {
+        calls: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,9 +124,11 @@ pub enum Decision {
     /// Hand over to a human.
     Stop(StopReason),
     /// Tell the agent to write its reproduction test and run it with
-    /// `run_tests` before reading more code; the tier stays (#144).
+    /// `run_tests` before reading more code (#144), or, when it last ran
+    /// one in call `last_test`, to run it again (#156); the tier stays.
     RemindTest {
         calls: u32,
+        last_test: Option<u32>,
     },
 }
 
@@ -136,10 +146,14 @@ pub struct Router {
     attempt_failed: bool,
     /// A patch reached the repro test or the gate.
     patched: bool,
-    /// The agent has called `run_tests`.
-    tested: bool,
-    /// Test reminders given so far.
+    /// The call in which the agent last ran `run_tests`.
+    last_test: Option<u32>,
+    /// Reminders before the first test run given so far.
     reminders: u32,
+    /// Reminders to run the test again given so far.
+    retests: u32,
+    /// A reminder to run the test again came since `last_test`.
+    retest_reminded: bool,
 }
 
 impl Router {
@@ -152,8 +166,10 @@ impl Router {
             expert_failures: 0,
             attempt_failed: false,
             patched: false,
-            tested: false,
+            last_test: None,
             reminders: 0,
+            retests: 0,
+            retest_reminded: false,
         }
     }
 
@@ -168,11 +184,14 @@ impl Router {
                 signal,
                 Signal::PatchTested { .. } | Signal::GatePassed | Signal::GateFailed
             );
-        let tested = self.tested || signal == Signal::TestRun;
-        let this = Self {
-            patched,
-            tested,
-            ..self
+        let this = match signal {
+            Signal::TestRun { calls } => Self {
+                patched,
+                last_test: Some(calls),
+                retest_reminded: false,
+                ..self
+            },
+            _ => Self { patched, ..self },
         };
         match this.tier {
             Tier::Expert => this.observe_expert(signal),
@@ -233,7 +252,7 @@ impl Router {
                 self.escalate(EscalationReason::NoPatch { calls })
             }
             Signal::ModelCalls { calls } => self.remind_test(calls),
-            Signal::TestRun => (self, Decision::Continue),
+            Signal::TestRun { .. } => (self, Decision::Continue),
         }
     }
 
@@ -266,7 +285,7 @@ impl Router {
             Signal::EditRejected
             | Signal::EditAccepted
             | Signal::FaultSpread { .. }
-            | Signal::TestRun => (self, Decision::Continue),
+            | Signal::TestRun { .. } => (self, Decision::Continue),
         }
     }
 
@@ -290,21 +309,42 @@ impl Router {
     }
 
     /// A reminder every `calls_per_test_reminder` calls until the agent
-    /// runs a test, at most `test_reminders` of them.
+    /// runs a test, at most `test_reminders` of them. After that, one
+    /// reminder `calls_per_test_reminder` calls after the last test run,
+    /// until the next run, at most `retest_reminders` of them: in #145 an
+    /// agent ran its test once and read code to the end of its calls.
     fn remind_test(self, calls: u32) -> (Self, Decision) {
-        let due = self
-            .rules
-            .calls_per_test_reminder
-            .saturating_mul(self.reminders.saturating_add(1));
-        if self.tested || self.reminders >= self.rules.test_reminders || calls < due {
+        let every = self.rules.calls_per_test_reminder;
+        let (due, left) = match self.last_test {
+            None => (
+                every.saturating_mul(self.reminders.saturating_add(1)),
+                self.reminders < self.rules.test_reminders,
+            ),
+            Some(at) => (
+                at.saturating_add(every),
+                !self.retest_reminded && self.retests < self.rules.retest_reminders,
+            ),
+        };
+        if !left || calls < due {
             return (self, Decision::Continue);
         }
-        (
-            Self {
+        let next = match self.last_test {
+            None => Self {
                 reminders: self.reminders + 1,
                 ..self
             },
-            Decision::RemindTest { calls },
+            Some(_) => Self {
+                retests: self.retests + 1,
+                retest_reminded: true,
+                ..self
+            },
+        };
+        (
+            next,
+            Decision::RemindTest {
+                calls,
+                last_test: self.last_test,
+            },
         )
     }
 
@@ -428,10 +468,10 @@ mod tests {
     #[test]
     fn core_without_a_patch_after_fifteen_calls_escalates() {
         // A test run keeps the reminder of #144 out of the way.
-        let (router, d) = run(Router::default(), &[Signal::TestRun, calls(14)]);
+        let (router, d) = run(Router::default(), &[tested(14), calls(14)]);
         assert_eq!((router.tier(), d[1]), (Tier::Core, Decision::Continue));
 
-        let (router, d) = run(Router::default(), &[Signal::TestRun, calls(15)]);
+        let (router, d) = run(Router::default(), &[tested(15), calls(15)]);
         assert_eq!(
             d[1],
             Decision::Escalate(EscalationReason::NoPatch { calls: 15 })
@@ -445,19 +485,37 @@ mod tests {
             Signal::GateFailed,
             Signal::PatchTested { repro_passes: true },
         ] {
-            let (router, d) = run(Router::default(), &[Signal::TestRun, first, calls(30)]);
+            let (router, d) = run(Router::default(), &[tested(30), first, calls(30)]);
             assert_eq!((router.tier(), d[2]), (Tier::Core, Decision::Continue));
         }
     }
 
     #[test]
     fn expert_ignores_the_call_rule() {
-        let (router, d) = run(expert(), &[Signal::TestRun, calls(30)]);
+        let (router, d) = run(expert(), &[tested(30), calls(30)]);
         assert_eq!((router.tier(), d[1]), (Tier::Expert, Decision::Continue));
     }
 
     fn calls(calls: u32) -> Signal {
         Signal::ModelCalls { calls }
+    }
+
+    fn tested(calls: u32) -> Signal {
+        Signal::TestRun { calls }
+    }
+
+    fn reminded(calls: u32) -> Decision {
+        Decision::RemindTest {
+            calls,
+            last_test: None,
+        }
+    }
+
+    fn reminded_again(calls: u32, last_test: u32) -> Decision {
+        Decision::RemindTest {
+            calls,
+            last_test: Some(last_test),
+        }
     }
 
     // §5.3 row: any tier, 8 calls without `run_tests` → reminder, at most
@@ -467,11 +525,7 @@ mod tests {
         let (router, d) = run(Router::default(), &[calls(7), calls(8), calls(9)]);
         assert_eq!(
             d,
-            vec![
-                Decision::Continue,
-                Decision::RemindTest { calls: 8 },
-                Decision::Continue,
-            ]
+            vec![Decision::Continue, reminded(8), Decision::Continue,]
         );
         assert_eq!(router.tier(), Tier::Core);
     }
@@ -494,9 +548,9 @@ mod tests {
         assert_eq!(
             d[1..],
             [
-                Decision::RemindTest { calls: 8 },
+                reminded(8),
                 Decision::Continue,
-                Decision::RemindTest { calls: 16 },
+                reminded(16),
                 Decision::Continue,
                 Decision::Continue,
             ]
@@ -507,9 +561,89 @@ mod tests {
     fn a_test_run_turns_the_reminder_off() {
         let (_, d) = run(
             Router::default(),
-            &[Signal::TestRun, Signal::GateFailed, calls(8), calls(16)],
+            &[tested(5), Signal::GateFailed, calls(8), calls(12)],
         );
         assert!(d.iter().all(|d| *d == Decision::Continue), "{d:?}");
+    }
+
+    // #156: in #145 an agent ran its test once in call 11 and read code to
+    // the end of its 40 calls.
+    #[test]
+    fn eight_calls_after_the_last_test_run_bring_one_reminder_to_run_it_again() {
+        let (_, d) = run(
+            Router::default(),
+            &[
+                Signal::GateFailed,
+                tested(11),
+                calls(18),
+                calls(19),
+                calls(27),
+                calls(40),
+            ],
+        );
+        assert_eq!(
+            d[2..],
+            [
+                Decision::Continue,
+                reminded_again(19, 11),
+                Decision::Continue,
+                Decision::Continue,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_test_run_restarts_the_count_and_the_reminders_stop_after_two() {
+        let (_, d) = run(
+            Router::default(),
+            &[
+                Signal::GateFailed,
+                tested(3),
+                calls(11),
+                tested(12),
+                calls(19),
+                calls(20),
+                tested(21),
+                calls(29),
+                calls(40),
+            ],
+        );
+        assert_eq!(
+            d[1..],
+            [
+                Decision::Continue,
+                reminded_again(11, 3),
+                Decision::Continue,
+                Decision::Continue,
+                reminded_again(20, 12),
+                Decision::Continue,
+                Decision::Continue,
+                Decision::Continue,
+            ]
+        );
+    }
+
+    #[test]
+    fn reminders_before_the_first_test_run_leave_the_reminders_to_run_it_again() {
+        let (_, d) = run(
+            Router::default(),
+            &[
+                Signal::GateFailed,
+                calls(8),
+                calls(16),
+                tested(17),
+                calls(25),
+            ],
+        );
+        assert_eq!(
+            d[1..],
+            [
+                reminded(8),
+                reminded(16),
+                Decision::Continue,
+                reminded_again(25, 17),
+            ]
+        );
     }
 
     #[test]
@@ -520,9 +654,9 @@ mod tests {
         assert_eq!(
             d,
             vec![
-                Decision::RemindTest { calls: 8 },
+                reminded(8),
                 Decision::Escalate(EscalationReason::NoPatch { calls: 15 }),
-                Decision::RemindTest { calls: 16 },
+                reminded(16),
             ]
         );
         assert_eq!(router.tier(), Tier::Expert);
@@ -531,7 +665,7 @@ mod tests {
     #[test]
     fn expert_is_reminded_too() {
         let (router, d) = run(expert(), &[calls(8)]);
-        assert_eq!(d[0], Decision::RemindTest { calls: 8 });
+        assert_eq!(d[0], reminded(8));
         assert_eq!(router.tier(), Tier::Expert);
     }
 
