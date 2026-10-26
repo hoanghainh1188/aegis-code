@@ -3,12 +3,14 @@
 //! build-config path, a lockfile the reader cannot read, or a manifest
 //! changed without its lockfile all fail the step. A manifest the resolved
 //! dependency tree covers (#80) may change alone: the gate compares the
-//! trees next.
+//! trees next. In a repo of more than one profile (#71), a file the part's
+//! profile does not read but another of the repo's does fails too (#200):
+//! the other build may read it, and this part's check cannot.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use aegis_lang::{Profile, glob_match, join_dir, new_dependency_violations, read_lockfile};
+use aegis_lang::{Profile, glob_match, in_dir, join_dir, new_dependency_violations, read_lockfile};
 
 use crate::GateError;
 use crate::git::{self, Change};
@@ -30,12 +32,37 @@ fn matters(profile: &Profile, path: &str) -> bool {
         || !profile.protected_changes(&[path]).is_empty()
 }
 
+/// The other profiles of the repo, each with the directory it owns
+/// (`""` for the rest of the repo).
+pub(crate) type Others<'a> = [(&'a str, &'a Profile)];
+
+/// The changed paths of the part, from the repo root, that `profile` does
+/// not read but the profile of a directory holding the part does, each
+/// with that profile's language (#200): `web/native/Cargo.lock` under the
+/// TypeScript part `web` of a Rust repo, which the root's workspace may
+/// build.
+fn foreign(profile: &Profile, dir: &str, changed: &[String], others: &Others<'_>) -> Vec<String> {
+    changed
+        .iter()
+        .filter(|p| !matters(profile, p))
+        .filter_map(|p| {
+            let full = join_dir(dir, p);
+            let langs: Vec<String> = others
+                .iter()
+                .filter(|(d, o)| in_dir(d, &full).is_some_and(|rel| matters(o, rel)))
+                .map(|(_, o)| o.display_name.clone())
+                .collect();
+            (!langs.is_empty()).then(|| format!("{full} ({})", langs.join(", ")))
+        })
+        .collect()
+}
+
 /// `Ok(None)` when no manifest, lockfile or protected path changed;
 /// `Ok(Some(Err(reason)))` when the step fails. `changes` and `ignored`
 /// (the paths git ignores in the patched tree) are relative to `dir`, the
-/// part of `repo` that `profile` owns (#71). `tree` are the `on_change`
-/// patterns of the dependency tree the gate resolves after this check, if
-/// it does.
+/// part of `repo` that `profile` owns (#71); `others` are the repo's other
+/// profiles. `tree` are the `on_change` patterns of the dependency tree the
+/// gate resolves after this check, if it does.
 #[allow(clippy::too_many_arguments)]
 pub fn check(
     profile: &Profile,
@@ -46,6 +73,7 @@ pub fn check(
     ignored: &[String],
     allowed: &BTreeSet<String>,
     tree: &[String],
+    others: &Others<'_>,
 ) -> Result<Option<Result<(), String>>, GateError> {
     let shown = |path: &str| join_dir(dir, path);
     let nested: Vec<String> = changes
@@ -82,6 +110,14 @@ pub fn check(
                 .map(|p| shown(p))
                 .collect::<Vec<_>>()
                 .join(", ")
+        ))));
+    }
+    let foreign = foreign(profile, dir, changed, others);
+    if !foreign.is_empty() {
+        return Ok(Some(Err(format!(
+            "the patch changes build files another profile of the repo reads, which this part's \
+             check cannot read: {}; declare their directory as a part of its own to change them",
+            foreign.join(", ")
         ))));
     }
     let deps = &profile.dependencies;
@@ -142,4 +178,56 @@ pub fn check(
     } else {
         Err(problems.join("\n"))
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use aegis_lang::{Language, Profiles};
+
+    use super::*;
+
+    fn profile(language: Language) -> Profile {
+        Profiles::builtin().unwrap().get(language).unwrap().clone()
+    }
+
+    #[test]
+    fn a_build_file_of_a_profile_holding_the_part_is_foreign() {
+        let (rust, ts, py) = (
+            profile(Language::Rust),
+            profile(Language::TypeScript),
+            profile(Language::Python),
+        );
+        let changed = |paths: &[&str]| paths.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+        // `web/py` holds none of the part's files: the gate gives them to
+        // that deeper part.
+        let others: Vec<(&str, &Profile)> = vec![("", &rust), ("web/py", &py)];
+        assert_eq!(
+            foreign(
+                &ts,
+                "web",
+                &changed(&[
+                    "native/Cargo.lock",
+                    "native/.cargo/config.toml",
+                    "package-lock.json",
+                    "src/app.ts",
+                ]),
+                &others,
+            ),
+            [
+                "web/native/Cargo.lock (Rust)",
+                "web/native/.cargo/config.toml (Rust)"
+            ]
+        );
+        // Python owns only `web/py`: a requirements file beside it is not
+        // its. The root's toolchain file is protected wherever it is.
+        assert_eq!(
+            foreign(
+                &ts,
+                "web",
+                &changed(&["requirements.txt", "rust-toolchain.toml"]),
+                &others
+            ),
+            ["web/rust-toolchain.toml (Rust)"]
+        );
+    }
 }
