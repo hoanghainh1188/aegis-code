@@ -88,7 +88,7 @@ Khung 100 dòng và giới hạn 50 kết quả lấy theo thử nghiệm của 
   - **Python (scrapy):** CALLS, IMPORTS, INHERITS khớp hoàn toàn với grep. Đồ thị không thấy import động qua chuỗi đường dẫn (`load_object`, settings, `mock.patch`).
   - **Rust (typst):** CALLS nối theo tên. Vì vậy `parse`, `abs` khớp nhầm sang hàm khác, còn lời gọi qua trait gần như không được nối. Đồ thị cũng không thấy impl do macro sinh ra. Muốn sửa chữ ký hàm hay trait thì phải kiểm lại bằng `rust-analyzer`.
 - Cách nối (`aegis-lifecycle`, `code_graph.rs`), khi cấu hình có `[codebase_memory]` (`config/poc.toml`, `config/typst.toml`):
-  - Server chạy cạnh ACI, trong cây của job, với `HOME` là `<state_dir>/index` và `--ui=false`. `codebase_memory.tools` là các công cụ đồ thị agent được dùng; cấu hình PoC để trống (#203).
+  - Server chạy cạnh ACI, với `HOME` và thư mục làm việc là `<state_dir>/index`, và `--ui=false`. Không chạy trong cây của job: daemon do server của job đầu tiên khởi động giữ thư mục đó, và khi cây bị xoá thì `detect_changes` không chạy được git (#203). `codebase_memory.tools` là các công cụ đồ thị agent được dùng; cấu hình PoC để trống (#203).
   - Mọi repo dùng chung một thư mục chỉ mục. Lý do: server chạy qua một daemon chung cho mỗi user, và daemon đó chỉ phục vụ một thư mục cache. Một server dùng thư mục khác sẽ không khởi động được trong lúc daemon còn chạy.
   - Trước lượt gọi model đầu tiên, lifecycle lập chỉ mục cây của job (`index_repository`, chế độ `fast`: bỏ `docs/` và lớp semantic). Mất 2–6 s trên typst và scrapy. Lập chỉ mục thất bại thì job dừng.
   - Sau một `edit` hay `create_file` thành công, lần hỏi đồ thị kế tiếp lập chỉ mục lại trước. Không dựa vào watcher của server: nó không cập nhật kịp trong lúc đo.

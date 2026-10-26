@@ -316,17 +316,20 @@ fn tool_specs(
         // per user and serves a single cache directory, so a job with
         // another one could not start while a job is running (#185). Each
         // job indexes its tree as its own project and drops it at the end
-        // (`CodeGraph`). The server runs in the tree, which it then takes
-        // as its own project.
+        // (`CodeGraph`). The server runs in the index directory, not in the
+        // tree: the daemon the first job's server starts keeps that
+        // directory as its own, and once the job's tree is gone
+        // `detect_changes` can run no git command (#203).
         let index = cfg.run.state_dir.join("index");
         std::fs::create_dir_all(&index).map_err(|e| LifecycleError::io(&index, &e))?;
+        let cwd = index.clone();
         let index = index.display().to_string();
         let fill = |v: &String| v.replace(INDEX_DIR, &index);
         specs.push(McpServerSpec {
             name: code_graph::SERVER.into(),
             program: cbm.program.clone(),
             args: cbm.args.iter().map(fill).collect(),
-            cwd: Some(tree.to_path_buf()),
+            cwd: Some(cwd),
             env: cbm.env.iter().map(|(k, v)| (k.clone(), fill(v))).collect(),
             tools: Some(cbm.tools.clone()),
         });
@@ -1196,6 +1199,21 @@ mod tests {
                 .clone(),
         );
         RunConfig::from_toml(&toml::to_string(&cfg).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn codebase_memory_runs_in_the_index_directory_not_in_the_job_s_tree() {
+        // #203: the daemon keeps its first server's directory, and a job's
+        // tree is removed at the end of the job.
+        let cfg = monorepo(false);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let job_dir = cfg.run.state_dir.join("jobs/cwd");
+        std::fs::create_dir_all(&job_dir).unwrap();
+        let tree = job_dir.join("repo");
+        let specs = tool_specs(&cfg, &profiles, &tree, &job_dir).unwrap();
+        let cbm = specs.iter().find(|s| s.name == code_graph::SERVER).unwrap();
+        assert_eq!(cbm.cwd, Some(cfg.run.state_dir.join("index")));
+        assert_eq!(cbm.tools, Some(vec![]));
     }
 
     #[test]
