@@ -32,7 +32,9 @@ CARGO_PROFILE_TEST_DEBUG = "line-tables-only"
 
 [budget]
 max_cost_usd = 4.0
-max_model_calls = 40
+# 80 for the experiment of #156: six issues used all 40 calls in each of
+# three runs (#145); the default stays 40 (ADR 0005 §4).
+max_model_calls = 80
 
 # Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
 # Before the first gate run the platform asks it for the code linked to the

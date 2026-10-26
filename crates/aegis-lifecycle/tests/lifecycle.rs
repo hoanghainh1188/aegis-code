@@ -684,6 +684,47 @@ async fn eight_calls_without_a_test_run_remind_the_agent_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn eight_calls_after_a_test_run_remind_the_agent_to_run_it_again() {
+    let scratch = repo_with_bug();
+    let mut script = vec![call(
+        "t1",
+        "run_tests",
+        json!({"test": "fourth_item_is_refused"}),
+    )];
+    script
+        .extend((2..=9).map(|n| call(&format!("t{n}"), "search_symbol", json!({"name": "Cart"}))));
+    script.push(vec![ContentBlock::text(
+        r#"{"status": "stopped", "stop_reason": "needs a design decision"}"#,
+    )]);
+    let p = platform(
+        config(&scratch, "http://127.0.0.1:1", 40),
+        Scripted::new(script, vec![]),
+    );
+
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(
+        report.reason.as_deref(),
+        Some("agent stopped: needs a design decision")
+    );
+    let core = p.provider.requests_for("core");
+    assert_eq!(core.len(), 10);
+    let reminded: Vec<_> = core.iter().map(reminder_in).collect();
+    assert_eq!(reminded.iter().filter(|r| **r).count(), 1);
+    assert!(reminded[9], "the 10th call reads the reminder");
+    let told = core[9].messages.last().unwrap().content.iter().any(|b| {
+        matches!(b, ContentBlock::Text { text, .. } if text.starts_with("You last ran a test 8 calls ago"))
+    });
+    assert!(told);
+    assert_eq!(
+        router_events(&p.store).await,
+        [LedgerEvent::TestReminded {
+            tier: Tier::Core,
+            calls: 9,
+        }]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn core_reading_for_fifteen_calls_without_a_patch_escalates_to_expert() {
     let scratch = repo_with_bug();
     let reads = (1..=15)

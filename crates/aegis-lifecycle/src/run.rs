@@ -967,7 +967,8 @@ where
             dearest_call_usd = dearest_call_usd.max(cost);
             ledger.tool_calls(tier, tool_calls(turn)).await?;
         }
-        let (after_edits, decision) = fold_tools(router, &outcome.turns);
+        let prior_calls = check.budget.model_calls(&[]);
+        let (after_edits, decision) = fold_tools(router, prior_calls, &outcome.turns);
         if after_edits.tier() != router.tier() {
             // Escalated on the loop's last turn: Expert takes over from here.
             first_expert_call = true;
@@ -996,14 +997,14 @@ where
                 Some(Halt::Budget(stop)) => {
                     return Ok(Ending::stop(stop.outcome(), stop.to_string()));
                 }
-                Some(Halt::RemindTest { calls }) => {
+                Some(Halt::RemindTest { calls, last_test }) => {
                     // The router counts the reminder, so the next one comes
-                    // only after more calls without a test run (#144).
+                    // only after more calls without a test run (#144, #156).
                     let (next, decision) = router.observe(Signal::ModelCalls { calls });
-                    debug_assert_eq!(decision, Decision::RemindTest { calls });
+                    debug_assert_eq!(decision, Decision::RemindTest { calls, last_test });
                     router = next;
                     ledger.test_reminded(tier, calls).await?;
-                    session = session.with_user_text(test_reminder(calls));
+                    session = session.with_user_text(test_reminder(calls, last_test));
                     continue;
                 }
                 Some(Halt::Escalate(reason)) => {
