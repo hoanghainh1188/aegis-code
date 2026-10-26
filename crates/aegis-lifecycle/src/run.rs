@@ -905,6 +905,10 @@ pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
     }
 }
 
+/// Model calls the agent needs at least to act on the code graph's note
+/// before the gate: read a file, edit it, answer again, with one to spare.
+const IMPACT_CALLS: u32 = 4;
+
 /// The Core/Expert loop with gate runs between attempts.
 #[allow(clippy::too_many_arguments)]
 async fn drive<P, S, T>(
@@ -1050,7 +1054,19 @@ where
         // Once a job, before its first gate run: the code the graph links
         // to the patch, for the agent to check (#203). The graph only
         // helps, so a failed query lets the patch go on to the gate.
-        if !std::mem::replace(&mut impact_checked, true)
+        // Not when the budget leaves the agent too few calls to act on the
+        // note: the patch would then stop at the budget instead of going to
+        // the gate.
+        let record = ledger.record();
+        let calls_left = cfg
+            .budget
+            .max_model_calls
+            .saturating_sub(record.model_calls);
+        let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
+        let room =
+            calls_left >= IMPACT_CALLS && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
+        if room
+            && !std::mem::replace(&mut impact_checked, true)
             && let Some(impact) = tools.impact(base).await
         {
             match impact {
