@@ -196,6 +196,32 @@ mod tests {
         assert_eq!(t.price("claude-opus-5-5").unwrap().input, 4.0);
     }
 
+    /// A model a shipped config sends but the table does not price fails
+    /// the run at the first call (#221).
+    #[test]
+    fn every_model_of_the_shipped_configs_has_a_price() {
+        let t = table();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "toml") {
+                continue;
+            }
+            let config: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+            let Some(models) = config.get("models").and_then(|m| m.as_table()) else {
+                continue;
+            };
+            for tier in models.values() {
+                if let Some(id) = tier.get("id").and_then(|id| id.as_str()) {
+                    assert!(t.price(id).is_ok(), "{}: no price for {id}", path.display());
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0);
+    }
+
     // Sonnet, 5-minute writes:
     // C_in  = 2 · (50 000·0.05 + 2 000·1.25 + 1 000) / 1e6 = 2 · 6 000 / 1e6 = 0.012
     // C_out = 800 · 10 / 1e6 = 0.008

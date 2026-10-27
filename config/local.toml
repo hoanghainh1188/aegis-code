@@ -6,15 +6,19 @@ base_url = "http://localhost:11434/v1"
 protocol = "openai"
 
 # Model per tier (design §5.1, §9; #38).
-# Uses open-weights coding models running locally on Ollama/vLLM.
+# Open-weights coding models, named by their Ollama tag (`ollama pull
+# qwen2.5-coder:7b`, `qwen2.5-coder:32b`); Ollama answers 404 to any other
+# name (#221). With vLLM, serve them under the same names
+# (`--served-model-name qwen2.5-coder:32b`) or change the ids here and
+# the keys in config/pricing.toml together.
 [models.light]
-id = "qwen2.5-coder-7b"
+id = "qwen2.5-coder:7b"
 
 [models.core]
-id = "qwen2.5-coder-32b"
+id = "qwen2.5-coder:32b"
 
 [models.expert]
-id = "qwen2.5-coder-32b"
+id = "qwen2.5-coder:32b"
 effort = "high"
 
 # Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
