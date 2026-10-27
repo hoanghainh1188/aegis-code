@@ -1,0 +1,86 @@
+# Local / On-Premise configuration: zero cloud API cost, connects to local LLM runner (Ollama, vLLM, etc.) (#38).
+
+[provider]
+kind = "local"
+base_url = "http://localhost:11434/v1"
+protocol = "openai"
+
+# Model per tier (design §5.1, §9; #38).
+# Uses open-weights coding models running locally on Ollama/vLLM.
+[models.light]
+id = "qwen2.5-coder-7b"
+
+[models.core]
+id = "qwen2.5-coder-32b"
+
+[models.expert]
+id = "qwen2.5-coder-32b"
+effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+sandbox = true
+
+[run.sandbox_env]
+TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS = ""
+
+[budget]
+max_cost_usd = 0.0
+max_model_calls = 40
+
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+[repo]
+path = ".workspace/repos/scrapy"
+language = "python"
+base = "master"
+key = "scrapy"
+hidden_test = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not requires_internet", "{tests}"]
+conventions = """
+- Put the reproduction test in a new file `tests/test_<module>_<topic>.py`,
+  named after the module you fix, never in the module itself. Use the
+  helpers `tests/` already has (`tests/mockserver`, `tests/spiders.py`,
+  `scrapy.utils.test`) instead of writing new ones.
+- Report its pytest id, `tests/test_<module>_<topic>.py::test_name`, and
+  that file as its only file.
+"""
+
+[repo.overrides]
+fetch = ["sh", "-c", """uv venv -q --allow-existing .venv && python3 -c '
+import configparser
+c = configparser.ConfigParser(interpolation=None)
+c.read("tox.ini")
+envs = ["test-requirements", "testenv", "testenv:extra-deps"]
+lines = [l for e in envs if e in c for l in c[e].get("deps", "").splitlines()]
+deps = (l.split("#")[0].strip() for l in lines)
+deps = {d for d in deps if d and not d.startswith("{")}
+import re
+hooks = open(".pre-commit-config.yaml").read()
+ruff = re.search(r"ruff-pre-commit\\s*\\n\\s*rev:\\s*v?([\\w.]+)", hooks)
+if ruff:
+    deps.add("ruff==" + ruff.group(1))
+print("\\n".join(sorted(deps)))
+' > .venv/test-requirements.txt && uv pip install -q --python .venv/bin/python -e . -r .venv/test-requirements.txt"""]
+
+[repo.overrides.gate]
+test = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "-m", "not requires_internet", "scrapy", "tests", "--doctest-modules"]
+test_output = "pytest"
+coverage = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "-m", "not requires_internet", "--cov=scrapy", "--cov-report=xml:coverage.xml", "scrapy", "tests", "--doctest-modules"]
+[repo.overrides.coverage]
+format = "cobertura"
+path = "coverage.xml"
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "scrapy"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

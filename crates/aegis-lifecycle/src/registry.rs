@@ -94,7 +94,7 @@ impl ModeConfig {
             ProviderConfig::Bedrock { .. } => {
                 return refuse("`require_jp_profile` must be true".into());
             }
-            ProviderConfig::ClaudeApi { .. } => {
+            ProviderConfig::ClaudeApi { .. } | ProviderConfig::Local { .. } => {
                 return refuse(format!("the provider must be Bedrock in `{JAPAN_REGION}`"));
             }
         }

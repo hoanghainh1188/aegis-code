@@ -5,6 +5,7 @@ use aegis_secrets::Secrets;
 use serde::Deserialize;
 
 use crate::claude_api::{ClaudeApi, DEFAULT_API_KEY_ENV};
+use crate::local::{LocalModelProvider, LocalProtocol};
 use crate::{ModelPolicy, ModelProvider, ProviderError, Request, Response};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -24,6 +25,13 @@ pub enum ProviderConfig {
         /// Required, so a missing line cannot silently turn the guard off.
         require_jp_profile: bool,
     },
+    Local {
+        base_url: String,
+        #[serde(default)]
+        api_key_env: Option<String>,
+        #[serde(default)]
+        protocol: LocalProtocol,
+    },
 }
 
 fn default_api_key_env() -> String {
@@ -36,6 +44,7 @@ pub enum Provider {
     ClaudeApi(ClaudeApi),
     #[cfg(feature = "bedrock")]
     Bedrock(crate::Bedrock),
+    Local(LocalModelProvider),
 }
 
 impl Provider {
@@ -88,6 +97,19 @@ impl Provider {
                 };
                 bedrock(region, policy).await
             }
+            ProviderConfig::Local {
+                base_url,
+                api_key_env,
+                protocol,
+            } => {
+                let api_key = match (api_key_env, secrets) {
+                    (Some(env), Some(secrets)) => secrets.get(env).map(|s| s.expose().to_owned()),
+                    (Some(env), None) => std::env::var(env).ok(),
+                    (None, _) => None,
+                };
+                let local = LocalModelProvider::new(base_url, api_key, *protocol)?;
+                Ok(Self::Local(local))
+            }
         }
     }
 }
@@ -113,6 +135,7 @@ impl ModelProvider for Provider {
             Self::ClaudeApi(api) => api.send(request).await,
             #[cfg(feature = "bedrock")]
             Self::Bedrock(bedrock) => bedrock.send(request).await,
+            Self::Local(local) => local.send(request).await,
         }
     }
 }
@@ -152,6 +175,25 @@ mod tests {
                 require_jp_profile: true,
             }
         );
+    }
+
+    #[test]
+    fn local_config_uses_local_provider() {
+        assert_eq!(
+            load("local.toml"),
+            ProviderConfig::Local {
+                base_url: "http://localhost:11434/v1".into(),
+                api_key_env: None,
+                protocol: LocalProtocol::OpenAi,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn local_provider_builds_without_error() {
+        let config = load("local.toml");
+        let provider = Provider::from_config(&config).await.unwrap();
+        assert!(matches!(provider, Provider::Local(_)));
     }
 
     #[test]
