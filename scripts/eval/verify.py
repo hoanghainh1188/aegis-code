@@ -39,6 +39,7 @@ TIMEOUT = 1800
 RAN = {
     "go": re.compile(r"^--- (PASS|FAIL): ", re.MULTILINE),
     "csharp": re.compile(r"\b[Tt]otal(?: tests)?:\s*[1-9]"),
+    "java": re.compile(r"Tests run: [1-9]"),
 }
 
 
@@ -75,6 +76,10 @@ def command(item, tree):
         return ["cargo", "test", "--workspace", "--test", "tests", "--", pattern], env
     if lang in ("typescript", "javascript"):
         env = {**os.environ}
+        # Straight to vitest: `npm test` may go through a package manager
+        # this machine lacks (zod's goes through nub).
+        if any(tree.glob("vitest.config.*")):
+            return ["npx", "--no-install", "vitest", "run", *item["hidden_tests"]], env
         return ["npm", "test", "--", *item["hidden_tests"]], env
     if lang == "go":
         env = {**os.environ}
@@ -83,7 +88,11 @@ def command(item, tree):
     if lang == "java":
         env = {**os.environ}
         test_arg = ",".join(item["hidden_tests"])
-        return ["mvn", "test", f"-Dtest={test_arg}"], env
+        # Only the modules that hold the test files: others may not build
+        # in the `test` phase (gson's test-jpms needs the installed jar).
+        modules = sorted({f.split("/src/test/")[0] for f in item["test_files"] if "/src/test/" in f})
+        return ["mvn", "-B", "test", f"-Dtest={test_arg}", "-Dsurefire.failIfNoSpecifiedTests=false",
+                *(["-pl", ",".join(modules)] if modules else [])], env
     if lang == "csharp":
         # English output, for RAN.
         env = {**os.environ, "DOTNET_CLI_UI_LANGUAGE": "en"}

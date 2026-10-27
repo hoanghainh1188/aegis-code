@@ -14,3 +14,9 @@ source_files = ["packages/zod/src/v4/core/schemas.ts"]
 test_files = ["packages/zod/src/v4/classic/tests/union.test.ts"]
 hidden_tests = ["packages/zod/src/v4/classic/tests/union.test.ts"]
 body = "Since 4.6.6, an array that exceeds `.max()` inside a union is reported as `invalid_union` rather than the array's `too_big`. In 4.6.5 it was `too_big`.\n\n```ts\nimport { z } from 'zod';\n\nconst schema = z.union([z.array(z.string()).max(2), z.string()]);\nconst result = schema.safeParse(['a', 'b', 'c']);\nconsole.log(result.error?.issues.map(({ code, origin, path }) => ({ code, origin, path })));\n```\n\n- **4.6.5:** `[{ code: 'too_big', origin: 'array', path: [] }]`\n- **4.6.6:** `[{ code: 'invalid_union', path: [] }]` (`errors` holds the array's `too_big` and the string's `invalid_type`)\n\n**Why, as far as I can tell.** 4.6.6 added `capSize` to arrays, maps and sets: a container over its leading max size fails before its items are parsed, and the issue is marked `continue = false`. `handleUnionResults` reports a single option's issues only when exactly one option did not abort. Before 4.6.6, the array option's `too_big` did not abort, so the union reported it. Now both options abort, so the union falls back to `invalid_union`. `.min()` is not affected.\n\n**Impact.** Code that maps issues to messages, for instance a \"too many items\" form error, gets a generic \"Invalid input\" after a patch upgrade. A common shape this hits is \"a list, or a single value coerced to a list\", written as a union.\n\n**Expected.** Either keep reporting `too_big` from the array option when it is the only option whose type matched, as before, or note the change in the release notes.\n\nWe worked around it by checking the size after the union (`z.union([...]).pipe(z.array(item).max(n))`). Thanks for zod!"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 7

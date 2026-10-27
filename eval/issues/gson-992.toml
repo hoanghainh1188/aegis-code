@@ -14,3 +14,9 @@ source_files = ["gson/src/main/java/com/google/gson/JsonPrimitive.java"]
 test_files = ["gson/src/test/java/com/google/gson/JsonPrimitiveTest.java"]
 hidden_tests = ["JsonPrimitiveTest"]
 body = "While most types maintain consistency between `equals()` and `hashCode()` after string serialization and parsing (`JsonElement#toString()` + `JsonParser#parse(String)`, integers do not. `equals()` returns true, but the hash codes are different.\r\n\r\n```\r\n  public void testEqualsIntegerAndLazilyParsedInteger() {\r\n    MoreAsserts.assertEqualsAndHashCode(new JsonPrimitive(42), new JsonPrimitive(new LazilyParsedNumber(\"42\")));\r\n  }\r\n```"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 12

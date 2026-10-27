@@ -93,22 +93,23 @@
  {
   "repo": "colinhacks/zod",
   "language": "typescript",
-  "issue": 6578,
-  "title": "Add Tajik (`tg`) locale \u2014 branch ready, interaction limit blocks the PR",
-  "url": "https://github.com/colinhacks/zod/issues/6578",
-  "closed_at": "2026-09-09T17:53:26Z",
-  "labels": [],
-  "fix_pr": 6581,
-  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6581",
+  "issue": 6027,
+  "title": "Bug: toJSONSchema `$ref` pointer not encoded when meta id contains `/` or `~`",
+  "url": "https://github.com/colinhacks/zod/issues/6027",
+  "closed_at": "2026-08-13T21:02:49Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 6144,
+  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6144",
   "base_branch": "main",
-  "fix_commit": "574d480fb443d3fd396efbcb8230f3dfee4a2cd2",
+  "fix_commit": "bd18314c6d0e29a7890ecea73e206f8bbca54ec9",
   "source_files": [
-   "packages/zod/src/v4/locales/index.ts",
-   "packages/zod/src/v4/locales/tg.ts"
+   "packages/zod/src/v4/core/to-json-schema.ts"
   ],
   "test_files": [
-   "packages/zod/src/v4/core/tests/locales/tg.test.ts"
+   "packages/zod/src/v4/classic/tests/to-json-schema.test.ts"
   ],
-  "source_lines": 135
+  "source_lines": 10
  }
 ]

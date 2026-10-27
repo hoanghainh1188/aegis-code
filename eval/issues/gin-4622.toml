@@ -1,0 +1,22 @@
+# SaveUploadedFile: unexpected chmod on existing directories (breaks /tmp usage)
+id = "gin-4622"
+language = "go"
+repo = "gin-gonic/gin"
+issue = 4622
+url = "https://github.com/gin-gonic/gin/issues/4622"
+title = "SaveUploadedFile: unexpected chmod on existing directories (breaks /tmp usage)"
+closed_at = "2026-06-22T15:34:43Z"
+labels = ["type/bug"]
+base_commit = "da1e108614ecbbadfa5736b1b297b16121d23b9b"
+fix_commit = "d9307dbcbbe796a64d9e0ef23452da888dd7f904"
+fix_pr = 4702
+source_files = ["context.go"]
+test_files = ["context_test.go"]
+hidden_tests = ["TestSaveUploadedFileWithPermissionFailed", "TestSaveUploadedFileToExistingDir"]
+body = "## Description\n\nAfter upgrading from v1.10.1 to v1.12.0, `Context.SaveUploadedFile` started to fail when saving files directly into existing system directories like `/tmp`.\n\nThe failure happens due to an attempt to call `os.Chmod` on the target directory, even if it already exists and is not owned by the process.\n\nRelevant code:\nhttps://github.com/gin-gonic/gin/blob/v1.12.0/context.go#L734\n\n## Reproduction\n\n```go\nfile, _ := c.FormFile(\"file\")\n\n// Saving directly into /tmp\nerr := c.SaveUploadedFile(file, \"/tmp/test.txt\")\nif err != nil {\n  panic(err)\n}\n```\n\n## Actual behavior\n\nThe call fails with:\n\nchmod /tmp: operation not permitted\n\n## Expected behavior\n\nIf the directory already exists, especially for system directories like `/tmp`, `SaveUploadedFile` should not attempt to modify its permissions.\n\nThe previous behavior (v1.10.1) only used `os.MkdirAll`, which does not change permissions on existing directories.\n\n## Impact\n\nThis is a breaking change for common usage patterns such as:\n\n* saving files to `/tmp/<filename>`\n* writing into pre-existing directories managed by the OS or container runtime\n\n## Context\n\nThis behavior appears to be introduced together with the change that allows specifying permissions for created directories (see #4068). However, applying `chmod` unconditionally also affects already existing directories.\n\n## Suggested fix\n\nOnly apply `os.Chmod` when the directory is newly created, or make it optional.\n\nFor example:\n\n* skip `chmod` if directory already exists\n* or provide a flag to control this behavior\n\n## Additional notes\n\nThis change is not mentioned as breaking in release notes, but it alters previously working behavior.\n\n\n### Gin Version\n\nv1.12.0\n\n### Can you reproduce the bug?\n\nYes\n\n### Source Code\n\n```go\nfile, _ := c.FormFile(\"file\")\n\n// Saving directly into /tmp\nerr := c.SaveUploadedFile(file, \"/tmp/test.txt\")\nif err != nil {\n   panic(err)\n}\n```\n\n### Go Version\n\n1.26.1\n\n### Operating System\n\nlinux"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 5

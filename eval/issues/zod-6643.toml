@@ -14,3 +14,9 @@ source_files = ["packages/zod/src/v4/core/compile.ts", "packages/zod/src/v4/core
 test_files = ["packages/zod/src/v4/classic/tests/array.test.ts", "packages/zod/src/v4/classic/tests/map.test.ts", "packages/zod/src/v4/classic/tests/set.test.ts"]
 hidden_tests = ["packages/zod/src/v4/classic/tests/array.test.ts", "packages/zod/src/v4/classic/tests/map.test.ts", "packages/zod/src/v4/classic/tests/set.test.ts"]
 body = "For reference: https://www.cve.org/CVERecord?id=CVE-2023-54404\n\nzod 4.6.5 is affected by this CVE:\n\nZod schema-validation library through 4.6.5 contains an uncontrolled resource consumption vulnerability that allows attackers to exhaust memory by submitting a large array to an application using an array schema without a length constraint. Attackers can exploit the handleArrayResult parse logic in $ZodArray, which accumulates every validation issue for each failing element with no cap or early termination, causing the process to allocate excessive issue objects and crash due to out-of-memory conditions."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 10
