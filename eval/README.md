@@ -37,6 +37,8 @@ Bước 1–6 cho 21 issue scrapy và 20 issue typst. Sau bước 7 còn **32 is
 
 Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` của `tox.ini`, trừ `google-cloud-storage` và các shell tương tác.
 
+Test ẩn của Go là các hàm `Test…` mà bản sửa thêm hoặc đổi, chạy bằng `go test -run '^(…)$'`; của C# là lớp test `Namespace.Class`, chạy bằng `dotnet test --filter FullyQualifiedName~Namespace.Class.`. Hai runner này thoát 0 khi bộ lọc không khớp test nào, nên `verify.py` coi lượt chạy ở `fix_commit` không có test nào là không đạt (#219). Môi trường kiểm gin: Go 1.27. RestSharp: .NET SDK 8 và 10, `EVAL_DOTNET_FRAMEWORK=net8.0` vì project test còn nhắm `net48` (cần mono) và `net9.0`.
+
 Ở Phase 2 (#155), mở rộng thêm 20 issue mẫu cho 4 ngôn ngữ mới (mỗi repo 5 issue đáp ứng tiêu chí):
 - **TypeScript**: `colinhacks/zod` (5 issue: zod-6659, zod-6657, zod-6641, zod-6643, zod-6578)
 - **Go**: `gin-gonic/gin` (5 issue: gin-4851, gin-4877, gin-4853, gin-4818, gin-4760)
