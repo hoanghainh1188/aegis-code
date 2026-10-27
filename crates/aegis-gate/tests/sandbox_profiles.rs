@@ -198,24 +198,13 @@ fn the_go_gate_passes_inside_the_container() {
     );
 }
 
-/// The gate looks for the report at the profile's path as written, and
-/// `TestResults/*/…` has a new directory each run (#211): the report is
-/// copied to a fixed path.
-const CSHARP_COVERAGE: &str = r#"
-[gate]
-coverage = ["sh", "-c", "dotnet test --no-restore --results-directory TestResults --collect 'XPlat Code Coverage;Format=opencover' && cp TestResults/*/coverage.opencover.xml coverage.opencover.xml"]
-[coverage]
-format = "open_cover"
-path = "coverage.opencover.xml"
-"#;
-
 #[test]
 fn the_csharp_gate_passes_inside_the_container() {
     gate_passes(
         Language::CSharp,
-        CSHARP_COVERAGE,
+        "",
         "csharp",
-        "bin/\nobj/\nTestResults/\ncoverage.opencover.xml\n",
+        "bin/\nobj/\nTestResults/\n",
         "FullyQualifiedName~CartTests.AddsUpPrices",
     );
 }

@@ -949,3 +949,106 @@ fn the_audit_gets_the_lockfile_and_the_repo_s_policy() {
         StepStatus::Skipped(Skip::NoDependencyChange)
     );
 }
+
+#[test]
+fn coverage_step_passes_with_glob_path_and_removes_old_reports() {
+    if !ready() {
+        return;
+    }
+    let overrides = r#"
+[gate]
+format = false
+lint = false
+repro_test = false
+test = ["true"]
+coverage = ["sh", "-c", "mkdir -p TestResults/run_new && echo '<coverage/>' > TestResults/run_new/coverage.opencover.xml"]
+[coverage]
+format = "open_cover"
+path = "TestResults/*/coverage.opencover.xml"
+"#;
+    let prof = profile(Language::Rust, overrides);
+    let repo = Repo::new("rust", &[]);
+
+    // Seed an old coverage report from a previous run.
+    let old_dir = repo.dir().join("TestResults").join("run_old");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    let old_file = old_dir.join("coverage.opencover.xml");
+    std::fs::write(&old_file, "<old/>").unwrap();
+    assert!(old_file.exists());
+
+    let report = repo.gate(&prof, None);
+    assert_eq!(
+        report.step(StepName::Coverage).unwrap().status,
+        StepStatus::Passed
+    );
+    // Old file was deleted by the pre-coverage cleanup.
+    assert!(!old_file.exists(), "old coverage report must be removed");
+    // New file exists.
+    assert!(
+        repo.dir()
+            .join("TestResults/run_new/coverage.opencover.xml")
+            .exists()
+    );
+}
+
+#[test]
+fn coverage_step_fails_when_multiple_reports_match_glob() {
+    if !ready() {
+        return;
+    }
+    let overrides = r#"
+[gate]
+format = false
+lint = false
+repro_test = false
+test = ["true"]
+coverage = ["sh", "-c", "mkdir -p TestResults/r1 TestResults/r2 && touch TestResults/r1/coverage.opencover.xml TestResults/r2/coverage.opencover.xml"]
+[coverage]
+format = "open_cover"
+path = "TestResults/*/coverage.opencover.xml"
+"#;
+    let prof = profile(Language::Rust, overrides);
+    let repo = Repo::new("rust", &[]);
+
+    let report = repo.gate(&prof, None);
+    let step = report.step(StepName::Coverage).unwrap();
+    assert_eq!(step.status, StepStatus::Failed);
+    assert!(
+        step.detail
+            .contains("multiple coverage reports match `TestResults/*/coverage.opencover.xml`:"),
+        "{}",
+        step.detail
+    );
+}
+
+#[test]
+fn coverage_step_fails_when_no_report_matches_glob() {
+    if !ready() {
+        return;
+    }
+    let overrides = r#"
+[gate]
+format = false
+lint = false
+repro_test = false
+test = ["true"]
+coverage = ["true"]
+[coverage]
+format = "open_cover"
+path = "TestResults/*/coverage.opencover.xml"
+"#;
+    let prof = profile(Language::Rust, overrides);
+    let repo = Repo::new("rust", &[]);
+
+    let report = repo.gate(&prof, None);
+    let step = report.step(StepName::Coverage).unwrap();
+    assert_eq!(step.status, StepStatus::Failed);
+    assert!(
+        step.detail.contains("no coverage report at `")
+            && step
+                .detail
+                .contains("TestResults/*/coverage.opencover.xml`"),
+        "{}",
+        step.detail
+    );
+}

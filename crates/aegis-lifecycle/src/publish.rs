@@ -27,7 +27,13 @@ fn coverage_percent(profiles: &RepoProfiles, tree: &Path, parts: &[String]) -> O
         .filter(|part| parts.contains(&part.dir))
         .filter_map(|part| {
             let coverage = part.profile.coverage.as_ref()?;
-            let text = std::fs::read_to_string(tree.join(&part.dir).join(&coverage.path)).ok()?;
+            let dir = tree.join(&part.dir);
+            let matches = aegis_lang::find_reports(&dir, &coverage.path);
+            let report = match matches.as_slice() {
+                [single] => single,
+                _ => return None,
+            };
+            let text = std::fs::read_to_string(report).ok()?;
             match coverage.format {
                 CoverageFormat::Lcov => Some((lcov_percent(&text)?, lcov_lines(&text))),
                 CoverageFormat::Cobertura => {

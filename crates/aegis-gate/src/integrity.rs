@@ -24,7 +24,11 @@ impl Snapshot {
         Self(
             files
                 .iter()
-                .filter(|f| !skip.contains(f))
+                .filter(|f| {
+                    !skip
+                        .iter()
+                        .any(|pattern| pattern == *f || aegis_lang::path_glob(pattern, f))
+                })
                 .map(|f| (f.clone(), fingerprint(&repo.join(f))))
                 .collect(),
         )
@@ -37,5 +41,29 @@ impl Snapshot {
             .filter(|(f, before)| fingerprint(&repo.join(f)) != **before)
             .map(|(f, _)| f.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_skips_files_matching_glob_patterns() {
+        let repo = Path::new("/mock");
+        let files = vec![
+            "src/lib.rs".to_owned(),
+            "TestResults/abc-123/coverage.opencover.xml".to_owned(),
+            "lcov.info".to_owned(),
+        ];
+        let skip = vec![
+            "TestResults/*/coverage.opencover.xml".to_owned(),
+            "lcov.info".to_owned(),
+        ];
+        let snapshot = Snapshot::take(repo, &files, &skip);
+        assert_eq!(
+            snapshot.0.keys().cloned().collect::<Vec<_>>(),
+            vec!["src/lib.rs".to_owned()]
+        );
     }
 }
