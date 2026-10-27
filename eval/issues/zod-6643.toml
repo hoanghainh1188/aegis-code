@@ -1,0 +1,16 @@
+# zod 4.6.5 is affected by CVE-2023-54404
+id = "zod-6643"
+language = "typescript"
+repo = "colinhacks/zod"
+issue = 6643
+url = "https://github.com/colinhacks/zod/issues/6643"
+title = "zod 4.6.5 is affected by CVE-2023-54404"
+closed_at = "2026-10-09T19:50:24Z"
+labels = []
+base_commit = "0b216ef674e297ebe41d8bf902262e56f8755822"
+fix_commit = "e06a510b6fc1e6e28e3201fd116ca2a76212f6be"
+fix_pr = 6652
+source_files = ["packages/zod/src/v4/core/compile.ts", "packages/zod/src/v4/core/schemas.ts", "packages/zod/src/v4/core/util.ts"]
+test_files = ["packages/zod/src/v4/classic/tests/array.test.ts", "packages/zod/src/v4/classic/tests/map.test.ts", "packages/zod/src/v4/classic/tests/set.test.ts"]
+hidden_tests = ["packages/zod/src/v4/classic/tests/array.test.ts", "packages/zod/src/v4/classic/tests/map.test.ts", "packages/zod/src/v4/classic/tests/set.test.ts"]
+body = "For reference: https://www.cve.org/CVERecord?id=CVE-2023-54404\n\nzod 4.6.5 is affected by this CVE:\n\nZod schema-validation library through 4.6.5 contains an uncontrolled resource consumption vulnerability that allows attackers to exhaust memory by submitting a large array to an application using an array schema without a length constraint. Attackers can exploit the handleArrayResult parse logic in $ZodArray, which accumulates every validation issue for each failing element with no cap or early termination, causing the process to allocate excessive issue objects and crash due to out-of-memory conditions."

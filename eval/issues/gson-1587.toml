@@ -1,0 +1,16 @@
+# URI type adapter does not preserve object identity
+id = "gson-1587"
+language = "java"
+repo = "google/gson"
+issue = 1587
+url = "https://github.com/google/gson/issues/1587"
+title = "URI type adapter does not preserve object identity"
+closed_at = "2026-07-23T21:08:42Z"
+labels = ["bug"]
+base_commit = "e25d4fab7fd54f267c765d975acccddfdddc9cda"
+fix_commit = "961517decce0aa907c285c19d8b93d5c746ecdcb"
+fix_pr = 3067
+source_files = ["gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"]
+test_files = ["gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java"]
+hidden_tests = ["DefaultTypeAdaptersTest"]
+body = "The type adapter included by default for `java.net.URI` does not preserve the identity of all URI values. In other words:\r\n\r\n```java\r\nURI uri = new URI(\"s3://bucket/path/Kankyō.png\");\r\nURI roundTripUri = gson.fromJson(gson.toJson(uri), URI.class);\r\nassert roundTripUri.equals(uri); // AssertionError\r\n```\r\n\r\nThe problem is that the implementation [here](https://github.com/google/gson/blob/d1828736eb425a575667e0c86117ced787d1cf5b/gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java#L502-L520) uses `URI#toASCIIString`, which does not preserve the original URI components but instead normalizes them like this:\r\n\r\n```java\r\nNormalizer.normalize(s, Normalizer.Form.NFC)\r\n```\r\n\r\nThis is very bad, because it is changing the meaning of the URI on serialization. This issue has caused numerous bugs at our business dealing with international filenames being uploaded to our SAAS products and then being changed after being passed between multiple microservices.\r\n\r\nHere is an alternate implementation that we have started to use in our code:\r\n\r\n```java\r\npublic class NonNormalizingUriTypeAdapter extends TypeAdapter<URI> {\r\n    @Override\r\n    public URI read(JsonReader in) throws IOException {\r\n        if (in.peek() == JsonToken.NULL) {\r\n            in.nextNull();\r\n            return null;\r\n        }\r\n        try {\r\n            String nextString = in.nextString();\r\n            return \"null\".equals(nextString) ? null : new URI(nextString);\r\n        }\r\n        catch (URISyntaxException e) {\r\n            throw new JsonIOException(e);\r\n        }\r\n    }\r\n\r\n    @Override\r\n    public void write(JsonWriter out, URI value) throws IOException {\r\n        out.value(value == null ? null : value.toString());\r\n    }\r\n}\r\n```\r\n\r\nReally the only difference is using `toString()` instead of `toASCIIString()`, which URL-encodes the result without changing the character byte representations."

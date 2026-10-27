@@ -1,0 +1,115 @@
+[
+ {
+  "repo": "google/gson",
+  "language": "java",
+  "issue": 3113,
+  "title": "JsonReader silently accepts \\uXXXX escapes containing lone surrogates in string values and field names",
+  "url": "https://github.com/google/gson/issues/3113",
+  "closed_at": "2026-09-09T20:03:44Z",
+  "labels": [],
+  "fix_pr": 3116,
+  "fix_pr_url": "https://github.com/google/gson/pull/3116",
+  "base_branch": "main",
+  "fix_commit": "8b4b55051489132190cb8d1c61eb9dc7f5381295",
+  "source_files": [
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java"
+  ],
+  "source_lines": 23
+ },
+ {
+  "repo": "google/gson",
+  "language": "java",
+  "issue": 1768,
+  "title": "JsonReader / JsonTreeReader.promoteNameToValue() causes incorrect JSON path",
+  "url": "https://github.com/google/gson/issues/1768",
+  "closed_at": "2026-08-27T01:13:24Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 3098,
+  "fix_pr_url": "https://github.com/google/gson/pull/3098",
+  "base_branch": "main",
+  "fix_commit": "b3f4ca20087f9066de4c340522ff84e0558e1ad1",
+  "source_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/JsonTreeReader.java",
+   "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/JsonParserTest.java",
+   "gson/src/test/java/com/google/gson/functional/MapTest.java",
+   "gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java"
+  ],
+  "source_lines": 34
+ },
+ {
+  "repo": "google/gson",
+  "language": "java",
+  "issue": 992,
+  "title": "JsonPrimitive with LazilyParsedNumber integers breaks contract for hashCode()",
+  "url": "https://github.com/google/gson/issues/992",
+  "closed_at": "2026-07-23T21:11:01Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 3059,
+  "fix_pr_url": "https://github.com/google/gson/pull/3059",
+  "base_branch": "main",
+  "fix_commit": "5e277e42786ab6441b7dd6b1a8c34d545d132307",
+  "source_files": [
+   "gson/src/main/java/com/google/gson/JsonPrimitive.java"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/JsonPrimitiveTest.java"
+  ],
+  "source_lines": 39
+ },
+ {
+  "repo": "google/gson",
+  "language": "java",
+  "issue": 1587,
+  "title": "URI type adapter does not preserve object identity",
+  "url": "https://github.com/google/gson/issues/1587",
+  "closed_at": "2026-07-23T21:08:42Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 3067,
+  "fix_pr_url": "https://github.com/google/gson/pull/3067",
+  "base_branch": "main",
+  "fix_commit": "961517decce0aa907c285c19d8b93d5c746ecdcb",
+  "source_files": [
+   "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java"
+  ],
+  "source_lines": 2
+ },
+ {
+  "repo": "google/gson",
+  "language": "java",
+  "issue": 1247,
+  "title": "Confusing Exceptions",
+  "url": "https://github.com/google/gson/issues/1247",
+  "closed_at": "2026-07-21T19:32:32Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 3057,
+  "fix_pr_url": "https://github.com/google/gson/pull/3057",
+  "base_branch": "main",
+  "fix_commit": "866bc38923123f4ad8025c3c363511deb4380edf",
+  "source_files": [
+   "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java",
+   "gson/src/main/java/com/google/gson/internal/bind/ObjectTypeAdapter.java"
+  ],
+  "test_files": [
+   "gson/src/test/java/com/google/gson/functional/MapTest.java",
+   "gson/src/test/java/com/google/gson/internal/ConstructorConstructorTest.java"
+  ],
+  "source_lines": 37
+ }
+]

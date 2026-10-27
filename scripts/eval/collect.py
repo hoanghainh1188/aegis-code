@@ -123,6 +123,7 @@ def pr_files(repo, number):
 
 def main():
     repo, language, since = sys.argv[1], sys.argv[2], sys.argv[3]
+    max_count = int(sys.argv[4]) if len(sys.argv) > 4 else None
     owner, name = repo.split("/")
     after, out = None, []
     while True:
@@ -158,11 +159,16 @@ def main():
                 "fix_commit": pr["mergeCommit"]["oid"],
                 "source_files": sources, "test_files": tests, "source_lines": source_lines,
             })
+            print(f"[{len(out)}/{max_count or '∞'}] Found candidate #{issue['number']}: {issue['title']}", file=sys.stderr)
+            if max_count and len(out) >= max_count:
+                break
+        if max_count and len(out) >= max_count:
+            break
         if not issues["pageInfo"]["hasNextPage"]:
             break
         after = issues["pageInfo"]["endCursor"]
     json.dump(out, sys.stdout, indent=1)
-    print(f"{len(out)} candidates", file=sys.stderr)
+    print(f"\nTotal: {len(out)} candidates", file=sys.stderr)
 
 
 if __name__ == "__main__":

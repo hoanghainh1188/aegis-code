@@ -37,12 +37,20 @@ Bước 1–6 cho 21 issue scrapy và 20 issue typst. Sau bước 7 còn **32 is
 
 Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` của `tox.ini`, trừ `google-cloud-storage` và các shell tương tác.
 
+Ở Phase 2 (#155), mở rộng thêm 20 issue mẫu cho 4 ngôn ngữ mới (mỗi repo 5 issue đáp ứng tiêu chí):
+- **TypeScript**: `colinhacks/zod` (5 issue: zod-6659, zod-6657, zod-6641, zod-6643, zod-6578)
+- **Go**: `gin-gonic/gin` (5 issue: gin-4851, gin-4877, gin-4853, gin-4818, gin-4760)
+- **Java**: `google/gson` (5 issue: gson-3113, gson-1768, gson-992, gson-1587, gson-1247)
+- **C#**: `restsharp/RestSharp` (5 issue: RestSharp-2413, RestSharp-2402, RestSharp-2083, RestSharp-2156, RestSharp-2271)
+
+Tổng cộng bộ thử gồm **52 issue** cho cả 6 profile ngôn ngữ.
+
 ## Định dạng
 
 | Trường | Nghĩa |
 | --- | --- |
 | `id` | `<repo>-<số issue>`, cũng là id trong ledger và nhánh `agent/<id>` |
-| `language` | Profile (`rust`, `python`), để báo KPI theo từng ngôn ngữ (ADR 0004) |
+| `language` | Profile (`rust`, `python`, `typescript`, `go`, `java`, `csharp`), để báo KPI theo từng ngôn ngữ (ADR 0004) |
 | `repo`, `issue`, `url`, `title`, `closed_at`, `labels` | Issue gốc |
 | `base_commit` | Cha thứ nhất của commit merge bản sửa: code ngay trước khi sửa |
 | `fix_commit`, `fix_pr` | Bản sửa của người |

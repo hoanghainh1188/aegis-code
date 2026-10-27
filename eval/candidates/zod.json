@@ -1,0 +1,114 @@
+[
+ {
+  "repo": "colinhacks/zod",
+  "language": "typescript",
+  "issue": 6659,
+  "title": "v4.6.6: a union whose array option exceeds .max() now reports invalid_union instead of too_big",
+  "url": "https://github.com/colinhacks/zod/issues/6659",
+  "closed_at": "2026-10-13T18:16:30Z",
+  "labels": [],
+  "fix_pr": 6662,
+  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6662",
+  "base_branch": "main",
+  "fix_commit": "680d19f7d1e042e55934209caeb79bc843b94f44",
+  "source_files": [
+   "packages/zod/src/v4/core/schemas.ts"
+  ],
+  "test_files": [
+   "packages/zod/src/v4/classic/tests/union.test.ts"
+  ],
+  "source_lines": 12
+ },
+ {
+  "repo": "colinhacks/zod",
+  "language": "typescript",
+  "issue": 6657,
+  "title": "Bug: es, fr, he, hr and lt locales are missing the map entry in Sizable, so z.map() size errors lose their unit",
+  "url": "https://github.com/colinhacks/zod/issues/6657",
+  "closed_at": "2026-10-13T18:15:59Z",
+  "labels": [],
+  "fix_pr": 6661,
+  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6661",
+  "base_branch": "main",
+  "fix_commit": "40a5dba080b065cc430e5b0e64a8058d68c1660d",
+  "source_files": [
+   "packages/zod/src/v4/locales/es.ts",
+   "packages/zod/src/v4/locales/fr.ts",
+   "packages/zod/src/v4/locales/he.ts",
+   "packages/zod/src/v4/locales/hr.ts",
+   "packages/zod/src/v4/locales/lt.ts"
+  ],
+  "test_files": [
+   "packages/zod/src/v4/core/tests/locales/he.test.ts",
+   "packages/zod/src/v4/core/tests/locales/parity.test.ts"
+  ],
+  "source_lines": 33
+ },
+ {
+  "repo": "colinhacks/zod",
+  "language": "typescript",
+  "issue": 6641,
+  "title": "z.record skips an own __proto__ key without running the key schema",
+  "url": "https://github.com/colinhacks/zod/issues/6641",
+  "closed_at": "2026-10-13T18:15:17Z",
+  "labels": [],
+  "fix_pr": 6660,
+  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6660",
+  "base_branch": "main",
+  "fix_commit": "311cd74b2765ff7c7b58add60e37c5a0ea7a1972",
+  "source_files": [
+   "packages/zod/src/v4/core/compile.ts",
+   "packages/zod/src/v4/core/schemas.ts"
+  ],
+  "test_files": [
+   "packages/zod/src/v4/classic/tests/record.test.ts",
+   "packages/zod/src/v4/core/tests/compile.test.ts"
+  ],
+  "source_lines": 22
+ },
+ {
+  "repo": "colinhacks/zod",
+  "language": "typescript",
+  "issue": 6643,
+  "title": "zod 4.6.5 is affected by CVE-2023-54404",
+  "url": "https://github.com/colinhacks/zod/issues/6643",
+  "closed_at": "2026-10-09T19:50:24Z",
+  "labels": [],
+  "fix_pr": 6652,
+  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6652",
+  "base_branch": "main",
+  "fix_commit": "e06a510b6fc1e6e28e3201fd116ca2a76212f6be",
+  "source_files": [
+   "packages/zod/src/v4/core/compile.ts",
+   "packages/zod/src/v4/core/schemas.ts",
+   "packages/zod/src/v4/core/util.ts"
+  ],
+  "test_files": [
+   "packages/zod/src/v4/classic/tests/array.test.ts",
+   "packages/zod/src/v4/classic/tests/map.test.ts",
+   "packages/zod/src/v4/classic/tests/set.test.ts"
+  ],
+  "source_lines": 53
+ },
+ {
+  "repo": "colinhacks/zod",
+  "language": "typescript",
+  "issue": 6578,
+  "title": "Add Tajik (`tg`) locale \u2014 branch ready, interaction limit blocks the PR",
+  "url": "https://github.com/colinhacks/zod/issues/6578",
+  "closed_at": "2026-09-09T17:53:26Z",
+  "labels": [],
+  "fix_pr": 6581,
+  "fix_pr_url": "https://github.com/colinhacks/zod/pull/6581",
+  "base_branch": "main",
+  "fix_commit": "574d480fb443d3fd396efbcb8230f3dfee4a2cd2",
+  "source_files": [
+   "packages/zod/src/v4/locales/index.ts",
+   "packages/zod/src/v4/locales/tg.ts"
+  ],
+  "test_files": [
+   "packages/zod/src/v4/core/tests/locales/tg.test.ts"
+  ],
+  "source_lines": 135
+ }
+]

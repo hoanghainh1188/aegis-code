@@ -1,0 +1,16 @@
+# JsonPrimitive with LazilyParsedNumber integers breaks contract for hashCode()
+id = "gson-992"
+language = "java"
+repo = "google/gson"
+issue = 992
+url = "https://github.com/google/gson/issues/992"
+title = "JsonPrimitive with LazilyParsedNumber integers breaks contract for hashCode()"
+closed_at = "2026-07-23T21:11:01Z"
+labels = ["bug"]
+base_commit = "961517decce0aa907c285c19d8b93d5c746ecdcb"
+fix_commit = "5e277e42786ab6441b7dd6b1a8c34d545d132307"
+fix_pr = 3059
+source_files = ["gson/src/main/java/com/google/gson/JsonPrimitive.java"]
+test_files = ["gson/src/test/java/com/google/gson/JsonPrimitiveTest.java"]
+hidden_tests = ["JsonPrimitiveTest"]
+body = "While most types maintain consistency between `equals()` and `hashCode()` after string serialization and parsing (`JsonElement#toString()` + `JsonParser#parse(String)`, integers do not. `equals()` returns true, but the hash codes are different.\r\n\r\n```\r\n  public void testEqualsIntegerAndLazilyParsedInteger() {\r\n    MoreAsserts.assertEqualsAndHashCode(new JsonPrimitive(42), new JsonPrimitive(new LazilyParsedNumber(\"42\")));\r\n  }\r\n```"
