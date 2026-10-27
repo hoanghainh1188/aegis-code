@@ -1,0 +1,22 @@
+# Bug: toJSONSchema `$ref` pointer not encoded when meta id contains `/` or `~`
+id = "zod-6027"
+language = "typescript"
+repo = "colinhacks/zod"
+issue = 6027
+url = "https://github.com/colinhacks/zod/issues/6027"
+title = "Bug: toJSONSchema `$ref` pointer not encoded when meta id contains `/` or `~`"
+closed_at = "2026-08-13T21:02:49Z"
+labels = ["bug"]
+base_commit = "2a5164f5e753650c0dca74801c6cde38ca7be7d8"
+fix_commit = "bd18314c6d0e29a7890ecea73e206f8bbca54ec9"
+fix_pr = 6144
+source_files = ["packages/zod/src/v4/core/to-json-schema.ts"]
+test_files = ["packages/zod/src/v4/classic/tests/to-json-schema.test.ts"]
+hidden_tests = ["packages/zod/src/v4/classic/tests/to-json-schema.test.ts"]
+body = "## Description\n\nAccording to [RFC 6901 (JSON Pointer)](https://datatracker.ietf.org/doc/html/rfc6901), reference tokens inside a JSON Pointer must escape two characters:\n\n- `~` → `~0`\n- `/` → `~1`\n\nWhen `z.toJSONSchema()` builds the `$ref` URI fragment from a schema's `.meta({ id })`, it uses the raw id without applying these escapes. The `$defs` key itself is a plain JSON object key and does not need escaping — but the `$ref` pointer path does, and it currently doesn't get it.\n\n## Steps to reproduce\n\n```typescript\nimport { z } from 'zod';\n\nconst User = z.object({ name: z.string() })\n  .meta({ id: 'Shared/User~' });\n\nconsole.log(z.toJSONSchema(z.object({ User })));\n```\n\n## Actual output\n\n```json\n{\n  \"properties\": {\n    \"User\": {\n      \"$ref\": \"#/$defs/Shared/User~\"\n    }\n  },\n  \"$defs\": {\n    \"Shared/User~\": {}\n  }\n}\n```\n\nThe `$ref` pointer token `Shared/User~` is not escaped — `/` should be `~1` and `~` should be `~0`.\n\n## Expected output\n\n```json\n{\n  \"properties\": {\n    \"User\": {\n      \"$ref\": \"#/$defs/Shared~1User~0\"\n    }\n  },\n  \"$defs\": {\n    \"Shared/User~\": {}\n  }\n}\n```\n\nThe `$defs` key stays as the original unescaped id. Only the `$ref` pointer path needs encoding."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 7

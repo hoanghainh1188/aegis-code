@@ -37,15 +37,37 @@ Bước 1–6 cho 21 issue scrapy và 20 issue typst. Sau bước 7 còn **32 is
 
 Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` của `tox.ini`, trừ `google-cloud-storage` và các shell tương tác.
 
-Test ẩn của Go là các hàm `Test…` mà bản sửa thêm hoặc đổi, chạy bằng `go test -run '^(…)$'`; của C# là lớp test `Namespace.Class`, chạy bằng `dotnet test --filter FullyQualifiedName~Namespace.Class.`. Hai runner này thoát 0 khi bộ lọc không khớp test nào, nên `verify.py` coi lượt chạy ở `fix_commit` không có test nào là không đạt (#219). Môi trường kiểm gin: Go 1.27. RestSharp: .NET SDK 8 và 10, `EVAL_DOTNET_FRAMEWORK=net8.0` vì project test còn nhắm `net48` (cần mono) và `net9.0`.
+### Phase 2: TypeScript, Go, Java, C# (#155, #220)
 
-Ở Phase 2 (#155), mở rộng thêm 20 issue mẫu cho 4 ngôn ngữ mới (mỗi repo 5 issue đáp ứng tiêu chí):
-- **TypeScript**: `colinhacks/zod` (5 issue: zod-6659, zod-6657, zod-6641, zod-6643, zod-6578)
-- **Go**: `gin-gonic/gin` (5 issue: gin-4851, gin-4877, gin-4853, gin-4818, gin-4760)
-- **Java**: `google/gson` (5 issue: gson-3113, gson-1768, gson-992, gson-1587, gson-1247)
-- **C#**: `restsharp/RestSharp` (5 issue: RestSharp-2413, RestSharp-2402, RestSharp-2083, RestSharp-2156, RestSharp-2271)
+Cùng các tiêu chí trên, lấy từ ngày 2026-06-01. Ngoại lệ của tiêu chí 5: zod không gắn nhãn issue, và vài issue của gin, gson không có nhãn; với issue không nhãn, xét theo nội dung: báo lỗi thì giữ, đề xuất hay tính năng thì bỏ. Issue có nhãn khác `bug`/`regression` (`type/proposal`, `feature-request`) vẫn bị bỏ.
 
-Tổng cộng bộ thử gồm **52 issue** cho cả 6 profile ngôn ngữ.
+Sau bước 7 còn **15 issue**:
+- **TypeScript** (`colinhacks/zod`): zod-6027, zod-6641, zod-6643, zod-6657, zod-6659
+- **Go** (`gin-gonic/gin`): gin-4622, gin-4638, gin-4760, gin-4818, gin-4851
+- **Java** (`google/gson`): gson-992, gson-1247, gson-1587, gson-1768, gson-3113
+- **C#**: chưa có, dựng lại ở #224
+
+| Issue | Lý do |
+| --- | --- |
+| zod-6578 | Thêm locale mới, là tính năng chứ không phải lỗi |
+| gin-4853 | Test ẩn đã pass ngay ở base (test về race, chỉ fail khi chạy `-race`) |
+| gin-4877 | Nhãn `type/proposal` |
+| RestSharp-2083 | Đóng trước 2026-06-01; test ẩn đã pass ngay ở base |
+| RestSharp-2156 | Đóng trước 2026-06-01; nhãn `feature-request` |
+| RestSharp-2271 | Đóng trước 2026-06-01 |
+| RestSharp-2402 | Test ẩn đã pass ngay ở base |
+| RestSharp-2413 | Thêm API mới (trailing headers), là tính năng chứ không phải lỗi |
+
+RestSharp không còn ứng viên nào từ 2026-06-01. Các repo C# khác có issue `bug` phù hợp đều chạy test bằng Microsoft.Testing.Platform, mà `verify.py` chưa hỗ trợ (#224).
+
+Test ẩn của Go là các hàm `Test…` mà bản sửa thêm hoặc đổi, chạy bằng `go test -run '^(…)$'`; của Java là lớp test, chạy bằng `mvn test -Dtest=…` trong module chứa file test; của C# là lớp test `Namespace.Class`, chạy bằng `dotnet test --filter FullyQualifiedName~Namespace.Class.`. Các runner này thoát 0 khi bộ lọc không khớp test nào, nên `verify.py` coi lượt chạy ở `fix_commit` không có test nào là không đạt (#219).
+
+Môi trường kiểm:
+- zod: Node 24, phụ thuộc cài bằng `pnpm install --no-frozen-lockfile` với một `pnpm-workspace.yaml` cục bộ (`packages/*`, ghi vào `.git/info/exclude` của bản clone), vì zod khai báo workspace và trình quản lý gói `nub` trong `package.json`. `verify.py` gọi thẳng `vitest run`.
+- gin: Go 1.27.
+- gson: JDK 17, Maven 3.10.
+
+Tổng cộng bộ thử gồm **47 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson.
 
 ## Định dạng
 
@@ -57,7 +79,7 @@ Tổng cộng bộ thử gồm **52 issue** cho cả 6 profile ngôn ngữ.
 | `base_commit` | Cha thứ nhất của commit merge bản sửa: code ngay trước khi sửa |
 | `fix_commit`, `fix_pr` | Bản sửa của người |
 | `source_files`, `test_files` | File mà bản sửa đổi |
-| `hidden_tests` | typst: tên test trong `tests/suite`; scrapy: file test cho pytest. Agent không bao giờ thấy |
+| `hidden_tests` | typst: tên test trong `tests/suite`; scrapy, zod: file test; gin: hàm `Test…`; gson: lớp test. Agent không bao giờ thấy |
 | `changed_tests` | Chỉ typst. Test có sẵn mà bản sửa đổi output tham chiếu (ảnh, `hashes.txt`), do `scripts/eval/changed_tests.py` tìm. Lượt chạy khô khai báo chúng là thay đổi test được phép, để gate cập nhật tham chiếu (#105). Agent thật khai từng test, hoặc khai cả nhóm qua `allowed_reference_changes` khi quá nhiều (#147) |
 | `hidden_known_failures` | Tuỳ chọn. Hidden test fail trong sandbox kể cả với bản sửa thật (cần mạng, cần chương trình ngoài). Lượt chạy khô (#104) tìm ra; không tính là lỗi của agent |
 | `body` | Nội dung issue lúc lấy về, để lần chạy nào cũng đọc đúng một văn bản |

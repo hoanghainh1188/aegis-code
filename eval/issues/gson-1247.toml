@@ -14,3 +14,9 @@ source_files = ["gson/src/main/java/com/google/gson/internal/ConstructorConstruc
 test_files = ["gson/src/test/java/com/google/gson/functional/MapTest.java", "gson/src/test/java/com/google/gson/internal/ConstructorConstructorTest.java"]
 hidden_tests = ["MapTest", "ConstructorConstructorTest"]
 body = "When trying to deserialize the values `[[{},null],false,false]` and `[[null,false],null,true]` with the code `(new Gson()).fromJson(x, Map.class);` two confusing exceptions are thrown:  \r\n`java.lang.ClassCastException: com.google.gson.internal.LinkedTreeMap is not Comparable` and  \r\n`java.lang.NullPointerException: key == null`, respectively.  \r\n\r\nSuch exceptions should not be thrown to the user. Instead, one would expect these cases to be reported with an `IllegalArgumentException`."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 12

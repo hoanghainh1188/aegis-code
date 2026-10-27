@@ -291,7 +291,7 @@ hidden_test = ["pytest", "{{tests}}"]
     fn the_shipped_set_loads() {
         let set =
             load_set(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval/issues")).unwrap();
-        assert_eq!(set.len(), 52);
+        assert_eq!(set.len(), 47);
         assert_eq!(
             set.iter().filter(|i| i.language == Language::Rust).count(),
             18
@@ -317,11 +317,32 @@ hidden_test = ["pytest", "{{tests}}"]
             set.iter()
                 .filter(|i| i.language == Language::CSharp)
                 .count(),
-            5
+            0
         );
         assert!(
             set.iter()
                 .all(|i| i.base_commit.len() == 40 && i.fix_commit.len() == 40)
         );
+    }
+
+    /// Every shipped issue went through `scripts/eval/verify.py` (#220):
+    /// its hidden tests fail at the base and pass at the fix.
+    #[test]
+    fn every_shipped_issue_is_verified() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval/issues");
+        let unverified: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|e| e == "toml"))
+            .filter(|path| {
+                let text = std::fs::read_to_string(path).unwrap();
+                let table: toml::Table = text.parse().unwrap();
+                !table.get("verified").is_some_and(|v| {
+                    v.get("base").and_then(|b| b.as_str()) == Some("fail")
+                        && v.get("fix").and_then(|f| f.as_str()) == Some("pass")
+                })
+            })
+            .collect();
+        assert!(unverified.is_empty(), "not verified: {unverified:?}");
     }
 }
