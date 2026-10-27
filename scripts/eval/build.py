@@ -129,15 +129,22 @@ def go_tests(item, clone, base):
 
 def csharp_tests(item, clone):
     """`Namespace.Class` of each test file, one class per file named like it,
-    for `dotnet test --filter FullyQualifiedName~Namespace.Class.` (#219)."""
+    for `dotnet test --filter FullyQualifiedName~Namespace.Class.` (#219).
+    A part of a partial class sits in `Class.Part.cs`; a class outside any
+    namespace is named alone (#224)."""
     names = []
     for path in item["test_files"]:
         source = git(clone, "show", f"{item['fix_commit']}:{path}")
-        cls = path.rsplit("/", 1)[-1].removesuffix(".cs")
+        stem = path.rsplit("/", 1)[-1].split(".", 1)[0]
+        # The file name may differ in case (`Adhoc…` for `AdHoc…`).
+        found = re.search(rf"\bclass\s+({re.escape(stem)})\b", source, re.IGNORECASE)
+        if not found:
+            sys.exit(f"{item['repo']}#{item['issue']}: no class {stem} in {path}")
+        cls = found.group(1)
         namespace = CS_NAMESPACE.search(source)
-        if not namespace or not re.search(rf"\bclass\s+{re.escape(cls)}\b", source):
-            sys.exit(f"{item['repo']}#{item['issue']}: no namespace or class {cls} in {path}")
-        names.append(f"{namespace.group(1)}.{cls}")
+        name = f"{namespace.group(1)}.{cls}" if namespace else cls
+        if name not in names:
+            names.append(name)
     return names
 
 

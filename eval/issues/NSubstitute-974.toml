@@ -1,0 +1,22 @@
+# Configuring two returns on the same generic method with inheritance-related type arguments throws InvalidCastException
+id = "NSubstitute-974"
+language = "csharp"
+repo = "nsubstitute/NSubstitute"
+issue = 974
+url = "https://github.com/nsubstitute/NSubstitute/issues/974"
+title = "Configuring two returns on the same generic method with inheritance-related type arguments throws InvalidCastException"
+closed_at = "2026-08-09T11:33:06Z"
+labels = ["bug"]
+base_commit = "d989c320b7728e30aef08c18a9238715daa79f18"
+fix_commit = "b9bac2914881bc28a4fa8a14f2c348d4ccadd7dd"
+fix_pr = 989
+source_files = ["src/NSubstitute/Core/CallSpecification.cs", "src/NSubstitute/Core/Extensions.cs"]
+test_files = ["tests/NSubstitute.Acceptance.Specs/FieldReports/Issue974_ReturnsForGenericMethodWithRelatedReturnTypes.cs"]
+hidden_tests = ["NSubstitute.Acceptance.Specs.FieldReports.Issue974_ReturnsForGenericMethodWithRelatedReturnTypes"]
+body = "**Describe the bug**\nWhen two returns are configured on the same generic method, and the two closed type arguments are related by inheritance, configuring the **second** call throws an `InvalidCastException`. NSubstitute appears to hand back the value stored for the *first* configuration while recording the *second* call, then fails to cast it to the second call's return type.\n\nThis works in **5.3.0** and breaks in **6.0.0**.\n\nThis was found with MediatR's `IMediator.Send<TResponse>(IRequest<TResponse>)`, where different request types resolve `TResponse` to `IResult` vs `IResult<T>`.\n\n**To Reproduce**\nCreate and run this console application. When NSubstitute is on version 5.3.0 the application writes \"No Errors\" to the console. When NSubstitute is on version 6.0.0 the application throws a System.InvalidCastException.\n\n**program.cs**\n```\nusing NSubstitute;\n\nvar sub = Substitute.For<ISender>();\n\nsub.Send(Arg.Any<NonGenericRequest>()).Returns(Substitute.For<IResult>());\nsub.Send(Arg.Any<GenericRequest>()).Returns(Substitute.For<IResult<int>>());\nConsole.WriteLine(\"No errors\");\n\npublic interface IResult { }\npublic interface IResult<T> : IResult { }\n\npublic interface IRequest<TResponse> { }\n\npublic class NonGenericRequest : IRequest<IResult> { }\npublic class GenericRequest : IRequest<IResult<int>> { }\n\npublic interface ISender\n{\n    Task<TResponse> Send<TResponse>(IRequest<TResponse> request);\n}\n\n```\n**csproj**\n```\n<Project Sdk=\"Microsoft.NET.Sdk\">\n\n    <PropertyGroup>\n        <OutputType>Exe</OutputType>\n        <TargetFramework>net10.0</TargetFramework>\n        <ImplicitUsings>enable</ImplicitUsings>\n        <Nullable>enable</Nullable>\n    </PropertyGroup>\n\n    <ItemGroup>\n<!--        <PackageReference Include=\"NSubstitute\" Version=\"6.0.0\" />-->\n        <PackageReference Include=\"NSubstitute\" Version=\"5.3.0\" />\n    </ItemGroup>\n\n</Project>\n\n```\n\n**Expected behaviour**\nI would expect this to behave like 5.3.0 and not throw an exception. \n\n**Environment:**\n - NSubstitute version: 6.0.0\n - Platform: net10 project on Windows\n\n**Workaround**\n\nUse Arg.Is so it doesn't match the `null` recording placeholder:\n\n```\nsub.Send(Arg.Is<NonGenericRequest>(r => r != null)).Returns(Substitute.For<IResult>());\nsub.Send(Arg.Is<GenericRequest>(r => r != null)).Returns(Substitute.For<IResult<int>>());\n```\n"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 6
