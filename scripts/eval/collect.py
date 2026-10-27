@@ -36,8 +36,19 @@ query($owner: String!, $name: String!, $since: DateTime!, $after: String) {
 
 # Files a patch must not need: dependencies, toolchain, CI.
 BLOCKED = (
+    # Rust & Python
     "Cargo.lock", "Cargo.toml", "pyproject.toml", "setup.py", "setup.cfg",
     "requirements", "tox.ini", ".github/", "rust-toolchain", "uv.lock",
+    # TypeScript / Node
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "tsconfig.json", ".npmrc", ".yarnrc",
+    # Go
+    "go.mod", "go.sum", "go.work",
+    # Java
+    "pom.xml", ".mvn/", "mvnw", "gradlew", "build.gradle",
+    # C# / .NET
+    ".csproj", ".fsproj", ".vbproj", ".sln", ".slnx", "packages.lock.json",
+    "Directory.Build.props", "Directory.Build.targets", "nuget.config", "global.json",
 )
 MAX_SOURCE_LINES = 300
 MAX_FILES = 12
@@ -50,15 +61,54 @@ def gh(args, stdin=None):
 
 
 def is_test(path, language):
+    name = path.rsplit("/", 1)[-1]
+    name_lower = name.lower()
+    path_lower = path.lower()
     if language == "python":
-        name = path.rsplit("/", 1)[-1]
         return path.startswith("tests/") or name.startswith("test_") or "/tests/" in path
+    if language in ("typescript", "javascript"):
+        return (
+            name.endswith((".test.ts", ".spec.ts", ".test.js", ".spec.js", ".test.tsx", ".spec.tsx"))
+            or path.startswith(("test/", "tests/", "__tests__/"))
+            or "/test/" in path or "/tests/" in path or "/__tests__/" in path
+        )
+    if language == "go":
+        return name.endswith("_test.go")
+    if language == "java":
+        return (
+            name.endswith(("Test.java", "Tests.java", "TestCase.java"))
+            or path.startswith("src/test/") or "/src/test/" in path
+        )
+    if language == "csharp":
+        return (
+            name_lower.endswith(("test.cs", "tests.cs"))
+            or path_lower.startswith(("test/", "tests/"))
+            or "/test/" in path_lower or "/tests/" in path_lower
+        )
+    # Rust default
     return path.startswith("tests/") or "/tests/" in path
 
 
 def is_source(path, language):
-    ext = ".py" if language == "python" else ".rs"
-    return path.endswith(ext) and not path.startswith(("docs/", "tests/")) and "/tests/" not in path
+    if is_test(path, language):
+        return False
+    if path.startswith(("docs/", "doc/", "examples/", "benchmarks/", "benchmark/")):
+        return False
+    if "/docs/" in path or "/doc/" in path or "/examples/" in path:
+        return False
+    if language == "python":
+        return path.endswith(".py")
+    if language in ("typescript", "javascript"):
+        return path.endswith((".ts", ".tsx", ".js", ".jsx")) and not path.endswith(".d.ts")
+    if language == "go":
+        return path.endswith(".go")
+    if language == "java":
+        return path.endswith(".java")
+    if language == "csharp":
+        return path.endswith(".cs")
+    if language == "rust":
+        return path.endswith(".rs")
+    return False
 
 
 def pr_files(repo, number):

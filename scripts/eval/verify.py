@@ -21,9 +21,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORK = ROOT / ".workspace/eval"
-CLONES = {"scrapy/scrapy": ROOT / ".workspace/repos/scrapy", "typst/typst": ROOT / ".workspace/repos/typst"}
+CLONES = {
+    "scrapy/scrapy": ROOT / ".workspace/repos/scrapy",
+    "typst/typst": ROOT / ".workspace/repos/typst",
+    "colinhacks/zod": ROOT / ".workspace/repos/zod",
+    "gin-gonic/gin": ROOT / ".workspace/repos/gin",
+    "apache/commons-lang": ROOT / ".workspace/repos/commons-lang",
+    "google/gson": ROOT / ".workspace/repos/gson",
+    "FluentValidation/FluentValidation": ROOT / ".workspace/repos/FluentValidation",
+    "restsharp/RestSharp": ROOT / ".workspace/repos/RestSharp",
+}
 SCRAPY_PYTHON = ROOT / ".workspace/measure/scrapy-venv/bin/python"
 TIMEOUT = 1800
+
+
+def clone_path(repo):
+    name = repo.split("/")[1]
+    return CLONES.get(repo, ROOT / f".workspace/repos/{name}")
 
 
 def git(repo, *args, check=True):
@@ -34,7 +48,7 @@ def worktree(item):
     name = item["repo"].split("/")[1]
     tree = WORK / f"wt-{name}"
     if not tree.exists():
-        git(CLONES[item["repo"]], "worktree", "add", "--detach", "--force", str(tree), item["base_commit"])
+        git(clone_path(item["repo"]), "worktree", "add", "--detach", "--force", str(tree), item["base_commit"])
     return tree
 
 
@@ -44,12 +58,30 @@ def checkout(tree, commit):
 
 
 def command(item, tree):
-    if item["language"] == "python":
+    lang = item["language"]
+    if lang == "python":
         env = {**os.environ, "PYTHONPATH": str(tree)}
         return [str(SCRAPY_PYTHON), "-m", "pytest", "-q", "-p", "no:cacheprovider", *item["hidden_tests"]], env
-    env = {**os.environ, "CARGO_TARGET_DIR": str(WORK / "target-typst")}
-    pattern = "^(" + "|".join(item["hidden_tests"]) + ")$"
-    return ["cargo", "test", "--workspace", "--test", "tests", "--", pattern], env
+    if lang == "rust":
+        env = {**os.environ, "CARGO_TARGET_DIR": str(WORK / "target-typst")}
+        pattern = "^(" + "|".join(item["hidden_tests"]) + ")$"
+        return ["cargo", "test", "--workspace", "--test", "tests", "--", pattern], env
+    if lang in ("typescript", "javascript"):
+        env = {**os.environ}
+        return ["npm", "test", "--", *item["hidden_tests"]], env
+    if lang == "go":
+        env = {**os.environ}
+        pattern = "^(" + "|".join(item["hidden_tests"]) + ")$" if item["hidden_tests"] else "."
+        return ["go", "test", "-v", "-run", pattern, "./..."], env
+    if lang == "java":
+        env = {**os.environ}
+        test_arg = ",".join(item["hidden_tests"])
+        return ["mvn", "test", f"-Dtest={test_arg}"], env
+    if lang == "csharp":
+        env = {**os.environ}
+        filter_expr = "|".join(item["hidden_tests"])
+        return ["dotnet", "test", "--filter", filter_expr], env
+    raise ValueError(f"unknown language: {lang}")
 
 
 def run(item, tree, label):
