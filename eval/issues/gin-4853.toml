@@ -12,5 +12,5 @@ fix_commit = "1bd0ecf2d3e08da37efa270bb7be20c1eddb0d68"
 fix_pr = 4854
 source_files = ["context.go"]
 test_files = ["context_test.go"]
-hidden_tests = ["context_test.go"]
+hidden_tests = ["TestCopyConcurrentWithSet"]
 body = "## Summary\n\n`Context.Copy` reads `c.Keys` before acquiring `c.mu.RLock()`, which races with concurrent `Context.Set` calls that initialize or reallocate the map under `c.mu.Lock()`. The race detector flags this unsynchronized access under `-race`. The copy can observe a nil map header and drop keys that `Set` has already committed.\n\n## Steps to Reproduce\n\n1. Share a `*gin.Context` between two goroutines.\n2. One goroutine repeatedly calls `c.Set(k, v)`, initializing from a nil `Keys` map.\n3. Another goroutine repeatedly calls `c.Copy()`.\n4. `go test -race` reports a write in `Set` concurrent with a read in `Copy`.\n\n## Proposed Fix\n\nMove the read of `c.Keys` inside the critical section protected by `c.mu.RLock()`, and clone under the lock (`cp.Keys = maps.Clone(c.Keys)`).\n\nA Pull Request addressing this issue is submitted concurrently."

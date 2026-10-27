@@ -12,6 +12,7 @@ patches), in one worktree per repo under `.workspace/eval/`.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -33,6 +34,12 @@ CLONES = {
 }
 SCRAPY_PYTHON = ROOT / ".workspace/measure/scrapy-venv/bin/python"
 TIMEOUT = 1800
+# Output that shows at least one test ran, for runners that exit 0 when
+# their filter matches nothing.
+RAN = {
+    "go": re.compile(r"^--- (PASS|FAIL): ", re.MULTILINE),
+    "csharp": re.compile(r"\b[Tt]otal(?: tests)?:\s*[1-9]"),
+}
 
 
 def clone_path(repo):
@@ -78,9 +85,18 @@ def command(item, tree):
         test_arg = ",".join(item["hidden_tests"])
         return ["mvn", "test", f"-Dtest={test_arg}"], env
     if lang == "csharp":
-        env = {**os.environ}
-        filter_expr = "|".join(item["hidden_tests"])
-        return ["dotnet", "test", "--filter", filter_expr], env
+        # English output, for RAN.
+        env = {**os.environ, "DOTNET_CLI_UI_LANGUAGE": "en"}
+        # The trailing dot keeps `Foo.BarTests` from matching `Foo.BarTestsExtra`.
+        filter_expr = "|".join(f"FullyQualifiedName~{t}." for t in item["hidden_tests"])
+        # Test projects often target frameworks this machine cannot run
+        # (net48 needs mono); pick the one to run, e.g. net8.0.
+        framework = os.environ.get("EVAL_DOTNET_FRAMEWORK")
+        # Repos moving to .slnx keep the .sln for a while; `dotnet test`
+        # refuses a folder with both.
+        solution = [p.name for p in sorted(tree.glob("*.sln")) or sorted(tree.glob("*.slnx"))][:1]
+        return ["dotnet", "test", *solution, "--filter", filter_expr,
+                *(["--framework", framework] if framework else [])], env
     raise ValueError(f"unknown language: {lang}")
 
 
@@ -94,7 +110,7 @@ def run(item, tree, label):
         rc, text = None, "timed out"
     (WORK / "logs").mkdir(exist_ok=True)
     (WORK / "logs" / f"{item['id']}-{label}.log").write_text(text)
-    return rc, round(time.time() - started)
+    return rc, round(time.time() - started), text
 
 
 def verify(item):
@@ -113,9 +129,15 @@ def verify(item):
             target = tree / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(shown.stdout)
-    base_rc, base_s = run(item, tree, "base")
+    base_rc, base_s, _ = run(item, tree, "base")
     checkout(tree, item["fix_commit"])
-    fix_rc, fix_s = run(item, tree, "fix")
+    fix_rc, fix_s, fix_out = run(item, tree, "fix")
+    ran = RAN.get(item["language"])
+    if fix_rc == 0 and ran and not ran.search(fix_out):
+        # `go test -run` and `dotnet test --filter` exit 0 when nothing
+        # matches, so a wrong name would pass at both commits (#219).
+        return {"ok": False, "base_rc": base_rc, "fix_rc": fix_rc, "base_s": base_s, "fix_s": fix_s,
+                "why": "hidden tests ran no test at the fix"}
     # pytest: 1 = tests failed, 2 = a test module does not import (it uses
     # what the fix adds); 3-5 are usage problems or no tests at all.
     base_failed = base_rc not in (0, None) and (item["language"] != "python" or base_rc in (1, 2))

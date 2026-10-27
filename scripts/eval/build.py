@@ -7,7 +7,9 @@ Needs the clones of the target repos with the upstream history fetched
 (`.workspace/repos/<name>`, remote `upstream`). The base of each issue is
 the first parent of the fix's merge commit: the code as it was right before
 the fix. Hidden tests are what the fix added: test names in typst's
-`tests/suite/**/*.typ`, test files for pytest.
+`tests/suite/**/*.typ`, test files for pytest, the `Test…` functions the
+fix adds or changes for Go, test classes for Java (`Class`) and C#
+(`Namespace.Class`).
 """
 
 import json
@@ -28,6 +30,9 @@ CLONES = {
     "restsharp/RestSharp": ROOT / ".workspace/repos/RestSharp",
 }
 TYPST_HEADER = re.compile(r"^\+--- ([A-Za-z0-9_-]+)")
+HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
+GO_FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s+)?([A-Za-z_]\w*)\s*[\[(]")
+CS_NAMESPACE = re.compile(r"^\s*namespace\s+([\w.]+)", re.MULTILINE)
 
 
 def clone_path(repo):
@@ -76,18 +81,7 @@ def hidden_tests(item, clone, base):
             return names
         return item.get("hidden_tests", [])
     if lang == "go":
-        # Test function names added in test files
-        if clone.exists():
-            diff = git(clone, "diff", base, item["fix_commit"], "--", *item["test_files"])
-            names = []
-            for line in diff.splitlines():
-                if line.startswith("+func Test") or line.startswith("+func ("):
-                    m = re.search(r"func\s+(?:\([^)]+\)\s+)?(Test[A-Za-z0-9_]+)", line)
-                    if m and m.group(1) not in names:
-                        names.append(m.group(1))
-            if names:
-                return names
-        return item["test_files"]
+        return go_tests(item, clone, base)
     if lang == "java":
         # Test class names (e.g. StringUtilsTrimTest for mvn test -Dtest=...)
         names = []
@@ -99,8 +93,52 @@ def hidden_tests(item, clone, base):
     if lang in ("typescript", "javascript"):
         return item["test_files"]
     if lang == "csharp":
-        return item["test_files"]
+        return csharp_tests(item, clone)
     return item["test_files"]
+
+
+def changed_lines(clone, base, fix, path):
+    """Lines of `path` at `fix` that the fix adds or changes, or that sit
+    right after a removed block."""
+    lines = []
+    for line in git(clone, "diff", "-U0", base, fix, "--", path).splitlines():
+        m = HUNK.match(line)
+        if m:
+            start, count = int(m.group(1)), int(m.group(2) or 1)
+            lines.extend(range(start, start + count) if count else [max(start, 1)])
+    return lines
+
+
+def go_tests(item, clone, base):
+    """`Test…` functions the fix adds or changes, for `go test -run`. A test
+    file name would match no test, so the hidden tests would always pass
+    (#219)."""
+    names = []
+    for path in item["test_files"]:
+        source = git(clone, "show", f"{item['fix_commit']}:{path}").splitlines()
+        funcs = [(n, m.group(1)) for n, text in enumerate(source, 1)
+                 if (m := GO_FUNC.match(text))]
+        for line in changed_lines(clone, base, item["fix_commit"], path):
+            enclosing = [name for start, name in funcs if start <= line]
+            if enclosing and enclosing[-1].startswith("Test") and enclosing[-1] not in names:
+                names.append(enclosing[-1])
+    if not names:
+        sys.exit(f"{item['repo']}#{item['issue']}: the fix changes no Go Test function")
+    return names
+
+
+def csharp_tests(item, clone):
+    """`Namespace.Class` of each test file, one class per file named like it,
+    for `dotnet test --filter FullyQualifiedName~Namespace.Class.` (#219)."""
+    names = []
+    for path in item["test_files"]:
+        source = git(clone, "show", f"{item['fix_commit']}:{path}")
+        cls = path.rsplit("/", 1)[-1].removesuffix(".cs")
+        namespace = CS_NAMESPACE.search(source)
+        if not namespace or not re.search(rf"\bclass\s+{re.escape(cls)}\b", source):
+            sys.exit(f"{item['repo']}#{item['issue']}: no namespace or class {cls} in {path}")
+        names.append(f"{namespace.group(1)}.{cls}")
+    return names
 
 
 def main():

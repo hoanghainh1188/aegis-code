@@ -12,5 +12,11 @@ fix_commit = "e24f076f217c1397844a2b87e0ba6027804988bb"
 fix_pr = 2414
 source_files = ["src/RestSharp/Response/RestResponse.cs", "src/RestSharp/Response/RestResponseBase.cs"]
 test_files = ["test/RestSharp.Tests/ResponseTrailerTests.cs"]
-hidden_tests = ["test/RestSharp.Tests/ResponseTrailerTests.cs"]
+hidden_tests = ["RestSharp.Tests.ResponseTrailerTests"]
 body = "## Problem\n\n.NET exposes HTTP response trailer fields through HttpResponseMessage.TrailingHeaders, but RestSharp currently maps only the regular response headers and content headers to RestResponse. The internal HttpResponseMessage is disposed after execution, so callers using the standard ExecuteAsync path cannot access trailer fields.\n\nTrailer fields are useful for message integrity checks, signatures, delivery metrics, and post-processing status information. RFC 9110 also recommends storing them separately from the initial header section.\n\n## Proposed change\n\n- Add a TrailingHeaders collection to RestResponseBase, separate from Headers and ContentHeaders.\n- Populate it after the response body has been fully consumed, because .NET exposes received trailers only after content completion.\n- Keep the collection empty on target frameworks where HttpResponseMessage.TrailingHeaders is unavailable.\n- Add tests verifying that trailers are preserved and remain separate from regular headers.\n\n## Compatibility\n\nThis would be an additive public API change. RestSharp targets \netstandard2.0, .NET Framework, and modern .NET, so the property can be available on all targets while population is guarded for supported modern .NET targets."
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 10
