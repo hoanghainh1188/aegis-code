@@ -17,8 +17,22 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CLONES = {"scrapy/scrapy": ROOT / ".workspace/repos/scrapy", "typst/typst": ROOT / ".workspace/repos/typst"}
+CLONES = {
+    "scrapy/scrapy": ROOT / ".workspace/repos/scrapy",
+    "typst/typst": ROOT / ".workspace/repos/typst",
+    "colinhacks/zod": ROOT / ".workspace/repos/zod",
+    "gin-gonic/gin": ROOT / ".workspace/repos/gin",
+    "apache/commons-lang": ROOT / ".workspace/repos/commons-lang",
+    "google/gson": ROOT / ".workspace/repos/gson",
+    "FluentValidation/FluentValidation": ROOT / ".workspace/repos/FluentValidation",
+    "restsharp/RestSharp": ROOT / ".workspace/repos/RestSharp",
+}
 TYPST_HEADER = re.compile(r"^\+--- ([A-Za-z0-9_-]+)")
+
+
+def clone_path(repo):
+    name = repo.split("/")[1]
+    return CLONES.get(repo, ROOT / f".workspace/repos/{name}")
 
 
 def git(repo, *args):
@@ -30,18 +44,43 @@ def toml_str(value):
 
 
 def hidden_tests(item, clone, base):
-    if item["language"] == "python":
+    lang = item["language"]
+    if lang == "python":
         # Test modules only; helpers (mock servers, base classes) are copied
         # with the test files but not run on their own.
         return [f for f in item["test_files"]
                 if f.startswith("tests/") and f.rsplit("/", 1)[-1].startswith("test_") and f.endswith(".py")]
-    names = []
-    diff = git(clone, "diff", base, item["fix_commit"], "--", "tests/suite")
-    for line in diff.splitlines():
-        m = TYPST_HEADER.match(line)
-        if m and m.group(1) not in names:
-            names.append(m.group(1))
-    return names
+    if lang == "rust":
+        names = []
+        diff = git(clone, "diff", base, item["fix_commit"], "--", "tests/suite")
+        for line in diff.splitlines():
+            m = TYPST_HEADER.match(line)
+            if m and m.group(1) not in names:
+                names.append(m.group(1))
+        return names
+    if lang == "go":
+        # Test function names added in test files
+        diff = git(clone, "diff", base, item["fix_commit"], "--", *item["test_files"])
+        names = []
+        for line in diff.splitlines():
+            if line.startswith("+func Test") or line.startswith("+func ("):
+                m = re.search(r"func\s+(?:\([^)]+\)\s+)?(Test[A-Za-z0-9_]+)", line)
+                if m and m.group(1) not in names:
+                    names.append(m.group(1))
+        return names if names else item["test_files"]
+    if lang == "java":
+        # Test class names (e.g. StringUtilsTrimTest for mvn test -Dtest=...)
+        names = []
+        for f in item["test_files"]:
+            name = f.rsplit("/", 1)[-1]
+            if name.endswith(".java"):
+                names.append(name[:-5])
+        return names if names else item["test_files"]
+    if lang in ("typescript", "javascript"):
+        return item["test_files"]
+    if lang == "csharp":
+        return item["test_files"]
+    return item["test_files"]
 
 
 def main():
@@ -50,7 +89,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     for items in picked.values():
         for item in items:
-            clone = CLONES[item["repo"]]
+            clone = clone_path(item["repo"])
             base = git(clone, "rev-parse", f"{item['fix_commit']}^1").strip()
             issue = json.loads(subprocess.run(
                 ["gh", "api", f"repos/{item['repo']}/issues/{item['issue']}"],

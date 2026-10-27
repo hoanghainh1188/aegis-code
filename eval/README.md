@@ -54,8 +54,12 @@ Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` 
 | `[verified]` | Kết quả của `verify.py` |
 
 Lệnh chạy test ẩn:
-- typst: `cargo test --workspace --test tests -- "^(tên1|tên2)$"`
-- scrapy: `python -m pytest -q -p no:cacheprovider <file>…`
+- typst (Rust): `cargo test --workspace --test tests -- "^(tên1|tên2)$"`
+- scrapy (Python): `python -m pytest -q -p no:cacheprovider <file>…`
+- zod (TypeScript): `npm test -- <file>…`
+- gin (Go): `go test -v -run "^(Test1|Test2)$" ./...`
+- gson (Java): `mvn test -Dtest=TestClass1,TestClass2`
+- RestSharp / FluentValidation (C#): `dotnet test --filter "<biểu thức filter>"`
 
 ## Codebase-Memory
 
