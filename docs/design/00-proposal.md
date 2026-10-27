@@ -331,8 +331,8 @@ Cập nhật 25/10:
 - [x] Chọn repo đích Rust và repo đích Python cho PoC: tạm dùng fork công khai typst (Rust) và scrapy (Python) trong lúc chờ repo nội bộ (#157).
 - [x] Đo thời gian build + test của từng repo đích (Phase 0, #2): cả hai dưới 3 phút → cache 5 phút ([đo ngày 20/10](../measurements/2026-10-20-build-test-target-repos.md)).
 - [ ] Kiểm tra ngưỡng cache tối thiểu riêng của Bedrock cho Opus 5.5 và Haiku 5.5 (cần gọi thật ở `ap-northeast-1`, cùng lúc với #55).
-- [ ] Theo dõi khi nào Sonnet 5.5 có profile `jp.` (gọi `GetInferenceProfile` từ Tokyo, #19).
-- [ ] Kiểm tra Vertex AI có Opus / Sonnet 5.5 ở `asia-northeast1` không (#19).
+- [x] Theo dõi khi nào Sonnet 5.5 có profile `jp.` (gọi `GetInferenceProfile` từ Tokyo, #19; kết quả ngày 27/10: chưa có, giữ Opus effort thấp, xem [báo cáo](../measurements/2026-10-27-japan-inference-profiles.md)).
+- [x] Kiểm tra Vertex AI có Opus / Sonnet 5.5 ở `asia-northeast1` không (#19; kết quả ngày 27/10: chưa có cam kết cô lập nội địa Nhật Bản như Bedrock CRIS `jp.`, xem [báo cáo](../measurements/2026-10-27-japan-inference-profiles.md)).
 
 ## 11. Nguồn tham khảo
 

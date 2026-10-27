@@ -7,7 +7,8 @@ region = "ap-northeast-1"
 require_jp_profile = true
 
 # Model per tier (design §5.1). Read by aegis-router.
-# Switch core to jp.anthropic.claude-sonnet-5-5 once that profile exists.
+# Core uses Opus with low effort because Sonnet 5.5 has no `jp.` profile on
+# Bedrock yet (checked 2026-10-27, #19). Switch core once that profile exists.
 [models.light]
 id = "jp.anthropic.claude-haiku-5-5"
 
