@@ -178,3 +178,108 @@ async fn anthropic_protocol_delegates_to_claude_messages_endpoint() {
         vec![ContentBlock::text("Fixed via Anthropic Messages endpoint.")]
     );
 }
+
+fn reply(usage: serde_json::Value) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "id": "chatcmpl-local",
+        "model": "qwen2.5-coder-32b",
+        "choices": [
+            {
+                "index": 0,
+                "message": { "role": "assistant", "content": "ok" },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": usage
+    }))
+}
+
+// #222: OpenAI counts cached tokens in `prompt_tokens`; `input_tokens` is
+// only the uncached rest, as with the Messages API.
+#[tokio::test]
+async fn openai_protocol_does_not_count_cached_tokens_as_input_too() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(reply(json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 50,
+            "prompt_tokens_details": { "cached_tokens": 800 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = LocalModelProvider::new(server.uri(), None, LocalProtocol::OpenAi).unwrap();
+    let usage = provider.send(&test_request()).await.unwrap().usage;
+
+    assert_eq!(usage.input_tokens, 200);
+    assert_eq!(usage.cache_read_input_tokens, 800);
+    assert_eq!(usage.output_tokens, 50);
+}
+
+// #222: a `tool` message has no error flag, so a failed call says so in
+// its text.
+#[tokio::test]
+async fn openai_protocol_marks_failed_tool_results() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(reply(
+            json!({ "prompt_tokens": 10, "completion_tokens": 1 }),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut request = test_request();
+    request.messages.push(Message::assistant(vec![
+        ContentBlock::ToolUse {
+            id: "call_ok".into(),
+            name: "open".into(),
+            input: json!({ "file": "parser.rs" }),
+        },
+        ContentBlock::ToolUse {
+            id: "call_bad".into(),
+            name: "open".into(),
+            input: json!({ "file": "missing.rs" }),
+        },
+    ]));
+    request.messages.push(Message::user(vec![
+        ContentBlock::ToolResult {
+            tool_use_id: "call_ok".into(),
+            content: "fn parse() {}".into(),
+            is_error: false,
+        },
+        ContentBlock::ToolResult {
+            tool_use_id: "call_bad".into(),
+            content: "no such file: missing.rs".into(),
+            is_error: true,
+        },
+    ]));
+
+    let provider = LocalModelProvider::new(server.uri(), None, LocalProtocol::OpenAi).unwrap();
+    provider.send(&request).await.unwrap();
+
+    let sent = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&sent[0].body).unwrap();
+    let tools: Vec<_> = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .map(|m| {
+            (
+                m["tool_call_id"].as_str().unwrap(),
+                m["content"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            ("call_ok", "fn parse() {}"),
+            ("call_bad", "Error: no such file: missing.rs"),
+        ]
+    );
+}
