@@ -334,6 +334,7 @@ Cập nhật 25/10:
 - [x] Theo dõi khi nào Sonnet 5.5 có profile `jp.` (gọi `GetInferenceProfile` từ Tokyo, #19; kết quả ngày 27/10: chưa có, giữ Opus effort thấp, xem [báo cáo](../measurements/2026-10-27-japan-inference-profiles.md)).
 - [x] Kiểm tra Vertex AI có Opus / Sonnet 5.5 ở `asia-northeast1` không (#19; kết quả ngày 27/10: chưa có cam kết cô lập nội địa Nhật Bản như Bedrock CRIS `jp.`, xem [báo cáo](../measurements/2026-10-27-japan-inference-profiles.md)).
 - [x] Đánh giá chi phí GPU so với Bedrock và xây dựng phương án model local cho khách hàng không cho dữ liệu ra ngoài (#38; kết quả ngày 27/10: xem [báo cáo](../measurements/2026-10-27-local-model-cost-analysis.md)).
+- [x] Đánh giá hiệu quả SBFL (Tarantula / Ochiai) và cài đặt thuật toán (#34; kết quả ngày 27/10: xem [báo cáo](../measurements/2026-10-27-sbfl-evaluation.md)).
 
 ## 11. Nguồn tham khảo
 
