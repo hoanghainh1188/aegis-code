@@ -1,0 +1,16 @@
+# z.record skips an own __proto__ key without running the key schema
+id = "zod-6641"
+language = "typescript"
+repo = "colinhacks/zod"
+issue = 6641
+url = "https://github.com/colinhacks/zod/issues/6641"
+title = "z.record skips an own __proto__ key without running the key schema"
+closed_at = "2026-10-13T18:15:17Z"
+labels = []
+base_commit = "b500a2ee95134f81d74da7911d7378dd2853d042"
+fix_commit = "311cd74b2765ff7c7b58add60e37c5a0ea7a1972"
+fix_pr = 6660
+source_files = ["packages/zod/src/v4/core/compile.ts", "packages/zod/src/v4/core/schemas.ts"]
+test_files = ["packages/zod/src/v4/classic/tests/record.test.ts", "packages/zod/src/v4/core/tests/compile.test.ts"]
+hidden_tests = ["packages/zod/src/v4/classic/tests/record.test.ts", "packages/zod/src/v4/core/tests/compile.test.ts"]
+body = "Follow-up to #6220 / #6221, which made `.strict()` report an own `__proto__` key. The `z.record` path still skips it silently.\n\nWith a non-enumerable key schema (a refinement, regex or `z.string()` with checks), `z.record` never runs the key schema on an own `__proto__` key. It drops the key silently. Every other key that fails the key schema is reported as `invalid_key`.\n\n```js\nimport { z } from 'zod'; // 4.6.5\n\nconst locale = z.string().refine((l) => ['fr', 'de'].includes(l));\nconst record = z.record(locale, z.string());\n\nrecord.safeParse(JSON.parse('{\"xx\": \"x\", \"fr\": \"y\"}'));\n// fails: invalid_key at [\"xx\"]\n\nrecord.safeParse(JSON.parse('{\"__proto__\": \"x\", \"fr\": \"y\"}'));\n// succeeds with { fr: \"y\" }; the \"__proto__\" entry is dropped without an issue\n```\n\n`JSON.parse` creates `\"__proto__\"` as an own property, so this is what any JSON body can carry. The pollution defense works: the output prototype is untouched. The issue is only that an invalid key is accepted instead of reported.\n\n**Expected:** run the key schema on `__proto__` like any other key and report `invalid_key` when it fails. Keep not writing it to the output. This matches how #6221 handled `.strict()`.\n\nThis still reproduces on `main`: #6386 made stripping `__proto__` the policy for parse output, and that part is fine. Only the missing `invalid_key` report differs from what `.strict()` does since #6221.\n\n**Location:** `packages/zod/src/v4/core/schemas.ts`, in the `$ZodRecord` loop over `Reflect.ownKeys(input)`: `if (key === \"__proto__\") continue;`\n"

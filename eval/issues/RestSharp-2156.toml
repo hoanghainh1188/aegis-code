@@ -1,0 +1,16 @@
+# Remove modification of HttpClient DefaultRequestHeaders
+id = "RestSharp-2156"
+language = "csharp"
+repo = "restsharp/RestSharp"
+issue = 2156
+url = "https://github.com/restsharp/RestSharp/issues/2156"
+title = "Remove modification of HttpClient DefaultRequestHeaders"
+closed_at = "2026-03-01T16:26:55Z"
+labels = ["feature-request"]
+base_commit = "ae6b354e7817caf77483ede03468bee68f03b948"
+fix_commit = "8cafdd1dbc83b42c942c6bfb75dd1288f5263599"
+fix_pr = 2363
+source_files = ["src/RestSharp.Extensions.DependencyInjection/ServiceCollectionExtensions.cs", "src/RestSharp/RestClient.Async.cs", "src/RestSharp/RestClient.cs"]
+test_files = ["test/RestSharp.Tests/RestClientTests.cs"]
+hidden_tests = ["test/RestSharp.Tests/RestClientTests.cs"]
+body = "I can create a PR to do this, but I wanted to run it by someone first to make sure it's acceptable, thanks.\r\n\r\n**Is your feature request related to a problem? Please describe.**\r\nIf you are re-using a single HttpClient instance in your application (as is recommended by MS) and passing it into multiple instances of RestClient, that HttpClient instance may be modified by the `RestSharp.RestClient.ConfigureHttpClient` method. For example, the UserAgent header is added to the DefaultRequestHeaders property.\r\n\r\nThis may be an issue if your RestClient instances are for different APIs that expect different UserAgents. What happens is that you end up with multiple UserAgents and the API you're calling may fail to recognise it. Now, the API probably should be checking if the UserAgent contains a certain string, not equals, but I still think it would be better if the HttpClient instance was left untouched and the UserAgent set on the request message instead.\r\n\r\n**Describe the solution you'd like**\r\n- Change`RestSharp.RestClient.ConfigureHttpClient` to only set the Timeout property (I think this is the only property that can't be set on each request)\r\n- Move the setting of UserAgent and ExpectContinue to `RestSharp.RestClient.ExecuteRequestAsync` and set them on the message.Headers property.\r\n\r\n**Describe alternatives you've considered**\r\nUse multiple instances of HttpClient, or ask for the API being called to use \"contains\" rather than \"equals\""

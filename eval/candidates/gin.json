@@ -1,0 +1,109 @@
+[
+ {
+  "repo": "gin-gonic/gin",
+  "language": "go",
+  "issue": 4851,
+  "title": "Pooled skippedNodes keeps the capacity captured at allocation, causing panic in getValue when routes are registered late",
+  "url": "https://github.com/gin-gonic/gin/issues/4851",
+  "closed_at": "2026-10-10T04:18:56Z",
+  "labels": [],
+  "fix_pr": 4852,
+  "fix_pr_url": "https://github.com/gin-gonic/gin/pull/4852",
+  "base_branch": "master",
+  "fix_commit": "ea9fab99e01d55a5e4f8daacc0d11ccffaee0a15",
+  "source_files": [
+   "tree.go"
+  ],
+  "test_files": [
+   "routes_test.go"
+  ],
+  "source_lines": 15
+ },
+ {
+  "repo": "gin-gonic/gin",
+  "language": "go",
+  "issue": 4877,
+  "title": "Include the HTTP QUERY method in RouterGroup.Any",
+  "url": "https://github.com/gin-gonic/gin/issues/4877",
+  "closed_at": "2026-10-10T04:16:18Z",
+  "labels": [
+   "type/proposal"
+  ],
+  "fix_pr": 4878,
+  "fix_pr_url": "https://github.com/gin-gonic/gin/pull/4878",
+  "base_branch": "master",
+  "fix_commit": "e8f24969d59611428b03d02424b8f4bb55a1ef91",
+  "source_files": [
+   "routergroup.go"
+  ],
+  "test_files": [
+   "routergroup_test.go",
+   "routes_test.go"
+  ],
+  "source_lines": 8
+ },
+ {
+  "repo": "gin-gonic/gin",
+  "language": "go",
+  "issue": 4853,
+  "title": "Context.Copy reads c.Keys before taking c.mu, racing with Context.Set",
+  "url": "https://github.com/gin-gonic/gin/issues/4853",
+  "closed_at": "2026-09-25T06:01:39Z",
+  "labels": [],
+  "fix_pr": 4854,
+  "fix_pr_url": "https://github.com/gin-gonic/gin/pull/4854",
+  "base_branch": "master",
+  "fix_commit": "1bd0ecf2d3e08da37efa270bb7be20c1eddb0d68",
+  "source_files": [
+   "context.go"
+  ],
+  "test_files": [
+   "context_test.go"
+  ],
+  "source_lines": 3
+ },
+ {
+  "repo": "gin-gonic/gin",
+  "language": "go",
+  "issue": 4818,
+  "title": "Panic: slice bounds out of range in getValue with HandleMethodNotAllowed enabled",
+  "url": "https://github.com/gin-gonic/gin/issues/4818",
+  "closed_at": "2026-09-19T13:11:34Z",
+  "labels": [
+   "type/bug"
+  ],
+  "fix_pr": 4819,
+  "fix_pr_url": "https://github.com/gin-gonic/gin/pull/4819",
+  "base_branch": "master",
+  "fix_commit": "3b08cd7235bd5ad2f055aa9e38135f111f6c5926",
+  "source_files": [
+   "tree.go"
+  ],
+  "test_files": [
+   "routes_test.go"
+  ],
+  "source_lines": 8
+ },
+ {
+  "repo": "gin-gonic/gin",
+  "language": "go",
+  "issue": 4760,
+  "title": "Engine.Run starts an HTTP server without default timeouts",
+  "url": "https://github.com/gin-gonic/gin/issues/4760",
+  "closed_at": "2026-09-19T06:41:54Z",
+  "labels": [
+   "type/bug"
+  ],
+  "fix_pr": 4800,
+  "fix_pr_url": "https://github.com/gin-gonic/gin/pull/4800",
+  "base_branch": "master",
+  "fix_commit": "d8f2d588d7573b3438cfc95b7a47f9ec8966273c",
+  "source_files": [
+   "gin.go"
+  ],
+  "test_files": [
+   "gin_test.go"
+  ],
+  "source_lines": 39
+ }
+]

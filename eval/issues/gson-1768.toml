@@ -1,0 +1,16 @@
+# JsonReader / JsonTreeReader.promoteNameToValue() causes incorrect JSON path
+id = "gson-1768"
+language = "java"
+repo = "google/gson"
+issue = 1768
+url = "https://github.com/google/gson/issues/1768"
+title = "JsonReader / JsonTreeReader.promoteNameToValue() causes incorrect JSON path"
+closed_at = "2026-08-27T01:13:24Z"
+labels = ["bug"]
+base_commit = "61f2c646066e959f65cb99a826a2a759be42dbdd"
+fix_commit = "b3f4ca20087f9066de4c340522ff84e0558e1ad1"
+fix_pr = 3098
+source_files = ["gson/src/main/java/com/google/gson/internal/bind/JsonTreeReader.java", "gson/src/main/java/com/google/gson/stream/JsonReader.java"]
+test_files = ["gson/src/test/java/com/google/gson/functional/JsonParserTest.java", "gson/src/test/java/com/google/gson/functional/MapTest.java", "gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java"]
+hidden_tests = ["JsonParserTest", "MapTest", "JsonReaderPathTest"]
+body = "The internal method `JsonReaderInternalAccess.promoteNameToValue(JsonReader)` which is used before the key of a `Map<K,V>` is read causes an incorrect JSON path because after the name has been read as value, the JSON path is not updated.\r\n\r\nFor example:\r\n```java\r\nString malformedJson = \"{\\\"name\\\":\\\"value\";\r\ntry {\r\n    new Gson().fromJson(malformedJson, new TypeToken<Map<String, String>>() {}.getType());\r\n} catch (JsonSyntaxException exception) {\r\n    // Incorrect: Path is missing name\r\n    // Unterminated string at line 1 column 15 path $.\r\n    System.out.println(exception.getCause().getMessage());\r\n}\r\n\r\nJsonReader jsonReader = new JsonReader(new StringReader(malformedJson));\r\njsonReader.beginObject();\r\njsonReader.nextName();\r\ntry {\r\n    jsonReader.nextString();\r\n} catch (MalformedJsonException exception) {\r\n    // Correct: Path includes name\r\n    // Unterminated string at line 1 column 15 path $.name\r\n    System.out.println(exception.getMessage());\r\n}\r\n```"

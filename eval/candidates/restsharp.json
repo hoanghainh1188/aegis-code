@@ -1,0 +1,117 @@
+[
+ {
+  "repo": "restsharp/RestSharp",
+  "language": "csharp",
+  "issue": 2413,
+  "title": "Expose HTTP response trailers on RestResponse",
+  "url": "https://github.com/restsharp/RestSharp/issues/2413",
+  "closed_at": "2026-10-21T12:48:00Z",
+  "labels": [],
+  "fix_pr": 2414,
+  "fix_pr_url": "https://github.com/restsharp/RestSharp/pull/2414",
+  "base_branch": "dev",
+  "fix_commit": "e24f076f217c1397844a2b87e0ba6027804988bb",
+  "source_files": [
+   "src/RestSharp/Response/RestResponse.cs",
+   "src/RestSharp/Response/RestResponseBase.cs"
+  ],
+  "test_files": [
+   "test/RestSharp.Tests/ResponseTrailerTests.cs"
+  ],
+  "source_lines": 10
+ },
+ {
+  "repo": "restsharp/RestSharp",
+  "language": "csharp",
+  "issue": 2402,
+  "title": "RestClient configured with Newtonsoft.Json serializer still instantiates System.Text.Json",
+  "url": "https://github.com/restsharp/RestSharp/issues/2402",
+  "closed_at": "2026-10-21T12:40:55Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 2403,
+  "fix_pr_url": "https://github.com/restsharp/RestSharp/pull/2403",
+  "base_branch": "dev",
+  "fix_commit": "d73d43c68b9d22dd8310717c58633522a44236f9",
+  "source_files": [
+   "src/RestSharp/Serializers/SerializerConfig.cs"
+  ],
+  "test_files": [
+   "test/RestSharp.Tests.Serializers.Json/NewtonsoftJson/IntegratedSimpleTests.cs",
+   "test/RestSharp.Tests/RestClientTests.cs"
+  ],
+  "source_lines": 18
+ },
+ {
+  "repo": "restsharp/RestSharp",
+  "language": "csharp",
+  "issue": 2083,
+  "title": "ThreadPool   hang",
+  "url": "https://github.com/restsharp/RestSharp/issues/2083",
+  "closed_at": "2026-03-05T11:54:32Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 2367,
+  "fix_pr_url": "https://github.com/restsharp/RestSharp/pull/2367",
+  "base_branch": "dev",
+  "fix_commit": "c362621b172699270783dedc97d87dfd7d66d961",
+  "source_files": [
+   "src/RestSharp/Extensions/HttpResponseExtensions.cs",
+   "src/RestSharp/Response/RestResponse.cs",
+   "src/RestSharp/RestClient.Extensions.cs"
+  ],
+  "test_files": [
+   "test/RestSharp.Tests.Integrated/SyncRequestTests.cs"
+  ],
+  "source_lines": 10
+ },
+ {
+  "repo": "restsharp/RestSharp",
+  "language": "csharp",
+  "issue": 2156,
+  "title": "Remove modification of HttpClient DefaultRequestHeaders",
+  "url": "https://github.com/restsharp/RestSharp/issues/2156",
+  "closed_at": "2026-03-01T16:26:55Z",
+  "labels": [
+   "feature-request"
+  ],
+  "fix_pr": 2363,
+  "fix_pr_url": "https://github.com/restsharp/RestSharp/pull/2363",
+  "base_branch": "dev",
+  "fix_commit": "8cafdd1dbc83b42c942c6bfb75dd1288f5263599",
+  "source_files": [
+   "src/RestSharp.Extensions.DependencyInjection/ServiceCollectionExtensions.cs",
+   "src/RestSharp/RestClient.Async.cs",
+   "src/RestSharp/RestClient.cs"
+  ],
+  "test_files": [
+   "test/RestSharp.Tests/RestClientTests.cs"
+  ],
+  "source_lines": 23
+ },
+ {
+  "repo": "restsharp/RestSharp",
+  "language": "csharp",
+  "issue": 2271,
+  "title": "request.AddFile(...) quotes parameter name, but request.AddParameter(...) does not.",
+  "url": "https://github.com/restsharp/RestSharp/issues/2271",
+  "closed_at": "2026-02-26T19:58:56Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 2357,
+  "fix_pr_url": "https://github.com/restsharp/RestSharp/pull/2357",
+  "base_branch": "dev",
+  "fix_commit": "046795231e33ca08c72cb906e9085b4e94bcbdae",
+  "source_files": [
+   "src/RestSharp/Request/RequestContent.cs",
+   "src/RestSharp/Request/RestRequest.cs"
+  ],
+  "test_files": [
+   "test/RestSharp.Tests.Integrated/MultipartFormDataTests.cs"
+  ],
+  "source_lines": 7
+ }
+]

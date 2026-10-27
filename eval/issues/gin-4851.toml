@@ -1,0 +1,16 @@
+# Pooled skippedNodes keeps the capacity captured at allocation, causing panic in getValue when routes are registered late
+id = "gin-4851"
+language = "go"
+repo = "gin-gonic/gin"
+issue = 4851
+url = "https://github.com/gin-gonic/gin/issues/4851"
+title = "Pooled skippedNodes keeps the capacity captured at allocation, causing panic in getValue when routes are registered late"
+closed_at = "2026-10-10T04:18:56Z"
+labels = []
+base_commit = "e8f24969d59611428b03d02424b8f4bb55a1ef91"
+fix_commit = "ea9fab99e01d55a5e4f8daacc0d11ccffaee0a15"
+fix_pr = 4852
+source_files = ["tree.go"]
+test_files = ["routes_test.go"]
+hidden_tests = ["routes_test.go"]
+body = "## Summary\n\n`getValue` grows the backtrack stack with a raw reslice `(*skippedNodes)[:index+1]`, assuming capacity equals `Engine.maxSections`. However, `skippedNodes` capacity is captured when the context pool allocates it. Routes registered after a context is already created raise `maxSections` without resizing the pooled slice. The next request needing an additional backtrack frame panics with:\n`runtime error: slice bounds out of range` inside the router before any middleware or handler.\n\n## Steps to Reproduce\n\n1. Register `GET /a` and serve a warmup request (pooled context capacity = 1).\n2. Register additional nested routes: `GET /x/y/z/w`, `GET /x/y/:id/w`, `GET /x/:id/z/w`, `GET /:id/y/z/w`.\n3. Serve `POST /x/y/z/w/extra` with `router.HandleMethodNotAllowed = true`.\n4. Result: `panic: runtime error: slice bounds out of range [:2] with capacity 1`.\n\n## Proposed Fix\n\nGrow `skippedNodes` with `append` instead of raw reslicing.\n\nA Pull Request addressing this is submitted concurrently."

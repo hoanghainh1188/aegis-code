@@ -1,0 +1,16 @@
+# Include the HTTP QUERY method in RouterGroup.Any
+id = "gin-4877"
+language = "go"
+repo = "gin-gonic/gin"
+issue = 4877
+url = "https://github.com/gin-gonic/gin/issues/4877"
+title = "Include the HTTP QUERY method in RouterGroup.Any"
+closed_at = "2026-10-10T04:16:18Z"
+labels = ["type/proposal"]
+base_commit = "43fe48e8a0f44af783116cdb010725e6bb50255f"
+fix_commit = "e8f24969d59611428b03d02424b8f4bb55a1ef91"
+fix_pr = 4878
+source_files = ["routergroup.go"]
+test_files = ["routergroup_test.go", "routes_test.go"]
+hidden_tests = ["routergroup_test.go", "routes_test.go"]
+body = "### Feature Description\n\n## Feature description\n\n`RouterGroup.Any` currently registers a fixed list of HTTP methods but excludes `QUERY`, even though Gin supports `router.QUERY` and `gin.MethodQuery` (RFC 10008). As a result, a `QUERY` request to an `Any` route returns 404.\n\n```go\nr := gin.New()\nr.Any(\"/search\", func(c *gin.Context) {\n    c.Status(http.StatusOK)\n})\n// QUERY /search currently returns 404.\n```\n\nI propose adding `gin.MethodQuery` to the methods registered by `Any`, then updating its documentation and routing tests. This would make `Any` cover every HTTP method that Gin exposes through a routing shortcut. Applications that want an explicit set of methods can continue using `Match`.\n\n## Compatibility consideration\n\nPR #4806 deliberately left `QUERY` out of `Any` to preserve the matching behavior of existing routes. Including it would change those routes to accept `QUERY`, so this should be treated as an intentional behavior change and called out in release notes. Handlers registered with `Any` would also need to respect QUERY's safe and idempotent semantics when processing that method.\n\nRelated: #4721 and #4806."
