@@ -2,7 +2,7 @@
 //! and detection from marker files (ADR 0004 §1).
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -479,8 +479,8 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
     Ok(())
 }
 
-/// Path pattern for [`Profile::protected_changes`].
-pub(crate) fn path_glob(pattern: &str, path: &str) -> bool {
+/// Path pattern for [`Profile::protected_changes`] and coverage report paths.
+pub fn path_glob(pattern: &str, path: &str) -> bool {
     fn segments(pattern: &[&str], path: &[&str]) -> bool {
         match pattern.split_first() {
             None => path.is_empty(),
@@ -500,6 +500,81 @@ pub(crate) fn path_glob(pattern: &str, path: &str) -> bool {
     let pattern: Vec<&str> = pattern.split('/').collect();
     let path: Vec<&str> = path.split('/').collect();
     segments(&pattern, &path)
+}
+
+/// Finds all regular files under `root` that match `pattern`.
+///
+/// Supports literal paths, wildcards (`*`) within path segments (such as
+/// `TestResults/*/coverage.opencover.xml`), and `**` across directory
+/// levels. Results are sorted.
+pub fn find_reports(root: &Path, pattern: &str) -> Vec<PathBuf> {
+    fn match_segments(current: &Path, segments: &[&str], results: &mut Vec<PathBuf>) {
+        let Some((seg, rest)) = segments.split_first() else {
+            if current.is_file() {
+                results.push(current.to_path_buf());
+            }
+            return;
+        };
+        if *seg == "**" {
+            match_segments(current, rest, results);
+            if let Ok(entries) = std::fs::read_dir(current) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        match_segments(&path, segments, results);
+                    }
+                }
+            }
+        } else if seg.contains('*') {
+            if let Ok(entries) = std::fs::read_dir(current) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if glob_match(seg, &name_str) {
+                        let path = entry.path();
+                        if rest.is_empty() {
+                            if path.is_file() {
+                                results.push(path);
+                            }
+                        } else if path.is_dir() {
+                            match_segments(&path, rest, results);
+                        }
+                    }
+                }
+            }
+        } else {
+            let next = current.join(seg);
+            if rest.is_empty() {
+                if next.is_file() {
+                    results.push(next);
+                }
+            } else if next.is_dir() {
+                match_segments(&next, rest, results);
+            }
+        }
+    }
+
+    let pattern = pattern.trim_start_matches("./");
+    if pattern.is_empty() {
+        return Vec::new();
+    }
+    if !pattern.contains('*') {
+        let direct = root.join(pattern);
+        return if direct.is_file() {
+            vec![direct]
+        } else {
+            Vec::new()
+        };
+    }
+    let segments: Vec<&str> = pattern
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != ".")
+        .collect();
+    let mut results = Vec::new();
+    match_segments(root, &segments, &mut results);
+    results.sort();
+    results.dedup();
+    results
 }
 
 /// `*` matches any run of characters; everything else is literal.
@@ -920,5 +995,50 @@ mod tests {
             p.language_of(Path::new("src/MAIN.RS")),
             Some(Language::Rust)
         );
+    }
+
+    #[test]
+    fn find_reports_matches_literal_and_glob_paths() {
+        let dir_name = format!("aegis_test_find_reports_{}", std::process::id());
+        let root = std::env::temp_dir().join(dir_name);
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 1. Literal path
+        let literal = root.join("lcov.info");
+        std::fs::write(&literal, "TN:").unwrap();
+        assert_eq!(find_reports(&root, "lcov.info"), vec![literal.clone()]);
+        assert_eq!(find_reports(&root, "missing.xml"), Vec::<PathBuf>::new());
+
+        // 2. Glob pattern with single wildcard segment (e.g. TestResults/*/coverage.opencover.xml)
+        let guid1 = root.join("TestResults").join("1111-guid");
+        let guid2 = root.join("TestResults").join("2222-guid");
+        std::fs::create_dir_all(&guid1).unwrap();
+        std::fs::create_dir_all(&guid2).unwrap();
+        let report1 = guid1.join("coverage.opencover.xml");
+        let report2 = guid2.join("coverage.opencover.xml");
+        std::fs::write(&report1, "<CoverageSession1/>").unwrap();
+        std::fs::write(&report2, "<CoverageSession2/>").unwrap();
+
+        let pattern = "TestResults/*/coverage.opencover.xml";
+        assert_eq!(
+            find_reports(&root, pattern),
+            vec![report1.clone(), report2.clone()]
+        );
+
+        // 3. Trailing wildcard file name
+        assert_eq!(
+            find_reports(&root, "TestResults/*/*.xml"),
+            vec![report1.clone(), report2.clone()]
+        );
+
+        // 4. Recursive glob **
+        let nested = root.join("a").join("b").join("c");
+        std::fs::create_dir_all(&nested).unwrap();
+        let deep_report = nested.join("deep.xml");
+        std::fs::write(&deep_report, "<deep/>").unwrap();
+        assert_eq!(find_reports(&root, "a/**/deep.xml"), vec![deep_report]);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

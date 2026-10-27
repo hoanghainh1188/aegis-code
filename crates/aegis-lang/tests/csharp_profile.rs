@@ -36,14 +36,9 @@ fn fetched(profile: &ResolvedProfile) -> Workspace {
     ws
 }
 
-/// The one file matching a `dir/*/file` coverage path.
+/// The one file matching a coverage path pattern.
 fn find_report(root: &Path, pattern: &str) -> Option<PathBuf> {
-    let (dir, file) = pattern.split_once("/*/").expect("dir/*/file pattern");
-    std::fs::read_dir(root.join(dir))
-        .ok()?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path().join(file))
-        .find(|p| p.exists())
+    aegis_lang::find_reports(root, pattern).into_iter().next()
 }
 
 #[test]

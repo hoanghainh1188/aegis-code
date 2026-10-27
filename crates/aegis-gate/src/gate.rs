@@ -1159,28 +1159,44 @@ impl<'a> Run<'a> {
             Step::Skipped(reason) => return Ok(StepReport::skipped(name, skip_of(*reason))),
             Step::Run(c) => c,
         };
-        let path = self
-            .part
-            .profile
-            .coverage
-            .as_ref()
-            .map(|c| self.part.repo.join(&c.path));
-        if let Some(p) = path.as_ref().filter(|p| p.exists()) {
-            std::fs::remove_file(p).map_err(|e| GateError::io(p, &e))?;
+        let pattern = self.part.profile.coverage.as_ref().map(|c| c.path.as_str());
+        if let Some(pat) = pattern {
+            for old in aegis_lang::find_reports(&self.part.repo, pat) {
+                std::fs::remove_file(&old).map_err(|e| GateError::io(&old, &e))?;
+            }
         }
         let ran = self.run_in(&command.render(&[])?, false, name.id())?;
         let failed = |why: String| report(name, StepStatus::Failed, &[&ran], why);
-        Ok(match (ran.exit, &path) {
+        let reports = pattern.map(|pat| (pat, aegis_lang::find_reports(&self.part.repo, pat)));
+        Ok(match (ran.exit, &reports) {
             (Exit::Cancelled, _) => StepReport::skipped(name, Skip::Cancelled),
             (e @ (Exit::TimedOut | Exit::Signal), _) => {
                 failed(format!("{}:\n{}", exit_text(e), tail(&ran.log)))
             }
-            (e, Some(p)) if !p.exists() => failed(format!(
-                "no coverage report at `{}` ({}):\n{}",
-                p.display(),
-                exit_text(e),
-                tail(&ran.log)
-            )),
+            (e, Some((pat, found))) if found.is_empty() => {
+                let p = self.part.repo.join(pat);
+                failed(format!(
+                    "no coverage report at `{}` ({}):\n{}",
+                    p.display(),
+                    exit_text(e),
+                    tail(&ran.log)
+                ))
+            }
+            (_, Some((pat, found))) if found.len() > 1 => {
+                let shown: Vec<String> = found
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(&self.part.repo)
+                            .map(|rel| rel.display().to_string())
+                            .unwrap_or_else(|_| p.display().to_string())
+                    })
+                    .collect();
+                failed(format!(
+                    "multiple coverage reports match `{}`: {}",
+                    pat,
+                    shown.join(", ")
+                ))
+            }
             (e, None) if !e.success() => failed(format!("{}:\n{}", exit_text(e), tail(&ran.log))),
             // The coverage run also runs the tests; their failures were
             // judged against the base by the test step (#104).
