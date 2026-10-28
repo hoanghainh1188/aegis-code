@@ -5,6 +5,9 @@
 //! ([`crate::auth::api`]). A service sees and changes only the repos it has
 //! a role in: a job of another repo is "not found". Writes are audited.
 //!
+//! `POST /api/v1/jobs/{id}/review` (maintainer) queues the next review
+//! round of the PR the job opened (#243), at most `[reviews] max_rounds`.
+//!
 //! A repo's monthly budget (#31) is read at `GET /api/v1/repos/{id}/budget`
 //! and its cap set with `PUT` (maintainer); a job asked for when it is
 //! spent is refused with `409 budget_spent` and the reason.
@@ -41,6 +44,7 @@ pub fn router(store: Store, auth: Auth) -> Router {
         .route("/api/v1/jobs/{id}/runs", get(list_runs))
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
+        .route("/api/v1/jobs/{id}/review", post(review_job))
         .route(
             "/api/v1/repos/{id}/budget",
             get(repo_budget).put(set_repo_budget),
@@ -246,6 +250,8 @@ struct JobView {
     retries: u32,
     cancel_requested: bool,
     retry_of: Option<i64>,
+    review_of: Option<i64>,
+    review_round: u32,
     locked_by: Option<String>,
     locked_until: Option<String>,
     run_after: String,
@@ -269,6 +275,8 @@ impl From<Job> for JobView {
             retries: j.retries,
             cancel_requested: j.cancel_requested,
             retry_of: j.retry_of.map(|r| r.0),
+            review_of: j.review_of.map(|r| r.0),
+            review_round: j.review_round,
             locked_by: j.locked_by,
             locked_until: j.locked_until.map(|t| t.to_rfc3339()),
             run_after: j.run_after.to_rfc3339(),
@@ -336,6 +344,11 @@ async fn create_job(
     }
     let source = JobSource::parse(&body.source)
         .ok_or_else(|| ApiError::invalid(format!("source: unknown `{}`", body.source)))?;
+    if source == JobSource::Review {
+        return Err(ApiError::invalid(
+            "source: a review round is asked for at POST /api/v1/jobs/{id}/review",
+        ));
+    }
     let key = body
         .ledger_key
         .unwrap_or_else(|| default_ledger_key(issue_ref));
@@ -461,6 +474,19 @@ async fn retry_job(
     let Path(id) = id?;
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
     let job = store.retry_job_by(JobId(id), &access.actor).await?;
+    Ok(ok(StatusCode::CREATED, JobView::from(job)))
+}
+
+/// The next review round (#243) of the PR job `id` opened, or the PR a
+/// review round of it works on.
+async fn review_job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.review_job_by(JobId(id), &access.actor).await?;
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }
 

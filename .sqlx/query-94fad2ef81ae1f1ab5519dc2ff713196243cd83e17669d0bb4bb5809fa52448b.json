@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET cancel_requested = true,\n                 status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,\n                 reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'\n                               ELSE reason END,\n                 updated_at = now()\n             WHERE id = $1 AND status IN ('queued', 'running')\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
+  "query": "UPDATE jobs SET cancel_requested = true,\n                 status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,\n                 reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'\n                               ELSE reason END,\n                 updated_at = now()\n             WHERE id = $1 AND status IN ('queued', 'running')\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -200,6 +200,28 @@
             "name": "retry_of"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "review_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_of"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "review_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_round"
+          }
+        }
       }
     ],
     "parameters": {
@@ -225,8 +247,10 @@
       false,
       true,
       true,
-      true
+      true,
+      true,
+      false
     ]
   },
-  "hash": "962a40345bae97a971dedaaef1793323c7668eadc25efa55bee2606cf8a75381"
+  "hash": "94fad2ef81ae1f1ab5519dc2ff713196243cd83e17669d0bb4bb5809fa52448b"
 }

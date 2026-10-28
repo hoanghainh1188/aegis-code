@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of\n             FROM jobs WHERE id = $1",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, status, reason)\n             SELECT $1, $2, $3, $4,\n                    CASE WHEN $5::text IS NULL THEN 'queued' ELSE 'cancelled' END, $5\n             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2\n                               AND status IN ('queued', 'running'))\n             ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -200,11 +200,37 @@
             "name": "retry_of"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "review_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_of"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "review_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_round"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -225,8 +251,10 @@
       false,
       true,
       true,
-      true
+      true,
+      true,
+      false
     ]
   },
-  "hash": "f5cc20535a9b84e56d9c99a9aa8f69ccd1c3e64a274996b3a02ec4d7128ad0b4"
+  "hash": "8b4651b4cfb881d9cc222b0a445d1c5b3f72fe7dd6703ffdf1137be0b77a72eb"
 }

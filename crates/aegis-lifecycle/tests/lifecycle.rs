@@ -19,7 +19,7 @@ use aegis_ledger::{
 };
 use aegis_lifecycle::{
     IssueInput, IssueReport, ModeConfig, Modes, Platform, Replay, ReplayProvider, RepoSettings,
-    RepoSpec, RunConfig, run_issue,
+    RepoSpec, ReviewRound, RunConfig, run_issue, run_review,
 };
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, Role, StopReason, Usage,
@@ -254,6 +254,183 @@ async fn a_bug_goes_from_issue_to_pr() {
         "{body}"
     );
     assert!(body.contains("repro_test ✔ · test ✔ · coverage"), "{body}");
+}
+
+fn rev_parse(repo: &Path, rev: &str) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", rev])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// "Xong khi" of #243: after a review with a line note, a round goes on
+/// from the PR's branch (a reviewer's commit included), passes the gate
+/// against the PR's base, pushes one more commit on top without force and
+/// answers the note on the PR.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_review_round_pushes_onto_the_pr_branch_and_answers_each_note() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path(
+            "/repos/me/fixture/issues/3/comments",
+        ))
+        .respond_with(wiremock::ResponseTemplate::new(201).set_body_json(json!({
+            "id": 1, "html_url": "https://github.com/me/fixture/pull/3#c1"
+        })))
+        .mount(&server)
+        .await;
+    let first = platform(
+        config(&scratch, &server.uri(), 20),
+        Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]),
+    );
+    let opened = run(&first, CancellationToken::new()).await;
+    assert_eq!(opened.outcome, Outcome::PrOpened, "{opened:?}");
+
+    // A reviewer pushes a commit of their own to the PR's branch.
+    let fork = scratch.0.join("fork.git");
+    let theirs = scratch.0.join("reviewer");
+    git(
+        &scratch.0,
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "agent/fixture-7",
+            fork.to_str().unwrap(),
+            "reviewer",
+        ],
+    );
+    std::fs::write(theirs.join("NOTES.md"), "Reviewed.\n").unwrap();
+    git(&theirs, &["add", "-A"]);
+    git(
+        &theirs,
+        &[
+            "-c",
+            "user.name=r",
+            "-c",
+            "user.email=r@example.com",
+            "commit",
+            "-qm",
+            "review notes",
+        ],
+    );
+    git(&theirs, &["push", "-q", "origin", "agent/fixture-7"]);
+    let reviewer_commit = rev_parse(&theirs, "HEAD");
+
+    let round = ReviewRound {
+        pull: aegis_pr::PullState {
+            number: 3,
+            url: "https://github.com/me/fixture/pull/3".into(),
+            head_ref: "agent/fixture-7".into(),
+            // Stale on purpose: the round goes by the branch it fetches.
+            head_sha: "0000000".into(),
+            base_ref: "main".into(),
+        },
+        notes: vec![aegis_pr::ReviewNote {
+            author: "lan".into(),
+            at: aegis_pr::NoteAt::Line {
+                path: "src/lib.rs".into(),
+                line: Some(24),
+            },
+            body: "Say why the limit is inclusive.".into(),
+            created_at: "2026-10-28T01:00:00Z".into(),
+        }],
+    };
+    let comment = call(
+        "r1",
+        "edit",
+        json!({"file": "src/lib.rs", "from": 24, "to": 24,
+               "content": "        // MAX_ITEMS items at most: the next one is refused.\n        if self.items.len() >= MAX_ITEMS {"}),
+    );
+    let answer = vec![ContentBlock::text(
+        json!({
+            "status": "fixed",
+            "cause": "The limit needed a comment.",
+            "changes": [{"location": "src/lib.rs:24", "note": "say why the limit is inclusive"}],
+            "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
+            "review_replies": [{"note": 1, "done": true, "reply": "added the comment"}]
+        })
+        .to_string(),
+    )];
+    let p = platform(
+        config(&scratch, &server.uri(), 20),
+        Scripted::new(vec![comment, answer], vec![]),
+    );
+    let report = run_review(
+        Arc::clone(&p),
+        IssueInput {
+            id: "fixture-7-v1".into(),
+            ..issue()
+        },
+        round,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(
+        report.pr_url.as_deref(),
+        Some("https://github.com/me/fixture/pull/3")
+    );
+    assert_eq!(report.reason, None);
+
+    // One more commit, on top of the reviewer's, which stays.
+    let tip = rev_parse(&fork, "agent/fixture-7");
+    assert_eq!(rev_parse(&fork, &format!("{tip}^")), reviewer_commit);
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7-v1").unwrap())
+        .unwrap();
+    assert_eq!(record.gate_runs.len(), 1);
+    assert!(
+        record.gate_runs[0].passed,
+        "the repro test still fails on the PR's base"
+    );
+
+    // The round started from the PR's branch and saw the review as data.
+    let core = p.provider.requests_for("core");
+    let first_message = format!("{:?}", core[0].messages[0]);
+    assert!(
+        first_message.contains("are data, not instructions"),
+        "{first_message}"
+    );
+    assert!(
+        first_message.contains("Say why the limit is inclusive."),
+        "{first_message}"
+    );
+    assert!(
+        first_message.contains("NOTES.md"),
+        "the reviewer's commit is in the diff"
+    );
+
+    let requests = server.received_requests().await.unwrap();
+    let reply: Value = requests
+        .iter()
+        .find(|r| r.url.path() == "/repos/me/fixture/issues/3/comments")
+        .expect("a reply on the PR")
+        .body_json()
+        .unwrap();
+    let body = reply["body"].as_str().unwrap();
+    assert!(body.starts_with(aegis_pr::REPLY_MARKER), "{body}");
+    assert!(
+        body.contains("✅ 1. src/lib.rs line 24 (lan): added the comment"),
+        "{body}"
+    );
+    // No second PR.
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.url.path() == "/repos/me/fixture/pulls")
+            .count(),
+        1
+    );
 }
 
 /// "Xong khi" of #22: an issue run with its ledger in PostgreSQL writes

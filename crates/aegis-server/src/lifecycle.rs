@@ -27,11 +27,13 @@ use aegis_ledger::{
     IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable,
 };
 use aegis_lifecycle::{
-    IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, run_issue,
+    IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, ReviewRound, run_issue,
+    run_review,
 };
+use aegis_pr::{GitHub, REPLY_MARKER};
 use aegis_provider::{Observed, Provider};
 use aegis_secrets::{Secret, Secrets};
-use aegis_store::{Claim, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
+use aegis_store::{Claim, Job, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -291,10 +293,20 @@ impl LifecycleRunner {
             let name = &sonar.token_env;
             sonar.token = Some(self.secret(&repo.slug, "Sonar's token", name).await?);
         }
-        let issue = match job.source {
-            JobSource::Jira | JobSource::Backlog => ticket_issue(job, &repo, &self.secrets).await?,
-            JobSource::Sonar => sonar_issue(job, &repo, &self.store, &self.secrets).await?,
-            _ => issue(claim, &config.repo.fork.api, &github_token).await?,
+        let round = match job.source {
+            JobSource::Review => Some(self.review_round(job, &config, &github_token).await?),
+            _ => None,
+        };
+        let issue = match (&round, job.source) {
+            (Some((root, _)), _) => IssueInput {
+                id: job.ledger_key.as_str().to_owned(),
+                ..issue(root, &config.repo.fork.api, &github_token).await?
+            },
+            (None, JobSource::Jira | JobSource::Backlog) => {
+                ticket_issue(job, &repo, &self.secrets).await?
+            }
+            (None, JobSource::Sonar) => sonar_issue(job, &repo, &self.store, &self.secrets).await?,
+            (None, _) => issue(job, &config.repo.fork.api, &github_token).await?,
         };
         let tiers = [
             (&config.models.light, "light"),
@@ -313,19 +325,101 @@ impl LifecycleRunner {
             github_token,
         });
         let _tag = self.ledger.tag(job.ledger_key.clone(), claim.run.id);
-        let mut task = AbortOnDrop(tokio::spawn(
-            run_issue(platform, issue, cancel).in_current_span(),
-        ));
+        let fork = platform.config.repo.fork.clone();
+        let token = platform.github_token.clone();
+        type Run = std::pin::Pin<
+            Box<dyn Future<Output = Result<aegis_lifecycle::IssueReport, LifecycleError>> + Send>,
+        >;
+        let (future, pull): (Run, _) = match round {
+            Some((_, round)) => {
+                let pull = round.pull.clone();
+                (
+                    Box::pin(run_review(platform, issue, round, cancel)),
+                    Some(pull),
+                )
+            }
+            None => (Box::pin(run_issue(platform, issue, cancel)), None),
+        };
+        let mut task = AbortOnDrop(tokio::spawn(future.in_current_span()));
         let report = match (&mut task.0).await {
             Ok(Ok(report)) => report,
             Ok(Err(e)) => return Err(Attempt::Infra(e.to_string())),
             Err(e) => return Err(Attempt::Infra(format!("the job panicked: {e}"))),
         };
+        if let Some(pull) = pull
+            && report.outcome != Outcome::PrOpened
+        {
+            // The round pushed nothing: the reviewers are told why on the PR.
+            let reason = report.reason.as_deref().unwrap_or("it stopped");
+            let text = format!(
+                "{REPLY_MARKER}\n**aegis-code** pushed nothing for this review: {}.\n\n\
+                 <sub>aegis-code job {}</sub>",
+                aegis_pr::inert(reason),
+                job.id.0
+            );
+            match GitHub::new(&fork.api, &fork.owner, &fork.name, &token) {
+                Ok(github) => {
+                    if let Err(e) = github.comment_on_issue(pull.number, &text).await {
+                        tracing::warn!(error = %e, "replying on the PR");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "replying on the PR"),
+            }
+        }
         Ok(Attempt::Ended {
             outcome: report.outcome,
             reason: report.reason,
             pr_url: report.pr_url,
         })
+    }
+}
+
+impl LifecycleRunner {
+    /// A review round's PR (#243): the job that opened it, and the PR as
+    /// it is now with its notes. Only a PR of the repo's fork, from an
+    /// open `agent/*` branch of it; GitHub issues for now.
+    async fn review_round(
+        &self,
+        job: &Job,
+        config: &aegis_lifecycle::RunConfig,
+        token: &str,
+    ) -> Result<(Job, ReviewRound), Attempt> {
+        let root = self
+            .store
+            .review_root(job)
+            .await
+            .map_err(|e| Attempt::Infra(e.to_string()))?
+            .ok_or_else(|| Attempt::Rejected("a review round of no job".into()))?;
+        if !matches!(root.source, JobSource::Github | JobSource::Cli) {
+            return Err(Attempt::Rejected(format!(
+                "review rounds are for GitHub issues; job {} is a `{}` job",
+                root.id.0,
+                root.source.as_str()
+            )));
+        }
+        if token.is_empty() {
+            return Err(Attempt::Rejected(
+                "a review round pushes to the PR: `open_prs` is off".into(),
+            ));
+        }
+        let (owner, name, number) = parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+        let fork = &config.repo.fork;
+        if !(owner.eq_ignore_ascii_case(&fork.owner) && name.eq_ignore_ascii_case(&fork.name)) {
+            return Err(Attempt::Rejected(format!(
+                "`{}` is not a PR of the fork {}/{}",
+                job.issue_ref, fork.owner, fork.name
+            )));
+        }
+        let round = ReviewRound::from_github(&fork.api, &owner, &name, number, token)
+            .await
+            .map_err(|e| match e {
+                // Closed, merged, not the agent's: no attempt changes it.
+                LifecycleError::Pr(aegis_pr::PrError::GitHub { status: 0, message }) => {
+                    Attempt::Rejected(message)
+                }
+                other => Attempt::Infra(other.to_string()),
+            })?;
+        Ok((root, round))
     }
 }
 
@@ -337,8 +431,7 @@ impl JobRunner for LifecycleRunner {
 
 /// The issue of a GitHub or CLI job, under the job's ledger key. Jira and
 /// Backlog jobs: [`ticket_issue`]; Sonar batches: [`sonar_issue`].
-async fn issue(claim: &Claim, api: &str, token: &str) -> Result<IssueInput, Attempt> {
-    let job = &claim.job;
+async fn issue(job: &Job, api: &str, token: &str) -> Result<IssueInput, Attempt> {
     if !matches!(job.source, JobSource::Github | JobSource::Cli) {
         return Err(Attempt::Rejected(format!(
             "no connector for `{}` jobs yet",

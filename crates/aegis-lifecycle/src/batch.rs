@@ -176,6 +176,7 @@ impl<P, S> BatchSteps<'_, P, S> {
                 .flat_map(|a| a.allowed_reference_changes.clone())
                 .collect(),
             stop_reason: None,
+            review_replies: vec![],
         }
     }
 }
@@ -320,6 +321,7 @@ fn batch_answer(
             .flat_map(|a| a.allowed_reference_changes.clone())
             .collect(),
         stop_reason: None,
+        review_replies: vec![],
     }
 }
 

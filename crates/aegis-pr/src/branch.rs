@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::PrError;
 
-const PREFIX: &str = "agent/";
+pub(crate) const PREFIX: &str = "agent/";
 const MAX_ID_CHARS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

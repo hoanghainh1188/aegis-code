@@ -88,7 +88,7 @@ pub(crate) async fn queue_in(
              ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING
              RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
                        attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
+                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
         job.repo_id.0,
         job.issue_ref,
         job.ledger_key.as_str(),

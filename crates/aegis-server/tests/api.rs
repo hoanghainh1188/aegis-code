@@ -208,3 +208,61 @@ async fn the_api_keeps_its_64_kb_limit_and_webhooks_have_their_own() {
     );
     db.drop().await;
 }
+
+/// #243: a review round is asked for on the job that opened the PR, at
+/// most `[reviews] max_rounds` per PR, never through `POST /api/v1/jobs`.
+#[tokio::test]
+async fn a_review_round_is_asked_for_on_the_job_that_opened_the_pr() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone().with_max_review_rounds(1);
+    let app = app(&store).await;
+    let repo_id = repo(&store).await;
+    let as_review = json!({ "repo_id": repo_id, "issue_ref": "typst/typst#9", "source": "review" });
+    let (status, body) = call(&app, "POST", "/api/v1/jobs", Some(as_review)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("/review"),
+        "{body}"
+    );
+
+    let new = json!({ "repo_id": repo_id, "issue_ref": "typst/typst#9", "source": "github" });
+    let (_, body) = call(&app, "POST", "/api/v1/jobs", Some(new)).await;
+    let id = body["data"]["id"].as_i64().unwrap();
+    let (status, body) = call(&app, "POST", &format!("/api/v1/jobs/{id}/review"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "no PR yet: {body}");
+
+    let claim = store
+        .claim_job("w", std::time::Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let done = aegis_store::AttemptEnd::Done {
+        outcome: aegis_ledger::Outcome::PrOpened,
+        reason: None,
+        pr_url: Some("https://github.com/aegis-bot/typst/pull/4".into()),
+    };
+    store.finish_attempt(&claim.run, "w", &done).await.unwrap();
+    let (status, body) = call(&app, "POST", &format!("/api/v1/jobs/{id}/review"), None).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let round = &body["data"];
+    assert_eq!(
+        (
+            &round["source"],
+            &round["review_of"],
+            &round["review_round"],
+            &round["issue_ref"]
+        ),
+        (
+            &json!("review"),
+            &json!(id),
+            &json!(1),
+            &json!("aegis-bot/typst#4")
+        )
+    );
+    let (status, body) = call(&app, "POST", &format!("/api/v1/jobs/{id}/review"), None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    db.drop().await;
+}

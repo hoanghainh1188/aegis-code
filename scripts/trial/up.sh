@@ -121,6 +121,10 @@ say "Registering the repo and the first admin"
   . ./env.sh
   "$BIN" --config server.toml repo add demo.toml 2>/dev/null
   "$BIN" --config server.toml grant dev@example.com admin 2>/dev/null
+  # A service token for the trial's scripts (send-review.sh).
+  TOKEN=$("$BIN" --config server.toml token trial 2>/dev/null | head -1)
+  "$BIN" --config server.toml grant trial admin 2>/dev/null
+  echo "export AEGIS_TRIAL_API_TOKEN=$TOKEN" >> env.sh
 )
 
 cat <<DONE
@@ -130,6 +134,7 @@ Ready. Next:
   tail -f $WORK/server.log
   http://localhost:8080                            # dashboard, as dev@example.com
   http://127.0.0.1:8070/demo-org/demo/issues/1     # the issue and the job's comment
-  http://127.0.0.1:8070/demo-org/demo/pull/1       # the PR, once the job opens it
+  http://127.0.0.1:8070/demo-org/demo/pull/100     # the PR, once the job opens it
+  scripts/trial/send-review.sh 100 "<text>" [<file> <line> "<comment>"]   # a review round
 Undo: scripts/trial/down.sh
 DONE

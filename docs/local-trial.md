@@ -83,9 +83,17 @@ sequenceDiagram
    - Log từng bước gate: `.workspace/trial/state/jobs/demo-org-demo-1-<số>/gate/logs/`.
    - Issue và comment: <http://127.0.0.1:8070/demo-org/demo/issues/1>.
 
-4. **Kết quả:** job mở được PR thì xem ở <http://127.0.0.1:8070/demo-org/demo/pull/1> (mô tả và diff). Chấm nó trên dashboard (trang job → review). Job dừng (`stopped_budget`, `stopped_steps`…) thì lý do ở trang job và trong comment; với Ollama đây là chuyện thường, gửi lại webhook để chạy lần nữa.
+4. **Kết quả:** job mở được PR thì xem ở <http://127.0.0.1:8070/demo-org/demo/pull/100> (mô tả, commit, diff; PR của GitHub giả đánh số từ 100). Chấm nó trên dashboard (trang job → review). Job dừng (`stopped_budget`, `stopped_steps`…) thì lý do ở trang job và trong comment; với Ollama đây là chuyện thường, gửi lại webhook để chạy lần nữa.
 
-5. **Dọn:**
+5. **Vòng sửa theo review** (#243): gửi một review "Request changes" lên PR, kèm (tùy chọn) một comment theo dòng, rồi xin một vòng sửa qua API như người bảo trì:
+
+   ```bash
+   scripts/trial/send-review.sh 100 "Keep the cut on a rune boundary." textutil/textutil.go 9 "Explain why max <= 1 is special."
+   ```
+
+   Job `review` mới sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit vào PR 100 (không force) và trả lời từng ý trên trang PR. Mỗi PR có tối đa `[reviews] max_rounds` vòng (3).
+
+6. **Dọn:**
 
    ```bash
    scripts/trial/down.sh

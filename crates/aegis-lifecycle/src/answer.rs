@@ -42,6 +42,35 @@ fn every_test() -> String {
     "*".into()
 }
 
+/// What the agent did about one note of a review (#243).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ReviewReply {
+    /// The note's number in the review the round was given; a model may
+    /// write it as a string.
+    #[serde(deserialize_with = "number_or_text")]
+    pub note: u32,
+    pub done: bool,
+    #[serde(default)]
+    pub reply: String,
+}
+
+fn number_or_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Note {
+        Number(u32),
+        Text(String),
+    }
+    match Note::deserialize(d)? {
+        Note::Number(n) => Ok(n),
+        Note::Text(t) => t
+            .trim()
+            .trim_start_matches('#')
+            .parse()
+            .map_err(|_| serde::de::Error::custom(format!("`{t}` is not a note number"))),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct Raw {
     status: Status,
@@ -57,6 +86,8 @@ struct Raw {
     allowed_reference_changes: Vec<RawGroup>,
     #[serde(default)]
     stop_reason: Option<String>,
+    #[serde(default)]
+    review_replies: Vec<ReviewReply>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +100,8 @@ pub struct FinalAnswer {
     /// Groups of tests whose references may change together (#147).
     pub allowed_reference_changes: Vec<AllowedReferenceChange>,
     pub stop_reason: Option<String>,
+    /// A review round's answer to each note.
+    pub review_replies: Vec<ReviewReply>,
 }
 
 /// The JSON object in the agent's last reply; text or a fence around it
@@ -117,6 +150,7 @@ pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
             })
             .collect(),
         stop_reason: raw.stop_reason,
+        review_replies: raw.review_replies,
     })
 }
 

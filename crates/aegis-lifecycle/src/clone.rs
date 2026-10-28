@@ -162,11 +162,35 @@ pub async fn prepare_async(
 /// Fetches `branch` of `source` into the clone at `path`, moving the
 /// clone's branch of that name to it, even if it was pushed over.
 pub fn fetch(path: &Path, source: Source<'_>, branch: &str) -> Result<(), LifecycleError> {
+    fetch_into(path, source, branch, &format!("refs/heads/{branch}"))
+}
+
+/// Fetches `branch` of `source` (a PR's branch on the fork, #243) into
+/// `refs/aegis/<into>` of the clone; its commit.
+pub fn fetch_ref(
+    path: &Path,
+    source: Source<'_>,
+    branch: &str,
+    into: &str,
+) -> Result<String, LifecycleError> {
+    let local = format!("refs/aegis/{into}");
+    git(None, &["check-ref-format", &local], None)
+        .map_err(|_| LifecycleError::Config(format!("`{local}` is not a ref name")))?;
+    fetch_into(path, source, branch, &local)?;
+    crate::job::resolve(path, &local)
+}
+
+fn fetch_into(
+    path: &Path,
+    source: Source<'_>,
+    branch: &str,
+    local: &str,
+) -> Result<(), LifecycleError> {
     check_branch(branch)?;
     git(Some(path), &["rev-parse", "--git-dir"], None)
         .map_err(|_| LifecycleError::Config(format!("{}: not a git repo", path.display())))?;
     check_config(path)?;
-    let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{local}");
     // `--update-head-ok`: a clone made by hand has the branch checked out;
     // nothing reads its working tree.
     git(

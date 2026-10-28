@@ -23,9 +23,10 @@ mod light;
 mod publish;
 mod registry;
 mod replay;
+mod review;
 mod run;
 
-pub use answer::{FinalAnswer, Status, parse_answer};
+pub use answer::{FinalAnswer, ReviewReply, Status, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
     BudgetSection, DirConfig, ExtraServer, ForkConfig, IdentityConfig, LedgerBackend, RepoConfig,
@@ -36,4 +37,5 @@ pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};
 pub use registry::{ModeConfig, Modes, RepoRun, RepoSettings, RepoSpec};
 pub use replay::{Replay, ReplayProvider};
-pub use run::{IssueReport, Platform, job_dir, run_issue};
+pub use review::ReviewRound;
+pub use run::{IssueReport, Platform, job_dir, run_issue, run_review};

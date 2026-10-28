@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT repo_id, issue_ref, ledger_key, source, status FROM jobs\n             WHERE id = $1 FOR UPDATE",
+  "query": "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round\n             FROM jobs WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -57,6 +57,28 @@
             "name": "status"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "review_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_of"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "review_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_round"
+          }
+        }
       }
     ],
     "parameters": {
@@ -69,8 +91,10 @@
       false,
       false,
       false,
+      false,
+      true,
       false
     ]
   },
-  "hash": "6080ab15ea80683481bf6110ffd153e6b1976f15fc5159bb4821c4cbe335bc18"
+  "hash": "e3d7568cbcd7049d8849d2762df59c2c5cacc7bb7f356d8ad103cd6340119884"
 }

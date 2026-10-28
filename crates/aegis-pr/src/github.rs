@@ -110,6 +110,14 @@ impl GitHub {
         })
     }
 
+    pub(crate) fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub(crate) fn repo(&self) -> &str {
+        &self.repo
+    }
+
     /// Where the agent's branch for this repo is pushed: the web host of
     /// the API root (`api.github.com` → `github.com`, `<host>/api/v3` →
     /// `<host>`), same owner and repo, same token.
@@ -123,7 +131,7 @@ impl GitHub {
         Remote::https(host, &self.owner, &self.repo, &self.token)
     }
 
-    async fn get(&self, path: &str) -> Result<serde_json::Value, PrError> {
+    pub(crate) async fn get(&self, path: &str) -> Result<serde_json::Value, PrError> {
         let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
         let response = self
             .client

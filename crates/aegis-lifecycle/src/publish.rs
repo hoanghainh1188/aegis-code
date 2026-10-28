@@ -8,12 +8,13 @@ use aegis_lang::{CoverageFormat, RepoProfiles};
 use aegis_ledger::{IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
     CommitInput, Cost, GitHub, Identity, PrContent, Remote, abandon, cobertura_lines,
-    cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated, render,
-    write_commit_message,
+    cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated, push_gated_onto,
+    render, write_commit_message,
 };
 use aegis_provider::ModelProvider;
 
 use crate::answer::FinalAnswer;
+use crate::review::ReviewRound;
 use crate::{IssueInput, LifecycleError, Platform};
 
 /// Line coverage from the reports the gate's coverage step left in
@@ -58,6 +59,8 @@ fn coverage_percent(profiles: &RepoProfiles, tree: &Path, parts: &[String]) -> O
 
 pub(crate) struct Published {
     pub url: String,
+    /// Something to tell though the PR is up to date.
+    pub note: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -93,12 +96,8 @@ where
             .model_call(Tier::Light, &light.id, &response.usage)
             .await?;
     }
-    let fork = &cfg.repo.fork;
-    let github = GitHub::new(&fork.api, &fork.owner, &fork.name, &platform.github_token)?;
-    let remote = match &fork.push_to_local {
-        Some(path) => Remote::local(path)?,
-        None => github.remote()?,
-    };
+    let github = fork_github(platform)?;
+    let remote = fork_remote(platform)?;
     let identity = Identity {
         name: cfg.identity.name.clone(),
         email: cfg.identity.email.clone(),
@@ -134,13 +133,104 @@ where
         .open_pull_request(&pushed.branch, &target, &title, &body, cfg.run.draft_prs)
         .await
     {
-        Ok(pr) => Ok(Published { url: pr.url }),
+        Ok(pr) => Ok(Published {
+            url: pr.url,
+            note: None,
+        }),
         Err(e) => {
             // No PR, no branch: the fork is left as it was.
             let _ = abandon(tree, &pushed, &remote);
             Err(e.into())
         }
     }
+}
+
+fn fork_github<P, S>(platform: &Platform<P, S>) -> Result<GitHub, LifecycleError> {
+    let fork = &platform.config.repo.fork;
+    Ok(GitHub::new(
+        &fork.api,
+        &fork.owner,
+        &fork.name,
+        &platform.github_token,
+    )?)
+}
+
+/// Where the agent's branches are: the fork, or a local bare repo.
+pub(crate) fn fork_remote<P, S>(platform: &Platform<P, S>) -> Result<Remote, LifecycleError> {
+    Ok(match &platform.config.repo.fork.push_to_local {
+        Some(path) => Remote::local(path)?,
+        None => fork_github(platform)?.remote()?,
+    })
+}
+
+/// A review round's end (#243): the tree the gate passed committed on the
+/// PR's head and pushed without force, then the reply on the PR. The PR
+/// stays as it is; a push refused because the branch moved fails the
+/// round, with the reviewers' commits kept.
+pub(crate) async fn publish_round<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    tree: &Path,
+    issue: &IssueInput,
+    round: &ReviewRound,
+    answer: &FinalAnswer,
+    gate: &GateReport,
+) -> Result<Published, LifecycleError>
+where
+    P: ModelProvider + Sync,
+    S: LedgerStore + Sync,
+{
+    let cfg = &platform.config;
+    let light = &cfg.models.light;
+    let message = write_commit_message(
+        &platform.provider,
+        &light.id,
+        light.effort,
+        &CommitInput {
+            issue_title: &issue.title,
+            issue_url: &issue.url,
+            cause: &answer.cause,
+            changes: &answer.changes,
+        },
+    )
+    .await;
+    if let Some(response) = &message.response {
+        ledger
+            .model_call(Tier::Light, &light.id, &response.usage)
+            .await?;
+    }
+    let remote = fork_remote(platform)?;
+    let identity = Identity {
+        name: cfg.identity.name.clone(),
+        email: cfg.identity.email.clone(),
+    };
+    let pushed = push_gated_onto(
+        tree,
+        round.branch_id(),
+        gate,
+        &round.pull.head_sha,
+        &message.text,
+        &identity,
+        &remote,
+    )
+    .map_err(|e| {
+        LifecycleError::Config(format!(
+            "pushing to {}: {e} (someone may have pushed to it since the round began)",
+            round.pull.head_ref
+        ))
+    })?;
+    // The commit is on the PR: a reply that fails to post is told, not
+    // an error.
+    let reply = round.reply(&pushed.commit, answer);
+    let note = fork_github(platform)?
+        .comment_on_issue(round.pull.number, &reply)
+        .await
+        .err()
+        .map(|e| format!("pushed, but the reply was not posted: {e}"));
+    Ok(Published {
+        url: round.pull.url.clone(),
+        note,
+    })
 }
 
 #[cfg(test)]

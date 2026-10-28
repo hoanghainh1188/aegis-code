@@ -95,6 +95,8 @@ fn ended(id: JobId, repo: &Repo, source: JobSource, key: &str, pr: Option<&str>)
         reason: None,
         pr_url: pr.map(str::to_owned),
         retry_of: None,
+        review_of: None,
+        review_round: 0,
     }
 }
 

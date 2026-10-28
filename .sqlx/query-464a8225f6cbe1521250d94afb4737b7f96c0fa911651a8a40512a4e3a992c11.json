@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT coalesce(max(review_round), 0) AS \"rounds!\" FROM jobs WHERE review_of = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rounds!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "464a8225f6cbe1521250d94afb4737b7f96c0fa911651a8a40512a4e3a992c11"
+}

@@ -155,7 +155,8 @@ async fn run(args: Args) -> Result<(), String> {
         .map_err(|e| format!("{DATABASE_URL}: {e}"))?
         .with_budget(config.budget_rules())
         .await
-        .map_err(|e| format!("[budget]: {e}"))?;
+        .map_err(|e| format!("[budget]: {e}"))?
+        .with_max_review_rounds(config.reviews.max_rounds);
     let shutdown = on_shutdown_signal();
     let mut parts: JoinSet<Result<(), String>> = JoinSet::new();
     let refresh = secrets::keep_fresh(
