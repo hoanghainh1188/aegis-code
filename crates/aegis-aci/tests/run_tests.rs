@@ -181,11 +181,13 @@ async fn in_the_sandbox_the_test_runs_like_a_gate_step() {
         out.content
     );
     let calls = std::fs::read_to_string(repo.outside().join("bin/calls.log")).unwrap();
+    // The root part's directory is `""`: the tree is mounted as `<root>/`.
+    // No language server ran before (#268), so this is the test's own run.
     let root = repo.repo().canonicalize().unwrap();
     for expected in [
         "run --rm --name aegis-gate-",
         "--network none --cap-drop ALL --security-opt no-new-privileges",
-        &format!("--volume {}:/work --workdir /work", root.display()),
+        &format!("--volume {}/:/work --workdir /work", root.display()),
         "/deps:/usr/local/cargo/registry:ro",
         "--env CARGO_BUILD_JOBS=2 aegis-sandbox-rust cargo test --workspace -- --exact \
          tests::adds_up_prices",

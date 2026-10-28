@@ -66,7 +66,7 @@ Mọi công cụ trả kết quả có định dạng rõ, kèm đường dẫn 
 | `search_symbol` | Tên hàm / struct / trait / impl | Chữ ký, file, dòng bắt đầu–kết thúc | Tối đa 50 kết quả; quá 50 → báo agent thu hẹp |
 | `search_text` | Chuỗi, phạm vi thư mục | File + dòng khớp | Tối đa 50 kết quả |
 | `find_file` | Tên hoặc mẫu tên file | Danh sách đường dẫn | Tối đa 50 kết quả |
-| `find_definition` / `find_references` | File + dòng (kèm cột hoặc tên symbol trên dòng), hoặc tên symbol | Chỗ định nghĩa / chỗ dùng, file + dòng | Qua language server của profile (`aci.lsp`, #115). Tối đa 50 chỗ; mỗi lần gọi chờ index tối đa 30 s. Không có khi profile không khai language server |
+| `find_definition` / `find_references` | File + dòng (kèm cột hoặc tên symbol trên dòng), hoặc tên symbol | Chỗ định nghĩa / chỗ dùng, file + dòng | Qua language server của profile (`aci.lsp`, #115). Server khởi động ở lần gọi đầu tiên trên phần repo đó (#268), không ngay đầu job. Tối đa 50 chỗ; mỗi lần gọi chờ index tối đa 30 s. Không có khi profile không khai language server |
 | `open` | File, dòng bắt đầu | Khung 100 dòng có số dòng, số dòng ẩn trên/dưới | 100 dòng / lần |
 | `scroll_up` / `scroll_down` / `goto` | Hướng hoặc số dòng | Khung 100 dòng mới | — |
 | `edit` | File, dòng từ–đến, nội dung mới | Đoạn sau khi sửa ±5 dòng | Kiểm tra cú pháp bằng tree-sitter + formatter của profile (ví dụ `rustfmt`, `ruff format`); lỗi → từ chối, không ghi file |
