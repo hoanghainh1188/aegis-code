@@ -102,6 +102,15 @@ async fn reviewable(store: &Store, access: &Access, id: i64) -> Result<Job, WebE
             format!("job {id} không mở PR nên không có gì để duyệt"),
         ));
     }
+    if let Some(root) = job.review_of {
+        return Err(WebError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "job {id} là một vòng sửa theo review; PR được duyệt ở job {}",
+                root.0
+            ),
+        ));
+    }
     Ok(job)
 }
 

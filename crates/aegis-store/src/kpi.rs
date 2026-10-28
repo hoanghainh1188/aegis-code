@@ -15,6 +15,10 @@ pub struct KpiJob {
     /// As the repo was registered; the dashboard lowercases it.
     pub language: String,
     pub created_at: DateTime<Utc>,
+    /// A review round (#245): the ledger of the job that opened the PR,
+    /// and which round of it this is.
+    pub review_of: Option<IssueId>,
+    pub review_round: u32,
 }
 
 /// One ledger's record and its job; `None` for CLI and eval runs.
@@ -54,12 +58,14 @@ impl Store {
                       CASE WHEN s.ledger_key IS NULL THEN r.record END AS "record?",
                       s.ledger_key IS NOT NULL AS "stale!",
                       j.repo_id AS "repo_id?", p.slug AS "slug?", p.language AS "language?",
-                      j.created_at AS "created_at?"
+                      j.created_at AS "created_at?",
+                      root.ledger_key AS "review_of?", j.review_round AS "review_round?"
                FROM keys k
                LEFT JOIN stale s ON s.ledger_key = k.ledger_key
                LEFT JOIN issue_records r ON r.ledger_key = k.ledger_key
                LEFT JOIN jobs j ON j.ledger_key = k.ledger_key
                LEFT JOIN repos p ON p.id = j.repo_id
+               LEFT JOIN jobs root ON root.id = j.review_of
                WHERE ($1::bigint[] IS NULL OR j.repo_id = ANY($1))
                  AND EXISTS (SELECT 1 FROM ledger_events e WHERE e.ledger_key = k.ledger_key)
                ORDER BY k.ledger_key"#,
@@ -91,6 +97,11 @@ impl Store {
                         repo_slug,
                         language,
                         created_at,
+                        review_of: row.review_of.map(IssueId::parse).transpose()?,
+                        review_round: row
+                            .review_round
+                            .and_then(|r| u32::try_from(r).ok())
+                            .unwrap_or(0),
                     })
                 }
                 _ => None,

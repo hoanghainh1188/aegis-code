@@ -409,3 +409,93 @@ async fn pages_stay_on_known_hosts_and_refuse_cross_site_forms() {
     assert_eq!(get(&app, "/api/v1/health").await.status, StatusCode::OK);
     db.drop().await;
 }
+
+/// #245: a PR's review rounds are listed on its job page with what the PR
+/// cost in all, a round is not reviewed on its own, and the dashboard
+/// counts a round's cost with its PR, not as a run.
+#[tokio::test]
+async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let demo = repo(s, "demo", "go").await;
+    let lease = std::time::Duration::from_secs(60);
+    let opened = |pr: &str| aegis_store::AttemptEnd::Done {
+        outcome: Outcome::PrOpened,
+        reason: None,
+        pr_url: Some(pr.into()),
+    };
+    let finished = LedgerEvent::Finished {
+        outcome: Outcome::PrOpened,
+        wall_time_s: 60.0,
+    };
+    let root = job(
+        s,
+        demo,
+        "demo-1",
+        None,
+        &[call(1.0, Tier::Core), finished.clone()],
+    )
+    .await;
+    let claim = s.claim_job("w", lease, 10).await.unwrap().unwrap();
+    let pr = "https://github.com/bot/demo/pull/5";
+    s.finish_attempt(&claim.run, "w", &opened(pr))
+        .await
+        .unwrap();
+    s.ledger()
+        .append(
+            &IssueId::parse("demo-1").unwrap(),
+            &reviewed(ReviewVerdict::Accepted, 0, 4.0),
+        )
+        .await
+        .unwrap();
+    let round = s
+        .review_job_by(root, &aegis_store::Actor::cli())
+        .await
+        .unwrap();
+    for event in [call(0.5, Tier::Core), finished] {
+        s.ledger().append(&round.ledger_key, &event).await.unwrap();
+    }
+    let claim = s.claim_job("w", lease, 10).await.unwrap().unwrap();
+    assert_eq!(claim.job.id, round.id);
+    s.finish_attempt(&claim.run, "w", &opened(pr))
+        .await
+        .unwrap();
+    let app = app(s).await;
+
+    for id in [root, round.id] {
+        let page = get(&app, &format!("/jobs/{}", id.0)).await;
+        assert_eq!(page.status, StatusCode::OK);
+        assert!(page.body.contains("Vòng sửa theo review"), "{}", page.body);
+        assert!(
+            page.body
+                .contains(&format!("href=\"/jobs/{}\"", round.id.0)),
+            "{}",
+            page.body
+        );
+        assert!(
+            page.body.contains("$1.50"),
+            "the PR's cost in all: {}",
+            page.body
+        );
+    }
+    let round_page = get(&app, &format!("/jobs/{}", round.id.0)).await;
+    assert!(
+        round_page.body.contains(&format!("job #{}</a> mở", root.0)),
+        "{}",
+        round_page.body
+    );
+    assert!(!round_page.body.contains("Duyệt PR"), "{}", round_page.body);
+    let review = get(&app, &format!("/jobs/{}/review", round.id.0)).await;
+    assert_eq!(review.status, StatusCode::CONFLICT, "{}", review.body);
+
+    let d = dashboard_kpis(s).await.unwrap();
+    assert_eq!(
+        (d.total.runs, d.total.prs_opened, d.total.accepted),
+        (1, 1, 1)
+    );
+    assert_eq!(d.total.mean_cost_usd, Some(1.5));
+    assert_eq!(d.total_review_rounds, Some(1.0));
+    let home = get(&app, "/").await;
+    assert!(home.body.contains("Vòng sửa / PR"), "{}", home.body);
+    db.drop().await;
+}

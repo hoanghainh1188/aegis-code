@@ -267,6 +267,52 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
     })
 }
 
+/// One job of a PR's review rounds (#245): the job that opened it is
+/// round 0.
+struct RoundRow {
+    id: i64,
+    round: u32,
+    status: &'static str,
+    outcome: String,
+    model_calls: u32,
+    cost: String,
+    created_at: String,
+    current: bool,
+}
+
+/// The PR's jobs, from the one that opened it, when `job` is one of them
+/// and the PR had rounds; their cost together.
+async fn rounds_of(store: &Store, job: &Job) -> Result<(Vec<RoundRow>, String), WebError> {
+    let root = match job.review_of {
+        Some(root) => store.job(root).await?,
+        None => Some(job.clone()),
+    };
+    let Some(root) = root else {
+        return Ok((vec![], String::new()));
+    };
+    let rounds = store.review_rounds_of(root.id).await?;
+    if rounds.is_empty() {
+        return Ok((vec![], String::new()));
+    }
+    let mut rows = Vec::with_capacity(rounds.len() + 1);
+    let mut total = 0.0;
+    for j in std::iter::once(root).chain(rounds) {
+        let r = record(store, &j).await?;
+        total += r.cost_usd;
+        rows.push(RoundRow {
+            id: j.id.0,
+            round: j.review_round,
+            status: j.status.as_str(),
+            outcome: outcome(&j),
+            model_calls: r.model_calls,
+            cost: dollars(r.cost_usd),
+            created_at: j.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            current: j.id == job.id,
+        });
+    }
+    Ok((rows, dollars(total)))
+}
+
 struct RunRow {
     attempt: u32,
     status: &'static str,
@@ -295,6 +341,10 @@ struct JobPage<'a> {
     wall_time: String,
     runs: Vec<RunRow>,
     events: Vec<EventRow>,
+    rounds: Vec<RoundRow>,
+    rounds_cost: String,
+    /// A review round: the job whose PR it works on, where it is reviewed.
+    review_of: Option<i64>,
 }
 
 pub async fn detail(
@@ -322,6 +372,7 @@ pub async fn detail(
             ended_at: r.ended_at.map_or("—".into(), time),
         })
         .collect();
+    let (rounds, rounds_cost) = rounds_of(&store, &job).await?;
     render(&JobPage {
         nonce: nonce.as_str(),
         me: &me,
@@ -333,7 +384,9 @@ pub async fn detail(
         outcome: outcome(&job),
         reason: job.reason.clone().unwrap_or_default(),
         pr_url: pr_link(&job),
+        // A round's PR is reviewed on the job that opened it.
         can_review: job.outcome == Some(Outcome::PrOpened)
+            && job.review_of.is_none()
             && access.can(job.repo_id, RepoRole::Reviewer),
         tiers: tiers(&record),
         model_calls: record.model_calls,
@@ -341,6 +394,9 @@ pub async fn detail(
         wall_time: seconds(record.wall_time_s),
         runs,
         events: events.iter().filter_map(event_row).collect(),
+        rounds,
+        rounds_cost,
+        review_of: job.review_of.map(|r| r.0),
     })
 }
 
