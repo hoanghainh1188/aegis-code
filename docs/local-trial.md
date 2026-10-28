@@ -109,6 +109,8 @@ sequenceDiagram
 
    Job `gitlab` đọc issue qua API GitLab giả, chạy như issue GitHub rồi mở merge request (draft). Xem MR ở <http://127.0.0.1:8070/demo-org/demo/-/merge_requests/1> và comment kết quả trên issue ở cùng trang.
 
+   Pipeline GitLab hỏng (#253): `scripts/trial/send-gitlab-ci-failure.sh` gửi `Pipeline Hook` của pipeline 77 (cùng test hỏng như lần chạy GitHub ở bước 6); job `ci` đọc pipeline, job `go-test` và log qua API GitLab giả rồi mở MR.
+
 8. **Dọn:**
 
    ```bash

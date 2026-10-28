@@ -312,13 +312,7 @@ impl LifecycleRunner {
                 gitlab_issue(job, &config.repo.fork, &github_token).await?
             }
             (None, JobSource::Ci) => {
-                ci_issue(
-                    job,
-                    &config.repo.fork.api,
-                    &repo.default_branch,
-                    &github_token,
-                )
-                .await?
+                ci_issue(job, &config.repo.fork, &repo.default_branch, &github_token).await?
             }
             (None, _) => issue(job, &config.repo.fork.api, &github_token).await?,
         };
@@ -466,18 +460,38 @@ async fn issue(job: &Job, api: &str, token: &str) -> Result<IssueInput, Attempt>
 /// The failed GitHub Actions run of a `ci` job (#250), under the job's
 /// ledger key. A run that did not fail, or ran on another branch, is
 /// `Rejected`: no attempt changes it.
-async fn ci_issue(job: &Job, api: &str, branch: &str, token: &str) -> Result<IssueInput, Attempt> {
-    let (owner, name, run_id) = parse_run_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
-    let issue = IssueInput::from_github_run(api, &owner, &name, run_id, branch, token)
-        .await
-        .map_err(|e| match e {
-            LifecycleError::Issue(why) => Attempt::Rejected(why),
-            LifecycleError::Pr(aegis_pr::PrError::GitHub {
-                status: 404,
-                message,
-            }) => Attempt::Rejected(format!("run {run_id}: {message}")),
-            other => Attempt::Infra(other.to_string()),
-        })?;
+async fn ci_issue(
+    job: &Job,
+    fork: &aegis_lifecycle::ForkConfig,
+    branch: &str,
+    token: &str,
+) -> Result<IssueInput, Attempt> {
+    let read = match parse_pipeline_ref(&job.issue_ref) {
+        // A GitLab pipeline (#253), read from the fork's GitLab.
+        Some((project, id)) => {
+            if fork.platform != ForkPlatform::GitLab {
+                return Err(Attempt::Rejected(
+                    "a GitLab pipeline needs the repo's fork on GitLab".into(),
+                ));
+            }
+            IssueInput::from_gitlab_pipeline(&fork.api, project, id, branch, token).await
+        }
+        None => {
+            let (owner, name, run_id) = parse_run_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+            IssueInput::from_github_run(&fork.api, &owner, &name, run_id, branch, token).await
+        }
+    };
+    let issue = read.map_err(|e| match e {
+        LifecycleError::Issue(why) => Attempt::Rejected(why),
+        LifecycleError::Pr(
+            aegis_pr::PrError::GitHub { status: 404, .. }
+            | aegis_pr::PrError::GitLab {
+                status: 401 | 403 | 404,
+                ..
+            },
+        ) => Attempt::Rejected(e.to_string()),
+        other => Attempt::Infra(other.to_string()),
+    })?;
     Ok(IssueInput {
         id: job.ledger_key.as_str().to_owned(),
         ..issue
@@ -527,6 +541,13 @@ fn git_user(fork: &aegis_lifecycle::ForkConfig) -> &'static str {
     }
 }
 
+/// `group/sub/project/-/pipelines/<id>`, as the webhook builds it for a
+/// GitLab pipeline (#253).
+pub(crate) fn parse_pipeline_ref(text: &str) -> Option<(&str, u64)> {
+    let (project, id) = text.trim().split_once("/-/pipelines/")?;
+    Some((project, id.parse().ok()?)).filter(|(p, _)| p.contains('/'))
+}
+
 /// `owner/repo/actions/runs/<id>`, as the webhook builds it.
 pub(crate) fn parse_run_ref(text: &str) -> Result<(String, String, u64), String> {
     let bad = || format!("`{text}` is not owner/repo/actions/runs/<id>");
@@ -556,6 +577,21 @@ pub(crate) fn parse_issue_ref(text: &str) -> Result<(String, String, u64), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipeline_refs_keep_their_subgroups() {
+        assert_eq!(
+            parse_pipeline_ref("acme/platform/app/-/pipelines/9"),
+            Some(("acme/platform/app", 9))
+        );
+        for bad in [
+            "acme/app/actions/runs/9",
+            "app/-/pipelines/9",
+            "acme/app/-/pipelines/x",
+        ] {
+            assert_eq!(parse_pipeline_ref(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn run_refs_are_owner_repo_actions_runs_id() {

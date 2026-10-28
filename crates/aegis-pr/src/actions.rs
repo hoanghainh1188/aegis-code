@@ -1,11 +1,11 @@
-//! A failed GitHub Actions run (#250), as a CI job needs it: the workflow,
-//! the commit, the jobs and steps that failed, and the end of each failed
-//! job's log. The logs are untrusted (design §7): the caller gives them to
+//! A failed GitHub Actions run (#250) or GitLab pipeline (#253), as a CI
+//! job needs it: the workflow, the commit, the jobs and steps that failed,
+//! and the end of each failed job's log. The logs are untrusted (design §7): the caller gives them to
 //! the model as data.
 
 use serde::Deserialize;
 
-use crate::{GitHub, PrError};
+use crate::{GitHub, GitLab, PrError};
 
 /// Failed jobs read, at most; the rest are named only.
 const MAX_JOBS: usize = 3;
@@ -142,6 +142,75 @@ impl GitHub {
             head_sha: run.head_sha,
             conclusion: run.conclusion.unwrap_or_default(),
             failed: read,
+            more,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Pipeline {
+    id: u64,
+    #[serde(default)]
+    name: Option<String>,
+    web_url: String,
+    #[serde(rename = "ref", default)]
+    branch: Option<String>,
+    sha: String,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PipelineJob {
+    id: u64,
+    name: String,
+    #[serde(default)]
+    stage: Option<String>,
+    web_url: String,
+}
+
+impl GitLab {
+    /// Pipeline `id` of this project, as a [`FailedRun`]: its failed jobs
+    /// (GitLab names a stage, not steps) and the end of their logs. A
+    /// pipeline GitLab calls `failed` has the conclusion `failure`.
+    pub async fn failed_pipeline(&self, id: u64) -> Result<FailedRun, PrError> {
+        let get = reqwest::Method::GET;
+        let pipeline: Pipeline = self
+            .call(get.clone(), &format!("pipelines/{id}"), None)
+            .await?;
+        let jobs: Vec<PipelineJob> = self
+            .call(
+                get.clone(),
+                &format!("pipelines/{id}/jobs?scope[]=failed&per_page=100"),
+                None,
+            )
+            .await?;
+        let more = jobs.iter().skip(MAX_JOBS).map(|j| j.name.clone()).collect();
+        let mut failed = Vec::new();
+        for job in jobs.into_iter().take(MAX_JOBS) {
+            let log = self
+                .text(get.clone(), &format!("jobs/{}/trace", job.id), None)
+                .await
+                .map(|(_, text)| tail(&text, LOG_TAIL_CHARS))
+                .unwrap_or_default();
+            failed.push(FailedJob {
+                steps: job.stage.into_iter().collect(),
+                name: job.name,
+                url: job.web_url,
+                log_tail: log,
+            });
+        }
+        Ok(FailedRun {
+            id: pipeline.id,
+            workflow: pipeline.name.unwrap_or_else(|| "pipeline".into()),
+            url: pipeline.web_url,
+            head_branch: pipeline.branch.unwrap_or_default(),
+            head_sha: pipeline.sha,
+            conclusion: if pipeline.status == "failed" {
+                "failure".into()
+            } else {
+                pipeline.status
+            },
+            failed,
             more,
         })
     }

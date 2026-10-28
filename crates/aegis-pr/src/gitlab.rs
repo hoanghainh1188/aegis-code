@@ -139,13 +139,28 @@ impl GitLab {
         .await
     }
 
-    /// `method` on `projects/<project>/<path>`, with `body` as JSON.
-    async fn call<T: serde::de::DeserializeOwned>(
+    /// `method` on `projects/<project>/<path>`, with `body` as JSON; the
+    /// reply read as JSON.
+    pub(crate) async fn call<T: serde::de::DeserializeOwned>(
         &self,
         method: reqwest::Method,
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<T, PrError> {
+        let (status, text) = self.text(method, path, body).await?;
+        serde_json::from_str(&text).map_err(|e| PrError::GitLab {
+            status,
+            message: format!("unexpected reply: {e}"),
+        })
+    }
+
+    /// [`GitLab::call`]'s request, the reply as text (a job's log, #253).
+    pub(crate) async fn text(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(u16, String), PrError> {
         let url = format!("{}/projects/{}/{path}", self.api, self.project);
         let unreached = |e: reqwest::Error| PrError::GitLab {
             status: 0,
@@ -170,10 +185,7 @@ impl GitLab {
                 .unwrap_or_else(|_| text.chars().take(200).collect());
             return Err(PrError::GitLab { status, message });
         }
-        serde_json::from_str(&text).map_err(|e| PrError::GitLab {
-            status,
-            message: format!("unexpected reply: {e}"),
-        })
+        Ok((status, text))
     }
 }
 

@@ -129,3 +129,76 @@ async fn a_gitlab_issue_is_read_from_its_project() {
         "{missing:?}"
     );
 }
+
+/// #253: a failed GitLab pipeline read as a CI issue: its failed jobs, by
+/// stage, and the end of their traces; one that passed is refused.
+#[tokio::test]
+async fn a_failed_gitlab_pipeline_becomes_a_ci_issue() {
+    let gitlab = MockServer::start().await;
+    let pipeline = |status: &str| {
+        json!({ "id": 9, "status": status, "ref": "main", "sha": "abcdef0123456789",
+                "web_url": "https://gitlab.example.com/acme/platform/app/-/pipelines/9" })
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/acme%2Fplatform%2Fapp/pipelines/9"))
+        .and(header("PRIVATE-TOKEN", "t"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pipeline("failed")))
+        .mount(&gitlab)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v4/projects/acme%2Fplatform%2Fapp/pipelines/9/jobs",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 31, "name": "go-test", "stage": "test",
+              "web_url": "https://gitlab.example.com/acme/platform/app/-/jobs/31" }
+        ])))
+        .mount(&gitlab)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/acme%2Fplatform%2Fapp/jobs/31/trace"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("--- FAIL: TestTruncate\nFAIL\n"))
+        .mount(&gitlab)
+        .await;
+    let api = format!("{}/api/v4", gitlab.uri());
+    let issue = IssueInput::from_gitlab_pipeline(&api, "acme/platform/app", 9, "main", "t")
+        .await
+        .unwrap();
+    assert_eq!(issue.id, "app-pipeline-9");
+    assert_eq!(issue.title, "CI failed: pipeline on main");
+    assert_eq!(issue.kind, Some(IssueKind::CiFailure));
+    assert!(
+        issue.body.contains(
+            "- `go-test` (https://gitlab.example.com/acme/platform/app/-/jobs/31): failed at `test`"
+        ),
+        "{}",
+        issue.body
+    );
+    assert!(
+        issue.body.contains("--- FAIL: TestTruncate"),
+        "{}",
+        issue.body
+    );
+
+    let passed = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/acme%2Fplatform%2Fapp/pipelines/9"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pipeline("success")))
+        .mount(&passed)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v4/projects/acme%2Fplatform%2Fapp/pipelines/9/jobs",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&passed)
+        .await;
+    let api = format!("{}/api/v4", passed.uri());
+    let err = IssueInput::from_gitlab_pipeline(&api, "acme/platform/app", 9, "main", "t")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, LifecycleError::Issue(m) if m.contains("pipeline 9 did not fail")),
+        "{err}"
+    );
+}
