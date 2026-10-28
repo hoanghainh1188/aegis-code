@@ -14,6 +14,9 @@ use crate::{
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
+/// Put before the content of a failed tool call, which OpenAI's `tool`
+/// message cannot flag.
+const TOOL_ERROR_PREFIX: &str = "Error: ";
 
 /// Protocol used to communicate with the local model runner (vLLM, Ollama, LocalAI, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -233,11 +236,18 @@ fn build_openai_request<'a>(request: &'a Request) -> Result<OpenAiChatRequest<'a
                         ContentBlock::ToolResult {
                             tool_use_id,
                             content,
-                            is_error: _,
+                            is_error,
                         } => {
+                            // A `tool` message has no error flag; say it in
+                            // the text so the model knows the call failed (#222).
+                            let content = if *is_error {
+                                format!("{TOOL_ERROR_PREFIX}{content}")
+                            } else {
+                                content.clone()
+                            };
                             messages.push(OpenAiMessage::Tool {
                                 tool_call_id: tool_use_id.clone(),
-                                content: content.clone(),
+                                content,
                             });
                         }
                         _ => {}
@@ -381,6 +391,9 @@ fn convert_openai_response(
         .prompt_tokens_details
         .map(|d| d.cached_tokens)
         .unwrap_or(0);
+    // OpenAI counts cached tokens in `prompt_tokens`; `input_tokens` is the
+    // uncached rest, as with the Messages API (#222).
+    let input_tokens = usage.prompt_tokens.saturating_sub(cache_read_input_tokens);
 
     Ok(Response {
         id: raw.id.unwrap_or_else(|| "local-response".into()),
@@ -388,7 +401,7 @@ fn convert_openai_response(
         content,
         stop_reason,
         usage: Usage {
-            input_tokens: usage.prompt_tokens,
+            input_tokens,
             output_tokens: usage.completion_tokens,
             cache_read_input_tokens,
             ..Default::default()
