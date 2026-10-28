@@ -2,14 +2,20 @@
 //! source directories and the main definitions in each, read with the
 //! profile's symbol query. Built once per repo and kept in a file, so every
 //! issue on the repo sends the same bytes and the cached prefix holds
-//! (design §4.4).
+//! (design §4.4). Test files are left out, and each directory names its
+//! public definitions first, and of each kind the most used first (#269).
 
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path};
 
-use aegis_lang::{SymbolKind, symbols_in};
+use aegis_lang::{Language, Symbol, SymbolKind, is_test_path, symbols_in};
 
 use crate::{AciError, Workspace};
+
+/// The map's format: a stored map of an older one is not read, so a change
+/// of what the map shows takes effect on code already mapped.
+pub const MAP_FORMAT: u32 = 2;
 
 /// The map stays small next to the rest of the prompt.
 const MAX_CHARS: usize = 16_000;
@@ -39,8 +45,52 @@ fn rank(kind: SymbolKind) -> Option<u8> {
 #[derive(Default)]
 struct Group {
     files: usize,
-    /// (rank, name), deduplicated by the map.
-    names: BTreeMap<(u8, String), ()>,
+    /// Each name once: whether one of its definitions is public, and its
+    /// best rank.
+    names: BTreeMap<String, (bool, u8)>,
+}
+
+impl Group {
+    fn add(&mut self, name: String, public: bool, rank: u8) {
+        let entry = self.names.entry(name).or_insert((public, rank));
+        *entry = (entry.0 || public, entry.1.min(rank));
+    }
+
+    /// Public first, then by kind, then the most used, then by name.
+    fn ranked(&self, uses: &HashMap<String, usize>) -> Vec<&str> {
+        let mut names: Vec<(&String, &(bool, u8))> = self.names.iter().collect();
+        names.sort_by_key(|(name, (public, rank))| {
+            let used = uses.get(name.as_str()).copied().unwrap_or(0);
+            (!public, *rank, Reverse(used), name.as_str())
+        });
+        names.into_iter().map(|(n, _)| n.as_str()).collect()
+    }
+}
+
+/// Whether the definition can be used outside its module, by its
+/// language's rule.
+fn is_public(language: Language, symbol: &Symbol) -> bool {
+    let signature = symbol.signature.as_str();
+    match language {
+        Language::Rust => signature.starts_with("pub ") || signature.starts_with("pub("),
+        Language::Python => !symbol.name.starts_with('_'),
+        Language::Go => symbol.name.starts_with(|c: char| c.is_uppercase()),
+        Language::Java | Language::CSharp => signature.split_whitespace().any(|w| w == "public"),
+        Language::TypeScript => signature.starts_with("export"),
+    }
+}
+
+/// Counts the files each identifier appears in: how widely a name is used,
+/// its own file included. Per file rather than per occurrence, so a name
+/// that is also a common word (`and`, `f`) in comments and locals of a few
+/// files does not come first.
+fn count_identifiers(source: &str, uses: &mut HashMap<String, usize>) {
+    source
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|w| w.starts_with(|c: char| !c.is_ascii_digit()))
+        .collect::<BTreeSet<&str>>()
+        .into_iter()
+        .for_each(|w| *uses.entry(w.to_owned()).or_default() += 1);
 }
 
 fn group_of(relative: &Path) -> String {
@@ -65,14 +115,26 @@ fn group_of(relative: &Path) -> String {
 pub fn module_summary(ws: &Workspace) -> Result<String, AciError> {
     let (files, _) = ws.files_under(ws.root())?;
     let mut groups: BTreeMap<String, Group> = BTreeMap::new();
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    let (mut test_files, mut test_dirs) = (0, BTreeSet::new());
     for path in &files {
         let Some(profile) = ws.profile_for(path).map(|p| &p.profile) else {
             continue;
         };
         let relative = path.strip_prefix(ws.root()).unwrap_or(path);
+        let source = ws.read_text(path);
+        // Uses in tests count too: what tests call is what matters.
+        if let Some(source) = &source {
+            count_identifiers(source, &mut uses);
+        }
+        if is_test_path(&relative.to_string_lossy()) {
+            test_files += 1;
+            test_dirs.insert(group_of(relative));
+            continue;
+        }
         let group = groups.entry(group_of(relative)).or_default();
         group.files += 1;
-        let Some(source) = ws.read_text(path) else {
+        let Some(source) = source else {
             continue;
         };
         let Ok(symbols) = symbols_in(profile.language, Some(path), &source) else {
@@ -80,19 +142,16 @@ pub fn module_summary(ws: &Workspace) -> Result<String, AciError> {
         };
         for s in symbols.into_iter().filter(|s| s.container.is_none()) {
             if let Some(r) = rank(s.kind) {
-                group.names.insert((r, s.name), ());
+                let public = is_public(profile.language, &s);
+                group.add(s.name, public, r);
             }
         }
     }
     let mut out = HEADER.to_owned();
     for (shown, (dir, group)) in groups.iter().enumerate() {
-        let names: Vec<&str> = group
-            .names
-            .keys()
-            .take(MAX_NAMES)
-            .map(|(_, n)| n.as_str())
-            .collect();
-        let more = group.names.len().saturating_sub(MAX_NAMES);
+        let ranked = group.ranked(&uses);
+        let names = &ranked[..ranked.len().min(MAX_NAMES)];
+        let more = ranked.len() - names.len();
         let mut line = format!("\n- `{dir}` ({} files)", group.files);
         if !names.is_empty() {
             line.push_str(": ");
@@ -106,6 +165,12 @@ pub fn module_summary(ws: &Workspace) -> Result<String, AciError> {
             break;
         }
         out.push_str(&line);
+    }
+    if test_files > 0 {
+        out.push_str(&format!(
+            "\n- Tests: {test_files} files in {} directories, not listed",
+            test_dirs.len()
+        ));
     }
     out.push('\n');
     Ok(out)

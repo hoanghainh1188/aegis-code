@@ -312,7 +312,7 @@ fn linked(project: &str, answer: &str) -> Result<BTreeMap<String, BTreeSet<Strin
         if node["label"] == "File"
             || file.starts_with('<')
             || changed.contains(file)
-            || is_test(file)
+            || aegis_lang::is_test_path(file)
         {
             continue;
         }
@@ -335,16 +335,6 @@ fn short_name(project: &str, file: &str, qn: &str) -> String {
         .or_else(|| qn.rsplit('.').next())
         .unwrap_or(qn)
         .to_owned()
-}
-
-/// A test file by its path, in any of the profiles' languages.
-fn is_test(file: &str) -> bool {
-    let name = file.rsplit('/').next().unwrap_or(file);
-    let stem = name.split('.').next().unwrap_or(name);
-    file.split('/').any(|dir| dir == "tests" || dir == "test")
-        || stem.starts_with("test_")
-        || stem.ends_with("_test")
-        || stem.ends_with("_tests")
 }
 
 /// Indexes `tree` and returns the project's name, which the server picks.
@@ -931,13 +921,13 @@ mod tests {
             "crates/x/src/foo_test.go",
             "scrapy/test_x.py",
         ] {
-            assert!(is_test(test), "{test}");
+            assert!(aegis_lang::is_test_path(test), "{test}");
         }
         for source in [
             "scrapy/core/engine.py",
             "crates/typst-pdf/src/tests_util.rs",
         ] {
-            assert!(!is_test(source), "{source}");
+            assert!(!aegis_lang::is_test_path(source), "{source}");
         }
     }
 }

@@ -37,7 +37,7 @@ pub use sbfl::{SbflFormula, SbflMatrix, SuspiciousElement, TestExecution};
 pub use search::{FileHit, Hits, MAX_RESULTS, SearchResult, SymbolHit, TextHit};
 pub use secrets::{MARKER as REDACTED_MARKER, Redacted, redact};
 pub use server::AciServer;
-pub use summary::{load_or_create_summary, module_summary};
+pub use summary::{MAP_FORMAT, load_or_create_summary, module_summary};
 pub use viewer::{WINDOW, Window};
 pub use workspace::{FormatContainer, Workspace};
 

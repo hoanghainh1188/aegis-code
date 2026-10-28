@@ -80,6 +80,8 @@ fn the_module_map_names_the_main_definitions() {
     let aci = repo.aci(profile(Language::Rust, &ProfileOverrides::default()));
     let map = module_summary(aci.workspace()).unwrap();
     assert!(map.starts_with("# Module map\n"), "{map}");
+    // Public first, then types before functions (#269): `cart!` is not
+    // exported.
     assert!(
         map.ends_with("\n- `src` (1 files): Cart, CartError, Priced, Total, cart\n"),
         "{map}"
@@ -88,6 +90,26 @@ fn the_module_map_names_the_main_definitions() {
         module_summary(aci.workspace()).unwrap(),
         map,
         "deterministic"
+    );
+}
+
+/// #269: of one kind, the name more files use comes first, tests
+/// included; test files are counted in one line, not listed.
+#[test]
+fn the_module_map_ranks_by_use_and_leaves_tests_out() {
+    let repo = Scratch::fixture("rust");
+    repo.write("src/extra.rs", "pub struct Rare;\npub struct Wide;\n");
+    repo.write("tests/a.rs", "use cart::Wide;\nstruct Helper;\n");
+    repo.write("tests/b.rs", "fn wide(_: cart::Wide) {}\n");
+    let aci = repo.aci(profile(Language::Rust, &ProfileOverrides::default()));
+    let map = module_summary(aci.workspace()).unwrap();
+    assert!(!map.contains("`tests`") && !map.contains("Helper"), "{map}");
+    assert!(
+        map.ends_with(
+            "\n- `src` (2 files): Wide, Cart, Rare, CartError, Priced, Total, cart\n\
+             - Tests: 2 files in 1 directories, not listed\n"
+        ),
+        "{map}"
     );
 }
 
