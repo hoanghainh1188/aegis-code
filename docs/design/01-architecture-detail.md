@@ -348,8 +348,8 @@ Các kỹ thuật dưới đây có trong nghiên cứu ban đầu nhưng chưa 
 
 | Kỹ thuật | Làm gì | Vì sao chưa dùng | Xem lại khi |
 | --- | --- | --- | --- |
-| SWEzze / OCD | Nén ngữ cảnh code \~6 lần, giữ phần cần để sửa lỗi | Kỹ thuật nghiên cứu; mức tăng là tương đối (+2 đến +4.6 điểm %) trong Agentless, không phải luồng agent của mình | Context thường xuyên vượt 60% cửa sổ |
-| SaraCoder | Cắt tỉa ngữ cảnh 4 giai đoạn + bổ sung định nghĩa xuyên file | Chưa có công cụ dùng được ngay | Như trên |
+| SWEzze / OCD | Nén ngữ cảnh code \~6 lần, giữ phần cần để sửa lỗi | Kỹ thuật nghiên cứu; mức tăng là tương đối (+2 đến +4.6 điểm %) trong Agentless, không phải luồng agent của mình. Đã đo (#35, [báo cáo](../measurements/2026-10-28-context-compression.md)): context chưa từng vượt 40% cửa sổ; nén giữa chừng cần ≥ 23 lượt gọi sau đó mới hòa vốn với prompt caching; quyết định không làm | Context thường xuyên vượt 60% cửa sổ (đo lại sau #156 hoặc với model local, bằng `scripts/eval/context_lengths.py`) |
+| SaraCoder | Cắt tỉa ngữ cảnh 4 giai đoạn + bổ sung định nghĩa xuyên file | Dành cho gợi ý code, không phải sửa issue (#35) | Như trên |
 | HGARena (RepoGraph) | Đồ thị nối file, ký hiệu, test fail, đoạn sửa | Codebase-Memory đã phủ phần lớn | Codebase-Memory không đủ cho ngôn ngữ của repo đích |
 | InlineCoder | Nhúng hàm đang viết vào đồ thị gọi hàm | Dành cho sinh hàm mới, không phải sửa bug | Mở rộng sang viết tính năng |
 | SBFL (Tarantula / Ochiai) | Chấm điểm nghi ngờ cho từng hàm từ kết quả test | Cần đo coverage theo từng test; tốn công cho mỗi profile | Tỉ lệ định vị sai lỗi cao trong PoC |
