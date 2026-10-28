@@ -35,6 +35,15 @@ ledger = "postgres"
 max_cost_usd = 4.0
 max_model_calls = 40
 
+# Codebase-Memory (#203, #266): the impact note before the first gate run,
+# as in poc.toml. The graph stays on this machine: the index is under
+# `<state_dir>/index`, built in `fast` mode (no semantic layer, so no model
+# download), and the server makes no network call.
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
 [identity]
 name = "aegis-bot"
 email = "aegis-bot@users.noreply.github.com"

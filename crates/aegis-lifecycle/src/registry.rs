@@ -446,6 +446,17 @@ mod tests {
         assert!(err.contains("must be Bedrock"), "{err}");
     }
 
+    /// #266: customer repos get the impact note too, with the same server
+    /// as the PoC, and the guard still passes.
+    #[test]
+    fn the_shipped_customer_config_asks_the_code_graph() {
+        let jp = ModeConfig::from_toml(JP).unwrap();
+        let poc = ModeConfig::from_toml(POC).unwrap();
+        assert_eq!(jp.codebase_memory, poc.codebase_memory);
+        assert!(jp.codebase_memory.is_some());
+        jp.check(RepoMode::CustomerJp).unwrap();
+    }
+
     /// #233: the local mode's $0 cap does not stop a job of free calls
     /// before it starts, and its context fits what Ollama is told to run.
     #[test]
