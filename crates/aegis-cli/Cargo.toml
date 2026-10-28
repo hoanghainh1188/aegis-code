@@ -3,6 +3,7 @@ name = "aegis-cli"
 description = "Command-line entry point: run one issue or a batch."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [[bin]]

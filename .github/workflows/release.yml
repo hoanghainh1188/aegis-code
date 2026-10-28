@@ -191,6 +191,7 @@ jobs:
           for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
             install -D -m 0755 "dist/npm/$platform/aegis-job" "npm/aegis-job/vendor/$platform/aegis-job"
           done
+          cp LICENSE npm/aegis-job/
           node npm/aegis-job/bin/aegis-job.js --help > /dev/null
       - uses: actions/setup-node@v4
         with:

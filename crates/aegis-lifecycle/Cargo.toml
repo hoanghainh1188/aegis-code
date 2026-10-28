@@ -3,6 +3,7 @@ name = "aegis-lifecycle"
 description = "Lifecycle of one issue: classify, agent loop, gate, escalate, PR or stop, ledger (design §2)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

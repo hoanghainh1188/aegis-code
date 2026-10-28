@@ -3,6 +3,7 @@ name = "aegis-lang"
 description = "Language profiles for target repos: detection, ACI grammar, edit checks, gate steps, dependencies (ADR 0004)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

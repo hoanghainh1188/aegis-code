@@ -3,6 +3,7 @@ name = "aegis-tracker"
 description = "Jira and Backlog as issue trackers: tickets by JQL or filter with their logs, the job's end written back (#26)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

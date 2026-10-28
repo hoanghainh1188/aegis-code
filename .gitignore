@@ -11,3 +11,4 @@ lcov.info
 # Python bytecode (scripts/)
 __pycache__/
 npm/aegis-job/vendor/
+npm/aegis-job/LICENSE
