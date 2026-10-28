@@ -240,7 +240,7 @@ mod tests {
     fn the_reply_answers_each_note_and_is_inert() {
         let answer = parse_answer(
             r#"{"status":"fixed","cause":"c","changes":[{"location":"textutil.go","note":"rune slice"}],
-               "review_replies":[{"note":1,"done":true,"reply":"kept `max <= 0`"},
+               "review_replies":[{"note":"1","done":true,"reply":"kept `max <= 0`"},
                                  {"note":2,"done":false,"reply":"@everyone the name is the convention"}]}"#,
         )
         .unwrap();

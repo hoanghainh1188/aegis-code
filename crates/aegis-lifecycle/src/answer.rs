@@ -45,11 +45,30 @@ fn every_test() -> String {
 /// What the agent did about one note of a review (#243).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ReviewReply {
-    /// The note's number in the review the round was given.
+    /// The note's number in the review the round was given; a model may
+    /// write it as a string.
+    #[serde(deserialize_with = "number_or_text")]
     pub note: u32,
     pub done: bool,
     #[serde(default)]
     pub reply: String,
+}
+
+fn number_or_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Note {
+        Number(u32),
+        Text(String),
+    }
+    match Note::deserialize(d)? {
+        Note::Number(n) => Ok(n),
+        Note::Text(t) => t
+            .trim()
+            .trim_start_matches('#')
+            .parse()
+            .map_err(|_| serde::de::Error::custom(format!("`{t}` is not a note number"))),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
