@@ -93,7 +93,15 @@ sequenceDiagram
 
    Server tìm job đã mở PR 100, kiểm `reviewer` có quyền ghi (GitHub giả trả `admin` cho `reviewer`, không cho ai khác), rồi tạo job `review`. Job này sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit vào PR 100 (không force) và trả lời từng ý trên trang PR. Mỗi PR có tối đa `[reviews] max_rounds` vòng (3); vượt thì server comment lý do lên PR.
 
-6. **Dọn:**
+6. **Job sửa CI** (#250): gửi webhook `workflow_run` như GitHub gửi khi workflow `test` thất bại trên `main` (lần chạy 77 của GitHub giả, log có một test hỏng vì cắt giữa ký tự nhiều byte):
+
+   ```bash
+   scripts/trial/send-ci-failure.sh
+   ```
+
+   Job `ci` đọc lần chạy, job và bước hỏng, cuối log; agent sửa trên đầu `main` rồi mở PR như issue thường.
+
+7. **Dọn:**
 
    ```bash
    scripts/trial/down.sh

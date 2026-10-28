@@ -162,6 +162,33 @@ impl GitHub {
         })
     }
 
+    /// `path` as text (a job's log, #250), following GitHub's redirect to
+    /// where it is stored: the token is not sent to another host.
+    pub(crate) async fn get_text(&self, path: &str) -> Result<String, PrError> {
+        let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
+        let response = self
+            .client
+            .get(&url)
+            .bearer_auth(&self.token)
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .send()
+            .await
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|e| PrError::Http(e.to_string()))?;
+        if status.is_success() {
+            Ok(text)
+        } else {
+            Err(PrError::GitHub {
+                status: status.as_u16(),
+                message: text.chars().take(200).collect(),
+            })
+        }
+    }
+
     /// Lines the reviewers changed on top of the agent's commit: additions
     /// plus deletions from the PR's first commit (the agent's) to its last
     /// (design §8: "accepted" allows at most 10).

@@ -240,7 +240,7 @@ Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmana
    Fork cần nhánh chính trùng tên với `default_branch` và được cập nhật theo repo gốc (GitHub: *Sync fork*, hoặc Action đồng bộ). PR mở dưới dạng draft khi `[run] draft_prs = true` (mặc định) trong cấu hình mode.
 2. **Token của fork** (`fork.token_env`, tên một secret). Fine-grained PAT của tài khoản bot:
    - Trên repo đích: *Contents* đọc/ghi, *Pull requests* đọc/ghi.
-   - Trên repo gốc: *Issues* đọc (job đọc issue bằng token này). Repo private thì thêm *Contents* đọc: server clone và fetch bằng token này.
+   - Trên repo gốc: *Issues* đọc (job đọc issue bằng token này), *Actions* đọc (job sửa CI đọc lần chạy thất bại và log, #250). Repo private thì thêm *Contents* đọc: server clone và fetch bằng token này.
 
    Đặt giá trị như [mục 3](#3-xoay-secret); tên mới thì thêm vào `repo_secret_names` trước.
 3. **Comment lên issue** (một lần cho cả server): secret `AEGIS_GITHUB_COMMENT_TOKEN`, token có quyền *Issues* ghi trên các repo gốc; thiếu thì job vẫn chạy nhưng không comment. GitLab: `AEGIS_GITLAB_COMMENT_TOKEN`. GitHub Enterprise hay GitLab tự host: biến `AEGIS_GITHUB_API` / `AEGIS_GITLAB_API` (không phải secret) của container.
@@ -298,7 +298,7 @@ Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmana
    - *Secret*: giá trị của secret `AEGIS_GITHUB_WEBHOOK_SECRET` (một giá trị cho mọi repo);
    - *Let me select individual events*: **Issues** và **Workflow runs**.
 
-   Gắn nhãn `aegis` (biến `AEGIS_WEBHOOK_LABEL` đổi được) lên một issue tạo job; một lần chạy CI thất bại trên nhánh của chính repo (không phải PR) tạo job sửa CI.
+   Gắn nhãn `aegis` (biến `AEGIS_WEBHOOK_LABEL` đổi được) lên một issue tạo job; một lần chạy CI thất bại trên nhánh chính của chính repo (không phải PR) tạo job sửa CI: agent đọc job, bước hỏng và cuối log của lần chạy, sửa trên đầu nhánh chính rồi mở PR như issue thường (#250). Lần chạy đã qua khi job bắt đầu thì job dừng với lý do.
 
    **Vòng sửa theo review** (#243, #244): trên **repo chứa PR của agent** (repo `fork`; nếu khác repo gốc thì thêm webhook như trên ở đó), chọn thêm **Pull request reviews**, **Pull request review comments** và **Issue comments**. Review "Request changes", hoặc comment có một dòng `/aegis fix`, trên PR còn mở của agent tạo một job `review`: agent sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit (không force) và trả lời từng ý.
    - Chỉ người có quyền ghi trên repo gốc kích hoạt được. Server hỏi GitHub bằng `AEGIS_GITHUB_COMMENT_TOKEN`, nên token này cần xem được collaborator của repo gốc. Bot và người khác: bỏ qua.

@@ -11,6 +11,7 @@
 //! The PR's base branch must still point at the gate's base revision when
 //! the PR is opened; the lifecycle (#16) checks that before calling.
 
+mod actions;
 mod body;
 mod branch;
 mod commit_message;
@@ -25,6 +26,7 @@ use std::path::Path;
 
 use aegis_gate::GateReport;
 
+pub use actions::{FailedJob, FailedRun};
 pub use body::{
     AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, PrContent, gate_line, inert,
     render,

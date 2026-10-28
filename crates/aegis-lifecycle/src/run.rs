@@ -19,7 +19,7 @@ use aegis_gate::{
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
-    GateRun, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
+    GateRun, IssueId, IssueKind, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
     LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, TurnRecord,
@@ -226,6 +226,8 @@ where
         Some(kind) => (
             Classification {
                 kind,
+                // A failed CI run's log is its reproduction (#250).
+                has_repro_info: kind == IssueKind::CiFailure,
                 ..light::default_classification(issue)
             },
             None,
@@ -282,7 +284,7 @@ where
         body: body.text,
         ..issue.clone()
     };
-    ledger.classified(aegis_ledger::IssueKind::Bug).await?;
+    ledger.classified(IssueKind::Bug).await?;
     // The branch as it is now, reviewers' commits included.
     let remote = fork_remote(platform)?;
     let (clone, branch) = (cfg.repo.path.clone(), round.pull.head_ref.clone());
