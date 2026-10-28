@@ -192,3 +192,8 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--accent); width
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Personal tokens (#231). */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+form.inline { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+pre.token { overflow-x: auto; user-select: all; }

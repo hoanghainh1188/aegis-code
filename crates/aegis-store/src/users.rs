@@ -332,13 +332,15 @@ impl Store {
         Ok(ended)
     }
 
-    /// The service user of a live API token.
+    /// The user of a live API token: a service's, or a person's own token
+    /// (#231) that has not ended.
     pub async fn token_user(&self, token: &TokenHash) -> Result<Option<User>, StoreError> {
         sqlx::query_as!(
             UserRow,
             "SELECT u.id, u.kind, u.name, u.is_admin
              FROM api_tokens t JOIN users u ON u.id = t.user_id
-             WHERE t.token_hash = $1 AND t.revoked_at IS NULL",
+             WHERE t.token_hash = $1 AND t.revoked_at IS NULL
+               AND (t.expires_at IS NULL OR t.expires_at > now())",
             token.as_slice(),
         )
         .fetch_optional(&self.pool)

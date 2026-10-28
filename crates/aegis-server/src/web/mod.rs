@@ -10,6 +10,7 @@ mod dashboard;
 mod guard;
 mod jobs;
 mod review;
+mod tokens;
 mod view;
 
 use aegis_store::{Job, JobId, RepoRole, Store, StoreError};
@@ -39,6 +40,8 @@ pub fn router(auth: Auth) -> Router<Store> {
         .route("/jobs", get(jobs::list))
         .route("/jobs/{id}", get(jobs::detail))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
+        .route("/me/tokens", get(tokens::list).post(tokens::create))
+        .route("/me/tokens/{id}/revoke", post(tokens::revoke))
         .route(
             "/static/htmx-2.0.11.min.js",
             get(|| asset(HTMX, "text/javascript")),

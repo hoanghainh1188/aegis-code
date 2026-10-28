@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.id, u.kind, u.name, u.is_admin\n             FROM api_tokens t JOIN users u ON u.id = t.user_id\n             WHERE t.token_hash = $1 AND t.revoked_at IS NULL",
+  "query": "SELECT u.id, u.kind, u.name, u.is_admin\n             FROM api_tokens t JOIN users u ON u.id = t.user_id\n             WHERE t.token_hash = $1 AND t.revoked_at IS NULL\n               AND (t.expires_at IS NULL OR t.expires_at > now())",
   "describe": {
     "columns": [
       {
@@ -60,5 +60,5 @@
       false
     ]
   },
-  "hash": "dc0643b611d728d058201b3da4f486f6b51a5d3391a43c13dd88977ec980054d"
+  "hash": "bcbb527a52846542348db58520414e46c17c57d96b02056a00974bba737d820b"
 }

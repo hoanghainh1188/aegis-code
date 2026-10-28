@@ -5,6 +5,10 @@
 //! ([`crate::auth::api`]). A service sees and changes only the repos it has
 //! a role in: a job of another repo is "not found". Writes are audited.
 //!
+//! `GET /api/v1/me` and `GET /api/v1/repos` say who the token is and the
+//! repos it has a role in, for the developer client (#231). A person's
+//! own token (`/me/tokens`) acts as them, with their roles.
+//!
 //! `POST /api/v1/jobs/{id}/review` (maintainer) queues the next review
 //! round of the PR the job opened (#243), at most `[reviews] max_rounds`.
 //!
@@ -45,6 +49,8 @@ pub fn router(store: Store, auth: Auth) -> Router {
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .route("/api/v1/jobs/{id}/review", post(review_job))
+        .route("/api/v1/me", get(me))
+        .route("/api/v1/repos", get(repos))
         .route(
             "/api/v1/repos/{id}/budget",
             get(repo_budget).put(set_repo_budget),
@@ -309,6 +315,50 @@ impl From<Run> for RunView {
             ended_at: r.ended_at.map(|t| t.to_rfc3339()),
         }
     }
+}
+
+/// Who the token is (#231): what `aegis-job whoami` shows.
+async fn me(Extension(access): Extension<Access>) -> ApiResult {
+    Ok(ok(
+        StatusCode::OK,
+        serde_json::json!({
+            "name": access.actor.name,
+            "admin": access.is_admin(),
+        }),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+struct RepoView {
+    id: i64,
+    slug: String,
+    url: String,
+    default_branch: String,
+    language: String,
+    /// The caller's role in it.
+    role: &'static str,
+}
+
+/// The repos the caller has a role in, with that role (#231), oldest
+/// first: what `aegis-job repos` lists and `submit` resolves a slug with.
+async fn repos(State(store): State<Store>, Extension(access): Extension<Access>) -> ApiResult {
+    let mut out = Vec::new();
+    let mut page = Some(Page::first(Page::MAX_LIMIT));
+    while let Some(p) = page {
+        let found = store.list_repos(p).await?;
+        page = found.next_page();
+        out.extend(found.items.into_iter().filter_map(|r| {
+            Some(RepoView {
+                role: access.role_name(r.id)?,
+                id: r.id.0,
+                slug: r.slug,
+                url: r.url,
+                default_branch: r.default_branch,
+                language: r.language,
+            })
+        }));
+    }
+    Ok(ok(StatusCode::OK, out))
 }
 
 async fn health() -> Response {

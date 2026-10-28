@@ -22,6 +22,7 @@ mod repos;
 mod reviews;
 mod sonar;
 mod stats;
+mod tokens;
 mod types;
 mod users;
 
@@ -44,6 +45,7 @@ pub use queue::{AttemptEnd, Claim, Lease};
 pub use reviews::{DEFAULT_MAX_REVIEW_ROUNDS, pr_issue_ref};
 pub use sonar::MAX_BATCH_WARNINGS;
 pub use stats::QueueStats;
+pub use tokens::{MAX_PERSONAL_TOKENS, MAX_TOKEN_DAYS, PersonalToken};
 pub use types::{
     ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,
     NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
