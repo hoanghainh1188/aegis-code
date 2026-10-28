@@ -26,11 +26,19 @@ effort = "high"
 state_dir = ".workspace/state"
 pricing = "config/pricing.toml"
 step_timeout_s = 1800
+# Ollama runs a model with a short context (num_ctx 2048–4096) and the
+# OpenAI-style API cannot raise it per call; past it the prompt is cut
+# without an error (#233). Start the server with `OLLAMA_CONTEXT_LENGTH=32768
+# ollama serve`, or build a model with `PARAMETER num_ctx 32768` in a
+# Modelfile, and keep this the same number.
+context_window = 32768
 sandbox = true
 
 [run.sandbox_env]
 TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS = ""
 
+# $0 lets only free calls through, so a local model runs and a model with a
+# price in config/pricing.toml stops at its first call (#233).
 [budget]
 max_cost_usd = 0.0
 max_model_calls = 40

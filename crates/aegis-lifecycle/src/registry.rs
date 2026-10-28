@@ -379,6 +379,17 @@ mod tests {
         assert!(err.contains("must be Bedrock"), "{err}");
     }
 
+    /// #233: the local mode's $0 cap does not stop a job of free calls
+    /// before it starts, and its context fits what Ollama is told to run.
+    #[test]
+    fn the_shipped_local_config_runs_free_models() {
+        let local = ModeConfig::from_toml(include_str!("../../../config/local.toml")).unwrap();
+        local.check(RepoMode::Poc).unwrap();
+        assert!(!local.budget.limits().is_spent(0.0));
+        assert!(local.budget.limits().is_spent(0.01));
+        assert_eq!(local.run.context_window, 32_768);
+    }
+
     #[test]
     fn the_guard_refuses_any_way_out_of_japan() {
         type Edit = fn(&mut ModeConfig);
