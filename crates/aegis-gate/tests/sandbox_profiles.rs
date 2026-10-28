@@ -1,11 +1,12 @@
 //! #210: the gate of the TypeScript, Java, Go and C# profiles on their
-//! fixture repos, inside the profile's image with no network, and the
-//! reproduction-test command `run_tests` runs there too. Dependencies are
-//! fetched first in a container of the same image that has the network,
-//! into the caches the gate then mounts read-only, as the lifecycle does
-//! (#66). Needs Docker, the network and the image built from
-//! `docker/<image>` (`docker build -t aegis-sandbox-node docker/node`);
-//! skipped otherwise, unless `AEGIS_REQUIRE_DOCKER=1`.
+//! fixture repos (C# also under Microsoft.Testing.Platform, #228), inside
+//! the profile's image with no network, and the reproduction-test command
+//! `run_tests` runs there too. Dependencies are fetched first in a
+//! container of the same image that has the network, into the caches the
+//! gate then mounts read-only, as the lifecycle does (#66). Needs Docker,
+//! the network and the image built from `docker/<image>` (`docker build -t
+//! aegis-sandbox-node docker/node`); skipped otherwise, unless
+//! `AEGIS_REQUIRE_DOCKER=1`.
 
 mod common;
 
@@ -93,8 +94,15 @@ fn docker_run(
 /// the fetch and the steps write into the tree, which the fixture's own
 /// `.gitignore` lists but the test repo's does not. Then the profile's
 /// `repro_test` with `test`, as `run_tests` runs it. `overrides`: as a
-/// RepoConfig would.
-fn gate_passes(language: Language, overrides: &str, fixture: &str, ignored: &str, test: &str) {
+/// RepoConfig would. `coverage`: the coverage step's status.
+fn gate_passes(
+    language: Language,
+    overrides: &str,
+    fixture: &str,
+    ignored: &str,
+    test: &str,
+    coverage: StepStatus,
+) {
     let profile = profile(language, overrides);
     let image = profile.image.clone();
     if !docker_ready(&image) {
@@ -137,7 +145,9 @@ fn gate_passes(language: Language, overrides: &str, fixture: &str, ignored: &str
     ]
     .into_iter()
     .map(|step| {
-        let status = if has(step) {
+        let status = if step == StepName::Coverage {
+            coverage.clone()
+        } else if has(step) {
             StepStatus::Passed
         } else {
             StepStatus::Skipped(Skip::NotInProfile)
@@ -173,6 +183,7 @@ fn the_typescript_gate_passes_inside_the_container() {
         "typescript",
         "node_modules/\ncoverage/\n",
         "test/cart.test.ts",
+        StepStatus::Passed,
     );
 }
 
@@ -184,6 +195,7 @@ fn the_java_gate_passes_inside_the_container() {
         "java",
         "target/\n",
         "CartTest#addsUpPrices",
+        StepStatus::Passed,
     );
 }
 
@@ -195,6 +207,7 @@ fn the_go_gate_passes_inside_the_container() {
         "go",
         "coverage.out\n",
         "^TestAddsUpPrices$",
+        StepStatus::Passed,
     );
 }
 
@@ -206,5 +219,20 @@ fn the_csharp_gate_passes_inside_the_container() {
         "csharp",
         "bin/\nobj/\nTestResults/\n",
         "FullyQualifiedName~CartTests.AddsUpPrices",
+        StepStatus::Passed,
+    );
+}
+
+/// Under Microsoft.Testing.Platform `dotnet test` takes no `--collect`: the
+/// profile's coverage step is skipped and the rest passes (#228).
+#[test]
+fn the_csharp_gate_passes_under_the_testing_platform() {
+    gate_passes(
+        Language::CSharp,
+        "",
+        "csharp-mtp",
+        "bin/\nobj/\nTestResults/\n",
+        "FullyQualifiedName~CartTests.AddsUpPrices",
+        StepStatus::Skipped(Skip::NotForRepo),
     );
 }

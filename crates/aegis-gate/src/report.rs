@@ -57,6 +57,9 @@ pub enum Skip {
     DisabledByRepo,
     NoDependencyChange,
     NoReproTest,
+    /// The profile's command does not run on this repo (#228); the repo
+    /// can give its own.
+    NotForRepo,
     /// The request names no Sonar server.
     NotConfigured,
     /// An earlier step failed.
@@ -71,6 +74,9 @@ impl Skip {
             Self::DisabledByRepo => "skipped: turned off by the repo",
             Self::NoDependencyChange => "skipped: no manifest or lockfile changed",
             Self::NoReproTest => "skipped: no reproduction test given",
+            Self::NotForRepo => {
+                "skipped: the profile's command does not run on this repo; the repo can give its own"
+            }
             Self::NotConfigured => "skipped: not configured",
             Self::NotRun => "not run",
             Self::Cancelled => "cancelled",

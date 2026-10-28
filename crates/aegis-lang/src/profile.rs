@@ -111,10 +111,51 @@ pub struct GateSteps {
     pub repro_test: Option<CommandTemplate>,
     pub test: CommandTemplate,
     pub coverage: Option<CommandTemplate>,
+    /// Repos the profile's `coverage` does not run on (C# under
+    /// Microsoft.Testing.Platform, #228): the step is skipped there unless
+    /// the repo gives its own command.
+    #[serde(default)]
+    pub coverage_skip: Vec<FileMatch>,
     /// How `test` reports failing tests, so the gate can compare them with
     /// the base branch. Without it only the exit code is compared.
     #[serde(default)]
     pub test_output: Option<TestOutput>,
+}
+
+/// A file named `file` in the part's directory or the nearest one above it,
+/// up to the repo root, whose text matches the regex `pattern`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileMatch {
+    pub file: String,
+    pub pattern: String,
+}
+
+impl FileMatch {
+    /// Whether the nearest `file` from `dir` up to `root` matches.
+    pub fn matches(&self, dir: &Path, root: &Path) -> bool {
+        let Ok(pattern) = regex::Regex::new(&self.pattern) else {
+            return false;
+        };
+        let nearest = dir
+            .ancestors()
+            .take_while(|d| d.starts_with(root))
+            .map(|d| d.join(&self.file))
+            .find(|f| f.is_file());
+        nearest
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .is_some_and(|text| pattern.is_match(&text))
+    }
+
+    fn check(&self) -> Result<(), String> {
+        let name = self.file.as_str();
+        if matches!(name, "" | "." | "..") || name.contains(['/', '\\']) {
+            return Err(format!("`{}` is not a file name", self.file));
+        }
+        regex::Regex::new(&self.pattern)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Test runner output the gate can read failing test names from.
@@ -475,6 +516,12 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
     if let Some(c) = &gate.repro_test {
         c.check_placeholders(&[Placeholder::Test], &[Placeholder::Test])
             .map_err(|e| format!("gate.repro_test: {e}"))?;
+    }
+    for m in &gate.coverage_skip {
+        m.check().map_err(|e| format!("gate.coverage_skip: {e}"))?;
+    }
+    if !gate.coverage_skip.is_empty() && gate.coverage.is_none() {
+        return Err("gate.coverage_skip needs gate.coverage".into());
     }
     Ok(())
 }
@@ -1040,5 +1087,58 @@ mod tests {
         assert_eq!(find_reports(&root, "a/**/deep.xml"), vec![deep_report]);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn csharp_skips_its_coverage_under_the_testing_platform() {
+        let root = std::env::temp_dir().join(format!("aegis_test_mtp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let part = root.join("services/api");
+        std::fs::create_dir_all(&part).unwrap();
+        let cs = builtin().get(Language::CSharp).unwrap().clone();
+        let skipped = |dir: &Path| cs.gate.coverage_skip.iter().any(|m| m.matches(dir, &root));
+
+        assert!(!skipped(&part), "no global.json: VSTest");
+        let mtp = "{\n  \"test\": {\n    \"runner\": \"Microsoft.Testing.Platform\"\n  }\n}\n";
+        std::fs::write(root.join("global.json"), mtp).unwrap();
+        assert!(skipped(&root));
+        assert!(
+            skipped(&part),
+            "the repo root's global.json holds for its parts"
+        );
+        // The nearest global.json is the one `dotnet` reads.
+        std::fs::write(
+            part.join("global.json"),
+            r#"{"sdk": {"version": "10.0.100"}}"#,
+        )
+        .unwrap();
+        assert!(!skipped(&part));
+        assert!(skipped(&root));
+        // Nothing above the repo root counts.
+        let inner = root.join("services");
+        assert!(!cs.gate.coverage_skip[0].matches(&inner, &inner));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_bad_coverage_skips() {
+        let cs = BUILTIN
+            .iter()
+            .find(|(name, _)| name.ends_with("csharp.toml"))
+            .unwrap()
+            .1;
+        let skip = "file = \"global.json\"";
+        rejects(
+            &cs.replace(skip, "file = \"../global.json\""),
+            "is not a file name",
+        );
+        rejects(
+            &cs.replace(skip, "x = 1, file = \"global.json\""),
+            "unknown field",
+        );
+        let pattern = r#"'"runner"\s*:\s*"Microsoft\.Testing\.Platform"'"#;
+        assert!(cs.contains(pattern));
+        rejects(&cs.replace(pattern, "'('"), "gate.coverage_skip");
     }
 }
