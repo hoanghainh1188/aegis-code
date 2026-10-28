@@ -1,0 +1,29 @@
+# The trial on the Claude API: a few cents to a few dollars an issue,
+# needs ANTHROPIC_API_KEY. @WORK@ and @REPO@ are filled in by up.sh.
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[models.light]
+id = "claude-haiku-5-5"
+[models.core]
+id = "claude-sonnet-5-5"
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+[run]
+state_dir = "@WORK@/state"
+pricing = "@WORK@/pricing.toml"
+aci_bin = "@REPO@/target/release/aegis-aci"
+step_timeout_s = 900
+sandbox = true
+egress_image = "python:3.12-alpine"
+
+[budget]
+max_cost_usd = 2.0
+max_model_calls = 40
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@example.com"

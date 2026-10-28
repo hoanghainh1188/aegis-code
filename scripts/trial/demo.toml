@@ -1,0 +1,17 @@
+# The sample repo, registered with `aegis-server repo add` (#234). Its URL
+# is a local file: the clone and each job's fetch read from it, and the
+# webhook names it as the repository's `html_url`. PRs go to the fake
+# GitHub (`fork.api`), the branch to a local bare repo (`push_to_local`).
+slug = "demo"
+url = "file://@WORK@/upstream/demo"
+language = "go"
+
+[settings]
+conventions = "The package is textutil; its tests are in textutil/textutil_test.go."
+
+[settings.fork]
+owner = "demo-org"
+name = "demo"
+api = "http://127.0.0.1:8070"
+token_env = "AEGIS_TRIAL_FORK_TOKEN"
+push_to_local = "@WORK@/fork.git"

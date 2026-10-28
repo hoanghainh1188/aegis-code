@@ -1,0 +1,5 @@
+# gpt-oss:20b with the context the trial's mode expects (`context_window`):
+# Ollama's default is a few thousand tokens, and past it a prompt is cut
+# without an error (#233).
+FROM gpt-oss:20b
+PARAMETER num_ctx 32768

@@ -1,0 +1,44 @@
+# aegis-server for the local trial (docs/local-trial.md): everything on
+# loopback, secrets from the environment (env.sh), sign-in through the
+# mock SSO on :8090. up.sh copies it into the trial's directory.
+[secrets]
+source = "env"
+
+[modes]
+poc = "mode.toml"
+
+[api]
+listen = "127.0.0.1:8080"
+
+[metrics]
+listen = "127.0.0.1:9464"
+
+[auth]
+public_url = "http://localhost:8080"
+session_hours = 12
+api_requests_per_minute = 120
+api_failures_per_minute = 20
+trusted_proxies = 0
+
+[auth.oidc]
+issuer = "http://localhost:8090/default"
+client_id = "aegis"
+
+[budget]
+time_zone = "UTC"
+warn_ratio = 0.8
+
+[worker]
+max_workers = 1
+max_cost_usd = 4.0
+lease_s = 60
+renew_s = 20
+poll_s = 2
+drain_s = 30
+retry_base_s = 30
+
+[trackers]
+poll_s = 0
+
+[sonar]
+check_s = 0
