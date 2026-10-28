@@ -14,6 +14,15 @@ pub struct BudgetLimits {
     pub max_model_calls: u32,
 }
 
+impl BudgetLimits {
+    /// Whether a job that spent `spent_usd` can make no more calls within
+    /// `max_cost_usd`. A $0 cap still lets free calls (local models, #233)
+    /// through, as [`BudgetCheck`] does: only a call that costs goes over it.
+    pub fn is_spent(&self, spent_usd: f64) -> bool {
+        spent_usd > self.max_cost_usd || (self.max_cost_usd > 0.0 && spent_usd >= self.max_cost_usd)
+    }
+}
+
 impl Default for BudgetLimits {
     fn default() -> Self {
         Self {
@@ -212,6 +221,20 @@ mod tests {
 
     fn prices() -> Arc<PriceTable> {
         Arc::new(PriceTable::from_toml(PRICES).unwrap())
+    }
+
+    #[test]
+    fn a_zero_cap_is_spent_only_by_a_call_that_costs() {
+        let limits = |max_cost_usd| BudgetLimits {
+            max_cost_usd,
+            max_model_calls: 40,
+        };
+        // #233: local models cost nothing, so $0 does not stop them.
+        assert!(!limits(0.0).is_spent(0.0));
+        assert!(limits(0.0).is_spent(0.01));
+        assert!(!limits(4.0).is_spent(3.99));
+        assert!(limits(4.0).is_spent(4.0));
+        assert!(limits(4.0).is_spent(4.5));
     }
 
     fn check(tier: Tier, prior: Spent) -> BudgetCheck {
