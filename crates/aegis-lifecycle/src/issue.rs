@@ -137,20 +137,27 @@ impl IssueInput {
     ) -> Result<Self, LifecycleError> {
         let github = aegis_pr::GitHub::new(api, owner, repo, token)?;
         let run = github.failed_run(run_id).await?;
-        let refuse = |why: String| LifecycleError::Issue(format!("run {run_id} {why}"));
-        if run.conclusion != "failure" {
-            return Err(refuse(format!(
-                "did not fail (`{}`): nothing to fix",
-                run.conclusion
-            )));
-        }
-        if run.head_branch != branch {
-            return Err(refuse(format!(
-                "ran on `{}`, not on `{branch}`",
-                run.head_branch
-            )));
-        }
+        failed_on(&run, &format!("run {run_id}"), branch)?;
         Ok(Self::from_failed_run(&format!("{repo}-run-{run_id}"), &run))
+    }
+
+    /// A failed pipeline of GitLab project `project` on `branch` (#253),
+    /// as [`IssueInput::from_github_run`] makes a run one.
+    pub async fn from_gitlab_pipeline(
+        api: &str,
+        project: &str,
+        pipeline_id: u64,
+        branch: &str,
+        token: &str,
+    ) -> Result<Self, LifecycleError> {
+        let gitlab = aegis_pr::GitLab::new(api, project, token)?;
+        let run = gitlab.failed_pipeline(pipeline_id).await?;
+        failed_on(&run, &format!("pipeline {pipeline_id}"), branch)?;
+        let name = project.rsplit('/').next().unwrap_or(project);
+        Ok(Self::from_failed_run(
+            &format!("{name}-pipeline-{pipeline_id}"),
+            &run,
+        ))
     }
 
     pub fn from_failed_run(id: &str, run: &aegis_pr::FailedRun) -> Self {
@@ -227,6 +234,24 @@ impl IssueInput {
             self.url, self.title, body, summary, repro
         )
     }
+}
+
+/// Refuses a run that did not fail or ran on another branch than `branch`.
+fn failed_on(run: &aegis_pr::FailedRun, what: &str, branch: &str) -> Result<(), LifecycleError> {
+    let refuse = |why: String| LifecycleError::Issue(format!("{what} {why}"));
+    if run.conclusion != "failure" {
+        return Err(refuse(format!(
+            "did not fail (`{}`): nothing to fix",
+            run.conclusion
+        )));
+    }
+    if run.head_branch != branch {
+        return Err(refuse(format!(
+            "ran on `{}`, not on `{branch}`",
+            run.head_branch
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

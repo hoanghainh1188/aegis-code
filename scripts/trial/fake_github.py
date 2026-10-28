@@ -15,7 +15,8 @@ GET  /<o>/<r>/pull/<n>                    the PR as a page: body, diff, review, 
 GET  /<o>/<r>/issues/<n>                  the issue and its comments
 
 GitLab: GET  /api/v4/projects/<path>/issues/<iid>, POST .../merge_requests,
-POST .../issues/<iid>/notes; the MR as a page at /<path>/-/merge_requests/<iid>.
+POST .../issues/<iid>/notes, GET .../pipelines/77[/jobs] and .../jobs/1/trace
+(a failed pipeline); the MR as a page at /<path>/-/merge_requests/<iid>.
 
 PRs are numbered from 100, so they never share a number with an issue.
 """
@@ -110,6 +111,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(200, {"iid": int(tail[1]), "title": issue["title"],
                                    "description": issue["body"],
                                    "web_url": f"{ROOT}/{project}/-/issues/{tail[1]}"})
+        if method == "GET" and tail[:2] == ["pipelines", str(CI_RUN)]:
+            # The same failed test as the GitHub run, as a GitLab pipeline (#253).
+            if tail[2:] == []:
+                return self.json(200, {
+                    "id": CI_RUN, "status": "failed", "ref": "main",
+                    "sha": git("rev-parse", "refs/heads/main"),
+                    "web_url": f"{ROOT}/{project}/-/pipelines/{CI_RUN}"})
+            if tail[2:] == ["jobs"]:
+                return self.json(200, [{"id": 1, "name": "go-test", "stage": "test",
+                                        "web_url": f"{ROOT}/{project}/-/jobs/1"}])
+        if method == "GET" and tail == ["jobs", "1", "trace"]:
+            return self.send(200, CI_LOG, "text/plain; charset=utf-8")
         if method == "POST" and tail == ["merge_requests"]:
             MERGE_REQUESTS.append(body)
             iid = len(MERGE_REQUESTS)
