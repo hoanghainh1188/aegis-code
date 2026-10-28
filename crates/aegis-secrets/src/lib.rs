@@ -3,9 +3,10 @@
 //!
 //! [`Secrets`] keeps the values it has read, by name, in memory only: never
 //! in a file or the process environment, never in a log. The source is AWS
-//! Secrets Manager ([`AwsSource`], feature `aws`) in deployments; reading
-//! the environment ([`EnvSource`]) is for dev and tests and must be chosen
-//! by name.
+//! Secrets Manager ([`AwsSource`], feature `aws`) in deployments on AWS, or
+//! a directory of secret files ([`FileSource`]) on premises; reading the
+//! environment ([`EnvSource`]) is for dev and tests and must be chosen by
+//! name.
 //!
 //! - At start, [`Secrets::require`] reads what the process cannot run
 //!   without and names every one that is missing, never a value.
@@ -14,6 +15,7 @@
 //!   again when a call with it was refused. A call that already took a
 //!   value keeps it; the next [`Secrets::get`] sees the new one.
 
+mod file;
 mod source;
 
 #[cfg(feature = "aws")]
@@ -25,6 +27,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "aws")]
 pub use aws::AwsSource;
+pub use file::FileSource;
 pub use source::{EnvSource, Fetch, MemorySource, NoSource, SecretSource};
 
 /// After a refusal, a secret is read again at most this often: a peer
