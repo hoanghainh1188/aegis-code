@@ -118,6 +118,9 @@ pub struct GatePlan {
     pub lint: Step,
     pub typecheck: Step,
     pub repro_test: Step,
+    /// The profile's `repro_ran`; none when the repo gives its own
+    /// `repro_test`, whose output may read differently.
+    pub repro_ran: Option<String>,
     /// Never skipped: a gate without tests proves nothing.
     pub test: CommandTemplate,
     pub coverage: Step,
@@ -127,6 +130,17 @@ pub struct GatePlan {
     pub test_output: Option<TestOutput>,
     pub harness: Option<CustomHarness>,
     pub update_references: Option<ReferenceUpdate>,
+}
+
+impl GatePlan {
+    /// Whether `output` of `repro_test` shows it ran no test: the id
+    /// selected none, though the runner exited 0 (#235).
+    pub fn repro_ran_nothing(&self, output: &str) -> bool {
+        self.repro_ran
+            .as_deref()
+            .and_then(|p| regex::Regex::new(p).ok())
+            .is_some_and(|ran| !ran.is_match(output))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +173,10 @@ impl Profile {
             lint: step(&self.gate.lint, &o.lint).map_err(invalid)?,
             typecheck: step(&self.gate.typecheck, &o.typecheck).map_err(invalid)?,
             repro_test: step(&self.gate.repro_test, &o.repro_test).map_err(invalid)?,
+            repro_ran: match &o.repro_test {
+                Some(StepOverride::Run(_)) => None,
+                _ => self.gate.repro_ran.clone(),
+            },
             test: match step(&Some(self.gate.test.clone()), &o.test).map_err(invalid)? {
                 Step::Run(c) => c,
                 Step::Skipped(_) => return Err(invalid("gate.test cannot be turned off".into())),
@@ -187,6 +205,7 @@ impl Profile {
             lint: gate.lint.command().cloned(),
             typecheck: gate.typecheck.command().cloned(),
             repro_test: gate.repro_test.command().cloned(),
+            repro_ran: None,
             test: gate.test.clone(),
             coverage: gate.coverage.command().cloned(),
             coverage_skip: Vec::new(),
@@ -653,6 +672,49 @@ mod tests {
              [coverage]\nformat = \"cobertura\"\npath = \"TestResults/coverage.xml\"\n",
         );
         assert!(csharp.resolve(&own).unwrap().gate.coverage_skip.is_empty());
+    }
+
+    /// #235: an id that selects no test is told apart from a passing test,
+    /// from what the runner prints when it exits 0 either way.
+    #[test]
+    fn a_reproduction_run_that_selects_no_test_is_seen() {
+        let resolved = |language| {
+            Profiles::builtin()
+                .unwrap()
+                .get(language)
+                .unwrap()
+                .resolve(&ProfileOverrides::default())
+                .unwrap()
+                .gate
+        };
+        let go = resolved(Language::Go);
+        assert!(go.repro_ran_nothing(
+            "ok  \texample.com/demo/textutil\t0.001s [no tests to run]\n\
+             ok  \texample.com/demo/other\t(cached) [no tests to run]\n"
+        ));
+        assert!(!go.repro_ran_nothing(
+            "ok  \texample.com/demo/other\t0.002s [no tests to run]\n\
+             ok  \texample.com/demo/textutil\t0.001s\n"
+        ));
+        assert!(!go.repro_ran_nothing("ok  \texample.com/demo/textutil\t(cached)\n"));
+        let csharp = resolved(Language::CSharp);
+        assert!(csharp.repro_ran_nothing(
+            "No test matches the given testcase filter `Nope` in /src/bin/Cart.Tests.dll\n"
+        ));
+        assert!(!csharp.repro_ran_nothing(
+            "Passed!  - Failed:     0, Passed:     1, Skipped:     0, Total:     1\n"
+        ));
+        assert!(!csharp.repro_ran_nothing("Test run summary: Passed!\n  total: 1\n"));
+        // Runners that fail on an empty selection need no pattern.
+        assert!(!resolved(Language::Java).repro_ran_nothing(""));
+        // A repo's own command may print differently.
+        let own = overrides("[gate]\nrepro_test = [\"make\", \"test\", \"T={test}\"]\n");
+        let go = Profiles::builtin()
+            .unwrap()
+            .get(Language::Go)
+            .unwrap()
+            .clone();
+        assert!(go.resolve(&own).unwrap().gate.repro_ran.is_none());
     }
 
     #[test]

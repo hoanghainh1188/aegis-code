@@ -63,6 +63,8 @@ pub struct TestRun {
     pub duration: Duration,
     /// Failing tests read from the output, when the profile says how.
     pub failing: BTreeSet<String>,
+    /// The runner exited 0 but ran no test: the id selects none (#235).
+    pub ran_nothing: bool,
     /// The last lines of the output.
     pub tail: String,
 }
@@ -139,11 +141,13 @@ impl TestRunner {
             .test_output
             .map(|format| failing_tests_with(format, profile.gate.harness.as_ref(), &output))
             .unwrap_or_default();
+        let ran_nothing = ran.exit == Exit::Code(0) && profile.gate.repro_ran_nothing(&output);
         Ok(TestRun {
             test: test.to_owned(),
             exit: ran.exit,
             duration: ran.duration,
             failing,
+            ran_nothing,
             tail: tail(&ran.log),
         })
     }
@@ -153,6 +157,12 @@ impl fmt::Display for TestRun {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let secs = self.duration.as_secs();
         match self.exit {
+            Exit::Code(0) if self.ran_nothing => write!(
+                f,
+                "RAN NO TEST `{}` ({secs}s): no test has that id; give it in the form \
+                 the conventions say",
+                self.test
+            )?,
             Exit::Code(0) => write!(f, "PASSED `{}` ({secs}s)", self.test)?,
             Exit::Code(c) => write!(f, "FAILED `{}` (exit code {c}, {secs}s)", self.test)?,
             Exit::Signal => write!(f, "FAILED `{}` (killed by a signal, {secs}s)", self.test)?,
@@ -189,8 +199,23 @@ mod tests {
             exit,
             duration: Duration::from_secs(3),
             failing: failing.iter().map(|s| (*s).to_owned()).collect(),
+            ran_nothing: false,
             tail: "1 failed in 0.1s".into(),
         }
+    }
+
+    #[test]
+    fn a_run_that_selected_no_test_does_not_say_passed() {
+        let nothing = TestRun {
+            test: "textutil_test.go::TestX".into(),
+            ran_nothing: true,
+            ..run(Exit::Code(0), &[])
+        };
+        assert!(
+            nothing
+                .to_string()
+                .starts_with("RAN NO TEST `textutil_test.go::TestX` (3s): no test has that id")
+        );
     }
 
     #[test]

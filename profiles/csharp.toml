@@ -27,6 +27,10 @@ format = ["dotnet", "format", "--verify-no-changes", "--no-restore"]
 # Cảnh báo của Roslyn analyzers là lỗi.
 lint = ["dotnet", "build", "--no-restore", "-warnaserror"]
 repro_test = ["dotnet", "test", "--no-restore", "--filter", "{test}"]
+# `--filter` không khớp test nào thì VSTest báo "No test matches" và trả 0;
+# khi có chạy, VSTest in `Total: <n>`, Microsoft.Testing.Platform in
+# `total: <n>` (#235).
+repro_ran = '(?i)\btotal(\s+tests)?:\s*[1-9]'
 test = ["dotnet", "test", "--no-restore"]
 coverage = [
     "dotnet", "test", "--no-restore",
@@ -77,3 +81,6 @@ build = ["dotnet", "build", "--no-restore"]
 
 [sonar.properties]
 "sonar.cs.opencover.reportsPaths" = "TestResults/*/coverage.opencover.xml"
+
+[prompt]
+conventions = "csharp.md"

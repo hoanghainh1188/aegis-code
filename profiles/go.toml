@@ -22,6 +22,9 @@ format = ["gofmt", "-w", "{file}"]
 format = ["gofmt", "-d", "."]
 lint = ["go", "vet", "./..."]
 repro_test = ["go", "test", "./...", "-run", "{test}"]
+# `-run` khớp không test nào thì mọi package in `ok … [no tests to run]` và
+# trả 0; package có chạy test in `ok <package> <thời gian>` (#235).
+repro_ran = '(?m)^ok\s+\S+\s+(\d+(\.\d+)?s|\(cached\))\s*$'
 test = ["go", "test", "./..."]
 coverage = ["go", "test", "./...", "-coverprofile=coverage.out"]
 
@@ -56,3 +59,6 @@ cache_dirs = ["/go/pkg/mod"]
 
 [sonar.properties]
 "sonar.go.coverage.reportPaths" = "coverage.out"
+
+[prompt]
+conventions = "go.md"

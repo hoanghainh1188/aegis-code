@@ -109,6 +109,12 @@ pub struct GateSteps {
     pub typecheck: Option<CommandTemplate>,
     /// Runs one test, with `{test}`.
     pub repro_test: Option<CommandTemplate>,
+    /// A regex the output of `repro_test` matches when it ran a test, for
+    /// runners that exit 0 when the id selects none (`go test -run`,
+    /// `dotnet test --filter`, #235). Without a match the run counts as
+    /// running nothing.
+    #[serde(default)]
+    pub repro_ran: Option<String>,
     pub test: CommandTemplate,
     pub coverage: Option<CommandTemplate>,
     /// Repos the profile's `coverage` does not run on (C# under
@@ -283,7 +289,7 @@ pub struct Prompt {
 
 /// `prompts/conventions/<name>`, the files a profile's `[prompt]
 /// conventions` may name.
-const CONVENTIONS: [(&str, &str); 2] = [
+const CONVENTIONS: [(&str, &str); 6] = [
     (
         "rust.md",
         include_str!("../../../prompts/conventions/rust.md"),
@@ -291,6 +297,19 @@ const CONVENTIONS: [(&str, &str); 2] = [
     (
         "python.md",
         include_str!("../../../prompts/conventions/python.md"),
+    ),
+    ("go.md", include_str!("../../../prompts/conventions/go.md")),
+    (
+        "typescript.md",
+        include_str!("../../../prompts/conventions/typescript.md"),
+    ),
+    (
+        "java.md",
+        include_str!("../../../prompts/conventions/java.md"),
+    ),
+    (
+        "csharp.md",
+        include_str!("../../../prompts/conventions/csharp.md"),
     ),
 ];
 
@@ -516,6 +535,12 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
     if let Some(c) = &gate.repro_test {
         c.check_placeholders(&[Placeholder::Test], &[Placeholder::Test])
             .map_err(|e| format!("gate.repro_test: {e}"))?;
+    }
+    if let Some(pattern) = &gate.repro_ran {
+        if gate.repro_test.is_none() {
+            return Err("gate.repro_ran needs gate.repro_test".into());
+        }
+        regex::Regex::new(pattern).map_err(|e| format!("gate.repro_ran: {e}"))?;
     }
     for m in &gate.coverage_skip {
         m.check().map_err(|e| format!("gate.coverage_skip: {e}"))?;
@@ -764,6 +789,14 @@ mod tests {
                 .unwrap()
                 .uses(Placeholder::Test)
         );
+        // #235: every language tells the agent how to name its test.
+        for language in Language::ALL {
+            let profile = builtin().get(language).unwrap().clone();
+            let text = profile
+                .conventions()
+                .unwrap_or_else(|| panic!("{language:?}"));
+            assert!(text.contains("is run as"), "{language:?}");
+        }
         assert_eq!(rust.coverage.unwrap().format, CoverageFormat::Lcov);
         assert_eq!(rust.dependencies.lockfiles, vec!["Cargo.lock"]);
     }
