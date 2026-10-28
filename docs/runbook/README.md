@@ -1,6 +1,6 @@
 # Runbook vận hành aegis-server
 
-Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). Bốn việc thường làm: [triển khai](#1-triển-khai), [rollback](#2-rollback), [xoay secret](#3-xoay-secret), [xử lý sự cố](#4-xử-lý-sự-cố). Metric, cảnh báo và Grafana: [giám sát](#5-giám-sát). Phần [chuẩn bị tài khoản](#0-chuẩn-bị-tài-khoản) chỉ làm một lần.
+Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). Bốn việc thường làm: [triển khai](#1-triển-khai), [rollback](#2-rollback), [xoay secret](#3-xoay-secret), [xử lý sự cố](#4-xử-lý-sự-cố), [thêm repo](#6-thêm-repo). Metric, cảnh báo và Grafana: [giám sát](#5-giám-sát). Phần [chuẩn bị tài khoản](#0-chuẩn-bị-tài-khoản) chỉ làm một lần.
 
 ## Tổng quan
 
@@ -84,7 +84,7 @@ Một lần cho mỗi tài khoản AWS, bằng quyền quản trị ngắn hạn
 
 9. Tạo quyền cho người dùng đầu tiên: `aws ssm start-session --target <instance_id>`, rồi `sudo docker exec aegis aegis-server --config /etc/aegis/server.toml grant <email> admin`; token cho dịch vụ: `… token <tên dịch vụ>` (các lệnh: [auth/cli.rs](../../crates/aegis-server/src/auth/cli.rs)).
 
-10. Đăng ký repo: viết file repo (TOML, mẫu ở [repo_cli.rs](../../crates/aegis-server/src/repo_cli.rs)), rồi `… repo add <file>`. Lệnh kiểm cài đặt theo mode trước khi ghi, clone repo vào `<state_dir>/repos/<slug>` (repo private: token của fork, secret `fork.token_env`), ghi audit. Worker fetch nhánh chính trước mỗi job. Sửa: `… repo show <slug> > demo.json`, sửa file, `… repo update demo.json`. Cấp quyền: `… grant <email> <slug> maintainer|reviewer|viewer`.
+10. Đưa repo đầu tiên vào dùng: [6. Thêm repo](#6-thêm-repo).
 
 ## 1. Triển khai
 
@@ -106,41 +106,6 @@ Rollback chỉ đổi image, không lùi DB. Vì thế mỗi migration phải ch
 - **Contract** (bản phát hành sau, khi không còn rollback về bản trước expand): xóa cột/bảng cũ, thêm `NOT NULL`.
 - Không đổi tên hay đổi kiểu cột trong một bước; không xóa thứ bản trước còn đọc.
 - Server bỏ qua các migration đã áp mà nó không biết (#176), nên image cũ vẫn khởi động trên DB mà bản mới đã expand. Migration nó biết mà bị sửa (checksum khác) thì vẫn dừng với `VersionMismatch`: không sửa một migration đã phát hành, viết migration mới. Đừng xóa dòng trong `_sqlx_migrations`.
-
-### Nhận ticket Jira/Backlog (#26)
-
-Thêm mục `tracker` vào `[settings]` của file repo (cùng chỗ với `fork`, `sonar`) rồi `repo update`. Token không nằm ở đây: `token_env` là tên secret, đặt giá trị như mục 3 và thêm tên vào `repo_secret_names`.
-
-```json
-{ "kind": "jira", "url": "https://acme.atlassian.net", "user": "bot@acme.com",
-  "token_env": "AEGIS_JIRA_TOKEN",
-  "jql": "project = APP AND labels = aegis AND statusCategory = \"To Do\"",
-  "pr_transition": "In Review" }
-```
-
-```json
-{ "kind": "backlog", "url": "https://acme.backlog.jp", "token_env": "AEGIS_BACKLOG_API_KEY",
-  "project_ids": [12], "status_ids": [1], "keyword": "aegis", "pr_status_id": 3 }
-```
-
-- Jira Cloud: `user` là e-mail của tài khoản, token là API token của nó. Jira Data Center/Server: `"deployment": "data-center"`, bỏ `user`, token là personal access token.
-- Backlog: API key của một tài khoản bot (Cá nhân → API). Lọc theo project, trạng thái (`status_ids`), loại (`issue_type_ids`), danh mục (`category_ids`), từ khóa.
-- Tài khoản cần quyền đọc ticket và file đính kèm, viết comment; với `pr_transition`/`pr_status_id`, quyền chuyển trạng thái; Jira thêm quyền tạo link.
-- Vai trò `api` poll mỗi `[trackers] poll_s` (300 s), một tiến trình mỗi kỳ. Mỗi ticket chỉ tạo job một lần; muốn chạy lại thì retry job qua API. Job đọc mô tả và tối đa 3 file log dạng text (≤ 1 MiB, giữ 6 000 ký tự cuối). Khi job xong: comment trạng thái; có PR thì gắn link PR (Jira) và chuyển trạng thái nếu đã cấu hình.
-- Tracker lỗi (token sai, mạng): log `polling the tracker` / `tracker not polled` theo repo, các repo khác vẫn chạy.
-
-### Kéo cảnh báo Sonar định kỳ (#27)
-
-Repo đã có `sonar` (SonarQube Server hoặc Cloud, như bước Sonar của gate) thì thêm `sonar_poll` vào `[settings]` của file repo (`repo update`) để server tự kéo cảnh báo mới trên nhánh chính và gom thành batch:
-
-```json
-{ "every_s": 3600, "min_severity": "MAJOR", "max_warnings": 50 }
-```
-
-- `every_s` (≥ 60, mặc định 3600): lịch riêng của repo. Vai trò `api` xem mỗi `[sonar] check_s` (60 s) repo nào đến hạn, một tiến trình mỗi kỳ.
-- `min_severity` (`INFO`, `MINOR`, `MAJOR`, `CRITICAL`, `BLOCKER`; mặc định `MAJOR`): cảnh báo dưới mức này bị bỏ qua. `max_warnings` (1–100, mặc định 50): số cảnh báo mới nhất một batch nhận; phần còn lại vào lần kéo sau.
-- Mỗi cảnh báo chỉ vào một batch (bảng `sonar_warnings`), kể cả khi vẫn còn mở. Job `sonar` đọc lại các cảnh báo của batch theo key lúc bắt đầu, chỉ lấy cái còn mở, rồi đi luồng batch (#17) và mở một PR. Muốn chạy lại thì retry job qua API.
-- Token là secret mà `sonar.token_env` chỉ tới (cùng secret với bước Sonar của gate), cần quyền Browse project. Sonar lỗi: log `polling Sonar` / `Sonar not polled` theo repo, các repo khác vẫn chạy.
 
 ## 2. Rollback
 
@@ -261,3 +226,124 @@ Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmana
 | `AegisCacheReadRatioLow` | warning | Prompt đổi thứ tự hoặc cache breakpoint sai: so bản mới với bản trước (deploy gần nhất), xem tỉ lệ cache theo repo trên dashboard |
 
 **Máy giám sát lỗi:** `aws ssm start-session --target <monitoring_instance_id>`, rồi `systemctl status prometheus alertmanager grafana aegis-monitoring-sync.timer` và `sudo journalctl -u aegis-monitoring-sync`. Target `aegis` ở trang Targets của Prometheus báo `down` mà server vẫn chạy: kiểm security group cổng 9464 và `[metrics] listen` trong `/etc/aegis/server.toml`. Không thấy target nào: tag `Name` của máy server, quyền `ec2:DescribeInstances` của role `aegis-<env>-monitoring`. Máy giám sát chết thì không có cảnh báo nào; hiện chưa có gì canh chính nó (CloudWatch alarm trên status check của máy là bước tiếp theo nếu cần).
+
+## 6. Thêm repo
+
+Đưa một repo GitHub hoặc GitLab vào dùng, từ chưa có gì tới PR đầu tiên. Lệnh `aegis-server …` dưới đây chạy trên máy như ở [mục 0, bước 9](#0-chuẩn-bị-tài-khoản): `sudo docker exec aegis aegis-server --config /etc/aegis/server.toml <lệnh>`, viết tắt `… <lệnh>`.
+
+### Chuẩn bị
+
+1. **Repo đích của PR (`fork`).** Agent đẩy nhánh `agent/*` và mở PR **trong repo `fork.owner/fork.name`**, vào nhánh chính của nó. Hai cách:
+   - Fork của một tài khoản bot: người bảo trì kéo PR từ fork về repo gốc. Bot không cần quyền ghi repo gốc.
+   - Chính repo gốc (`fork` = owner/name của repo): PR mở thẳng ở đó. Bot cần quyền ghi, chỉ trên nhánh `agent/*` nếu có branch protection.
+
+   Fork cần nhánh chính trùng tên với `default_branch` và được cập nhật theo repo gốc (GitHub: *Sync fork*, hoặc Action đồng bộ). PR mở dưới dạng draft khi `[run] draft_prs = true` (mặc định) trong cấu hình mode.
+2. **Token của fork** (`fork.token_env`, tên một secret). Fine-grained PAT của tài khoản bot:
+   - Trên repo đích: *Contents* đọc/ghi, *Pull requests* đọc/ghi.
+   - Trên repo gốc: *Issues* đọc (job đọc issue bằng token này). Repo private thì thêm *Contents* đọc: server clone và fetch bằng token này.
+
+   Đặt giá trị như [mục 3](#3-xoay-secret); tên mới thì thêm vào `repo_secret_names` trước.
+3. **Comment lên issue** (một lần cho cả server): secret `AEGIS_GITHUB_COMMENT_TOKEN`, token có quyền *Issues* ghi trên các repo gốc; thiếu thì job vẫn chạy nhưng không comment. GitLab: `AEGIS_GITLAB_COMMENT_TOKEN`. GitHub Enterprise hay GitLab tự host: biến `AEGIS_GITHUB_API` / `AEGIS_GITLAB_API` (không phải secret) của container.
+
+### Đăng ký và clone
+
+4. Viết file repo, ví dụ `typst.toml` (mọi khóa của `[settings]`: `RepoSettings` trong [registry.rs](../../crates/aegis-lifecycle/src/registry.rs); khóa lạ bị từ chối):
+
+   ```toml
+   slug = "typst"                         # tên trong đường dẫn, nhánh, dashboard
+   url = "https://github.com/typst/typst" # repo gốc: webhook khớp theo URL này
+   default_branch = "main"
+   language = "rust"                      # python, rust, go, typescript, java, csharp
+   mode = "poc"                           # hoặc customer-jp
+   max_concurrent_jobs = 1
+
+   [settings]
+   # Quy ước riêng của repo, thêm vào prompt sau quy ước của ngôn ngữ.
+   conventions = """
+   Tests for a crate go in its tests/ directory.
+   Run `cargo test -p <crate>` for one crate.
+   """
+
+   [settings.fork]
+   owner = "acme-aegis-bot"
+   name = "typst"
+   token_env = "AEGIS_TOKEN_TYPST"
+   ```
+
+   Chép file vào workspace trên máy (ví dụ `/srv/aegis/.workspace/repo-files/typst.toml`; đường dẫn trong container giống hệt), rồi `… repo add /srv/aegis/.workspace/repo-files/typst.toml`. Lệnh:
+   - kiểm cài đặt theo mode trước khi ghi (repo `customer-jp` cần mode `customer-jp` hợp lệ);
+   - clone repo vào `<state_dir>/repos/<slug>` (repo private: bằng token của fork);
+   - ghi audit `repo.register`, in id của repo.
+
+   Worker fetch nhánh chính trước mỗi job, nên không cần cập nhật clone bằng tay.
+5. Sửa sau này: `… repo show typst > typst.json`, sửa, `… repo update typst.json` (slug giữ nguyên). `… repo list` liệt kê các repo.
+6. **`conventions`:** viết những gì một người mới cần biết để chạy **một** test của repo và test mới đặt ở đâu. Quy ước chung của ngôn ngữ (cách đặt id test tái hiện) đã có trong `prompts/conventions/`; ở đây chỉ thêm cái riêng của repo. Thiếu hướng dẫn, agent dễ chạy cả bộ test hoặc báo id test sai dạng và hết ngân sách vô ích.
+
+### Quyền và ngân sách
+
+7. Cấp quyền trên dashboard: `… grant <email> typst maintainer|reviewer|viewer` (maintainer: chạy, hủy job, đặt ngân sách; reviewer: chấm PR; viewer: xem).
+8. Ngân sách tháng (khuyến nghị đặt ngay): bằng token dịch vụ có vai trò maintainer trên repo (`… token ops`, `… grant ops typst maintainer`):
+
+   ```bash
+   curl -X PUT https://<domain>/api/v1/repos/<id>/budget -H "Authorization: Bearer $TOKEN" \
+     -H 'content-type: application/json' -d '{"monthly_usd": 50}'
+   ```
+
+   Hết ngân sách thì job mới bị hủy kèm lý do (comment lên issue). Trần mỗi job: `[worker] max_cost_usd` của server, hoặc `[settings.budget]` của repo.
+
+### Webhook
+
+9. **GitHub:** repo gốc → Settings → Webhooks → Add webhook:
+   - *Payload URL* `https://<domain>/webhooks/github`, *Content type* `application/json`;
+   - *Secret*: giá trị của secret `AEGIS_GITHUB_WEBHOOK_SECRET` (một giá trị cho mọi repo);
+   - *Let me select individual events*: **Issues** và **Workflow runs**.
+
+   Gắn nhãn `aegis` (biến `AEGIS_WEBHOOK_LABEL` đổi được) lên một issue tạo job; một lần chạy CI thất bại trên nhánh của chính repo (không phải PR) tạo job sửa CI.
+10. **GitLab:** project → Settings → Webhooks: URL `https://<domain>/webhooks/gitlab`, *Secret token* = `AEGIS_GITLAB_WEBHOOK_TOKEN`, sự kiện **Issues events** và **Pipeline events**.
+
+Endpoint của nền tảng nào chưa có secret trong store thì trả 404. Webhook khớp repo theo URL (`html_url`/`web_url`, không phân biệt hoa thường, bỏ `.git`): `url` trong file repo phải là URL của repo gốc.
+
+### Kiểm tra
+
+11. Mở một issue nhỏ, rõ ràng (một lỗi có cách tái hiện), gắn nhãn `aegis`. Trong vài giây:
+    - trang webhook của GitHub ghi lần gửi trả `202`;
+    - dashboard (`https://<domain>/`) có job mới của repo, chuyển `running`; log có `claimed` với `job_id`.
+12. Khi job xong: issue có comment kết quả; có PR thì PR nằm ở repo `fork`, nhánh `agent/…`. Chấm PR trên dashboard (trang job → review).
+13. Không thấy job: xem trang webhook và log (chữ ký sai → `401`; repo không khớp URL → `200` với `"status": "ignored"`, log `webhook delivery ignored` kèm `repository not registered`), rồi `… repo list`. Job dừng sớm: lý do ở trang job; `rejected` thường là thiếu secret (`no secret …`) hoặc cài đặt repo; `updating the clone` là URL hoặc token không đọc được repo.
+
+### Jira/Backlog và Sonar
+
+#### Nhận ticket Jira/Backlog (#26)
+
+Thêm mục `tracker` vào `[settings]` của file repo (cùng chỗ với `fork`, `sonar`) rồi `repo update`. Token không nằm ở đây: `token_env` là tên secret, đặt giá trị như mục 3 và thêm tên vào `repo_secret_names`.
+
+```json
+{ "kind": "jira", "url": "https://acme.atlassian.net", "user": "bot@acme.com",
+  "token_env": "AEGIS_JIRA_TOKEN",
+  "jql": "project = APP AND labels = aegis AND statusCategory = \"To Do\"",
+  "pr_transition": "In Review" }
+```
+
+```json
+{ "kind": "backlog", "url": "https://acme.backlog.jp", "token_env": "AEGIS_BACKLOG_API_KEY",
+  "project_ids": [12], "status_ids": [1], "keyword": "aegis", "pr_status_id": 3 }
+```
+
+- Jira Cloud: `user` là e-mail của tài khoản, token là API token của nó. Jira Data Center/Server: `"deployment": "data-center"`, bỏ `user`, token là personal access token.
+- Backlog: API key của một tài khoản bot (Cá nhân → API). Lọc theo project, trạng thái (`status_ids`), loại (`issue_type_ids`), danh mục (`category_ids`), từ khóa.
+- Tài khoản cần quyền đọc ticket và file đính kèm, viết comment; với `pr_transition`/`pr_status_id`, quyền chuyển trạng thái; Jira thêm quyền tạo link.
+- Vai trò `api` poll mỗi `[trackers] poll_s` (300 s), một tiến trình mỗi kỳ. Mỗi ticket chỉ tạo job một lần; muốn chạy lại thì retry job qua API. Job đọc mô tả và tối đa 3 file log dạng text (≤ 1 MiB, giữ 6 000 ký tự cuối). Khi job xong: comment trạng thái; có PR thì gắn link PR (Jira) và chuyển trạng thái nếu đã cấu hình.
+- Tracker lỗi (token sai, mạng): log `polling the tracker` / `tracker not polled` theo repo, các repo khác vẫn chạy.
+
+#### Kéo cảnh báo Sonar định kỳ (#27)
+
+Repo đã có `sonar` (SonarQube Server hoặc Cloud, như bước Sonar của gate) thì thêm `sonar_poll` vào `[settings]` của file repo (`repo update`) để server tự kéo cảnh báo mới trên nhánh chính và gom thành batch:
+
+```json
+{ "every_s": 3600, "min_severity": "MAJOR", "max_warnings": 50 }
+```
+
+- `every_s` (≥ 60, mặc định 3600): lịch riêng của repo. Vai trò `api` xem mỗi `[sonar] check_s` (60 s) repo nào đến hạn, một tiến trình mỗi kỳ.
+- `min_severity` (`INFO`, `MINOR`, `MAJOR`, `CRITICAL`, `BLOCKER`; mặc định `MAJOR`): cảnh báo dưới mức này bị bỏ qua. `max_warnings` (1–100, mặc định 50): số cảnh báo mới nhất một batch nhận; phần còn lại vào lần kéo sau.
+- Mỗi cảnh báo chỉ vào một batch (bảng `sonar_warnings`), kể cả khi vẫn còn mở. Job `sonar` đọc lại các cảnh báo của batch theo key lúc bắt đầu, chỉ lấy cái còn mở, rồi đi luồng batch (#17) và mở một PR. Muốn chạy lại thì retry job qua API.
+- Token là secret mà `sonar.token_env` chỉ tới (cùng secret với bước Sonar của gate), cần quyền Browse project. Sonar lỗi: log `polling Sonar` / `Sonar not polled` theo repo, các repo khác vẫn chạy.
