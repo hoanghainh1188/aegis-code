@@ -37,15 +37,15 @@ Bước 1–6 cho 21 issue scrapy và 20 issue typst. Sau bước 7 còn **32 is
 
 Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` của `tox.ini`, trừ `google-cloud-storage` và các shell tương tác.
 
-### Phase 2: TypeScript, Go, Java, C# (#155, #220)
+### Phase 2: TypeScript, Go, Java, C# (#155, #220, #224)
 
-Cùng các tiêu chí trên, lấy từ ngày 2026-06-01. Ngoại lệ của tiêu chí 5: zod không gắn nhãn issue, và vài issue của gin, gson không có nhãn; với issue không nhãn, xét theo nội dung: báo lỗi thì giữ, đề xuất hay tính năng thì bỏ. Issue có nhãn khác `bug`/`regression` (`type/proposal`, `feature-request`) vẫn bị bỏ.
+Cùng các tiêu chí trên, lấy từ ngày 2026-06-01. Ngoại lệ của tiêu chí 5: zod không gắn nhãn issue, và vài issue của gin, gson không có nhãn; với issue không nhãn, xét theo nội dung: báo lỗi thì giữ, đề xuất hay tính năng thì bỏ. Issue có nhãn khác `bug`/`regression` (`type/proposal`, `feature-request`) vẫn bị bỏ. Nhãn có tiền tố như `type/bug` (gin) hay `🪲 bug` (StackExchange.Redis) được coi là `bug`.
 
-Sau bước 7 còn **15 issue**:
+Sau bước 7 còn **20 issue**:
 - **TypeScript** (`colinhacks/zod`): zod-6027, zod-6641, zod-6643, zod-6657, zod-6659
 - **Go** (`gin-gonic/gin`): gin-4622, gin-4638, gin-4760, gin-4818, gin-4851
 - **Java** (`google/gson`): gson-992, gson-1247, gson-1587, gson-1768, gson-3113
-- **C#**: chưa có, dựng lại ở #224
+- **C#**: `App-vNext/Polly` (Polly-3086, Polly-3286), `nsubstitute/NSubstitute` (NSubstitute-828, NSubstitute-974), `StackExchange/StackExchange.Redis` (StackExchange.Redis-2689)
 
 | Issue | Lý do |
 | --- | --- |
@@ -58,7 +58,7 @@ Sau bước 7 còn **15 issue**:
 | RestSharp-2402 | Test ẩn đã pass ngay ở base |
 | RestSharp-2413 | Thêm API mới (trailing headers), là tính năng chứ không phải lỗi |
 
-RestSharp không còn ứng viên nào từ 2026-06-01. Các repo C# khác có issue `bug` phù hợp đều chạy test bằng Microsoft.Testing.Platform, mà `verify.py` chưa hỗ trợ (#224).
+RestSharp không còn ứng viên nào từ 2026-06-01, nên bộ C# lấy từ ba repo khác (#224). Humanizer bị loại vì ghim .NET 11 preview SDK; ImageSharp vì ảnh test nằm trong git LFS.
 
 Test ẩn của Go là các hàm `Test…` mà bản sửa thêm hoặc đổi, chạy bằng `go test -run '^(…)$'`; của Java là lớp test, chạy bằng `mvn test -Dtest=…` trong module chứa file test; của C# là lớp test `Namespace.Class`, chạy bằng `dotnet test --filter FullyQualifiedName~Namespace.Class.`. Các runner này thoát 0 khi bộ lọc không khớp test nào, nên `verify.py` coi lượt chạy ở `fix_commit` không có test nào là không đạt (#219).
 
@@ -66,8 +66,9 @@ Môi trường kiểm:
 - zod: Node 24, phụ thuộc cài bằng `pnpm install --no-frozen-lockfile` với một `pnpm-workspace.yaml` cục bộ (`packages/*`, ghi vào `.git/info/exclude` của bản clone), vì zod khai báo workspace và trình quản lý gói `nub` trong `package.json`. `verify.py` gọi thẳng `vitest run`.
 - gin: Go 1.27.
 - gson: JDK 17, Maven 3.10.
+- Polly, NSubstitute, StackExchange.Redis: .NET SDK 10.0.403 (cùng runtime 8), `EVAL_DOTNET_FRAMEWORK=net8.0`. NSubstitute và Polly-3286 chạy test bằng Microsoft.Testing.Platform (`global.json`); khi đó `dotnet test` nhận project qua `--project` thay vì đường dẫn trần. `--filter` kiểu VSTest chạy được trên cả NUnit lẫn xUnit v3 của MTP. `verify.py` chạy đúng project chứa file test, tắt coverlet (`CollectCoverage`, Polly đặt ngưỡng 100%), NuGet audit (`NuGetAudit`, advisory công bố sau bản sửa làm hỏng restore) và Nerdbank.GitVersioning (`NBGV_GitEngine=Disabled`, bản clone thiếu lịch sử).
 
-Tổng cộng bộ thử gồm **47 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson.
+Tổng cộng bộ thử gồm **52 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson, 5 C#.
 
 ## Định dạng
 
@@ -79,7 +80,7 @@ Tổng cộng bộ thử gồm **47 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 
 | `base_commit` | Cha thứ nhất của commit merge bản sửa: code ngay trước khi sửa |
 | `fix_commit`, `fix_pr` | Bản sửa của người |
 | `source_files`, `test_files` | File mà bản sửa đổi |
-| `hidden_tests` | typst: tên test trong `tests/suite`; scrapy, zod: file test; gin: hàm `Test…`; gson: lớp test. Agent không bao giờ thấy |
+| `hidden_tests` | typst: tên test trong `tests/suite`; scrapy, zod: file test; gin: hàm `Test…`; gson: lớp test; C#: lớp test `Namespace.Class`. Agent không bao giờ thấy |
 | `changed_tests` | Chỉ typst. Test có sẵn mà bản sửa đổi output tham chiếu (ảnh, `hashes.txt`), do `scripts/eval/changed_tests.py` tìm. Lượt chạy khô khai báo chúng là thay đổi test được phép, để gate cập nhật tham chiếu (#105). Agent thật khai từng test, hoặc khai cả nhóm qua `allowed_reference_changes` khi quá nhiều (#147) |
 | `hidden_known_failures` | Tuỳ chọn. Hidden test fail trong sandbox kể cả với bản sửa thật (cần mạng, cần chương trình ngoài). Lượt chạy khô (#104) tìm ra; không tính là lỗi của agent |
 | `body` | Nội dung issue lúc lấy về, để lần chạy nào cũng đọc đúng một văn bản |
@@ -88,10 +89,10 @@ Tổng cộng bộ thử gồm **47 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 
 Lệnh chạy test ẩn:
 - typst (Rust): `cargo test --workspace --test tests -- "^(tên1|tên2)$"`
 - scrapy (Python): `python -m pytest -q -p no:cacheprovider <file>…`
-- zod (TypeScript): `npm test -- <file>…`
+- zod (TypeScript): `vitest run <file>…`
 - gin (Go): `go test -v -run "^(Test1|Test2)$" ./...`
-- gson (Java): `mvn test -Dtest=TestClass1,TestClass2`
-- RestSharp / FluentValidation (C#): `dotnet test --filter "<biểu thức filter>"`
+- gson (Java): `mvn test -Dtest=TestClass1,TestClass2 -pl <module>`
+- Polly, NSubstitute, StackExchange.Redis (C#): `dotnet test [--project] <project> --filter "FullyQualifiedName~Ns.Class.|…"`
 
 ## Codebase-Memory
 

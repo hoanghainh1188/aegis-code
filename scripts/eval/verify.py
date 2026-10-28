@@ -101,12 +101,40 @@ def command(item, tree):
         # Test projects often target frameworks this machine cannot run
         # (net48 needs mono); pick the one to run, e.g. net8.0.
         framework = os.environ.get("EVAL_DOTNET_FRAMEWORK")
-        # Repos moving to .slnx keep the .sln for a while; `dotnet test`
-        # refuses a folder with both.
-        solution = [p.name for p in sorted(tree.glob("*.sln")) or sorted(tree.glob("*.slnx"))][:1]
-        return ["dotnet", "test", *solution, "--filter", filter_expr,
+        # None of these belongs to the hidden tests: a coverage threshold
+        # (Polly's is 100%) fails a filtered run, a NuGet advisory published
+        # after the fix fails the restore where warnings are errors, and
+        # Nerdbank.GitVersioning walks a history that a partial clone lacks
+        # (#224).
+        props = ["-p:CollectCoverage=false", "-p:NuGetAudit=false", "-p:NBGV_GitEngine=Disabled"]
+        return ["dotnet", "test", *dotnet_target(item, tree), "--filter", filter_expr, *props,
                 *(["--framework", framework] if framework else [])], env
     raise ValueError(f"unknown language: {lang}")
+
+
+def dotnet_target(item, tree):
+    """What `dotnet test` runs: the one project holding the test files, or
+    else the solution. Under Microsoft.Testing.Platform (`global.json`
+    `"test": {"runner": …}`) they are named by `--project` / `--solution`,
+    not as a bare path (#224)."""
+    projects = set()
+    for path in item["test_files"]:
+        folder = (tree / path).parent
+        while folder != tree and not any(folder.glob("*.csproj")):
+            folder = folder.parent
+        projects.update(folder.glob("*.csproj"))
+    if len(projects) == 1:
+        kind, target = "--project", projects.pop().relative_to(tree)
+    else:
+        # Repos moving to .slnx keep the .sln for a while; `dotnet test`
+        # refuses a folder with both.
+        found = sorted(tree.glob("*.sln")) or sorted(tree.glob("*.slnx"))
+        if not found:
+            return []
+        kind, target = "--solution", found[0].name
+    global_json = tree / "global.json"
+    mtp = global_json.exists() and "Microsoft.Testing.Platform" in global_json.read_text()
+    return [kind, str(target)] if mtp else [str(target)]
 
 
 def run(item, tree, label):

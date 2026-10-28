@@ -1,0 +1,27 @@
+[
+ {
+  "repo": "StackExchange/StackExchange.Redis",
+  "language": "csharp",
+  "issue": 2689,
+  "title": "Execute should check for whitespace (was: ACL Management)",
+  "url": "https://github.com/StackExchange/StackExchange.Redis/issues/2689",
+  "closed_at": "2026-07-10T10:57:25Z",
+  "labels": [
+   "🪲 bug",
+   "🙌 up-for-grabs",
+   "⚙️ area:API"
+  ],
+  "fix_pr": 3122,
+  "fix_pr_url": "https://github.com/StackExchange/StackExchange.Redis/pull/3122",
+  "base_branch": "main",
+  "fix_commit": "0b03ed1d12a6a783873a44cd1f6fad3acf54395f",
+  "source_files": [
+   "src/StackExchange.Redis/ExceptionFactory.cs",
+   "src/StackExchange.Redis/RedisDatabase.cs"
+  ],
+  "test_files": [
+   "tests/StackExchange.Redis.Tests/RoundTripUnitTests/AdhocMessageRoundTrip.cs"
+  ],
+  "source_lines": 8
+ }
+]

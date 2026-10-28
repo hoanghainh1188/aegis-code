@@ -291,7 +291,7 @@ hidden_test = ["pytest", "{{tests}}"]
     fn the_shipped_set_loads() {
         let set =
             load_set(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval/issues")).unwrap();
-        assert_eq!(set.len(), 47);
+        assert_eq!(set.len(), 52);
         assert_eq!(
             set.iter().filter(|i| i.language == Language::Rust).count(),
             18
@@ -317,7 +317,7 @@ hidden_test = ["pytest", "{{tests}}"]
             set.iter()
                 .filter(|i| i.language == Language::CSharp)
                 .count(),
-            0
+            5
         );
         assert!(
             set.iter()

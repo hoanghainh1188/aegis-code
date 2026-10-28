@@ -1,0 +1,48 @@
+[
+ {
+  "repo": "nsubstitute/NSubstitute",
+  "language": "csharp",
+  "issue": 828,
+  "title": "Argument matchers fail if null passed in to an out parameter of a generic derived type",
+  "url": "https://github.com/nsubstitute/NSubstitute/issues/828",
+  "closed_at": "2026-08-10T07:52:30Z",
+  "labels": [
+   "bug",
+   "help wanted"
+  ],
+  "fix_pr": 990,
+  "fix_pr_url": "https://github.com/nsubstitute/NSubstitute/pull/990",
+  "base_branch": "main",
+  "fix_commit": "a466b7abdfe937ffbedc7300a7eb425589fbd580",
+  "source_files": [
+   "src/NSubstitute/Core/CallSpecification.cs"
+  ],
+  "test_files": [
+   "tests/NSubstitute.Acceptance.Specs/FieldReports/Issue828_ArgumentMatchersForGenericOutParametersOfDerivedType.cs"
+  ],
+  "source_lines": 2
+ },
+ {
+  "repo": "nsubstitute/NSubstitute",
+  "language": "csharp",
+  "issue": 974,
+  "title": "Configuring two returns on the same generic method with inheritance-related type arguments throws InvalidCastException",
+  "url": "https://github.com/nsubstitute/NSubstitute/issues/974",
+  "closed_at": "2026-08-09T11:33:06Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 989,
+  "fix_pr_url": "https://github.com/nsubstitute/NSubstitute/pull/989",
+  "base_branch": "main",
+  "fix_commit": "b9bac2914881bc28a4fa8a14f2c348d4ccadd7dd",
+  "source_files": [
+   "src/NSubstitute/Core/CallSpecification.cs",
+   "src/NSubstitute/Core/Extensions.cs"
+  ],
+  "test_files": [
+   "tests/NSubstitute.Acceptance.Specs/FieldReports/Issue974_ReturnsForGenericMethodWithRelatedReturnTypes.cs"
+  ],
+  "source_lines": 17
+ }
+]

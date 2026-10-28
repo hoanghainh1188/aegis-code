@@ -1,0 +1,54 @@
+[
+ {
+  "repo": "App-vNext/Polly",
+  "language": "csharp",
+  "issue": 3286,
+  "title": "[Bug]: Concurrent registry initialization leaves discarded pipelines undisposed",
+  "url": "https://github.com/App-vNext/Polly/issues/3286",
+  "closed_at": "2026-10-26T16:02:36Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 3288,
+  "fix_pr_url": "https://github.com/App-vNext/Polly/pull/3288",
+  "base_branch": "main",
+  "fix_commit": "97acd91b52541664f961888d7655ba9b92ba6252",
+  "source_files": [
+   "src/Polly.Core/Registry/RegistryPipelineComponentBuilder.cs",
+   "src/Polly.Core/Registry/ResiliencePipelineRegistry.TResult.cs",
+   "src/Polly.Core/Registry/ResiliencePipelineRegistry.cs",
+   "src/Polly.Core/Utils/Pipeline/ReloadableComponent.cs"
+  ],
+  "test_files": [
+   "test/Polly.Core.Tests/Issues/IssuesTests.DiscardedRegistryPipelines_3286.cs"
+  ],
+  "source_lines": 54
+ },
+ {
+  "repo": "App-vNext/Polly",
+  "language": "csharp",
+  "issue": 3086,
+  "title": "[Bug]: Timeout strategy does not propagate correct CancellationToken",
+  "url": "https://github.com/App-vNext/Polly/issues/3086",
+  "closed_at": "2026-06-04T16:21:13Z",
+  "labels": [
+   "bug"
+  ],
+  "fix_pr": 3094,
+  "fix_pr_url": "https://github.com/App-vNext/Polly/pull/3094",
+  "base_branch": "main",
+  "fix_commit": "e984839b8324a163270f0bc686929a1066de69e0",
+  "source_files": [
+   "src/Polly.Core/Hedging/HedgingResilienceStrategy.cs",
+   "src/Polly.Core/Timeout/TimeoutResilienceStrategy.cs",
+   "src/Polly.Core/Utils/OutcomeUtilities.cs"
+  ],
+  "test_files": [
+   "test/Polly.Core.Tests/Hedging/HedgingResilienceStrategyTests.cs",
+   "test/Polly.Core.Tests/Issues/IssuesTests.CancellationTokenPropagation_3086.cs",
+   "test/Polly.Core.Tests/Timeout/TimeoutResilienceStrategyTests.cs",
+   "test/Polly.Core.Tests/Utils/OutcomeUtilitiesTests.cs"
+  ],
+  "source_lines": 40
+ }
+]

@@ -1,0 +1,22 @@
+# Execute should check for whitespace (was: ACL Management)
+id = "StackExchange.Redis-2689"
+language = "csharp"
+repo = "StackExchange/StackExchange.Redis"
+issue = 2689
+url = "https://github.com/StackExchange/StackExchange.Redis/issues/2689"
+title = "Execute should check for whitespace (was: ACL Management)"
+closed_at = "2026-07-10T10:57:25Z"
+labels = ["🪲 bug", "🙌 up-for-grabs", "⚙️ area:API"]
+base_commit = "51b2090b77404a1aed09fd569dfa5b63807b2dd8"
+fix_commit = "0b03ed1d12a6a783873a44cd1f6fad3acf54395f"
+fix_pr = 3122
+source_files = ["src/StackExchange.Redis/ExceptionFactory.cs", "src/StackExchange.Redis/RedisDatabase.cs"]
+test_files = ["tests/StackExchange.Redis.Tests/RoundTripUnitTests/AdhocMessageRoundTrip.cs"]
+hidden_tests = ["StackExchange.Redis.Tests.RoundTripUnitTests.AdHocMessageRoundTrip"]
+body = "I am trying to manage ACLs programmatically, but can't seem to figure out how to do it. Is that possible at this point? I'm aware that ACLs aren't supported yet, but I'm not sure why executing raw commands are an issue.\r\n\r\nSomething as simple as this:\r\n\r\n```\r\ndatabase.Execute(\"ACL SETUSER test\");\r\n```\r\nResults in this error:\r\n```\r\nStackExchange.Redis.RedisServerException: 'ERR unknown command 'ACL SETUSER TEST', with args beginning with: '\r\n```\r\n\r\nAll the ACL commands seem to do this.\r\n\r\nLonger commands like\r\n```\r\n$\"ACL SETUSER {username} on >{password} +@subscribe +@psubscribe &mychannels*\"\r\n```\r\nresults in \r\n```\r\nSystem.ArgumentOutOfRangeException: 'Specified argument was out of the range of valid values. (Parameter 'Command 'ACL SETUSER  on > +@subscribe +@psubscribe &mychannels*' exceeds library limit of 31 bytes')'\r\n```\r\n\r\nIf ACLs worked at all, I could get around that latter error by making multiple, shorter commands, though I'd prefer running a single command.\r\n\r\n"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-10-28"
+seconds = 25
