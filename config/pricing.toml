@@ -42,13 +42,14 @@ over_tokens = 100000
 input = 0.50
 output = 2.50
 
-# Local open-weights models (#38): zero cloud API cost.
-[models."qwen2.5-coder-7b"]
+# Local open-weights models (#38): zero cloud API cost. Keyed by the
+# Ollama tag that `config/local.toml` sends (#221).
+[models."qwen2.5-coder:7b"]
 input = 0.0
 output = 0.0
 cache_read_multiplier = 0.0
 
-[models."qwen2.5-coder-32b"]
+[models."qwen2.5-coder:32b"]
 input = 0.0
 output = 0.0
 cache_read_multiplier = 0.0
