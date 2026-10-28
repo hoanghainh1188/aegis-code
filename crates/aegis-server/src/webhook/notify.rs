@@ -161,6 +161,38 @@ impl GitLabNotifier {
     }
 }
 
+impl GitLabNotifier {
+    /// Whether user `user_id` is a Developer or above in GitLab project
+    /// `project` (#254), asked with the comment token; `Err` when there is
+    /// no token or GitLab fails.
+    pub async fn can_develop(&self, project: &str, user_id: u64) -> Result<bool, String> {
+        let token = self.secrets.get(GITLAB_COMMENT_TOKEN_ENV).ok_or_else(|| {
+            format!("no secret {GITLAB_COMMENT_TOKEN_ENV} to check the sender's rights")
+        })?;
+        let gitlab = GitLab::new(&self.api, project, token.expose()).map_err(|e| e.to_string())?;
+        let level = gitlab
+            .member_access(user_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(level >= aegis_pr::GITLAB_DEVELOPER)
+    }
+
+    /// Posts `text` on MR `iid` of `project`, if the store has the comment
+    /// token; failures are logged.
+    pub async fn comment_on_merge_request(&self, project: &str, iid: u64, text: &str) {
+        let Some(token) = self.secrets.get(GITLAB_COMMENT_TOKEN_ENV) else {
+            return;
+        };
+        let posted = match GitLab::new(&self.api, project, token.expose()) {
+            Ok(gitlab) => gitlab.comment_on_merge_request(iid, text).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = posted {
+            tracing::warn!(error = %e, "commenting on the merge request");
+        }
+    }
+}
+
 impl JobNotifier for GitLabNotifier {
     async fn job_ended(&self, job: &Job) {
         if job.source != JobSource::Gitlab {

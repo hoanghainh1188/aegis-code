@@ -687,3 +687,87 @@ async fn a_review_on_the_agents_pr_queues_a_round_for_writers_only() {
     assert_eq!(jobs(&store).await.len(), 2);
     db.drop().await;
 }
+
+/// #254: `/aegis fix` on the agent's GitLab MR by a Developer of the
+/// repo's project queues a review round; a Reporter's queues none.
+#[tokio::test]
+async fn a_fix_note_on_the_agents_gitlab_mr_queues_a_round_for_developers() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone();
+    repo(&store, "app", "https://gitlab.com/acme/app").await;
+    let gitlab_api = MockServer::start().await;
+    for (user, level) in [(42, 30), (43, 20)] {
+        Mock::given(method("GET"))
+            .and(path(format!("/projects/acme%2Fapp/members/all/{user}")))
+            .and(header("PRIVATE-TOKEN", "gl-comment"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "access_level": level })),
+            )
+            .mount(&gitlab_api)
+            .await;
+    }
+    let secrets = Secrets::fixed([
+        (GITLAB_TOKEN_ENV, TOKEN),
+        (GITLAB_COMMENT_TOKEN_ENV, "gl-comment"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            gitlab_notifier: Some(GitLabNotifier::new(&gitlab_api.uri(), secrets.clone())),
+            secrets,
+            ..config()
+        },
+    );
+    let mr = "https://gitlab.com/acme/app/-/merge_requests/4";
+    let typst = store.repo_by_slug("app").await.unwrap().unwrap();
+    store
+        .create_job(&aegis_store::NewJob {
+            repo_id: typst.id,
+            issue_ref: "acme/app#9".into(),
+            ledger_key: aegis_ledger::IssueId::parse("app-9-1".to_owned()).unwrap(),
+            source: JobSource::Gitlab,
+        })
+        .await
+        .unwrap();
+    let claim = store
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let opened = aegis_store::AttemptEnd::Done {
+        outcome: Outcome::PrOpened,
+        reason: None,
+        pr_url: Some(mr.into()),
+    };
+    let root = store
+        .finish_attempt(&claim.run, "w", &opened)
+        .await
+        .unwrap();
+    let note = |user: u64| {
+        json!({
+            "object_kind": "note",
+            "project": { "path_with_namespace": "acme/app", "web_url": "https://gitlab.com/acme/app" },
+            "user": { "id": user, "username": "u", "bot": false },
+            "object_attributes": { "note": "/aegis fix", "noteable_type": "MergeRequest" },
+            "merge_request": { "iid": 4, "state": "opened", "source_branch": "agent/app-9-1", "url": mr }
+        })
+    };
+    let (status, body) = gitlab(&app, "Note Hook", "n1", &note(43)).await;
+    assert_eq!(
+        (status, &body["data"]["status"]),
+        (StatusCode::OK, &json!("ignored")),
+        "{body}"
+    );
+    let (status, body) = gitlab(&app, "Note Hook", "n2", &note(42)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let round = store
+        .job(aegis_store::JobId(body["data"]["job_id"].as_i64().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (round.source, round.review_of, round.issue_ref.as_str()),
+        (JobSource::Review, Some(root.id), "acme/app!4")
+    );
+    db.drop().await;
+}

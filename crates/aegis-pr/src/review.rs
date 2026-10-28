@@ -1,12 +1,13 @@
-//! What a review round needs of an agent's PR (#243): its branch, and what
-//! the reviewers wrote. Only notes of people GitHub counts as the repo's
-//! (owner, member, collaborator) are read; bots and the agent's own
-//! replies ([`REPLY_MARKER`]) are not. The notes are still untrusted
-//! (design §7): the caller gives them to the model as data.
+//! What a review round needs of an agent's PR (#243) or merge request
+//! (#254): its branch, and what the reviewers wrote. Only notes of people
+//! of the repo are read (on GitHub: owner, member, collaborator; on
+//! GitLab: Developer or above); bots, GitLab's system notes and the
+//! agent's own replies ([`REPLY_MARKER`]) are not. The notes are still
+//! untrusted (design §7): the caller gives them to the model as data.
 
 use serde::Deserialize;
 
-use crate::{GitHub, PrError};
+use crate::{GitHub, GitLab, PrError};
 
 /// In every reply the agent posts on a PR, so a later round skips it.
 pub const REPLY_MARKER: &str = "<!-- aegis-code review reply -->";
@@ -213,6 +214,167 @@ impl GitHub {
         notes.sort_by(|a, b| a.created_at.cmp(&b.created_at));
         let drop = notes.len().saturating_sub(MAX_NOTES);
         Ok(notes.split_off(drop))
+    }
+}
+
+/// GitLab's Developer role: the least that may push and so ask for a
+/// round (#254).
+pub const GITLAB_DEVELOPER: u32 = 30;
+
+#[derive(Debug, Deserialize)]
+struct MergeRequest {
+    iid: u64,
+    web_url: String,
+    state: String,
+    source_branch: String,
+    target_branch: String,
+    sha: String,
+    source_project_id: u64,
+    target_project_id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLabUser {
+    id: u64,
+    username: String,
+    #[serde(default)]
+    bot: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct Position {
+    #[serde(default)]
+    new_path: Option<String>,
+    #[serde(default)]
+    new_line: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLabNote {
+    author: GitLabUser,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    system: bool,
+    #[serde(default)]
+    position: Option<Position>,
+    #[serde(default)]
+    created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Member {
+    access_level: u32,
+}
+
+impl GitLab {
+    /// MR `iid` of this project, refused unless it is opened and its source
+    /// is an `agent/*` branch of this same project.
+    pub async fn agent_merge_request(&self, iid: u64) -> Result<PullState, PrError> {
+        let mr: MergeRequest = self
+            .call(reqwest::Method::GET, &format!("merge_requests/{iid}"), None)
+            .await?;
+        let refuse = |why: &str| PrError::GitLab {
+            status: 0,
+            message: format!("MR !{iid} {why}"),
+        };
+        if mr.state != "opened" {
+            return Err(refuse("is not open"));
+        }
+        if !mr.source_branch.starts_with(crate::branch::PREFIX) {
+            return Err(refuse("is not from an agent branch"));
+        }
+        if mr.source_project_id != mr.target_project_id {
+            return Err(refuse("is from another project"));
+        }
+        Ok(PullState {
+            number: mr.iid,
+            url: mr.web_url,
+            head_ref: mr.source_branch,
+            head_sha: mr.sha,
+            base_ref: mr.target_branch,
+        })
+    }
+
+    /// The access level of user `user_id` in this project, inherited ones
+    /// included; 0 when they are not a member.
+    pub async fn member_access(&self, user_id: u64) -> Result<u32, PrError> {
+        match self
+            .call::<Member>(
+                reqwest::Method::GET,
+                &format!("members/all/{user_id}"),
+                None,
+            )
+            .await
+        {
+            Ok(m) => Ok(m.access_level),
+            Err(PrError::GitLab { status: 404, .. }) => Ok(0),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The notes on MR `iid`, oldest first, of its Developers and above
+    /// (see the module): a note on a line of the diff is a line note.
+    pub async fn merge_request_notes(&self, iid: u64) -> Result<Vec<ReviewNote>, PrError> {
+        let notes: Vec<GitLabNote> = self
+            .call(
+                reqwest::Method::GET,
+                &format!("merge_requests/{iid}/notes?sort=asc&order_by=created_at&per_page=100"),
+                None,
+            )
+            .await?;
+        let mut access = std::collections::BTreeMap::new();
+        let mut kept = Vec::new();
+        for note in notes {
+            let readable = !note.system
+                && !note.author.bot
+                && !note.body.trim().is_empty()
+                && !note.body.contains(REPLY_MARKER);
+            if !readable {
+                continue;
+            }
+            let level = match access.get(&note.author.id) {
+                Some(level) => *level,
+                None => {
+                    let level = self.member_access(note.author.id).await?;
+                    access.insert(note.author.id, level);
+                    level
+                }
+            };
+            if level < GITLAB_DEVELOPER {
+                continue;
+            }
+            let at = match note.position {
+                Some(Position {
+                    new_path: Some(path),
+                    new_line,
+                }) => NoteAt::Line {
+                    path,
+                    line: new_line,
+                },
+                _ => NoteAt::Conversation,
+            };
+            kept.push(ReviewNote {
+                author: note.author.username,
+                at,
+                body: note.body,
+                created_at: note.created_at,
+            });
+        }
+        let drop = kept.len().saturating_sub(MAX_NOTES);
+        Ok(kept.split_off(drop))
+    }
+
+    /// Comments on MR `iid` of this project. The caller makes `body` inert.
+    pub async fn comment_on_merge_request(&self, iid: u64, body: &str) -> Result<(), PrError> {
+        let _: serde_json::Value = self
+            .call(
+                reqwest::Method::POST,
+                &format!("merge_requests/{iid}/notes"),
+                Some(&serde_json::json!({ "body": body })),
+            )
+            .await?;
+        Ok(())
     }
 }
 

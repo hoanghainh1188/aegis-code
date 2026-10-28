@@ -46,6 +46,20 @@ impl ReviewRound {
         Ok(Self { pull, notes })
     }
 
+    /// MR `iid` of the GitLab fork `project`, which must be opened and
+    /// from an `agent/*` branch of the project, and its notes (#254).
+    pub async fn from_gitlab(
+        api: &str,
+        project: &str,
+        iid: u64,
+        token: &str,
+    ) -> Result<Self, LifecycleError> {
+        let gitlab = aegis_pr::GitLab::new(api, project, token)?;
+        let pull = gitlab.agent_merge_request(iid).await?;
+        let notes = gitlab.merge_request_notes(iid).await?;
+        Ok(Self { pull, notes })
+    }
+
     /// `<id>` of the PR's `agent/<id>` branch.
     pub fn branch_id(&self) -> &str {
         self.pull

@@ -35,6 +35,7 @@ pub use config::{
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};
+pub use publish::fork_forge_of;
 pub use registry::{ModeConfig, Modes, RepoRun, RepoSettings, RepoSpec};
 pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;

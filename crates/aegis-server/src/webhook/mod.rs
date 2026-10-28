@@ -11,7 +11,10 @@
 //!   and `issue_comment` (a line `/aegis fix`), from people who can write
 //!   to the repo (asked of GitHub with the comment token).
 //! - `POST /webhooks/gitlab`: `X-Gitlab-Token` equal to the secret
-//!   `AEGIS_GITLAB_WEBHOOK_TOKEN`; events `Issue Hook` and `Pipeline Hook`.
+//!   `AEGIS_GITLAB_WEBHOOK_TOKEN`; events `Issue Hook` and `Pipeline Hook`,
+//!   and `Note Hook` with a line `/aegis fix` on the agent's MR (#254), from
+//!   a Developer or above of the repo's project (asked of GitLab with
+//!   `AEGIS_GITLAB_COMMENT_TOKEN`).
 //!
 //! Both from the server's secret store (#30), as they are at the time of
 //! the delivery: a rotated secret is used once read, and a delivery that
@@ -467,6 +470,16 @@ async fn deliver(
     }
 }
 
+/// The project path of a GitLab repo URL: what follows the host, without
+/// `.git` (`https://gitlab.com/group/sub/app` → `group/sub/app`).
+fn project_path(url: &str) -> Option<&str> {
+    let path = url.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let after = path.split_once("://").map_or(path, |(_, r)| r);
+    let (_, project) = after.split_once('/')?;
+    project.contains('/').then_some(project)
+}
+
 /// `owner/name` of a repo URL (`https://github.com/owner/name`, with or
 /// without `.git`).
 fn owner_and_name(url: &str) -> Option<(&str, &str)> {
@@ -500,13 +513,28 @@ async fn review_round(
         Ok(None) => return ignored(delivery, "repository not registered"),
         Err(e) => return internal(delivery, &e),
     };
-    let Some(notifier) = hooks.config.notifier.as_ref() else {
-        return ignored(delivery, "no GitHub client to check the sender's rights");
+    let allowed = match source {
+        WebhookSource::Gitlab => {
+            let Some(notifier) = hooks.config.gitlab_notifier.as_ref() else {
+                return ignored(delivery, "no GitLab client to check the sender's rights");
+            };
+            let (Some(project), Ok(user_id)) = (project_path(&repo.url), sender.parse::<u64>())
+            else {
+                return ignored(delivery, "the repository's URL names no project");
+            };
+            notifier.can_develop(project, user_id).await
+        }
+        _ => {
+            let Some(notifier) = hooks.config.notifier.as_ref() else {
+                return ignored(delivery, "no GitHub client to check the sender's rights");
+            };
+            let Some((owner, name)) = owner_and_name(&repo.url) else {
+                return ignored(delivery, "the repository's URL names no owner and name");
+            };
+            notifier.can_write(owner, name, sender).await
+        }
     };
-    let Some((owner, name)) = owner_and_name(&repo.url) else {
-        return ignored(delivery, "the repository's URL names no owner and name");
-    };
-    match notifier.can_write(owner, name, sender).await {
+    match allowed {
         Ok(true) => {}
         Ok(false) => {
             tracing::info!(delivery, sender, repo = %repo.slug, "review round asked by someone who cannot write");
@@ -530,13 +558,26 @@ async fn review_round(
         .await;
     let refused = |why: String| async move {
         tracing::info!(delivery, why, "review round refused");
-        if let Ok((owner, name, number)) = crate::lifecycle::parse_issue_ref(issue_ref) {
-            let text = format!(
-                "{}\n**aegis-code** will not take this review: {}.",
-                aegis_pr::REPLY_MARKER,
-                aegis_pr::inert(&why)
-            );
-            notifier.comment(&owner, &name, number, &text).await;
+        let text = format!(
+            "{}\n**aegis-code** will not take this review: {}.",
+            aegis_pr::REPLY_MARKER,
+            aegis_pr::inert(&why)
+        );
+        // `group/project!iid` on GitLab, `owner/repo#n` on GitHub.
+        match (source, issue_ref.rsplit_once('!')) {
+            (WebhookSource::Gitlab, Some((project, iid))) => {
+                if let (Some(n), Ok(iid)) = (&hooks.config.gitlab_notifier, iid.parse()) {
+                    n.comment_on_merge_request(project, iid, &text).await;
+                }
+            }
+            _ => {
+                if let (Some(n), Ok((owner, name, number))) = (
+                    &hooks.config.notifier,
+                    crate::lifecycle::parse_issue_ref(issue_ref),
+                ) {
+                    n.comment(&owner, &name, number, &text).await;
+                }
+            }
         }
         answer(
             StatusCode::OK,
@@ -572,6 +613,15 @@ async fn review_round(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_gitlab_repo_url_gives_its_project_path() {
+        assert_eq!(
+            project_path("https://gitlab.com/acme/platform/app.git"),
+            Some("acme/platform/app")
+        );
+        assert_eq!(project_path("https://gitlab.com/app"), None);
+    }
 
     #[test]
     fn a_repo_url_gives_its_owner_and_name() {

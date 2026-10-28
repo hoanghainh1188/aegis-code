@@ -30,7 +30,7 @@ use aegis_lifecycle::{
     ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, ReviewRound,
     run_issue, run_review,
 };
-use aegis_pr::{GitHub, REPLY_MARKER};
+use aegis_pr::REPLY_MARKER;
 use aegis_provider::{Observed, Provider};
 use aegis_secrets::{Secret, Secrets};
 use aegis_store::{Claim, Job, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
@@ -300,10 +300,21 @@ impl LifecycleRunner {
             _ => None,
         };
         let issue = match (&round, job.source) {
-            (Some((root, _)), _) => IssueInput {
-                id: job.ledger_key.as_str().to_owned(),
-                ..issue(root, &config.repo.fork.api, &github_token).await?
-            },
+            (Some((root, _)), _) => {
+                // The issue the PR is for, read as its job read it.
+                let fork = &config.repo.fork;
+                let read = match root.source {
+                    JobSource::Gitlab => gitlab_issue(root, fork, &github_token).await?,
+                    JobSource::Ci => {
+                        ci_issue(root, fork, &repo.default_branch, &github_token).await?
+                    }
+                    _ => issue(root, &fork.api, &github_token).await?,
+                };
+                IssueInput {
+                    id: job.ledger_key.as_str().to_owned(),
+                    ..read
+                }
+            }
             (None, JobSource::Jira | JobSource::Backlog) => {
                 ticket_issue(job, &repo, &self.secrets).await?
             }
@@ -365,9 +376,9 @@ impl LifecycleRunner {
                 aegis_pr::inert(reason),
                 job.id.0
             );
-            match GitHub::new(&fork.api, &fork.owner, &fork.name, &token) {
-                Ok(github) => {
-                    if let Err(e) = github.comment_on_issue(pull.number, &text).await {
+            match aegis_lifecycle::fork_forge_of(&fork, &token) {
+                Ok(forge) => {
+                    if let Err(e) = forge.comment_on_request(pull.number, &text).await {
                         tracing::warn!(error = %e, "replying on the PR");
                     }
                 }
@@ -398,9 +409,12 @@ impl LifecycleRunner {
             .await
             .map_err(|e| Attempt::Infra(e.to_string()))?
             .ok_or_else(|| Attempt::Rejected("a review round of no job".into()))?;
-        if !matches!(root.source, JobSource::Github | JobSource::Cli) {
+        if !matches!(
+            root.source,
+            JobSource::Github | JobSource::Cli | JobSource::Gitlab | JobSource::Ci
+        ) {
             return Err(Attempt::Rejected(format!(
-                "review rounds are for GitHub issues; job {} is a `{}` job",
+                "review rounds are for GitHub and GitLab jobs; job {} is a `{}` job",
                 root.id.0,
                 root.source.as_str()
             )));
@@ -410,23 +424,51 @@ impl LifecycleRunner {
                 "a review round pushes to the PR: `open_prs` is off".into(),
             ));
         }
-        let (owner, name, number) = parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
         let fork = &config.repo.fork;
-        if !(owner.eq_ignore_ascii_case(&fork.owner) && name.eq_ignore_ascii_case(&fork.name)) {
-            return Err(Attempt::Rejected(format!(
-                "`{}` is not a PR of the fork {}/{}",
-                job.issue_ref, fork.owner, fork.name
-            )));
-        }
-        let round = ReviewRound::from_github(&fork.api, &owner, &name, number, token)
-            .await
-            .map_err(|e| match e {
-                // Closed, merged, not the agent's: no attempt changes it.
-                LifecycleError::Pr(aegis_pr::PrError::GitHub { status: 0, message }) => {
-                    Attempt::Rejected(message)
+        let not_the_forks = || {
+            Attempt::Rejected(format!(
+                "`{}` is not a PR or MR of the fork {}",
+                job.issue_ref,
+                fork.path()
+            ))
+        };
+        let read = match fork.platform {
+            ForkPlatform::GitHub => {
+                let (owner, name, number) =
+                    parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+                if !(owner.eq_ignore_ascii_case(&fork.owner)
+                    && name.eq_ignore_ascii_case(&fork.name))
+                {
+                    return Err(not_the_forks());
                 }
-                other => Attempt::Infra(other.to_string()),
-            })?;
+                ReviewRound::from_github(&fork.api, &owner, &name, number, token).await
+            }
+            // `group/sub/project!iid` (#254).
+            ForkPlatform::GitLab => {
+                let (project, iid) = job.issue_ref.rsplit_once('!').ok_or_else(not_the_forks)?;
+                let iid: u64 = iid.parse().map_err(|_| not_the_forks())?;
+                if !project.eq_ignore_ascii_case(&fork.path()) {
+                    return Err(not_the_forks());
+                }
+                ReviewRound::from_gitlab(&fork.api, project, iid, token).await
+            }
+        };
+        let round = read.map_err(|e| match e {
+            // Closed, merged, not the agent's: no attempt changes it.
+            LifecycleError::Pr(
+                aegis_pr::PrError::GitHub {
+                    status: 0,
+                    ref message,
+                }
+                | aegis_pr::PrError::GitLab {
+                    status: 0,
+                    ref message,
+                },
+            ) if message.starts_with("PR ") || message.starts_with("MR ") => {
+                Attempt::Rejected(e.to_string())
+            }
+            other => Attempt::Infra(other.to_string()),
+        })?;
         Ok((root, round))
     }
 }

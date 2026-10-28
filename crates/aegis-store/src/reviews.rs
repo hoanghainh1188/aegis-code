@@ -14,14 +14,11 @@ use crate::{Actor, Job, JobId, JobSource, JobStatus, Store, StoreError};
 /// Rounds a PR gets when the server sets no other number.
 pub const DEFAULT_MAX_REVIEW_ROUNDS: u32 = 3;
 
-/// `https://github.com/<owner>/<name>/pull/<n>` → `<owner>/<name>#<n>`:
-/// the PR as an issue ref, so a PR has one live round at a time.
+/// `https://github.com/<owner>/<name>/pull/<n>` → `<owner>/<name>#<n>`,
+/// `https://<gitlab>/<group/sub/project>/-/merge_requests/<n>` →
+/// `<group/sub/project>!<n>` (#254): the PR or MR as an issue ref, so it
+/// has one live round at a time.
 pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
-    let parts: Vec<&str> = pr_url.trim_end_matches('/').rsplitn(4, '/').collect();
-    let [number, "pull", name, rest] = parts.as_slice() else {
-        return None;
-    };
-    let owner = rest.rsplit('/').next()?;
     let plain = |s: &str| {
         !s.is_empty()
             && s != "."
@@ -29,6 +26,22 @@ pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
             && s.bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
     };
+    if let Some((front, iid)) = pr_url
+        .trim_end_matches('/')
+        .split_once("/-/merge_requests/")
+    {
+        let iid: u64 = iid.parse().ok()?;
+        let after_scheme = front.split_once("://").map_or(front, |(_, r)| r);
+        let (_, project) = after_scheme.split_once('/')?;
+        let parts: Vec<&str> = project.split('/').collect();
+        let ok = (2..=21).contains(&parts.len()) && parts.iter().all(|p| plain(p));
+        return ok.then(|| format!("{project}!{iid}"));
+    }
+    let parts: Vec<&str> = pr_url.trim_end_matches('/').rsplitn(4, '/').collect();
+    let [number, "pull", name, rest] = parts.as_slice() else {
+        return None;
+    };
+    let owner = rest.rsplit('/').next()?;
     let number: u64 = number.parse().ok()?;
     (plain(owner) && plain(name)).then(|| format!("{owner}/{name}#{number}"))
 }
@@ -214,6 +227,12 @@ mod tests {
                 "http://127.0.0.1:8070/demo-org/demo/pull/3/",
                 Some("demo-org/demo#3"),
             ),
+            (
+                "https://gitlab.com/acme/platform/app/-/merge_requests/4",
+                Some("acme/platform/app!4"),
+            ),
+            ("https://gitlab.com/app/-/merge_requests/4", None),
+            ("https://gitlab.com/acme/app/-/merge_requests/x", None),
             ("https://github.com/acme/typst/issues/12", None),
             ("https://github.com/acme/../pull/1", None),
             ("https://github.com/acme/typst/pull/x", None),

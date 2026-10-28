@@ -20,7 +20,7 @@ struct RawChange {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct RawRepro {
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     files: Vec<String>,
 }
 
@@ -54,6 +54,15 @@ pub struct ReviewReply {
     pub reply: String,
 }
 
+/// A list a model wrote as `null` is an empty one (#254).
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
 fn number_or_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -76,17 +85,17 @@ struct Raw {
     status: Status,
     #[serde(default)]
     cause: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     changes: Vec<RawChange>,
     #[serde(default)]
     repro_test: Option<RawRepro>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     allowed_test_changes: Vec<RawAllowed>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     allowed_reference_changes: Vec<RawGroup>,
     #[serde(default)]
     stop_reason: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     review_replies: Vec<ReviewReply>,
 }
 
@@ -157,6 +166,21 @@ pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_written_as_null_is_empty() {
+        let a = parse_answer(
+            r#"{"status": "fixed", "cause": "c", "changes": [{"location": "a.go", "note": "n"}],
+                "repro_test": {"name": "TestX", "files": null},
+                "allowed_test_changes": null, "allowed_reference_changes": null,
+                "review_replies": null}"#,
+        )
+        .unwrap();
+        assert!(a.allowed_test_changes.is_empty() && a.review_replies.is_empty());
+        assert!(a.repro.unwrap().files.is_empty());
+        // `changes` is still required for a fix.
+        assert!(parse_answer(r#"{"status": "fixed", "changes": null}"#).is_err());
+    }
 
     #[test]
     fn reads_the_final_answer() {

@@ -483,6 +483,113 @@ async fn a_bug_goes_to_a_merge_request_on_a_gitlab_fork() {
     );
 }
 
+/// #254: a review round on the agent's GitLab MR pushes one more commit
+/// to its branch and answers the notes on the MR.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_review_round_on_a_gitlab_mr_pushes_and_answers_on_it() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let gitlab = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path(
+            "/api/v4/projects/me%2Ffixture/merge_requests",
+        ))
+        .respond_with(wiremock::ResponseTemplate::new(201).set_body_json(json!({
+            "iid": 4, "web_url": "https://gitlab.example.com/me/fixture/-/merge_requests/4"
+        })))
+        .mount(&gitlab)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path(
+            "/api/v4/projects/me%2Ffixture/merge_requests/4/notes",
+        ))
+        .respond_with(wiremock::ResponseTemplate::new(201).set_body_json(json!({ "id": 1 })))
+        .expect(1)
+        .mount(&gitlab)
+        .await;
+    let gitlab_config = || {
+        let mut cfg = config(&scratch, "http://127.0.0.1:1", 20);
+        cfg.repo.fork.platform = aegis_lifecycle::ForkPlatform::GitLab;
+        cfg.repo.fork.api = format!("{}/api/v4", gitlab.uri());
+        cfg
+    };
+    let first = platform(
+        gitlab_config(),
+        Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]),
+    );
+    assert_eq!(
+        run(&first, CancellationToken::new()).await.outcome,
+        Outcome::PrOpened
+    );
+    let fork = scratch.0.join("fork.git");
+    let opened = rev_parse(&fork, "agent/fixture-7");
+
+    let round = ReviewRound {
+        pull: aegis_pr::PullState {
+            number: 4,
+            url: "https://gitlab.example.com/me/fixture/-/merge_requests/4".into(),
+            head_ref: "agent/fixture-7".into(),
+            head_sha: opened.clone(),
+            base_ref: "main".into(),
+        },
+        notes: vec![aegis_pr::ReviewNote {
+            author: "lan".into(),
+            at: aegis_pr::NoteAt::Conversation,
+            body: "Say why the limit is inclusive.".into(),
+            created_at: "1".into(),
+        }],
+    };
+    let comment = call(
+        "r1",
+        "edit",
+        json!({"file": "src/lib.rs", "from": 24, "to": 24,
+               "content": "        // MAX_ITEMS items at most.\n        if self.items.len() >= MAX_ITEMS {"}),
+    );
+    let answer = vec![ContentBlock::text(
+        json!({
+            "status": "fixed", "cause": "The limit needed a comment.",
+            "changes": [{"location": "src/lib.rs:24", "note": "comment the limit"}],
+            "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
+            "review_replies": [{"note": 1, "done": true, "reply": "added it"}]
+        })
+        .to_string(),
+    )];
+    let p = platform(
+        gitlab_config(),
+        Scripted::new(vec![comment, answer], vec![]),
+    );
+    let report = run_review(
+        Arc::clone(&p),
+        IssueInput {
+            id: "fixture-7-v1".into(),
+            ..issue()
+        },
+        round,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(report.reason, None, "the reply was posted");
+    let tip = rev_parse(&fork, "agent/fixture-7");
+    assert_eq!(rev_parse(&fork, &format!("{tip}^")), opened);
+    let notes = gitlab.received_requests().await.unwrap();
+    let reply: Value = notes
+        .iter()
+        .find(|r| r.url.path().ends_with("/merge_requests/4/notes"))
+        .unwrap()
+        .body_json()
+        .unwrap();
+    assert!(
+        reply["body"]
+            .as_str()
+            .unwrap()
+            .contains("✅ 1. comment (lan): added it")
+    );
+}
+
 /// "Xong khi" of #22: an issue run with its ledger in PostgreSQL writes
 /// every event there, and the same ledger as JSON gives the same record
 /// and KPIs.
