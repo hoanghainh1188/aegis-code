@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Token của tôi{% endblock %}
+{% block content %}
+<section aria-labelledby="tokens-heading">
+  <p class="eyebrow">{{ me.name }}</p>
+  <h1 id="tokens-heading">Token của tôi</h1>
+  <p class="note">Token cho client <code>aegis-job</code> trên máy bạn: làm việc với tư cách bạn, theo đúng quyền của bạn trên từng repo, và được ghi tên bạn trong audit. Tối đa {{ max_tokens }} token còn hạn, mỗi token sống tối đa {{ max_days }} ngày.</p>
+  {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
+  {% if let Some(t) = made %}
+  <div class="notice" role="status">
+    <p>Token mới, <strong>chỉ hiện lần này</strong>: chép ngay.</p>
+    <pre class="token"><code>{{ t }}</code></pre>
+    <p>Đăng nhập: <code>aegis-job login {{ public_url }}</code>, rồi dán token khi được hỏi.</p>
+  </div>
+  {% endif %}
+  <form method="post" action="/me/tokens" class="inline">
+    {% include "form_guard.html" %}
+    <label>Tên (máy, việc dùng)
+      <input type="text" name="label" maxlength="64" required placeholder="laptop">
+    </label>
+    <label>Số ngày
+      <input type="number" name="days" min="1" max="{{ max_days }}" step="1" value="30" inputmode="numeric">
+    </label>
+    <button type="submit">Tạo token</button>
+  </form>
+</section>
+
+<section aria-labelledby="live-heading" class="band">
+  <h2 id="live-heading">Token còn hạn</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Tên</th><th scope="col">Tạo</th><th scope="col">Hết hạn</th><th scope="col"><span class="visually-hidden">Thu hồi</span></th></tr></thead>
+    <tbody>
+    {% for t in tokens %}
+      <tr><td>{{ t.label }}</td><td>{{ t.created_at }}</td><td>{{ t.expires_at }}</td>
+        <td><form method="post" action="/me/tokens/{{ t.id }}/revoke">{% include "form_guard.html" %}<button type="submit" class="ghost">Thu hồi</button></form></td></tr>
+    {% else %}
+      <tr><td colspan="4" class="empty">Chưa có token nào.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

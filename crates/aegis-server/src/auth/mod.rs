@@ -150,6 +150,18 @@ impl Auth {
         Duration::from_secs(u64::from(self.inner.config.session_hours) * 3600)
     }
 
+    /// Where people reach the server (`[auth] public_url`), without a
+    /// trailing `/`; empty when unset.
+    pub(crate) fn public_url(&self) -> String {
+        self.inner
+            .config
+            .public_url
+            .as_ref()
+            .map_or(String::new(), |u| {
+                u.as_str().trim_end_matches('/').to_owned()
+            })
+    }
+
     /// Whether pages answer to `host` (a `Host` header without its port):
     /// loopback, or the host of `public_url`. This also stops DNS
     /// rebinding.
@@ -195,6 +207,15 @@ impl Access {
     /// Whether this may do in `repo` what `needed` allows.
     pub fn can(&self, repo: RepoId, needed: RepoRole) -> bool {
         self.admin || self.roles.get(&repo).is_some_and(|r| r.includes(needed))
+    }
+
+    /// This one's role in `repo`, as the client shows it (#231):
+    /// `admin`, `maintainer`, `reviewer`, `viewer`, or none.
+    pub fn role_name(&self, repo: RepoId) -> Option<&'static str> {
+        if self.admin {
+            return Some("admin");
+        }
+        self.roles.get(&repo).map(|r| r.as_str())
     }
 
     /// The repos this may see; `None`: every repo.
