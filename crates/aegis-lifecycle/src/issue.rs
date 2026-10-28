@@ -101,6 +101,28 @@ impl IssueInput {
         })
     }
 
+    /// Issue `iid` of GitLab project `project` (`group/sub/project`), read
+    /// through the REST API at `api` (#252).
+    pub async fn from_gitlab(
+        api: &str,
+        project: &str,
+        iid: u64,
+        token: &str,
+    ) -> Result<Self, LifecycleError> {
+        let gitlab = aegis_pr::GitLab::new(api, project, token)?;
+        let issue = gitlab.issue(iid).await?;
+        let name = project.rsplit('/').next().unwrap_or(project);
+        Ok(Self {
+            id: format!("{name}-{iid}"),
+            title: issue.title,
+            body: issue.description.unwrap_or_default(),
+            url: issue.web_url,
+            base: None,
+            hidden: None,
+            kind: None,
+        })
+    }
+
     /// A failed GitHub Actions run of `owner/repo` on `branch` (#250), as
     /// an issue: what failed and the end of the failed jobs' logs, given
     /// to the model as data. Refused when the run did not fail or ran on

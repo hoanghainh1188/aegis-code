@@ -14,7 +14,7 @@ use crate::github::{checked_api, plain_name};
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// GitLab subgroups nest up to 20 deep, under one top-level group.
-const MAX_PATH_PARTS: usize = 21;
+pub(crate) const MAX_PATH_PARTS: usize = 21;
 
 #[derive(Debug, Clone)]
 pub struct GitLab {
@@ -22,7 +22,26 @@ pub struct GitLab {
     api: String,
     /// `group/sub/project`, percent-encoded as one path segment.
     project: String,
+    /// `group/sub/project` as it is.
+    path: String,
     token: String,
+}
+
+/// An issue of the project (#252).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GitLabIssue {
+    pub iid: u64,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub web_url: String,
+}
+
+/// A merge request opened by the agent (#252).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MergeRequest {
+    pub iid: u64,
+    pub web_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -60,26 +79,86 @@ impl GitLab {
             client,
             api,
             project: parts.join("%2F"),
+            path: project.to_owned(),
             token: token.to_owned(),
         })
+    }
+
+    /// Where the agent's branch for this project is pushed: the web host of
+    /// the API root (`https://gitlab.com/api/v4` → `gitlab.com`), same
+    /// project, same token (#252).
+    pub fn remote(&self) -> Result<crate::Remote, PrError> {
+        let rest = self
+            .api
+            .split_once("://")
+            .map_or(self.api.as_str(), |(_, r)| r);
+        let host = rest.split('/').next().unwrap_or(rest);
+        crate::Remote::gitlab(host, &self.path, &self.token)
+    }
+
+    /// Issue `iid` of this project.
+    pub async fn issue(&self, iid: u64) -> Result<GitLabIssue, PrError> {
+        self.call(reqwest::Method::GET, &format!("issues/{iid}"), None)
+            .await
+    }
+
+    /// Opens a merge request from `head` into `base`, a draft when `draft`
+    /// (GitLab marks it by the title).
+    pub async fn open_merge_request(
+        &self,
+        head: &crate::AgentBranch,
+        base: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+    ) -> Result<MergeRequest, PrError> {
+        let title = if draft {
+            format!("Draft: {title}")
+        } else {
+            title.to_owned()
+        };
+        let request = json!({
+            "source_branch": head.name(),
+            "target_branch": base,
+            "title": title,
+            "description": body,
+            "remove_source_branch": false,
+        });
+        self.call(reqwest::Method::POST, "merge_requests", Some(&request))
+            .await
     }
 
     /// Comments on issue `iid` of this project. The caller makes `body`
     /// inert.
     pub async fn comment_on_issue(&self, iid: u64, body: &str) -> Result<IssueNote, PrError> {
-        let url = format!("{}/projects/{}/issues/{iid}/notes", self.api, self.project);
+        self.call(
+            reqwest::Method::POST,
+            &format!("issues/{iid}/notes"),
+            Some(&json!({ "body": body })),
+        )
+        .await
+    }
+
+    /// `method` on `projects/<project>/<path>`, with `body` as JSON.
+    async fn call<T: serde::de::DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<T, PrError> {
+        let url = format!("{}/projects/{}/{path}", self.api, self.project);
         let unreached = |e: reqwest::Error| PrError::GitLab {
             status: 0,
             message: e.to_string(),
         };
-        let response = self
+        let mut request = self
             .client
-            .post(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .json(&json!({ "body": body }))
-            .send()
-            .await
-            .map_err(unreached)?;
+            .request(method, &url)
+            .header("PRIVATE-TOKEN", &self.token);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request.send().await.map_err(unreached)?;
         let status = response.status().as_u16();
         let text = response.text().await.map_err(unreached)?;
         if !(200..300).contains(&status) {
@@ -95,5 +174,27 @@ impl GitLab {
             status,
             message: format!("unexpected reply: {e}"),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_agents_branch_goes_to_the_web_host_of_the_api_root() {
+        for (api, url) in [
+            (
+                "https://gitlab.com/api/v4",
+                "https://gitlab.com/acme/app.git",
+            ),
+            (
+                "https://git.acme.example/api/v4/",
+                "https://git.acme.example/acme/app.git",
+            ),
+        ] {
+            let gitlab = GitLab::new(api, "acme/app", "t").unwrap();
+            assert_eq!(gitlab.remote().unwrap().url(), url, "{api}");
+        }
     }
 }

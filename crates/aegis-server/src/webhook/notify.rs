@@ -221,16 +221,22 @@ pub fn plain_status_comment(job: &Job) -> String {
 
 /// What happened, and the reason made inert.
 fn status_parts(job: &Job) -> (String, Option<String>) {
+    // GitLab's issues get a merge request (#252).
+    let request = if job.source == JobSource::Gitlab {
+        "merge request"
+    } else {
+        "pull request"
+    };
     let (what, reason) = match (job.status, job.outcome) {
         (JobStatus::Done, Some(Outcome::PrOpened)) => {
             let what = match pr_url(job) {
-                Some(url) => format!("opened a pull request for this issue: {url}"),
-                None => "opened a pull request for this issue.".into(),
+                Some(url) => format!("opened a {request} for this issue: {url}"),
+                None => format!("opened a {request} for this issue."),
             };
             (what, None)
         }
         (JobStatus::Done, Some(outcome)) => (
-            format!("stopped without a pull request: {}.", stop(outcome)),
+            format!("stopped without a {request}: {}.", stop(outcome)),
             job.reason.as_deref(),
         ),
         (JobStatus::Cancelled, _) => match job.reason.as_deref() {
@@ -260,7 +266,7 @@ pub(crate) fn pr_url(job: &Job) -> Option<&str> {
 
 fn stop(outcome: Outcome) -> &'static str {
     match outcome {
-        Outcome::PrOpened => "a pull request was opened",
+        Outcome::PrOpened => "a pull or merge request was opened",
         Outcome::StoppedBudget => "its budget is spent",
         Outcome::StoppedSteps => "it reached its step limit",
         Outcome::StoppedExpertFail => "even the strongest model could not fix it",
@@ -308,6 +314,25 @@ mod tests {
         for bad in ["group/app", "group/app#x", "group/app#"] {
             assert_eq!(gitlab_issue_ref(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_gitlab_issue_is_told_of_its_merge_request() {
+        let mr = Job {
+            source: JobSource::Gitlab,
+            pr_url: Some("https://gitlab.com/acme/app/-/merge_requests/4".into()),
+            ..job(JobStatus::Done, Some(Outcome::PrOpened))
+        };
+        let text = status_comment(&mr);
+        assert!(
+            text.contains("opened a merge request for this issue: https://gitlab.com/acme/app/-/merge_requests/4"),
+            "{text}"
+        );
+        let stopped = Job {
+            source: JobSource::Gitlab,
+            ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
+        };
+        assert!(status_comment(&stopped).contains("stopped without a merge request"));
     }
 
     #[test]

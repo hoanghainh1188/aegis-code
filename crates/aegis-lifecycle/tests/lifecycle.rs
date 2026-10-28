@@ -433,6 +433,56 @@ async fn a_review_round_pushes_onto_the_pr_branch_and_answers_each_note() {
     );
 }
 
+/// #252: with the fork on GitLab, the gated branch is pushed and a draft
+/// merge request opened through GitLab's API; the run's PR is its URL.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bug_goes_to_a_merge_request_on_a_gitlab_fork() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let gitlab = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path(
+            "/api/v4/projects/me%2Ffixture/merge_requests",
+        ))
+        .and(wiremock::matchers::header("PRIVATE-TOKEN", "t"))
+        .respond_with(wiremock::ResponseTemplate::new(201).set_body_json(json!({
+            "iid": 4, "web_url": "https://gitlab.example.com/me/fixture/-/merge_requests/4"
+        })))
+        .expect(1)
+        .mount(&gitlab)
+        .await;
+    let mut cfg = config(&scratch, "http://127.0.0.1:1", 20);
+    cfg.repo.fork.platform = aegis_lifecycle::ForkPlatform::GitLab;
+    cfg.repo.fork.api = format!("{}/api/v4", gitlab.uri());
+    let p = platform(
+        cfg,
+        Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]),
+    );
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(
+        report.pr_url.as_deref(),
+        Some("https://gitlab.example.com/me/fixture/-/merge_requests/4")
+    );
+    assert_eq!(fork_refs(&scratch), "refs/heads/agent/fixture-7");
+    let mr: Value = gitlab.received_requests().await.unwrap()[0]
+        .body_json()
+        .unwrap();
+    assert_eq!(
+        (&mr["source_branch"], &mr["target_branch"]),
+        (&json!("agent/fixture-7"), &json!("main"))
+    );
+    assert_eq!(mr["title"], "Draft: fix: refuse a fourth item in the cart");
+    assert!(
+        mr["description"]
+            .as_str()
+            .unwrap()
+            .contains("`fourth_item_is_refused` (FAIL → PASS)")
+    );
+}
+
 /// "Xong khi" of #22: an issue run with its ledger in PostgreSQL writes
 /// every event there, and the same ledger as JSON gives the same record
 /// and KPIs.

@@ -29,8 +29,8 @@ mod run;
 pub use answer::{FinalAnswer, ReviewReply, Status, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
-    BudgetSection, DirConfig, ExtraServer, ForkConfig, IdentityConfig, LedgerBackend, RepoConfig,
-    RunConfig, RunSection, SonarConfig,
+    BudgetSection, DirConfig, ExtraServer, ForkConfig, ForkPlatform, IdentityConfig, LedgerBackend,
+    RepoConfig, RunConfig, RunSection, SonarConfig,
 };
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};

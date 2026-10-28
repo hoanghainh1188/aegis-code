@@ -1,4 +1,5 @@
-"""A stand-in for the GitHub REST API, enough for aegis jobs and review rounds.
+"""A stand-in for the GitHub REST API, enough for aegis jobs and review rounds,
+and for GitLab's (under /api/v4) enough for a GitLab issue's job (#252).
 
 GET  /repos/<o>/<r>/issues/<n>            the issue the job works on
 POST /repos/<o>/<r>/pulls                 the PR the job opens
@@ -12,6 +13,9 @@ GET  /repos/<o>/<r>/collaborators/<u>/permission   admin for the reviewer only
 GET  /repos/<o>/<r>/actions/runs/77[/jobs], /actions/jobs/1/logs   a failed CI run
 GET  /<o>/<r>/pull/<n>                    the PR as a page: body, diff, review, replies
 GET  /<o>/<r>/issues/<n>                  the issue and its comments
+
+GitLab: GET  /api/v4/projects/<path>/issues/<iid>, POST .../merge_requests,
+POST .../issues/<iid>/notes; the MR as a page at /<path>/-/merge_requests/<iid>.
 
 PRs are numbered from 100, so they never share a number with an issue.
 """
@@ -43,6 +47,7 @@ ISSUES = {
     }
 }
 PULLS, COMMENTS, REVIEWS, LINE_COMMENTS = [], [], [], []
+MERGE_REQUESTS, NOTES = [], []
 CI_RUN = 77
 CI_LOG = (
     "2026-10-28T09:00:01Z go test ./...\n"
@@ -92,9 +97,36 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(length) or b"{}")
 
+    def gitlab(self, method, rest, body=None):
+        """/api/v4/projects/<url-encoded path>/..."""
+        from urllib.parse import unquote
+        if len(rest) < 3 or rest[0] != "projects":
+            return self.not_found()
+        project, tail = unquote(rest[1]), rest[2:]
+        if method == "GET" and len(tail) == 2 and tail[0] == "issues":
+            issue = ISSUES.get(int(tail[1]))
+            if issue is None:
+                return self.not_found()
+            return self.json(200, {"iid": int(tail[1]), "title": issue["title"],
+                                   "description": issue["body"],
+                                   "web_url": f"{ROOT}/{project}/-/issues/{tail[1]}"})
+        if method == "POST" and tail == ["merge_requests"]:
+            MERGE_REQUESTS.append(body)
+            iid = len(MERGE_REQUESTS)
+            return self.json(201, {"iid": iid,
+                                   "web_url": f"{ROOT}/{project}/-/merge_requests/{iid}"})
+        if method == "POST" and len(tail) == 3 and tail[0] == "issues" and tail[2] == "notes":
+            NOTES.append((int(tail[1]), body.get("body", "")))
+            return self.json(201, {"id": len(NOTES)})
+        return self.not_found()
+
     def do_GET(self):
         parts = self.path.split("?")[0].strip("/").split("/")
         log("GET", self.path)
+        if parts[:2] == ["api", "v4"]:
+            return self.gitlab("GET", parts[2:])
+        if len(parts) >= 4 and parts[-2] == "merge_requests":
+            return self.merge_request_page(int(parts[-1]))
         if parts[0] == "repos" and len(parts) >= 5:
             return self.api_get(parts[1], parts[2], parts[3:])
         if len(parts) == 4 and parts[2] == "pull":
@@ -157,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = self.path.strip("/").split("/")
         body = self.read()
         log("POST", self.path, json.dumps(body)[:300])
+        if parts[:2] == ["api", "v4"]:
+            return self.gitlab("POST", parts[2:], body)
         o, r = parts[1], parts[2]
         if parts[3:] == ["pulls"]:
             PULLS.append(body)
@@ -217,6 +251,19 @@ class Handler(BaseHTTPRequestHandler):
                   f"<h2>Review</h2>{notes or '<p>none</p>'}"
                   f"<h2>Replies</h2>{replies or '<p>none</p>'}"
                   f"<h2>Diff</h2><pre>{lines}</pre>")
+
+    def merge_request_page(self, iid):
+        if not 0 < iid <= len(MERGE_REQUESTS):
+            return self.not_found()
+        mr = MERGE_REQUESTS[iid - 1]
+        diff = git("diff", f"{mr['target_branch']}...{mr['source_branch']}")
+        notes = "".join(f"<pre>{html.escape(b)}</pre>" for _, b in NOTES)
+        self.page(mr["title"], f"<h1>{html.escape(mr['title'])} !{iid}</h1>"
+                  f"<p><code>{html.escape(mr['source_branch'])}</code> → "
+                  f"<code>{html.escape(mr['target_branch'])}</code></p>"
+                  f"<h2>Description</h2><pre>{html.escape(mr['description'])}</pre>"
+                  f"<h2>Diff</h2><pre>{html.escape(diff)}</pre>"
+                  f"<h2>Notes on the issue</h2>{notes or '<p>none</p>'}")
 
     def issue_page(self, number):
         issue = ISSUES.get(number)

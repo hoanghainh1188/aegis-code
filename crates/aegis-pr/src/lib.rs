@@ -17,6 +17,7 @@ mod branch;
 mod commit_message;
 mod coverage;
 mod error;
+mod forge;
 mod git;
 mod github;
 mod gitlab;
@@ -35,9 +36,10 @@ pub use branch::{AgentBranch, EvalBranch};
 pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};
 pub use coverage::{cobertura_lines, cobertura_percent, lcov_lines, lcov_percent};
 pub use error::PrError;
-pub use git::{Identity, Remote, token_env};
+pub use forge::Forge;
+pub use git::{GITHUB_USER, GITLAB_USER, Identity, Remote, token_env, token_env_as};
 pub use github::{GitHub, IssueComment, PullRequest};
-pub use gitlab::{GitLab, IssueNote};
+pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};
 pub use review::{NoteAt, PullState, REPLY_MARKER, ReviewNote};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

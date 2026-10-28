@@ -101,7 +101,15 @@ sequenceDiagram
 
    Job `ci` đọc lần chạy, job và bước hỏng, cuối log; agent sửa trên đầu `main` rồi mở PR như issue thường.
 
-7. **Dọn:**
+7. **Job GitLab** (#252): repo `demo-gl` là cùng code nhưng là project GitLab, fork trên GitLab giả. Gửi webhook `Issue Hook` như GitLab gửi khi gắn nhãn `aegis` lên issue 1:
+
+   ```bash
+   scripts/trial/send-gitlab-webhook.sh
+   ```
+
+   Job `gitlab` đọc issue qua API GitLab giả, chạy như issue GitHub rồi mở merge request (draft). Xem MR ở <http://127.0.0.1:8070/demo-org/demo/-/merge_requests/1> và comment kết quả trên issue ở cùng trang.
+
+8. **Dọn:**
 
    ```bash
    scripts/trial/down.sh

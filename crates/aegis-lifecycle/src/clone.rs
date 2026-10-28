@@ -29,6 +29,9 @@ const UNSAFE_KEYS: &str = r"^(url\..*|http\..*|credential.*|include\..*|includei
 pub struct Source<'a> {
     pub url: &'a str,
     pub token: Option<&'a str>,
+    /// Who the token is sent as: [`aegis_pr::GITHUB_USER`] or
+    /// [`aegis_pr::GITLAB_USER`] (#252).
+    pub user: &'a str,
 }
 
 impl std::fmt::Debug for Source<'_> {
@@ -41,14 +44,19 @@ impl std::fmt::Debug for Source<'_> {
 }
 
 impl Source<'_> {
-    /// The token, only where it goes over HTTPS.
-    fn token(&self) -> Option<&str> {
+    /// The user and token, only where they go over HTTPS.
+    fn auth(&self) -> Option<(&str, &str)> {
         self.token
+            .map(|t| (self.user, t))
             .filter(|_| self.url.to_ascii_lowercase().starts_with("https://"))
     }
 }
 
-fn git(dir: Option<&Path>, args: &[&str], token: Option<&str>) -> Result<String, LifecycleError> {
+fn git(
+    dir: Option<&Path>,
+    args: &[&str],
+    auth: Option<(&str, &str)>,
+) -> Result<String, LifecycleError> {
     let mut c = Command::new("git");
     c.env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -59,8 +67,8 @@ fn git(dir: Option<&Path>, args: &[&str], token: Option<&str>) -> Result<String,
     if let Some(dir) = dir {
         c.arg("-C").arg(dir);
     }
-    if let Some(token) = token {
-        c.envs(aegis_pr::token_env(token));
+    if let Some((user, token)) = auth {
+        c.envs(aegis_pr::token_env_as(user, token));
     }
     let shown = args.join(" ");
     let out = c.args(args).output().map_err(|e| LifecycleError::Git {
@@ -129,7 +137,7 @@ pub fn prepare(path: &Path, source: Source<'_>, branch: &str) -> Result<(), Life
     let cloned = git(
         None,
         &["clone", "--bare", "--no-tags", "--", source.url, &shown],
-        source.token(),
+        source.auth(),
     )
     .and_then(|_| crate::job::resolve(path, branch).map(drop));
     if cloned.is_err() {
@@ -144,14 +152,17 @@ pub async fn prepare_async(
     path: &Path,
     url: &str,
     branch: &str,
-    token: Option<&str>,
+    auth: Option<(&str, &str)>,
 ) -> Result<(), LifecycleError> {
     let (path, url, branch) = (path.to_owned(), url.to_owned(), branch.to_owned());
-    let token = token.map(str::to_owned);
+    let auth = auth.map(|(u, t)| (u.to_owned(), t.to_owned()));
     tokio::task::spawn_blocking(move || {
         let source = Source {
             url: &url,
-            token: token.as_deref(),
+            token: auth.as_ref().map(|(_, t)| t.as_str()),
+            user: auth
+                .as_ref()
+                .map_or(aegis_pr::GITHUB_USER, |(u, _)| u.as_str()),
         };
         prepare(&path, source, &branch)
     })
@@ -203,7 +214,7 @@ fn fetch_into(
             source.url,
             &refspec,
         ],
-        source.token(),
+        source.auth(),
     )
     .map(drop)
 }
@@ -268,6 +279,7 @@ mod tests {
         let src = Source {
             url: &url,
             token: None,
+            user: aegis_pr::GITHUB_USER,
         };
         let clone = tmp.0.join("state/repos/demo");
         prepare(&clone, src, "main").unwrap();
@@ -299,6 +311,7 @@ mod tests {
             Source {
                 url: &url,
                 token: None,
+                user: aegis_pr::GITHUB_USER,
             },
             "main",
         )
@@ -320,7 +333,11 @@ mod tests {
             (url.as_str(), "--upload-pack=x"),
             (url.as_str(), "main:refs/heads/x"),
         ] {
-            let src = Source { url, token: None };
+            let src = Source {
+                url,
+                token: None,
+                user: aegis_pr::GITHUB_USER,
+            };
             assert!(prepare(&clone, src, branch).is_err(), "{url} {branch}");
             assert!(!clone.exists(), "{url} {branch}");
         }
@@ -336,6 +353,7 @@ mod tests {
         let src = Source {
             url: &url,
             token: None,
+            user: aegis_pr::GITHUB_USER,
         };
         let clone = tmp.0.join("clone");
         prepare(&clone, src, "main").unwrap();
@@ -357,8 +375,9 @@ mod tests {
         let https = Source {
             url: "https://github.com/acme/app",
             token: Some("s3cret"),
+            user: aegis_pr::GITLAB_USER,
         };
-        assert_eq!(https.token(), Some("s3cret"));
+        assert_eq!(https.auth(), Some(("oauth2", "s3cret")));
         assert!(!format!("{https:?}").contains("s3cret"));
         for url in [
             "http://github.com/acme/app",
@@ -368,8 +387,9 @@ mod tests {
             let other = Source {
                 url,
                 token: Some("s3cret"),
+                user: aegis_pr::GITHUB_USER,
             };
-            assert_eq!(other.token(), None, "{url}");
+            assert_eq!(other.auth(), None, "{url}");
         }
     }
 }

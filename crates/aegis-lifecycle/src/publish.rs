@@ -7,12 +7,13 @@ use aegis_gate::GateReport;
 use aegis_lang::{CoverageFormat, RepoProfiles};
 use aegis_ledger::{IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
-    CommitInput, Cost, GitHub, Identity, PrContent, Remote, abandon, cobertura_lines,
-    cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated, push_gated_onto,
-    render, write_commit_message,
+    CommitInput, Cost, Forge, GitHub, GitLab, Identity, PrContent, Remote, abandon,
+    cobertura_lines, cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated,
+    push_gated_onto, render, write_commit_message,
 };
 use aegis_provider::ModelProvider;
 
+use crate::ForkPlatform;
 use crate::answer::FinalAnswer;
 use crate::review::ReviewRound;
 use crate::{IssueInput, LifecycleError, Platform};
@@ -96,7 +97,7 @@ where
             .model_call(Tier::Light, &light.id, &response.usage)
             .await?;
     }
-    let github = fork_github(platform)?;
+    let forge = fork_forge(platform)?;
     let remote = fork_remote(platform)?;
     let identity = Identity {
         name: cfg.identity.name.clone(),
@@ -129,14 +130,11 @@ where
         },
     });
     let title = message.text.lines().next().unwrap_or("fix").to_owned();
-    match github
-        .open_pull_request(&pushed.branch, &target, &title, &body, cfg.run.draft_prs)
+    match forge
+        .open_request(&pushed.branch, &target, &title, &body, cfg.run.draft_prs)
         .await
     {
-        Ok(pr) => Ok(Published {
-            url: pr.url,
-            note: None,
-        }),
+        Ok(url) => Ok(Published { url, note: None }),
         Err(e) => {
             // No PR, no branch: the fork is left as it was.
             let _ = abandon(tree, &pushed, &remote);
@@ -145,8 +143,27 @@ where
     }
 }
 
+/// The fork's forge: a GitHub repository or a GitLab project (#252).
+fn fork_forge<P, S>(platform: &Platform<P, S>) -> Result<Forge, LifecycleError> {
+    let fork = &platform.config.repo.fork;
+    Ok(match fork.platform {
+        ForkPlatform::GitHub => Forge::GitHub(fork_github(platform)?),
+        ForkPlatform::GitLab => Forge::GitLab(GitLab::new(
+            &fork.api,
+            &fork.path(),
+            &platform.github_token,
+        )?),
+    })
+}
+
+/// The fork on GitHub; review rounds (#243) are GitHub's for now (#254).
 fn fork_github<P, S>(platform: &Platform<P, S>) -> Result<GitHub, LifecycleError> {
     let fork = &platform.config.repo.fork;
+    if fork.platform != ForkPlatform::GitHub {
+        return Err(LifecycleError::Config(
+            "review rounds on a GitLab merge request are not supported yet (#254)".into(),
+        ));
+    }
     Ok(GitHub::new(
         &fork.api,
         &fork.owner,
@@ -159,7 +176,7 @@ fn fork_github<P, S>(platform: &Platform<P, S>) -> Result<GitHub, LifecycleError
 pub(crate) fn fork_remote<P, S>(platform: &Platform<P, S>) -> Result<Remote, LifecycleError> {
     Ok(match &platform.config.repo.fork.push_to_local {
         Some(path) => Remote::local(path)?,
-        None => fork_github(platform)?.remote()?,
+        None => fork_forge(platform)?.remote()?,
     })
 }
 

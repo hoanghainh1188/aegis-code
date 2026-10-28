@@ -95,3 +95,37 @@ async fn a_run_that_passed_or_ran_elsewhere_is_refused() {
         "{err}"
     );
 }
+
+/// #252: a GitLab issue read through the API of the fork's instance.
+#[tokio::test]
+async fn a_gitlab_issue_is_read_from_its_project() {
+    let gitlab = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/acme%2Fplatform%2Fapp/issues/12"))
+        .and(header("PRIVATE-TOKEN", "t"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "iid": 12, "title": "Truncate splits runes", "description": "It cuts bytes.",
+            "web_url": "https://gitlab.example.com/acme/platform/app/-/issues/12"
+        })))
+        .mount(&gitlab)
+        .await;
+    let api = format!("{}/api/v4", gitlab.uri());
+    let issue = IssueInput::from_gitlab(&api, "acme/platform/app", 12, "t")
+        .await
+        .unwrap();
+    assert_eq!(
+        (issue.id.as_str(), issue.title.as_str(), issue.body.as_str()),
+        ("app-12", "Truncate splits runes", "It cuts bytes.")
+    );
+    let missing = IssueInput::from_gitlab(&api, "acme/platform/app", 13, "t").await;
+    assert!(
+        matches!(
+            missing,
+            Err(LifecycleError::Pr(aegis_pr::PrError::GitLab {
+                status: 404,
+                ..
+            }))
+        ),
+        "{missing:?}"
+    );
+}
