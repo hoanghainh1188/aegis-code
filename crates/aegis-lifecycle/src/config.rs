@@ -368,7 +368,7 @@ fn default_sonar_poll() -> u64 {
 /// its `tools`, maybe none, and the platform calls it too (#203).
 /// `{index_dir}` in `args` and `env` values is the index directory,
 /// `<state_dir>/index`, shared by every repo.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraServer {
     pub program: String,
