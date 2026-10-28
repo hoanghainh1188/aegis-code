@@ -793,6 +793,21 @@ impl<'a> Run<'a> {
             }
             _ => {}
         }
+        // A runner that exits 0 when the id selects nothing would pass on
+        // the base too and be refused there for the wrong reason (#235).
+        if self
+            .part
+            .profile
+            .gate
+            .repro_ran_nothing(&read_log(&patched.log))
+        {
+            let detail = format!(
+                "`{}` ran no test with the patch: no test has that id. Give the id in the form \
+                 this language's test command takes, as its conventions say.",
+                repro.test
+            );
+            return Ok(report(name, StepStatus::Failed, &[&patched], detail));
+        }
         let repo = self
             .part
             .repo

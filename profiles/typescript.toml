@@ -57,3 +57,6 @@ cache_dirs = ["node_modules", "/home/aegis/.npm"]
 
 [sonar.properties]
 "sonar.javascript.lcov.reportPaths" = "coverage/lcov.info"
+
+[prompt]
+conventions = "typescript.md"

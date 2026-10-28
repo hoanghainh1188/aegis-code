@@ -108,3 +108,6 @@ cache_dirs = ["target", "/home/aegis/.m2/repository", "/home/aegis/.gradle/cache
 
 [sonar.properties]
 "sonar.coverage.jacoco.xmlReportPaths" = "target/site/jacoco/jacoco.xml"
+
+[prompt]
+conventions = "java.md"

@@ -91,6 +91,7 @@ fn gate_steps_pass_offline_after_fetch() {
         .nth(1)
         .map(|t| t.trim_start().chars().next());
     assert_eq!(total, Some(Some('1')), "one test: {stdout}");
+    assert!(!gate.repro_ran_nothing(&stdout), "#235: {stdout}");
 
     ws.run_ok("coverage", &plain(gate.coverage.command().unwrap()));
     let pattern = &profile.coverage.as_ref().unwrap().path;
@@ -135,6 +136,7 @@ fn testing_platform_runs_the_tests_and_skips_the_coverage() {
     let out = ws.run_ok("repro_test", &repro);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("total: 1"), "one test: {stdout}");
+    assert!(!gate.repro_ran_nothing(&stdout), "#235: {stdout}");
     // What the skip is for: VSTest's `--collect` is an unknown option here.
     let coverage = ws.run(&plain(gate.coverage.command().unwrap()));
     assert!(!coverage.status.success());
