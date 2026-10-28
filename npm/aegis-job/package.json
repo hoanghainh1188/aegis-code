@@ -1,0 +1,37 @@
+{
+  "name": "@hoanghainh1188/aegis-job",
+  "version": "0.1.0",
+  "description": "aegis-job: send an issue to aegis-code and follow the job until its pull request (ADR 0006).",
+  "bin": {
+    "aegis-job": "bin/aegis-job.js"
+  },
+  "files": [
+    "bin/",
+    "vendor/",
+    "README.md"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hoanghainh1188/aegis-code.git",
+    "directory": "npm/aegis-job"
+  },
+  "homepage": "https://github.com/hoanghainh1188/aegis-code/blob/main/docs/client.md",
+  "keywords": [
+    "aegis-code",
+    "cli",
+    "issue",
+    "pull-request"
+  ],
+  "license": "Apache-2.0"
+}

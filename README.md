@@ -7,7 +7,7 @@
 > **Agentic Code Maintenance Platform:** Autonomous software maintenance powered by AI agents — ingest issues, analyze context, generate safe patches, and open verified Pull Requests for human review.
 
 [![Rust 2021](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![License: Proprietary](https://img.shields.io/badge/license-Internal-blue.svg)]()
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Status: Phase 2 Platform](https://img.shields.io/badge/status-Phase%202%20Platform-yellow.svg)]()
 
 ---
@@ -134,7 +134,7 @@ cargo build --release -p aegis-cli -p aegis-aci
 ```
 Elsewhere, point `run.aci_bin` in the config at it.
 
-The whole platform on one machine (fake GitHub/GitLab, Ollama or the Claude API): [docs/local-trial.md](docs/local-trial.md). The developer client: `cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client`, then [docs/client.md](docs/client.md).
+The whole platform on one machine (fake GitHub/GitLab, Ollama or the Claude API): [docs/local-trial.md](docs/local-trial.md). The developer client: `npm install -g @hoanghainh1188/aegis-job` (or `cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client`), then [docs/client.md](docs/client.md). Releases (GHCR images, offline bundle, npm): [docs/release.md](docs/release.md).
 
 ### Testing & Verification
 ```bash
@@ -173,3 +173,7 @@ Progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188
 * [Measurements](docs/measurements/) (Eval runs and KPI reports)
 * [Architectural Decision Records (ADRs)](docs/adr/)
 * [Development Conventions & Workflow](CLAUDE.md) (Branching, commit conventions, and pre-PR checks)
+
+## License
+
+Apache License 2.0: [LICENSE](LICENSE).

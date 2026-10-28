@@ -3,6 +3,7 @@ name = "aegis-secrets"
 description = "The one place secrets are read: AWS Secrets Manager, files on premises, or the environment for dev and tests; checked at start, refreshed while running (ADR 0003 §6, #30)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

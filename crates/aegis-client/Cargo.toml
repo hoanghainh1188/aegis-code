@@ -3,6 +3,7 @@ name = "aegis-client"
 description = "aegis-job: the developer's client of aegis-server's API (#231)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [[bin]]

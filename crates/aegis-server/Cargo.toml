@@ -3,6 +3,7 @@ name = "aegis-server"
 description = "The platform as a service: internal HTTP API, webhooks, job queue in PostgreSQL and workers (ADR 0003, #23, #25)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

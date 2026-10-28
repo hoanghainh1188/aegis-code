@@ -4,12 +4,20 @@ Client cho developer ([ADR 0006](adr/0006-developer-client.md)). Nó chỉ gọi
 
 ## Cài
 
-**Binary** (macOS arm64/x86_64, Linux x86_64): tải bản mới nhất ở trang Releases của repo (tag `aegis-job-v…`), kiểm SHA-256 rồi đặt vào `PATH`:
+**npm** (macOS arm64/x86_64, Linux arm64/x86_64; cần Node 18+):
 
 ```bash
-tar -xzf aegis-job-<version>-<target>.tar.gz
+npm install -g @hoanghainh1188/aegis-job
+```
+
+Gói chứa sẵn binary cho bốn nền tảng, không tải gì lúc cài. Cùng phiên bản với server (`vX.Y.Z`, [docs/release.md](release.md)).
+
+**Binary:** tải `aegis-job-<version>-<target>.tar.gz` ở trang Releases của repo (tag `v…`), kiểm SHA-256 rồi đặt vào `PATH`:
+
+```bash
 shasum -a 256 -c aegis-job-<version>-<target>.tar.gz.sha256
-install aegis-job ~/.local/bin/
+tar -xzf aegis-job-<version>-<target>.tar.gz
+install aegis-job-<version>-<target>/aegis-job ~/.local/bin/
 ```
 
 **Từ source** (cần Rust stable):

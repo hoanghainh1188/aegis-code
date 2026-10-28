@@ -3,10 +3,11 @@ name = "aegis-ledger"
 description = "Per-issue JSON record: tokens, cost, outcome, review for KPI (design §4.3, §8)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
-aegis-provider = { version = "0.1.0", path = "../aegis-provider" }
+aegis-provider = { path = "../aegis-provider" }
 serde = { version = "1.0.229", features = ["derive"] }
 # Read back the exact f64 that was written: costs are summed from many
 # events, and a ledger copied between stores must not drift (#22).
