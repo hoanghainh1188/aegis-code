@@ -39,7 +39,7 @@ The platform is written 100% in **Rust** as a Cargo Workspace ([ADR 0001](docs/a
 
 ```mermaid
 flowchart TD
-    Issue["Input Issue: Jira / Backlog / CI / Sonar"] --> T1["LAYER 1: CONTEXT RETRIEVAL (ACI Tools + SQLite AST Graph)"]
+    Issue["Input: GitHub / GitLab / Jira / Backlog issue, failed CI run, Sonar, PR review"] --> T1["LAYER 1: CONTEXT RETRIEVAL (ACI Tools + SQLite AST Graph)"]
     T1 --> T2["LAYER 2: PROMPT CACHING (4 Breakpoints BP1 → BP4)"]
     T2 --> T3["LAYER 3: MODEL ROUTING (Light → Core → Expert)"]
     T3 --> T4["LAYER 4: REGRESSION VERIFICATION GATE (Docker Sandbox --network none)"]
@@ -71,6 +71,10 @@ As specified in [ADR 0003](docs/adr/0003-platform-service-architecture.md):
 * Single binary `aegis-server` (Axum) configurable via `--role api|worker|all`.
 * Transactional job queue on **PostgreSQL** using `SELECT ... FOR UPDATE SKIP LOCKED` (ACID-compliant, atomic budget deduplication, zero external Redis/SQS overhead).
 * Minimalist server-rendered dashboard (**Askama + htmx**) secured with OIDC and AWS Secrets Manager.
+* Repos registered with `aegis-server repo add|update|show|list`; each repo's clone is made on registration and its main branch fetched before every job.
+* Pull requests on a GitHub fork or merge requests on a GitLab fork; a reviewer's "Request changes" or a `/aegis fix` comment starts a **review round** on the same branch.
+* Developers submit and follow jobs from the terminal with **`aegis-job`** and a personal token ([ADR 0006](docs/adr/0006-developer-client.md)).
+
 
 ### Security & Data Governance
 * **Japan Data Residency:** Customer profiles (`customer-jp.toml`) route through AWS Bedrock in `ap-northeast-1` (Tokyo/Osaka). The `aegis-provider` crate enforces `ModelPolicy::JapanOnly`, rejecting any non-`jp.` endpoint.
@@ -81,7 +85,8 @@ As specified in [ADR 0003](docs/adr/0003-platform-service-architecture.md):
 
 ## ⚡ 3. Core Capabilities
 
-* 📥 **Multi-Channel Ingestion:** Ingest issues from Jira, Backlog, CI failure webhooks (GitHub Actions, GitLab CI), and SonarQube static analysis alerts.
+* 📥 **Multi-Channel Ingestion:** Ingest issues from GitHub and GitLab (label webhook), Jira and Backlog (polled), failed CI runs on the main branch (GitHub Actions, GitLab pipelines: the failed jobs' logs become the issue), and SonarQube static analysis alerts.
+* 🔁 **Review Rounds:** A review on the agent's PR or MR (GitHub "Request changes", or a `/aegis fix` comment from someone with write access) sends the agent back to the same branch; it re-runs the gate, pushes one more commit without force and answers each note. At most `[reviews] max_rounds` per PR, each with its own budget.
 * 🔍 **Automated Triage & Summarization:** Light model analyzes stack traces, identifies suspected modules/crates, and produces structured metadata (`has_repro_info`, `suspected_crates`).
 * 🧪 **Isolated Reproducing Tests:** Automatically synthesizes test cases and verifies their initial **FAIL** status before code changes begin.
 * 🛠️ **Syntax-Guarded Patching:** The `edit` tool runs linters and syntax checkers, rejecting edits that cause compilation failures.
@@ -110,6 +115,7 @@ crates/
 ├── aegis-secrets/        # Secrets from AWS Secrets Manager (env for dev and tests)
 ├── aegis-store/          # PostgreSQL state: repos, jobs, queue, ledger, users, audit
 ├── aegis-server/         # The service: HTTP API, webhooks, scheduler, workers, dashboard (ADR 0003)
+├── aegis-client/         # aegis-job: developers submit and follow jobs through the API (ADR 0006)
 └── aegis-cli/            # CLI entrypoint to run single issues, batches and evals
 ```
 
@@ -118,7 +124,7 @@ crates/
 ## 🚀 5. Getting Started
 
 ### Prerequisites
-* Rust toolchain (1.80+)
+* Rust stable (edition 2024: 1.85+)
 * Docker (for isolated sandbox verification)
 
 ### Build
@@ -127,6 +133,8 @@ crates/
 cargo build --release -p aegis-cli -p aegis-aci
 ```
 Elsewhere, point `run.aci_bin` in the config at it.
+
+The whole platform on one machine (fake GitHub/GitLab, Ollama or the Claude API): [docs/local-trial.md](docs/local-trial.md). The developer client: `cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client`, then [docs/client.md](docs/client.md).
 
 ### Testing & Verification
 ```bash
@@ -146,11 +154,11 @@ cargo test -p aegis-provider --features bedrock
 
 ## 🗺️ 6. Roadmap
 
-Progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188/aegis-code/milestones); status as of 2026-10-25:
+Progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188/aegis-code/milestones); status as of 2026-10-28:
 
 * ✅ **Phase 0 – Setup** (closed 2026-10-24): CI pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
 * ✅ **Phase 1 – MVP / PoC** (closed 2026-10-24): Core crates, Rust and Python profiles; empirical 3-KPI evaluation on target repositories ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md), thresholds in [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md)).
-* 🚧 **Phase 2 – Platform Service** (in progress): TypeScript/JavaScript, Java, Go, C#/.NET profiles and per-directory profiles for monorepos; single binary `aegis-server` (Axum), PostgreSQL job queue, GitHub/GitLab webhooks, Jira/Backlog and scheduled Sonar polling, Askama+htmx dashboard, OIDC and audit, Prometheus/Grafana monitoring, OpenTofu deployment ([ADR 0003](docs/adr/0003-platform-service-architecture.md)). Remaining: `tofu apply` to staging (#33), eval sets for the four new profiles, KPI re-runs, and a pilot with a real team.
+* 🚧 **Phase 2 – Platform Service** (in progress): TypeScript/JavaScript, Java, Go, C#/.NET profiles and per-directory profiles for monorepos; single binary `aegis-server` (Axum), PostgreSQL job queue, GitHub/GitLab webhooks, Jira/Backlog and scheduled Sonar polling, Askama+htmx dashboard, OIDC and audit, Prometheus/Grafana monitoring, OpenTofu deployment ([ADR 0003](docs/adr/0003-platform-service-architecture.md)); repo registration command, review rounds on PRs and MRs, CI-failure jobs (GitHub Actions, GitLab pipelines), GitLab merge requests, the developer client `aegis-job` with personal tokens ([ADR 0006](docs/adr/0006-developer-client.md)), and a scripted local end-to-end trial. Eval sets for the four new profiles are built (52 issues in all, [eval/README.md](eval/README.md)) but not yet measured. Remaining: `tofu apply` to staging (#33), KPI runs on the new profiles (#259) and re-runs (#156, #157), and a pilot with a real team (#158).
 * ⏳ **Phase 3 – Advanced Scaling** (not started): SBFL fault localization, deep context compression (SWEzze/SaraCoder), language support beyond the initial 6 profiles.
 
 ---
