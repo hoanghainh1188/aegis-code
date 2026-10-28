@@ -64,7 +64,7 @@ Chính vì vậy Thiết kế §4.4 chỉ thu gọn theo đợt, một lần khi
 | Expert cũng không sửa được | 4 | $2,72 (4%) | $0,68 | 26 |
 
 - Đọc cache đạt 89–94% ở mọi nhóm.
-- Đòn bẩy chi phí là **các lượt chạy không ra PR**, không phải độ dài context: dừng sớm khi không có tiến triển, hoặc tăng tỉ lệ thành công (#156, #259).
+- Đòn bẩy chi phí là **các lượt chạy không ra PR**, không phải độ dài context: dừng sớm khi không có tiến triển, hoặc tăng tỉ lệ thành công (#156, #259). Dừng sớm thì không đáng: mọi quy tắc đơn giản đều làm mất PR tốt ([#273](2026-10-29-early-stop.md)).
 
 ## 5. Các nghiên cứu
 
