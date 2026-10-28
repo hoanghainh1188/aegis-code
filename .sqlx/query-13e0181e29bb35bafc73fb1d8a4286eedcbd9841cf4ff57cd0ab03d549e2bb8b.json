@@ -1,0 +1,109 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH stale AS (\n                 SELECT DISTINCT e.ledger_key FROM ledger_events e\n                 LEFT JOIN issue_records r ON r.ledger_key = e.ledger_key\n                 WHERE e.kind IN ('finished', 'reviewed')\n                   AND (r.ledger_key IS NULL OR e.recorded_at > r.updated_at)\n               ), keys AS (\n                 SELECT ledger_key FROM issue_records\n                 UNION SELECT ledger_key FROM stale\n                 UNION SELECT ledger_key FROM jobs\n               )\n               SELECT k.ledger_key AS \"ledger_key!\",\n                      CASE WHEN s.ledger_key IS NULL THEN r.record END AS \"record?\",\n                      s.ledger_key IS NOT NULL AS \"stale!\",\n                      j.repo_id AS \"repo_id?\", p.slug AS \"slug?\", p.language AS \"language?\",\n                      j.created_at AS \"created_at?\",\n                      root.ledger_key AS \"review_of?\", j.review_round AS \"review_round?\"\n               FROM keys k\n               LEFT JOIN stale s ON s.ledger_key = k.ledger_key\n               LEFT JOIN issue_records r ON r.ledger_key = k.ledger_key\n               LEFT JOIN jobs j ON j.ledger_key = k.ledger_key\n               LEFT JOIN repos p ON p.id = j.repo_id\n               LEFT JOIN jobs root ON root.id = j.review_of\n               WHERE ($1::bigint[] IS NULL OR j.repo_id = ANY($1))\n                 AND EXISTS (SELECT 1 FROM ledger_events e WHERE e.ledger_key = k.ledger_key)\n               ORDER BY k.ledger_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ledger_key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "record?",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "stale!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "repo_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "repo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "slug?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "language?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at?",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "review_of?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "ledger_key"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "review_round?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_round"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "13e0181e29bb35bafc73fb1d8a4286eedcbd9841cf4ff57cd0ab03d549e2bb8b"
+}

@@ -13,6 +13,7 @@
       <th scope="col" class="num">Thời gian duyệt</th>
       <th scope="col" class="num">Đọc cache</th>
       <th scope="col" class="num">Lên Expert</th>
+      <th scope="col" class="num" title="Số vòng sửa theo review trung bình của một PR được chấp nhận">Vòng sửa / PR</th>
     </tr>
   </thead>
   <tbody>
@@ -28,6 +29,7 @@
       <td class="num {{ r.review_class }}">{{ r.review }}</td>
       <td class="num {{ r.cache_class }}">{{ r.cache }}</td>
       <td class="num">{{ r.expert }}</td>
+      <td class="num">{{ r.rounds }}</td>
     </tr>
   {% else %}
     <tr><td colspan="10" class="empty">Chưa có lượt chạy nào.</td></tr>

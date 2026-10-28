@@ -293,6 +293,24 @@ pub struct IssueRecord {
 }
 
 impl IssueRecord {
+    /// This record with a review round's (#245) work added: its cost,
+    /// calls, tokens and hidden secrets are the PR's. What the PR is
+    /// (outcome, review, gate runs) stays this record's.
+    pub fn with_round(&self, round: &IssueRecord) -> Self {
+        let mut tokens = self.tokens.clone();
+        for (model, counts) in &round.tokens {
+            let sum = tokens.get(model).copied().unwrap_or_default().add(*counts);
+            tokens.insert(model.clone(), sum);
+        }
+        Self {
+            model_calls: self.model_calls + round.model_calls,
+            cost_usd: self.cost_usd + round.cost_usd,
+            secrets_redacted: self.secrets_redacted + round.secrets_redacted,
+            tokens,
+            ..self.clone()
+        }
+    }
+
     pub fn new(issue_id: IssueId) -> Self {
         Self {
             issue_id,
@@ -440,6 +458,43 @@ mod tests {
         };
         let counts = TokenCounts::from_usage(&usage);
         assert_eq!((counts.cache_write_5m, counts.cache_write_1h), (0, 900));
+    }
+
+    #[test]
+    fn a_review_rounds_work_is_added_to_its_prs_record() {
+        let pr = IssueRecord::from_events(
+            id("GH-1"),
+            &[
+                call(Tier::Core, "core", 1_000, 0.5),
+                LedgerEvent::Finished {
+                    outcome: Outcome::PrOpened,
+                    wall_time_s: 60.0,
+                },
+            ],
+        );
+        let round = IssueRecord::from_events(
+            id("GH-1-V1"),
+            &[
+                call(Tier::Core, "core", 300, 0.1),
+                call(Tier::Expert, "expert", 200, 0.4),
+                LedgerEvent::Finished {
+                    outcome: Outcome::StoppedSteps,
+                    wall_time_s: 30.0,
+                },
+            ],
+        );
+        let both = pr.with_round(&round);
+        assert_eq!(both.issue_id, id("GH-1"));
+        assert_eq!(
+            both.outcome,
+            Some(Outcome::PrOpened),
+            "the PR's, not the round's"
+        );
+        assert_eq!(both.model_calls, 3);
+        assert!((both.cost_usd - 1.0).abs() < 1e-12);
+        assert_eq!(both.tokens["core"].input, 1_300);
+        assert_eq!(both.tokens["expert"].input, 200);
+        assert_eq!(both.wall_time_s, Some(60.0));
     }
 
     #[test]

@@ -75,9 +75,18 @@ pub struct KpiRow {
     pub cache: String,
     pub cache_class: &'static str,
     pub expert: String,
+    /// Review rounds per accepted PR (#245).
+    pub rounds: String,
 }
 
 impl KpiRow {
+    pub fn with_rounds(self, rounds: Option<f64>) -> Self {
+        Self {
+            rounds: rounds.map_or("—".into(), |r| format!("{r:.1}")),
+            ..self
+        }
+    }
+
     /// `accept_min` is the acceptance threshold of the row: the total's,
     /// or a language's (ADR 0005).
     pub fn new(label: impl Into<String>, kpi: &Kpi, accept_min: f64) -> Self {
@@ -102,6 +111,7 @@ impl KpiRow {
                 .map_or("—".into(), |r| format!("{:.0}%", r * 100.0)),
             cache_class: class(kpi.cache_read_ratio.map(|r| r >= CACHE_READ_MIN)),
             expert: pct(kpi.expert_runs, kpi.runs),
+            rounds: "—".into(),
         }
     }
 }

@@ -16,7 +16,7 @@ pub use error::LedgerError;
 pub use issue::IssueLedger;
 pub use kpi::{
     ACCEPT_RATE_MIN, CACHE_READ_MIN, COST_PER_ISSUE_MAX, Kpi, LANGUAGE_ACCEPT_RATE_MIN,
-    REVIEW_MINUTES_MAX,
+    REVIEW_MINUTES_MAX, accepted,
 };
 pub use pricing::{LongPrompt, ModelPrice, PriceTable};
 pub use record::{

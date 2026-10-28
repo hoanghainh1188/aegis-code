@@ -38,7 +38,8 @@ fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
     (n > 0).then(|| sum / f64::from(n))
 }
 
-fn accepted(record: &IssueRecord) -> bool {
+/// Whether the PR of `record` was accepted, as the KPI counts it.
+pub fn accepted(record: &IssueRecord) -> bool {
     record.review.is_some_and(|r| match r.verdict {
         ReviewVerdict::Accepted => true,
         ReviewVerdict::AcceptedWithEdits => r.lines_edited <= ACCEPT_MAX_EDITED_LINES,

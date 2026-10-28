@@ -172,6 +172,24 @@ impl Store {
         .transpose()
     }
 
+    /// The review rounds of the PR job `root` opened, in order, retries
+    /// included (#245).
+    pub async fn review_rounds_of(&self, root: JobId) -> Result<Vec<Job>, StoreError> {
+        sqlx::query_as!(
+            JobRow,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                    attempts, locked_by, locked_until, created_at, updated_at,
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
+             FROM jobs WHERE review_of = $1 ORDER BY review_round, id LIMIT 100",
+            root.0,
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(Job::try_from)
+        .collect()
+    }
+
     /// The job that opened the PR review round `job` works on.
     pub async fn review_root(&self, job: &Job) -> Result<Option<Job>, StoreError> {
         match job.review_of {
