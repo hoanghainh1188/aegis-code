@@ -1,0 +1,36 @@
+# The trial on Ollama: free, slow, uneven. Every tier on one model built
+# from Modelfile (`ollama create aegis-gpt-oss -f Modelfile`). @WORK@ and
+# @REPO@ are filled in by up.sh.
+[provider]
+kind = "local"
+base_url = "http://localhost:11434/v1"
+protocol = "openai"
+
+[models.light]
+id = "aegis-gpt-oss"
+[models.core]
+id = "aegis-gpt-oss"
+[models.expert]
+id = "aegis-gpt-oss"
+effort = "high"
+
+[run]
+state_dir = "@WORK@/state"
+pricing = "@WORK@/pricing.toml"
+aci_bin = "@REPO@/target/release/aegis-aci"
+step_timeout_s = 900
+# The same as `num_ctx` in Modelfile.
+context_window = 32768
+sandbox = true
+# Any image with Python 3 runs the egress proxy; aegis-sandbox-python is
+# the default but large to build for one trial.
+egress_image = "python:3.12-alpine"
+
+[budget]
+# The model's calls are priced at $0: a $0 cap still lets them run (#233).
+max_cost_usd = 0.0
+max_model_calls = 40
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@example.com"

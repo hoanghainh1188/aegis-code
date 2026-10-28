@@ -160,6 +160,7 @@ Progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188
 * [Project Proposal](docs/design/00-proposal.md) (Foundational vision and requirements)
 * [Technical Architecture Specification](docs/design/01-architecture-detail.md) (Phase 1 core specification; the service layer is in [ADR 0003](docs/adr/0003-platform-service-architecture.md))
 * [Operations Runbook](docs/runbook/README.md) (Deploy, rollback, secret rotation, incidents, monitoring)
+* [Local End-to-End Trial](docs/local-trial.md) (The whole flow on one machine: `scripts/trial/up.sh`, a fake GitHub, Ollama or the Claude API)
 * [Measurements](docs/measurements/) (Eval runs and KPI reports)
 * [Architectural Decision Records (ADRs)](docs/adr/)
 * [Development Conventions & Workflow](CLAUDE.md) (Branching, commit conventions, and pre-PR checks)
