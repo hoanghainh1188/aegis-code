@@ -306,6 +306,15 @@ impl LifecycleRunner {
                 ticket_issue(job, &repo, &self.secrets).await?
             }
             (None, JobSource::Sonar) => sonar_issue(job, &repo, &self.store, &self.secrets).await?,
+            (None, JobSource::Ci) => {
+                ci_issue(
+                    job,
+                    &config.repo.fork.api,
+                    &repo.default_branch,
+                    &github_token,
+                )
+                .await?
+            }
             (None, _) => issue(job, &config.repo.fork.api, &github_token).await?,
         };
         let tiers = [
@@ -449,6 +458,41 @@ async fn issue(job: &Job, api: &str, token: &str) -> Result<IssueInput, Attempt>
     })
 }
 
+/// The failed GitHub Actions run of a `ci` job (#250), under the job's
+/// ledger key. A run that did not fail, or ran on another branch, is
+/// `Rejected`: no attempt changes it.
+async fn ci_issue(job: &Job, api: &str, branch: &str, token: &str) -> Result<IssueInput, Attempt> {
+    let (owner, name, run_id) = parse_run_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+    let issue = IssueInput::from_github_run(api, &owner, &name, run_id, branch, token)
+        .await
+        .map_err(|e| match e {
+            LifecycleError::Issue(why) => Attempt::Rejected(why),
+            LifecycleError::Pr(aegis_pr::PrError::GitHub {
+                status: 404,
+                message,
+            }) => Attempt::Rejected(format!("run {run_id}: {message}")),
+            other => Attempt::Infra(other.to_string()),
+        })?;
+    Ok(IssueInput {
+        id: job.ledger_key.as_str().to_owned(),
+        ..issue
+    })
+}
+
+/// `owner/repo/actions/runs/<id>`, as the webhook builds it.
+pub(crate) fn parse_run_ref(text: &str) -> Result<(String, String, u64), String> {
+    let bad = || format!("`{text}` is not owner/repo/actions/runs/<id>");
+    let parts: Vec<&str> = text.trim().split('/').collect();
+    let [owner, name, "actions", "runs", id] = parts.as_slice() else {
+        return Err(bad());
+    };
+    let id = id.parse().map_err(|_| bad())?;
+    if owner.is_empty() || name.is_empty() {
+        return Err(bad());
+    }
+    Ok(((*owner).to_owned(), (*name).to_owned(), id))
+}
+
 /// `owner/repo#number`.
 pub(crate) fn parse_issue_ref(text: &str) -> Result<(String, String, u64), String> {
     let bad = || format!("`{text}` is not owner/repo#number");
@@ -464,6 +508,22 @@ pub(crate) fn parse_issue_ref(text: &str) -> Result<(String, String, u64), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_refs_are_owner_repo_actions_runs_id() {
+        assert_eq!(
+            parse_run_ref("typst/typst/actions/runs/77").unwrap(),
+            ("typst".into(), "typst".into(), 77)
+        );
+        for bad in [
+            "typst/typst#77",
+            "typst/typst/actions/runs/x",
+            "/x/actions/runs/1",
+            "a/b/actions/jobs/1",
+        ] {
+            assert!(parse_run_ref(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn issue_refs_are_owner_repo_number() {

@@ -9,6 +9,7 @@ GET  /repos/<o>/<r>/pulls/<n>/comments    their line comments
 POST /repos/<o>/<r>/issues/<n>/comments   a comment of the agent (issue or PR)
 GET  /repos/<o>/<r>/issues/<n>/comments   comments on an issue or PR
 GET  /repos/<o>/<r>/collaborators/<u>/permission   admin for the reviewer only
+GET  /repos/<o>/<r>/actions/runs/77[/jobs], /actions/jobs/1/logs   a failed CI run
 GET  /<o>/<r>/pull/<n>                    the PR as a page: body, diff, review, replies
 GET  /<o>/<r>/issues/<n>                  the issue and its comments
 
@@ -42,6 +43,16 @@ ISSUES = {
     }
 }
 PULLS, COMMENTS, REVIEWS, LINE_COMMENTS = [], [], [], []
+CI_RUN = 77
+CI_LOG = (
+    "2026-10-28T09:00:01Z go test ./...\n"
+    "2026-10-28T09:00:03Z --- FAIL: TestTruncateKeepsWholeRunes (0.00s)\n"
+    "2026-10-28T09:00:03Z     textutil_test.go:21: Truncate(\"Xin chào thế giới\", 9) = "
+    "\"Xin ch\\xc3…\", want valid UTF-8 with at most 9 runes\n"
+    "2026-10-28T09:00:03Z FAIL\n"
+    "2026-10-28T09:00:03Z FAIL\texample.com/demo/textutil\t0.004s\n"
+    "2026-10-28T09:00:03Z ##[error]Process completed with exit code 1.\n"
+)
 
 
 def log(*parts):
@@ -98,6 +109,8 @@ class Handler(BaseHTTPRequestHandler):
             if rest[1] != REVIEWER["login"]:
                 return self.not_found()
             return self.json(200, {"permission": "admin"})
+        if rest[0] == "actions":
+            return self.actions(o, r, rest[1:])
         kind, number = rest[0], int(rest[1])
         if kind == "issues" and rest[2:] == []:
             issue = ISSUES.get(number)
@@ -122,6 +135,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(200, [v for n, v in REVIEWS if n == number])
         if rest[2:] == ["comments"]:
             return self.json(200, [c for n, c in LINE_COMMENTS if n == number])
+        self.not_found()
+
+    def actions(self, o, r, rest):
+        """Run 77 of the CI workflow `test`, failed on `main` (send-ci-failure.sh)."""
+        run_url = f"{ROOT}/{o}/{r}/actions/runs/{CI_RUN}"
+        if rest == ["runs", str(CI_RUN)]:
+            return self.json(200, {
+                "id": CI_RUN, "name": "test", "html_url": run_url, "head_branch": "main",
+                "head_sha": git("rev-parse", "refs/heads/main"), "conclusion": "failure"})
+        if rest == ["runs", str(CI_RUN), "jobs"]:
+            return self.json(200, {"jobs": [{
+                "id": 1, "name": "go test", "html_url": f"{run_url}/job/1", "conclusion": "failure",
+                "steps": [{"name": "checkout", "conclusion": "success"},
+                          {"name": "go test ./...", "conclusion": "failure"}]}]})
+        if rest == ["jobs", "1", "logs"]:
+            return self.send(200, CI_LOG, "text/plain; charset=utf-8")
         self.not_found()
 
     def do_POST(self):
