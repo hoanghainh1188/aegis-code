@@ -32,7 +32,7 @@ pub use branch::{AgentBranch, EvalBranch};
 pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};
 pub use coverage::{cobertura_lines, cobertura_percent, lcov_lines, lcov_percent};
 pub use error::PrError;
-pub use git::{Identity, Remote};
+pub use git::{Identity, Remote, token_env};
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, IssueNote};
 

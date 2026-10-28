@@ -267,6 +267,26 @@ impl LifecycleRunner {
         } else {
             String::new()
         };
+        // The main branch as it is now, not as the clone last saw it; a
+        // worker on a new machine makes the clone (#234).
+        let read_token = match &github_token {
+            t if !t.is_empty() => Some(t.clone()),
+            _ => self
+                .secrets
+                .get_or_load(&config.repo.fork.token_env)
+                .await
+                .map_err(|e| Attempt::Infra(e.to_string()))?
+                .map(|t| t.expose().to_owned()),
+        };
+        aegis_lifecycle::clone::prepare_async(
+            &config.repo.path,
+            &repo.url,
+            &config.repo.base,
+            read_token.as_deref(),
+        )
+        .await
+        // The remote may be back for the next attempt.
+        .map_err(|e| Attempt::Infra(format!("updating the clone of {}: {e}", repo.url)))?;
         if let Some(sonar) = &mut config.sonar {
             let name = &sonar.token_env;
             sonar.token = Some(self.secret(&repo.slug, "Sonar's token", name).await?);

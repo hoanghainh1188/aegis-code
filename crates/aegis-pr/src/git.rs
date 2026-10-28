@@ -90,6 +90,23 @@ impl Remote {
     }
 }
 
+/// Environment that makes git send `token` as an `Authorization` header
+/// over HTTP, for that call only, with no credential helper asked: the
+/// token is never in argv, a URL or a config file.
+pub fn token_env(token: &str) -> [(&'static str, String); 5] {
+    let basic = base64(format!("x-access-token:{token}").as_bytes());
+    [
+        ("GIT_CONFIG_COUNT", "2".into()),
+        ("GIT_CONFIG_KEY_0", "http.extraHeader".into()),
+        (
+            "GIT_CONFIG_VALUE_0",
+            format!("Authorization: Basic {basic}"),
+        ),
+        ("GIT_CONFIG_KEY_1", "credential.helper".into()),
+        ("GIT_CONFIG_VALUE_1", String::new()),
+    ]
+}
+
 fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -176,15 +193,7 @@ impl Staging {
         let what = args.first().copied().unwrap_or("git");
         let mut c = self.command(args);
         if let Some(token) = token {
-            let basic = base64(format!("x-access-token:{token}").as_bytes());
-            c.env("GIT_CONFIG_COUNT", "2")
-                .env("GIT_CONFIG_KEY_0", "http.extraHeader")
-                .env(
-                    "GIT_CONFIG_VALUE_0",
-                    format!("Authorization: Basic {basic}"),
-                )
-                .env("GIT_CONFIG_KEY_1", "credential.helper")
-                .env("GIT_CONFIG_VALUE_1", "");
+            c.envs(token_env(token));
         }
         let mut child = c
             .stdin(if stdin.is_some() {

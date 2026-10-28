@@ -214,9 +214,8 @@ email = "aegis-bot@example.invalid"
 }
 
 fn spec(scratch: &Scratch, github_api: &str) -> RepoSpec {
-    let clone = scratch.0.join("state/repos/fixture");
-    std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
-    std::fs::rename(scratch.0.join("clone"), &clone).unwrap();
+    // The worker clones it into `state/repos/fixture` (#234).
+    let upstream = scratch.0.join("clone");
     let settings: RepoSettings = serde_json::from_value(json!({
         "overrides": {
             "gate": { "coverage": ["sh", "-c", "echo TN: > lcov.info"] },
@@ -230,7 +229,7 @@ fn spec(scratch: &Scratch, github_api: &str) -> RepoSpec {
     .unwrap();
     RepoSpec {
         slug: "fixture".into(),
-        url: "https://github.com/me/fixture".into(),
+        url: upstream.display().to_string(),
         default_branch: "main".into(),
         language: aegis_lang::Language::Rust,
         mode: RepoMode::Poc,
@@ -343,7 +342,7 @@ async fn a_whole_job_logs_its_id_and_no_secret_or_code_and_is_counted() {
         "{text}"
     );
     // No secret, nor the repo's code, nor what the agent wrote.
-    let code = std::fs::read_to_string(scratch.0.join("state/repos/fixture/src/lib.rs")).unwrap();
+    let code = std::fs::read_to_string(scratch.0.join("clone/src/lib.rs")).unwrap();
     let mut forbidden = vec![MODEL_KEY.1, FORK_TOKEN.1, CANARY, REPRO];
     forbidden.extend(code.lines().map(str::trim).filter(|l| l.len() > 24));
     for needle in forbidden {

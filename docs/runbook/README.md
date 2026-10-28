@@ -84,6 +84,8 @@ Một lần cho mỗi tài khoản AWS, bằng quyền quản trị ngắn hạn
 
 9. Tạo quyền cho người dùng đầu tiên: `aws ssm start-session --target <instance_id>`, rồi `sudo docker exec aegis aegis-server --config /etc/aegis/server.toml grant <email> admin`; token cho dịch vụ: `… token <tên dịch vụ>` (các lệnh: [auth/cli.rs](../../crates/aegis-server/src/auth/cli.rs)).
 
+10. Đăng ký repo: viết file repo (TOML, mẫu ở [repo_cli.rs](../../crates/aegis-server/src/repo_cli.rs)), rồi `… repo add <file>`. Lệnh kiểm cài đặt theo mode trước khi ghi, clone repo vào `<state_dir>/repos/<slug>` (repo private: token của fork, secret `fork.token_env`), ghi audit. Worker fetch nhánh chính trước mỗi job. Sửa: `… repo show <slug> > demo.json`, sửa file, `… repo update demo.json`. Cấp quyền: `… grant <email> <slug> maintainer|reviewer|viewer`.
+
 ## 1. Triển khai
 
 Mỗi commit vào `main` có image `aegis-server:<SHA>` và `aegis-sandbox-<profile>:<SHA>` trên ECR (tag không ghi đè được).
@@ -107,7 +109,7 @@ Rollback chỉ đổi image, không lùi DB. Vì thế mỗi migration phải ch
 
 ### Nhận ticket Jira/Backlog (#26)
 
-Thêm mục `tracker` vào cài đặt của repo (`repos.config`, cùng chỗ với `fork`, `sonar`). Token không nằm ở đây: `token_env` là tên secret, đặt giá trị như mục 3 và thêm tên vào `repo_secret_names`.
+Thêm mục `tracker` vào `[settings]` của file repo (cùng chỗ với `fork`, `sonar`) rồi `repo update`. Token không nằm ở đây: `token_env` là tên secret, đặt giá trị như mục 3 và thêm tên vào `repo_secret_names`.
 
 ```json
 { "kind": "jira", "url": "https://acme.atlassian.net", "user": "bot@acme.com",
@@ -129,7 +131,7 @@ Thêm mục `tracker` vào cài đặt của repo (`repos.config`, cùng chỗ v
 
 ### Kéo cảnh báo Sonar định kỳ (#27)
 
-Repo đã có `sonar` (SonarQube Server hoặc Cloud, như bước Sonar của gate) thì thêm `sonar_poll` vào `repos.config` để server tự kéo cảnh báo mới trên nhánh chính và gom thành batch:
+Repo đã có `sonar` (SonarQube Server hoặc Cloud, như bước Sonar của gate) thì thêm `sonar_poll` vào `[settings]` của file repo (`repo update`) để server tự kéo cảnh báo mới trên nhánh chính và gom thành batch:
 
 ```json
 { "every_s": 3600, "min_severity": "MAJOR", "max_warnings": 50 }

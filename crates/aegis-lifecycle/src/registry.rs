@@ -302,10 +302,11 @@ impl Modes {
         Ok(RepoRun { repo, config })
     }
 
-    /// Registers a repo, refused unless its configuration can be built
-    /// now: a `customer-jp` repo needs a `customer-jp` mode that passes the
-    /// guard.
-    pub async fn register(&self, store: &Store, spec: &RepoSpec) -> Result<Repo, LifecycleError> {
+    /// The row `spec` is stored as and the configuration its jobs will
+    /// run with, built as it will be read back: refused unless it builds
+    /// now (a `customer-jp` repo needs a `customer-jp` mode that passes
+    /// the guard).
+    pub fn check_spec(&self, spec: &RepoSpec) -> Result<(NewRepo, RunConfig), LifecycleError> {
         let new = NewRepo {
             slug: spec.slug.clone(),
             url: spec.url.clone(),
@@ -316,15 +317,66 @@ impl Modes {
             config: serde_json::to_value(&spec.settings)
                 .map_err(|e| LifecycleError::Config(format!("repo `{}`: {e}", spec.slug)))?,
         };
-        // As it will be read back, before anything is written.
-        self.build(
+        let config = self.build(
             &new.slug,
             &new.default_branch,
             &new.language,
             new.mode,
             &new.config,
         )?;
+        Ok((new, config))
+    }
+
+    /// Registers a repo, refused unless its configuration can be built
+    /// now ([`Modes::check_spec`]). Its clone is not touched: [`Modes::add`].
+    pub async fn register(&self, store: &Store, spec: &RepoSpec) -> Result<Repo, LifecycleError> {
+        let (new, _) = self.check_spec(spec)?;
         Ok(store.create_repo_by(&new, &Actor::cli()).await?)
+    }
+
+    /// Registers a repo as [`Modes::register`] does, with its clone made
+    /// first at `<state_dir>/repos/<slug>` (or fetched, if one is there),
+    /// `token` the fork's for a private repo (#234). A clone this made is
+    /// removed again if the repo cannot be stored.
+    pub async fn add(
+        &self,
+        store: &Store,
+        spec: &RepoSpec,
+        token: Option<&str>,
+        actor: &Actor,
+    ) -> Result<Repo, LifecycleError> {
+        let (new, config) = self.check_spec(spec)?;
+        let path = config.repo.path;
+        let made = !path.exists();
+        crate::clone::prepare_async(&path, &new.url, &new.default_branch, token).await?;
+        match store.create_repo_by(&new, actor).await {
+            Ok(repo) => Ok(repo),
+            Err(e) => {
+                if made {
+                    let _ = std::fs::remove_dir_all(&path);
+                }
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Replaces a registered repo's URL, branch, language, mode, limit and
+    /// settings with `spec`'s (its slug stays), checked as [`Modes::add`]
+    /// checks them; its clone is made or fetched from the new URL first.
+    pub async fn update(
+        &self,
+        store: &Store,
+        spec: &RepoSpec,
+        token: Option<&str>,
+        actor: &Actor,
+    ) -> Result<Repo, LifecycleError> {
+        let (new, config) = self.check_spec(spec)?;
+        if store.repo_by_slug(&new.slug).await?.is_none() {
+            return Err(LifecycleError::Config(format!("no repo `{}`", new.slug)));
+        }
+        crate::clone::prepare_async(&config.repo.path, &new.url, &new.default_branch, token)
+            .await?;
+        Ok(store.update_repo_by(&new, actor).await?)
     }
 }
 
