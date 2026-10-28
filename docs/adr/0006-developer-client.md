@@ -27,6 +27,7 @@ Developer làm việc với aegis-code qua tracker (Jira/Backlog), webhook (nhã
    - Tag `aegis-job-v<phiên bản>` chạy workflow build binary cho macOS (arm64, x86_64) và Linux (x86_64), đóng `tar.gz` kèm SHA-256, gắn vào GitHub Release.
    - Người có Rust cài bằng `cargo install --git … aegis-client`.
    - Homebrew tap và gói npm bọc binary để sau, khi có người dùng ngoài team.
+   - **Cập nhật (#263):** client nay phát hành cùng version với server (`vX.Y.Z`, [docs/release.md](../release.md)), thay cho tag `aegis-job-v*`. Có thêm gói npm `@hoanghainh1188/aegis-job`: một gói chứa sẵn binary cho bốn nền tảng (thêm Linux arm64) và một launcher JS, không tải gì khi cài.
 
 ## Hệ quả
 

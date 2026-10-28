@@ -1,0 +1,49 @@
+# Phiên bản và GitHub Release (#263, docs/release.md), như komainu.
+#
+# - Mỗi lần push lên main: release-please mở (hoặc cập nhật) PR
+#   "chore(release): aegis-code X.Y.Z". PR đổi version trong Cargo.toml,
+#   Cargo.lock, npm/aegis-job/package.json, version.txt và CHANGELOG.md theo
+#   các commit Conventional Commits từ bản trước.
+# - Squash-merge PR đó: release-please tạo tag vX.Y.Z và GitHub Release;
+#   release.yml chạy từ Release (image GHCR, gói offline, client, npm).
+#
+# Token riêng thay vì GITHUB_TOKEN: sự kiện do GITHUB_TOKEN tạo không chạy
+# workflow khác, nên PR release không có CI và Release không chạy
+# release.yml. RELEASE_PLEASE_TOKEN là fine-grained PAT chỉ cho repo này:
+# Contents, Pull requests, Issues (nhãn release) đọc và ghi.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR & GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require RELEASE_PLEASE_TOKEN
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_PLEASE_TOKEN" ]; then
+            echo "::error::Chưa đặt secret RELEASE_PLEASE_TOKEN (docs/release.md). Release do GITHUB_TOKEN tạo không chạy release.yml."
+            exit 1
+          fi
+      - id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - if: ${{ steps.release.outputs.release_created }}
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: echo "Đã tạo $TAG; release.yml chạy từ sự kiện Release." >> "$GITHUB_STEP_SUMMARY"

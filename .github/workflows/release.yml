@@ -1,0 +1,208 @@
+# Một bản phát hành vX.Y.Z (#263, docs/release.md), chạy từ GitHub Release
+# do release-please.yml tạo:
+#
+# - image aegis-server và aegis-sandbox-<profile> lên GHCR, tag X.Y.Z và
+#   X.Y, ký bằng cosign keyless (OIDC của GitHub, không có khóa);
+# - gói offline: mỗi image một file `docker save`, kèm SHA-256,
+#   versions.txt (digest, migration cuối) và load-images.sh, gắn vào Release;
+# - client aegis-job cho bốn nền tảng, gắn vào Release, và một gói npm
+#   chứa cả bốn binary, publish bằng OIDC trusted publishing (không có
+#   token npm), như komainu.
+#
+# Chạy lại một bản: workflow_dispatch với tag đã có.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag đã có, vX.Y.Z'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.event.release.tag_name }}
+  IMAGES: ghcr.io/${{ github.repository_owner }}
+  CARGO_TERM_COLOR: always
+  # The client has no query macros; this keeps sqlx's from asking for a
+  # database anywhere in the build.
+  SQLX_OFFLINE: 'true'
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      minor: ${{ steps.check.outputs.minor }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - id: check
+        name: Tag khớp version trong repo
+        run: |
+          version=${TAG#v}
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          npm=$(python3 -c 'import json; print(json.load(open("npm/aegis-job/package.json"))["version"])')
+          file=$(cat version.txt)
+          echo "tag $version, Cargo.toml $cargo, package.json $npm, version.txt $file"
+          for v in "$cargo" "$npm" "$file"; do
+            [ "$v" = "$version" ] || { echo "::error::tag $TAG không khớp version trong repo"; exit 1; }
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+
+  images:
+    name: image ${{ matrix.name }}
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: server, context: ., file: docker/server/Dockerfile }
+          - { name: sandbox-python, context: docker/python, file: docker/python/Dockerfile }
+          - { name: sandbox-rust, context: docker/rust, file: docker/rust/Dockerfile }
+          - { name: sandbox-node, context: docker/node, file: docker/node/Dockerfile }
+          - { name: sandbox-java, context: docker/java, file: docker/java/Dockerfile }
+          - { name: sandbox-go, context: docker/go, file: docker/go/Dockerfile }
+          - { name: sandbox-dotnet, context: docker/dotnet, file: docker/dotnet/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: |
+            ${{ env.IMAGES }}/aegis-${{ matrix.name }}:${{ needs.version.outputs.version }}
+            ${{ env.IMAGES }}/aegis-${{ matrix.name }}:${{ needs.version.outputs.minor }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
+      - uses: sigstore/cosign-installer@v3
+      - name: Ký image
+        env:
+          IMAGE: ${{ env.IMAGES }}/aegis-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "$IMAGE"
+          echo "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
+  offline:
+    name: gói offline
+    needs: [version, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Chỗ trống trên đĩa
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - run: scripts/release/save-images.sh "${{ needs.version.outputs.version }}" "$IMAGES" offline
+      - name: Gắn vào Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" offline/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  client:
+    name: client (${{ matrix.target }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-14, npm: darwin-arm64 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel, npm: darwin-x64 }
+          # 22.04: the binary runs on glibc 2.35 and later.
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, npm: linux-x64 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, npm: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked -p aegis-client --target ${{ matrix.target }}
+      - name: Pack
+        shell: bash
+        run: |
+          name="aegis-job-${{ needs.version.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "$name" "npm/${{ matrix.npm }}"
+          cp "target/${{ matrix.target }}/release/aegis-job" docs/client.md "$name/"
+          cp "target/${{ matrix.target }}/release/aegis-job" "npm/${{ matrix.npm }}/"
+          tar -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.npm }}
+          path: |
+            aegis-job-*.tar.gz*
+            npm/
+
+  publish-client:
+    name: client lên Release và npm
+    needs: [version, client]
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: client-*
+          path: dist
+          merge-multiple: true
+      - name: Gói npm với bốn binary
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            install -D -m 0755 "dist/npm/$platform/aegis-job" "npm/aegis-job/vendor/$platform/aegis-job"
+          done
+          node npm/aegis-job/bin/aegis-job.js --help > /dev/null
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - name: npm có trusted publishing
+        run: npm install -g npm@11.5.1
+      - name: Gắn client vào Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd npm/aegis-job && npm pack --pack-destination ../../dist)
+          gh release upload "$TAG" dist/aegis-job-*.tar.gz* dist/*.tgz --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Publish lên npmjs bằng OIDC
+        working-directory: npm/aegis-job
+        run: npm publish --access public
