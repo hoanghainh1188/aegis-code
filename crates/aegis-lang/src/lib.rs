@@ -26,6 +26,7 @@ mod python_lock;
 mod resolve;
 mod symbols;
 mod syntax;
+mod test_path;
 mod yarn_lock;
 
 pub use command::{CommandTemplate, Placeholder};
@@ -46,3 +47,4 @@ pub use resolve::{
 };
 pub use symbols::{Symbol, SymbolKind, has_symbol_query, symbols, symbols_in};
 pub use syntax::{MAX_SOURCE_BYTES, SyntaxError, has_grammar, syntax_errors, syntax_errors_in};
+pub use test_path::is_test_path;

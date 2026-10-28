@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aegis_aci::{REDACTED_MARKER, Workspace, load_or_create_summary, redact};
+use aegis_aci::{MAP_FORMAT, REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
     BuildCache, CancelToken, Egress, FetchStep, GatePart, GateReport, GateRequest, ReferenceGroup,
     Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
@@ -555,7 +555,7 @@ pub(crate) fn module_map(
         .state_dir
         .join("maps")
         .join(&cfg.repo.key)
-        .join(format!("{digest}.md"));
+        .join(format!("{digest}.v{MAP_FORMAT}.md"));
     Ok(load_or_create_summary(&checkout, &map_path)?)
 }
 
