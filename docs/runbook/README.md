@@ -1,6 +1,6 @@
 # Runbook vận hành aegis-server
 
-Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). Bốn việc thường làm: [triển khai](#1-triển-khai), [rollback](#2-rollback), [xoay secret](#3-xoay-secret), [xử lý sự cố](#4-xử-lý-sự-cố), [thêm repo](#6-thêm-repo). Metric, cảnh báo và Grafana: [giám sát](#5-giám-sát). Phần [chuẩn bị tài khoản](#0-chuẩn-bị-tài-khoản) chỉ làm một lần.
+Cho người vận hành bản triển khai trên AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). Trên máy của khách, không dùng AWS: [on-premise.md](on-premise.md). Bốn việc thường làm: [triển khai](#1-triển-khai), [rollback](#2-rollback), [xoay secret](#3-xoay-secret), [xử lý sự cố](#4-xử-lý-sự-cố), [thêm repo](#6-thêm-repo). Metric, cảnh báo và Grafana: [giám sát](#5-giám-sát). Phần [chuẩn bị tài khoản](#0-chuẩn-bị-tài-khoản) chỉ làm một lần.
 
 ## Tổng quan
 
@@ -161,7 +161,7 @@ Vào máy: `aws ssm start-session --target <instance_id>`. Log: CloudWatch Logs 
 - `journalctl -u aegis -n 100`. Server dừng khi thiếu secret bắt buộc và **nêu tên secret**: đặt nó (mục 3), `sudo systemctl restart aegis`.
 - `AccessDenied` đọc secret: tên phải là `aegis/<env>/<TÊN>`; role máy chỉ đọc tiền tố đó.
 - Không kéo được image: tag có trên ECR không (`aws ecr describe-images --repository-name aegis-server`), ECR còn giữ không (giữ 30 bản gần nhất).
-- `permission denied … docker.sock` trong log job: `/etc/aegis/docker.env` sai group, sửa theo `getent group docker`.
+- `permission denied … docker.sock` trong log job: `DOCKER_GID` trong `/etc/aegis/aegis.env` sai group, sửa theo `getent group docker`.
 
 ### Provider (API model) lỗi kéo dài
 

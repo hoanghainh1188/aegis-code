@@ -51,6 +51,8 @@ resource "aws_launch_template" "server" {
     aegis_uid        = local.aegis_uid
     sandbox_profiles = join(" ", var.sandbox_profiles)
     stop_timeout_s   = var.server_config.drain_s + 60
+    # The unit of every deployment, on premises too (#262).
+    aegis_unit = file("${path.module}/../../../systemd/aegis.service")
     server_toml = templatefile("${path.module}/server.toml.tftpl", {
       region        = var.region
       secret_prefix = local.secret_prefix

@@ -1,0 +1,35 @@
+# aegis-server as a container on this machine's Docker (#262, ADR 0007):
+# the unit of on-premise machines (deploy/systemd/install.sh) and of the
+# AWS deployment (deploy/tofu/modules/aegis/user_data.sh.tftpl), one file.
+#
+# /etc/aegis/aegis.env: DOCKER_GID, AEGIS_ROLE, AEGIS_STOP_S, and
+# AEGIS_RUN_ARGS, the machine's own docker run arguments (network, ports,
+# secrets, log driver). /etc/aegis/image.env: AEGIS_IMAGE, written by
+# aegis-deploy. The workspace has the same path inside and out: the gate
+# hands it to the daemon when it mounts a job's tree into a sandbox.
+[Unit]
+Description=aegis-server
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/etc/aegis/aegis.env
+EnvironmentFile=/etc/aegis/image.env
+ExecStartPre=-/usr/bin/docker rm -f aegis
+ExecStart=/usr/bin/docker run --rm --name aegis \
+  --user 10001:10001 --group-add ${DOCKER_GID} \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume /srv/aegis/.workspace:/srv/aegis/.workspace \
+  --volume /etc/aegis/server.toml:/etc/aegis/server.toml:ro \
+  --stop-timeout ${AEGIS_STOP_S} \
+  $AEGIS_RUN_ARGS \
+  ${AEGIS_IMAGE} --config /etc/aegis/server.toml --role ${AEGIS_ROLE}
+ExecStop=/usr/bin/docker stop --time ${AEGIS_STOP_S} aegis
+# Above AEGIS_STOP_S, itself above [worker] drain_s: running jobs finish.
+TimeoutStopSec=900
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

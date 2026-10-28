@@ -1,0 +1,6 @@
+server.toml
+.env
+secrets/
+modes/*
+!modes/.gitkeep
+docker-compose.override.yml

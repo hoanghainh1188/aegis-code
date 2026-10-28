@@ -1,0 +1,82 @@
+# aegis on one machine (#262, docs/runbook/on-premise.md): PostgreSQL and
+# aegis-server with every role. The job queue is in PostgreSQL (ADR 0003
+# §3): no Redis. The gate's sandboxes run on this machine's Docker daemon,
+# next to the aegis container (ADR 0007).
+#
+#   ./install.sh                      once: directories, secrets, .env
+#   ./aegis-deploy.sh <version>       start, upgrade, roll back
+name: aegis
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_DB: aegis
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "aegis", "-d", "aegis"]
+      interval: 5s
+      retries: 12
+    networks: [db]
+
+  aegis:
+    image: ${AEGIS_REGISTRY:-ghcr.io/hoanghainh1188}/aegis-server:${AEGIS_VERSION:?set AEGIS_VERSION in .env (./aegis-deploy.sh does)}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config", "/etc/aegis/server.toml", "--role", "all"]
+    # The image's user; the gate starts sandboxes with the same uid:gid, so
+    # the workspace belongs to it. The socket's group lets it reach the
+    # daemon: whoever holds the socket is root of this machine.
+    user: "10001:10001"
+    group_add:
+      - "${DOCKER_GID:?set DOCKER_GID in .env (./install.sh does)}"
+    ports:
+      - "${AEGIS_PUBLISH:-8080}:8080"
+      # /metrics has no token (#32): this machine only.
+      - "127.0.0.1:9464:9464"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The same path inside and out: the gate hands it to the daemon when
+      # it mounts a job's tree into a sandbox.
+      - /srv/aegis/.workspace:/srv/aegis/.workspace
+      - ./server.toml:/etc/aegis/server.toml:ro
+      - ./modes:/etc/aegis/modes:ro
+      # One file per secret (#261), only the aegis user may read them.
+      - ./secrets:/run/secrets:ro
+    environment:
+      # GitHub Enterprise or GitLab on premises: their API (not secrets).
+      AEGIS_GITHUB_API: ${AEGIS_GITHUB_API:-}
+      AEGIS_GITLAB_API: ${AEGIS_GITLAB_API:-}
+    # Longer than [worker] drain_s, so running jobs can finish.
+    stop_grace_period: 11m
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /api/v1/health HTTP/1.0\r\n\r\n' >&3 && grep -q '"ok"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [db, default]
+
+networks:
+  # PostgreSQL is reachable from aegis only, never from outside.
+  db:
+    internal: true
+
+volumes:
+  pgdata:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
