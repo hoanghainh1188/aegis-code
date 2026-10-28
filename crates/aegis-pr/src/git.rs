@@ -45,6 +45,8 @@ pub struct Identity {
 pub struct Remote {
     url: String,
     token: Option<String>,
+    /// Who the token is sent as.
+    user: &'static str,
 }
 
 fn plain_name(s: &str) -> bool {
@@ -71,6 +73,23 @@ impl Remote {
         Ok(Self {
             url: format!("https://{host}/{owner}/{repo}.git"),
             token: Some(token.to_owned()),
+            user: GITHUB_USER,
+        })
+    }
+
+    /// `https://<host>/<group/sub/project>.git` on GitLab (#252), pushed
+    /// with `token`.
+    pub fn gitlab(host: &str, project: &str, token: &str) -> Result<Self, PrError> {
+        let parts: Vec<&str> = project.split('/').collect();
+        let plain_path = (2..=crate::gitlab::MAX_PATH_PARTS).contains(&parts.len())
+            && parts.iter().all(|p| plain_name(p));
+        if !plain_host(host) || !plain_path {
+            return Err(PrError::InvalidRemote(format!("{host}/{project}")));
+        }
+        Ok(Self {
+            url: format!("https://{host}/{project}.git"),
+            token: Some(token.to_owned()),
+            user: GITLAB_USER,
         })
     }
 
@@ -82,11 +101,18 @@ impl Remote {
         Ok(Self {
             url: format!("file://{}", path.display()),
             token: None,
+            user: GITHUB_USER,
         })
     }
 
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// The user and token git sends to this remote, to push to or fetch
+    /// from it; none for a local one.
+    pub fn credentials(&self) -> Option<(&'static str, &str)> {
+        self.token.as_deref().map(|t| (self.user, t))
     }
 }
 
@@ -94,7 +120,18 @@ impl Remote {
 /// over HTTP, for that call only, with no credential helper asked: the
 /// token is never in argv, a URL or a config file.
 pub fn token_env(token: &str) -> [(&'static str, String); 5] {
-    let basic = base64(format!("x-access-token:{token}").as_bytes());
+    token_env_as(GITHUB_USER, token)
+}
+
+/// The user GitHub takes with a token over HTTPS.
+pub const GITHUB_USER: &str = "x-access-token";
+/// The user GitLab takes with a personal, project or group access token
+/// over HTTPS (#252).
+pub const GITLAB_USER: &str = "oauth2";
+
+/// [`token_env`] for `user`: [`GITHUB_USER`] or [`GITLAB_USER`].
+pub fn token_env_as(user: &str, token: &str) -> [(&'static str, String); 5] {
+    let basic = base64(format!("{user}:{token}").as_bytes());
     [
         ("GIT_CONFIG_COUNT", "2".into()),
         ("GIT_CONFIG_KEY_0", "http.extraHeader".into()),
@@ -182,18 +219,18 @@ impl Staging {
         c
     }
 
-    /// Runs git here; `stdin` is fed to it, `token` becomes an
-    /// `Authorization` header for this call only.
+    /// Runs git here; `stdin` is fed to it, `auth` (user, token) becomes
+    /// an `Authorization` header for this call only.
     fn run(
         &self,
         args: &[&str],
         stdin: Option<&str>,
-        token: Option<&str>,
+        auth: Option<(&str, &str)>,
     ) -> Result<String, PrError> {
         let what = args.first().copied().unwrap_or("git");
         let mut c = self.command(args);
-        if let Some(token) = token {
-            c.envs(token_env(token));
+        if let Some((user, token)) = auth {
+            c.envs(token_env_as(user, token));
         }
         let mut child = c
             .stdin(if stdin.is_some() {
@@ -295,7 +332,7 @@ pub fn push_ref(
 ) -> Result<(), PrError> {
     let refspec = format!("{commit}:{full_ref}");
     let args = ["push", "--porcelain", remote.url.as_str(), refspec.as_str()];
-    staging.run(&args, None, remote.token.as_deref()).map(drop)
+    staging.run(&args, None, remote.credentials()).map(drop)
 }
 
 /// Removes `branch` only while it still points at `commit`, so a branch a
@@ -316,7 +353,7 @@ pub fn delete(
         remote.url.as_str(),
         refspec.as_str(),
     ];
-    staging.run(&args, None, remote.token.as_deref()).map(drop)
+    staging.run(&args, None, remote.credentials()).map(drop)
 }
 
 #[cfg(test)]
@@ -330,6 +367,30 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"x-access-token:abc"), "eC1hY2Nlc3MtdG9rZW46YWJj");
+    }
+
+    #[test]
+    fn a_gitlab_remote_is_its_project_path_and_sends_the_token_as_oauth2() {
+        let r = Remote::gitlab("gitlab.example.com", "acme/platform/app", "t").unwrap();
+        assert_eq!(r.url(), "https://gitlab.example.com/acme/platform/app.git");
+        assert_eq!(r.credentials(), Some(("oauth2", "t")));
+        for project in ["app", "acme/../app", "acme//app", "--upload-pack=x/app"] {
+            assert!(
+                Remote::gitlab("gitlab.com", project, "t").is_err(),
+                "{project}"
+            );
+        }
+        let header = &token_env_as(GITLAB_USER, "t")[2].1;
+        assert_eq!(
+            header,
+            &format!("Authorization: Basic {}", base64(b"oauth2:t"))
+        );
+        assert_eq!(
+            Remote::https("github.com", "me", "app", "t")
+                .unwrap()
+                .credentials(),
+            Some(("x-access-token", "t"))
+        );
     }
 
     #[test]

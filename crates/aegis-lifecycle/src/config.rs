@@ -255,10 +255,23 @@ impl RepoConfig {
     }
 }
 
-/// The fork the agent pushes to and opens PRs in.
+/// Where the fork is (#252).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForkPlatform {
+    #[default]
+    GitHub,
+    GitLab,
+}
+
+/// The fork the agent pushes to and opens PRs in: a GitHub repository, or
+/// a GitLab project (`owner` is then its namespace, subgroups included,
+/// and `api` the instance's API root).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForkConfig {
+    #[serde(default, skip_serializing_if = "is_github")]
+    pub platform: ForkPlatform,
     pub owner: String,
     pub name: String,
     #[serde(default = "default_api")]
@@ -267,6 +280,17 @@ pub struct ForkConfig {
     /// Push to this local bare repo instead of the fork (tests, dry runs).
     #[serde(default)]
     pub push_to_local: Option<PathBuf>,
+}
+
+fn is_github(platform: &ForkPlatform) -> bool {
+    *platform == ForkPlatform::GitHub
+}
+
+impl ForkConfig {
+    /// `owner/name`: the repository or project path.
+    pub fn path(&self) -> String {
+        format!("{}/{}", self.owner, self.name)
+    }
 }
 
 fn default_api() -> String {
@@ -451,6 +475,14 @@ impl RunConfig {
         if let Some(sonar) = &self.sonar {
             sonar.check()?;
         }
+        let fork = &self.repo.fork;
+        if fork.platform == ForkPlatform::GitLab && fork.api == default_api() {
+            return Err(LifecycleError::Config(
+                "repo.fork.api: a GitLab fork needs its instance's API root \
+                 (`https://gitlab.com/api/v4` or a self-hosted one)"
+                    .into(),
+            ));
+        }
         self.repo
             .audit_policy()
             .check_ids()
@@ -559,6 +591,25 @@ mod tests {
 
     fn with_sonar(table: &str) -> Result<RunConfig, LifecycleError> {
         RunConfig::from_toml(&format!("{POC}\n[sonar]\n{table}"))
+    }
+
+    #[test]
+    fn a_gitlab_fork_names_its_api_root() {
+        let gitlab = |api: &str| {
+            RunConfig::from_toml(&POC.replacen(
+                "[repo.fork]",
+                &format!("[repo.fork]\nplatform = \"gitlab\"{api}"),
+                1,
+            ))
+        };
+        let err = gitlab("").unwrap_err().to_string();
+        assert!(err.contains("a GitLab fork needs"), "{err}");
+        let cfg = gitlab("\napi = \"https://gitlab.com/api/v4\"").unwrap();
+        assert_eq!(cfg.repo.fork.platform, ForkPlatform::GitLab);
+        assert_eq!(
+            RunConfig::from_toml(POC).unwrap().repo.fork.platform,
+            ForkPlatform::GitHub
+        );
     }
 
     #[test]

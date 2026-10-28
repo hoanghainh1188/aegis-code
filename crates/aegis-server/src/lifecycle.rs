@@ -27,8 +27,8 @@ use aegis_ledger::{
     IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable,
 };
 use aegis_lifecycle::{
-    IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, ReviewRound, run_issue,
-    run_review,
+    ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, ReviewRound,
+    run_issue, run_review,
 };
 use aegis_pr::{GitHub, REPLY_MARKER};
 use aegis_provider::{Observed, Provider};
@@ -284,7 +284,9 @@ impl LifecycleRunner {
             &config.repo.path,
             &repo.url,
             &config.repo.base,
-            read_token.as_deref(),
+            read_token
+                .as_deref()
+                .map(|t| (git_user(&config.repo.fork), t)),
         )
         .await
         // The remote may be back for the next attempt.
@@ -306,6 +308,9 @@ impl LifecycleRunner {
                 ticket_issue(job, &repo, &self.secrets).await?
             }
             (None, JobSource::Sonar) => sonar_issue(job, &repo, &self.store, &self.secrets).await?,
+            (None, JobSource::Gitlab) => {
+                gitlab_issue(job, &config.repo.fork, &github_token).await?
+            }
             (None, JobSource::Ci) => {
                 ci_issue(
                     job,
@@ -477,6 +482,49 @@ async fn ci_issue(job: &Job, api: &str, branch: &str, token: &str) -> Result<Iss
         id: job.ledger_key.as_str().to_owned(),
         ..issue
     })
+}
+
+/// The GitLab issue of a `gitlab` job (`group/sub/project#iid`, #252),
+/// under the job's ledger key, read with the fork's token from the fork's
+/// GitLab: the repo's fork must be on GitLab.
+async fn gitlab_issue(
+    job: &Job,
+    fork: &aegis_lifecycle::ForkConfig,
+    token: &str,
+) -> Result<IssueInput, Attempt> {
+    if fork.platform != ForkPlatform::GitLab {
+        return Err(Attempt::Rejected(
+            "a GitLab issue needs the repo's fork on GitLab (`fork.platform = \"gitlab\"`)".into(),
+        ));
+    }
+    let bad = || Attempt::Rejected(format!("`{}` is not group/project#iid", job.issue_ref));
+    let (project, iid) = job.issue_ref.rsplit_once('#').ok_or_else(bad)?;
+    let iid: u64 = iid.parse().map_err(|_| bad())?;
+    let issue = IssueInput::from_gitlab(&fork.api, project, iid, token)
+        .await
+        .map_err(|e| match e {
+            // No such issue, no access, or not a project path: no attempt
+            // changes it. A GitLab that cannot be reached may come back.
+            LifecycleError::Pr(aegis_pr::PrError::GitLab {
+                status,
+                ref message,
+            }) if matches!(status, 401 | 403 | 404) || message.contains("not a project path") => {
+                Attempt::Rejected(e.to_string())
+            }
+            other => Attempt::Infra(other.to_string()),
+        })?;
+    Ok(IssueInput {
+        id: job.ledger_key.as_str().to_owned(),
+        ..issue
+    })
+}
+
+/// Who the fork's token is sent as to git: its platform's user (#252).
+fn git_user(fork: &aegis_lifecycle::ForkConfig) -> &'static str {
+    match fork.platform {
+        ForkPlatform::GitHub => aegis_pr::GITHUB_USER,
+        ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
+    }
 }
 
 /// `owner/repo/actions/runs/<id>`, as the webhook builds it.

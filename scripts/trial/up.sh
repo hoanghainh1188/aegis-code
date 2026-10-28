@@ -66,6 +66,9 @@ export AEGIS_GITHUB_WEBHOOK_SECRET=$(openssl rand -hex 32)
 export AEGIS_GITHUB_COMMENT_TOKEN=trial-comment-token
 export AEGIS_GITHUB_API=http://127.0.0.1:8070
 export AEGIS_TRIAL_FORK_TOKEN=trial-fork-token
+export AEGIS_GITLAB_WEBHOOK_TOKEN=$(openssl rand -hex 32)
+export AEGIS_GITLAB_COMMENT_TOKEN=trial-gitlab-comment-token
+export AEGIS_GITLAB_API=http://127.0.0.1:8070/api/v4
 export RUST_LOG=info
 ENV
 )
@@ -87,6 +90,8 @@ git -C "$WORK/upstream/demo" init -q -b main
 git -C "$WORK/upstream/demo" add -A
 git -C "$WORK/upstream/demo" -c user.name=demo -c user.email=demo@example.com commit -q -m "textutil: Truncate"
 git clone -q --bare "$WORK/upstream/demo" "$WORK/fork.git"
+# The same code as a GitLab project, whose fork is on the fake GitLab (#252).
+git clone -q "$WORK/upstream/demo" "$WORK/upstream/demo-gl"
 nohup python3 "$HERE/fake_github.py" "$WORK/fork.git" > "$WORK/fake_github.log" 2>&1 &
 echo $! > "$WORK/fake_github.pid"
 
@@ -94,6 +99,7 @@ say "Configuration ($MODEL)"
 cp "$HERE/server.toml" "$WORK/server.toml"
 fill "$HERE/mode-$MODEL.toml" "$WORK/mode.toml"
 fill "$HERE/demo.toml" "$WORK/demo.toml"
+fill "$HERE/demo-gl.toml" "$WORK/demo-gl.toml"
 {
   cat "$REPO/config/pricing.toml"
   printf '\n# The trial model on Ollama: free.\n[models."aegis-gpt-oss"]\ninput = 0.0\noutput = 0.0\ncache_read_multiplier = 0.0\n'
@@ -120,6 +126,7 @@ say "Registering the repo and the first admin"
   # shellcheck disable=SC1091
   . ./env.sh
   "$BIN" --config server.toml repo add demo.toml 2>/dev/null
+  "$BIN" --config server.toml repo add demo-gl.toml 2>/dev/null
   "$BIN" --config server.toml grant dev@example.com admin 2>/dev/null
   # A service token for trying the API (`curl -H "Authorization: Bearer $AEGIS_TRIAL_API_TOKEN"`).
   TOKEN=$("$BIN" --config server.toml token trial 2>/dev/null | head -1)
@@ -135,6 +142,7 @@ Ready. Next:
   http://localhost:8080                            # dashboard, as dev@example.com
   http://127.0.0.1:8070/demo-org/demo/issues/1     # the issue and the job's comment
   http://127.0.0.1:8070/demo-org/demo/pull/100     # the PR, once the job opens it
+  scripts/trial/send-gitlab-webhook.sh             # the same issue on GitLab: a job opens an MR
   scripts/trial/send-review.sh 100 "<text>" [<file> <line> "<comment>"]   # a review round
 Undo: scripts/trial/down.sh
 DONE

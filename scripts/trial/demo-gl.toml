@@ -1,0 +1,17 @@
+# The sample repo as a GitLab project (#252): its issues come from the fake
+# GitLab's webhook and its fork is on the fake GitLab, which takes the
+# merge request; the branch goes to the same local bare repo as demo's.
+slug = "demo-gl"
+url = "file://@WORK@/upstream/demo-gl"
+language = "go"
+
+[settings]
+conventions = "The package is textutil; its tests are in textutil/textutil_test.go."
+
+[settings.fork]
+platform = "gitlab"
+owner = "demo-org"
+name = "demo"
+api = "http://127.0.0.1:8070/api/v4"
+token_env = "AEGIS_TRIAL_FORK_TOKEN"
+push_to_local = "@WORK@/fork.git"

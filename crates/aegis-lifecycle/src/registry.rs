@@ -348,7 +348,8 @@ impl Modes {
         let (new, config) = self.check_spec(spec)?;
         let path = config.repo.path;
         let made = !path.exists();
-        crate::clone::prepare_async(&path, &new.url, &new.default_branch, token).await?;
+        crate::clone::prepare_async(&path, &new.url, &new.default_branch, auth(spec, token))
+            .await?;
         match store.create_repo_by(&new, actor).await {
             Ok(repo) => Ok(repo),
             Err(e) => {
@@ -374,10 +375,24 @@ impl Modes {
         if store.repo_by_slug(&new.slug).await?.is_none() {
             return Err(LifecycleError::Config(format!("no repo `{}`", new.slug)));
         }
-        crate::clone::prepare_async(&config.repo.path, &new.url, &new.default_branch, token)
-            .await?;
+        crate::clone::prepare_async(
+            &config.repo.path,
+            &new.url,
+            &new.default_branch,
+            auth(spec, token),
+        )
+        .await?;
         Ok(store.update_repo_by(&new, actor).await?)
     }
+}
+
+/// The user `token` is sent as for `spec`'s repo: its fork's platform's.
+fn auth<'a>(spec: &RepoSpec, token: Option<&'a str>) -> Option<(&'static str, &'a str)> {
+    let user = match spec.settings.fork.platform {
+        crate::ForkPlatform::GitHub => aegis_pr::GITHUB_USER,
+        crate::ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
+    };
+    token.map(|t| (user, t))
 }
 
 #[cfg(test)]

@@ -288,12 +288,17 @@ where
     // The branch as it is now, reviewers' commits included.
     let remote = fork_remote(platform)?;
     let (clone, branch) = (cfg.repo.path.clone(), round.pull.head_ref.clone());
-    let (url, token) = (remote.url().to_owned(), platform.github_token.clone());
+    let url = remote.url().to_owned();
+    let auth = remote
+        .credentials()
+        .filter(|(_, t)| !t.is_empty())
+        .map(|(u, t)| (u, t.to_owned()));
     let into = format!("review/{}", round.branch_id());
     let head = tokio::task::spawn_blocking(move || {
         let source = crate::clone::Source {
             url: &url,
-            token: Some(&token).filter(|t| !t.is_empty()).map(String::as_str),
+            token: auth.as_ref().map(|(_, t)| t.as_str()),
+            user: auth.as_ref().map_or(aegis_pr::GITHUB_USER, |(u, _)| u),
         };
         crate::clone::fetch_ref(&clone, source, &branch, &into)
     })
