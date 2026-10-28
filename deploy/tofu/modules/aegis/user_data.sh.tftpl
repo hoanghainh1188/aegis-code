@@ -32,9 +32,17 @@ mkdir -p /etc/aegis
 cat > /etc/aegis/server.toml <<'TOML'
 ${server_toml}
 TOML
+# Tham số riêng của máy cho unit chung deploy/systemd/aegis.service (#262).
 # Group của /var/run/docker.sock: aegis-server (uid ${aegis_uid}) cần nó để
 # chạy sandbox. Ai có group này là root của máy (docs/runbook, "Worker và Docker").
-echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" > /etc/aegis/docker.env
+# --network host: đọc role của máy qua IMDS (hop limit 1 chặn container
+# khác). AEGIS_STOP_S lớn hơn worker.drain_s để job đang chạy kịp xong.
+cat > /etc/aegis/aegis.env <<ENV
+DOCKER_GID=$(getent group docker | cut -d: -f3)
+AEGIS_ROLE=all
+AEGIS_STOP_S=${stop_timeout_s}
+AEGIS_RUN_ARGS="--network host --log-driver awslogs --log-opt awslogs-region=${region} --log-opt awslogs-group=${log_group} --log-opt awslogs-stream=$(hostname)"
+ENV
 
 cat > /usr/local/bin/aegis-deploy <<'DEPLOY'
 #!/bin/bash
@@ -64,34 +72,8 @@ exit 1
 DEPLOY
 chmod 0755 /usr/local/bin/aegis-deploy
 
-# --network host: đọc role của máy qua IMDS (hop limit 1 chặn container
-# khác). --stop-timeout lớn hơn worker.drain_s để job đang chạy kịp xong.
 cat > /etc/systemd/system/aegis.service <<'UNIT'
-[Unit]
-Description=aegis-server (role all)
-After=docker.service network-online.target
-Requires=docker.service
-
-[Service]
-EnvironmentFile=/etc/aegis/image.env
-EnvironmentFile=/etc/aegis/docker.env
-ExecStartPre=-/usr/bin/docker rm -f aegis
-ExecStart=/usr/bin/docker run --rm --name aegis --network host \
-  --user ${aegis_uid}:${aegis_uid} --group-add $${DOCKER_GID} \
-  --volume /var/run/docker.sock:/var/run/docker.sock \
-  --volume ${workspace_dir}:${workspace_dir} \
-  --volume /etc/aegis/server.toml:/etc/aegis/server.toml:ro \
-  --log-driver awslogs --log-opt awslogs-region=${region} \
-  --log-opt awslogs-group=${log_group} --log-opt awslogs-stream=%H \
-  --stop-timeout ${stop_timeout_s} \
-  $${AEGIS_IMAGE} --config /etc/aegis/server.toml --role all
-ExecStop=/usr/bin/docker stop --time ${stop_timeout_s} aegis
-TimeoutStopSec=${stop_timeout_s + 40}
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+${aegis_unit}
 UNIT
 systemctl daemon-reload
 systemctl enable aegis

@@ -58,7 +58,8 @@ Digest của từng image có trong `versions.txt` của Release.
 ## Máy không ra được Internet
 
 Tải từ trang Release về một máy có mạng:
-- các file `aegis-*-X.Y.Z.tar.gz` cùng `.sha256` của chúng (mỗi image một file; có thể bỏ sandbox của ngôn ngữ không dùng);
+- các file `aegis-*-X.Y.Z.tar.gz` cùng `.sha256` của chúng (mỗi image một file; có thể bỏ sandbox của ngôn ngữ không dùng, trừ `sandbox-python`, là proxy egress của gate);
+- `aegis-dep-*.tar.gz`: image của bên thứ ba mà Compose chạy (`postgres:17-alpine`);
 - `versions.txt` và `load-images.sh`.
 
 Chép tất cả sang máy đích, rồi chạy:

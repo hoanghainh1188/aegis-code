@@ -1,0 +1,62 @@
+# aegis-server on premises (#262, docs/runbook/on-premise.md). install.sh
+# copies this file to server.toml; edit that one. No secret is in it: they
+# are files in ./secrets, mounted at /run/secrets (#261).
+
+[secrets]
+source = "file"
+dir = "/run/secrets"
+refresh_s = 300
+
+# Each repo runs with the configuration of its mode. The image ships
+# config/poc.toml (Claude API, secret ANTHROPIC_API_KEY) and
+# config/customer-jp.toml (Bedrock in Tokyo). Your own, for example a local
+# model: put it in ./modes and name it here as /etc/aegis/modes/<file>.
+# Relative paths in a mode file are taken from /srv/aegis, so
+# `.workspace/state` is on the workspace volume.
+[modes]
+poc = "config/poc.toml"
+# poc = "/etc/aegis/modes/local.toml"
+
+[api]
+listen = "0.0.0.0:8080"
+
+[metrics]
+# Published on 127.0.0.1 only (docker-compose.yml).
+listen = "0.0.0.0:9464"
+
+[auth]
+# The address users and webhooks reach, behind your TLS proxy.
+public_url = "https://aegis.example.internal"
+session_hours = 12
+api_requests_per_minute = 120
+api_failures_per_minute = 20
+# 1 behind one reverse proxy that sets X-Forwarded-For; 0 with none.
+trusted_proxies = 1
+
+# Your SSO (OIDC); its client secret is the file AEGIS_OIDC_CLIENT_SECRET.
+# [auth.oidc]
+# issuer = "https://sso.example.internal/realms/dev"
+# client_id = "aegis"
+
+[budget]
+time_zone = "UTC"
+warn_ratio = 0.8
+
+[worker]
+max_workers = 2
+max_cost_usd = 4.0
+lease_s = 60
+renew_s = 20
+poll_s = 5
+# stop_grace_period in docker-compose.yml (11 min) must be longer.
+drain_s = 600
+retry_base_s = 30
+
+[trackers]
+poll_s = 300
+
+[sonar]
+check_s = 60
+
+[reviews]
+max_rounds = 3

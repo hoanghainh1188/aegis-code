@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# aegis-deploy [--offline] <version>: runs aegis-server <version> under
+# systemd on an on-premise machine (#262, docs/runbook/on-premise.md).
+# Pulls the server and sandbox images (unless --offline: loaded from the
+# offline bundle already), tags the sandboxes with the bare names the
+# profiles use, writes /etc/aegis/image.env, restarts the unit and waits
+# for /api/v1/health. Rolling back is this command with the version
+# before; the database is not rolled back (expand/contract).
+set -euo pipefail
+
+die() { echo "aegis-deploy: $*" >&2; exit 1; }
+offline=0
+if [ "${1:-}" = "--offline" ]; then
+  offline=1
+  shift
+fi
+version=${1:-}
+[ -n "$version" ] || die "usage: aegis-deploy [--offline] <version>"
+# shellcheck disable=SC1091
+. /etc/aegis/aegis.env
+registry=${AEGIS_REGISTRY:-ghcr.io/hoanghainh1188}
+health=${AEGIS_HEALTH_URL:-http://127.0.0.1:8080/api/v1/health}
+previous=$(sed -n 's/^AEGIS_IMAGE=.*://p' /etc/aegis/image.env 2>/dev/null || true)
+
+images=("$registry/aegis-server:$version")
+for p in ${AEGIS_SANDBOXES:-python}; do
+  images+=("$registry/aegis-sandbox-$p:$version")
+done
+for image in "${images[@]}"; do
+  if [ "$offline" = 1 ]; then
+    docker image inspect "$image" >/dev/null 2>&1 \
+      || die "$image is not loaded: run load-images.sh of the $version bundle"
+  else
+    docker pull --quiet "$image" >/dev/null
+  fi
+done
+for p in ${AEGIS_SANDBOXES:-python}; do
+  docker tag "$registry/aegis-sandbox-$p:$version" "aegis-sandbox-$p"
+done
+
+echo "AEGIS_IMAGE=$registry/aegis-server:$version" > /etc/aegis/image.env
+systemctl restart aegis
+for _ in $(seq 1 60); do
+  if curl -fsS "$health" >/dev/null 2>&1; then
+    if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
+      echo "aegis $version healthy; roll back with: aegis-deploy $previous"
+    else
+      echo "aegis $version healthy"
+    fi
+    exit 0
+  fi
+  sleep 5
+done
+journalctl -u aegis --no-pager -n 50 >&2
+die "aegis $version not healthy after 5 min"
