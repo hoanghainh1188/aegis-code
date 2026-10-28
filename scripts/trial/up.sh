@@ -121,7 +121,7 @@ say "Registering the repo and the first admin"
   . ./env.sh
   "$BIN" --config server.toml repo add demo.toml 2>/dev/null
   "$BIN" --config server.toml grant dev@example.com admin 2>/dev/null
-  # A service token for the trial's scripts (send-review.sh).
+  # A service token for trying the API (`curl -H "Authorization: Bearer $AEGIS_TRIAL_API_TOKEN"`).
   TOKEN=$("$BIN" --config server.toml token trial 2>/dev/null | head -1)
   "$BIN" --config server.toml grant trial admin 2>/dev/null
   echo "export AEGIS_TRIAL_API_TOKEN=$TOKEN" >> env.sh

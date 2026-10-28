@@ -52,8 +52,23 @@ impl Store {
     /// when the repo's monthly budget is (#31).
     pub async fn review_job_by(&self, of: JobId, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
+        let job = self
+            .review_in(&mut tx, of, actor, serde_json::json!({}))
+            .await?;
+        tx.commit().await?;
+        Ok(job)
+    }
+
+    /// [`Store::review_job_by`] in `tx`, with `detail` added to its audit.
+    pub(crate) async fn review_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        of: JobId,
+        actor: &Actor,
+        mut detail: serde_json::Value,
+    ) -> Result<Job, StoreError> {
         let asked = sqlx::query!("SELECT review_of FROM jobs WHERE id = $1 FOR UPDATE", of.0)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?
             .ok_or_else(|| StoreError::NotFound(format!("job {}", of.0)))?;
         let root_id = asked.review_of.unwrap_or(of.0);
@@ -62,7 +77,7 @@ impl Store {
              WHERE id = $1 FOR UPDATE",
             root_id,
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
         let status = JobStatus::decode("jobs.status", &root.status)?;
         let outcome = root.outcome.as_deref().map(decode_outcome).transpose()?;
@@ -78,11 +93,24 @@ impl Store {
             field: "pr_url",
             message: format!("`{pr_url}` is not a pull request URL"),
         })?;
+        // A live round reads the review when it runs: no other is needed,
+        // whatever the rounds left.
+        let live = sqlx::query_scalar!(
+            "SELECT id FROM jobs WHERE review_of = $1 AND status IN ('queued', 'running') LIMIT 1",
+            root_id,
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
+        if live.is_some() {
+            return Err(StoreError::Conflict(format!(
+                "the PR of job {root_id} has a live review round"
+            )));
+        }
         let rounds = sqlx::query_scalar!(
             r#"SELECT coalesce(max(review_round), 0) AS "rounds!" FROM jobs WHERE review_of = $1"#,
             root_id,
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
         let rounds = u32::try_from(rounds).unwrap_or(u32::MAX);
         if rounds >= self.max_review_rounds {
@@ -91,7 +119,7 @@ impl Store {
                 self.max_review_rounds
             )));
         }
-        budget::check(&mut tx, &self.budget, crate::RepoId(root.repo_id)).await?;
+        budget::check(tx, &self.budget, crate::RepoId(root.repo_id)).await?;
         let round = rounds + 1;
         let key = IssueId::parse(format!("{}-v{round}", root.ledger_key))?;
         let row = sqlx::query_as!(
@@ -108,7 +136,7 @@ impl Store {
             root_id,
             i32::try_from(round).unwrap_or(i32::MAX),
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|e| match StoreError::from_db(e) {
             StoreError::Conflict(_) => {
@@ -117,10 +145,31 @@ impl Store {
             other => other,
         })?;
         let job: Job = row.try_into()?;
-        let detail = serde_json::json!({ "review_of": root_id, "round": round });
-        audit::record(&mut tx, actor, "job.review", Target::of_job(&job), detail).await?;
-        tx.commit().await?;
+        detail["review_of"] = root_id.into();
+        detail["round"] = round.into();
+        audit::record(tx, actor, "job.review", Target::of_job(&job), detail).await?;
         Ok(job)
+    }
+
+    /// The job that opened the PR at `pr_url` (case aside), the last one
+    /// if a PR was somehow opened twice: what a review of it goes on with.
+    pub async fn job_by_pr_url(&self, pr_url: &str) -> Result<Option<Job>, StoreError> {
+        let url = pr_url.trim().trim_end_matches('/').to_ascii_lowercase();
+        sqlx::query_as!(
+            JobRow,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                    attempts, locked_by, locked_until, created_at, updated_at,
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
+             FROM jobs
+             WHERE review_of IS NULL AND status = 'done' AND outcome = 'pr_opened'
+               AND lower(rtrim(pr_url, '/')) = $1
+             ORDER BY id DESC LIMIT 1",
+            url,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(Job::try_from)
+        .transpose()
     }
 
     /// The job that opened the PR review round `job` works on.

@@ -251,6 +251,20 @@ impl GitHub {
         .await
     }
 
+    /// What `login` may do in this repo (`admin`, `write`, `read`,
+    /// `none`): `GET collaborators/{login}/permission`. Not a
+    /// collaborator is `none`.
+    pub async fn permission(&self, login: &str) -> Result<String, PrError> {
+        if !plain_name(login) {
+            return Ok("none".into());
+        }
+        match self.get(&format!("collaborators/{login}/permission")).await {
+            Ok(v) => Ok(v["permission"].as_str().unwrap_or("none").to_owned()),
+            Err(PrError::GitHub { status: 404, .. }) => Ok("none".into()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Comments on issue `number` of this repo: the job's status for whoever
     /// asked for it there (#25). The caller makes `body` inert.
     pub async fn comment_on_issue(&self, number: u64, body: &str) -> Result<IssueComment, PrError> {

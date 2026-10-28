@@ -60,6 +60,51 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Records `delivery` and queues the next review round of the PR job
+    /// `of` opened (#244), as [`Store::review_job_by`] does, in one
+    /// transaction: a delivery sent twice makes one round, and a round
+    /// refused (no rounds left, one live, budget spent) records nothing.
+    pub async fn deliver_review(
+        &self,
+        delivery: &NewDelivery,
+        of: JobId,
+    ) -> Result<Delivered, StoreError> {
+        if delivery.delivery_id.is_empty() || delivery.delivery_id.len() > MAX_DELIVERY_ID_LEN {
+            return Err(StoreError::Invalid {
+                field: "delivery_id",
+                message: format!("1 to {MAX_DELIVERY_ID_LEN} bytes"),
+            });
+        }
+        let mut tx = self.pool.begin().await?;
+        let recorded = sqlx::query_scalar!(
+            "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)
+             ON CONFLICT (source, delivery_id) DO NOTHING
+             RETURNING id",
+            delivery.source.as_str(),
+            delivery.delivery_id,
+            delivery.event,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(recorded) = recorded else {
+            return Ok(Delivered::Duplicate);
+        };
+        let actor = Actor::webhook(delivery.source.as_str());
+        let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
+        let job = self.review_in(&mut tx, of, &actor, detail).await?;
+        sqlx::query!(
+            "UPDATE webhook_deliveries SET job_id = $2 WHERE id = $1",
+            recorded,
+            job.id.0,
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(Delivered::Queued(Box::new(job)))
+    }
+}
+
 /// Queues `job` in `tx` under `rules`, by `actor` with `detail` in the audit log: when
 /// the repo's monthly budget is spent (#31) the job is recorded cancelled
 /// with the reason; when the issue already has a live job, none is made.

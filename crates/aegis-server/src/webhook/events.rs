@@ -23,6 +23,25 @@ pub enum Kind {
     Issue,
     /// CI failed on `branch`; a job only if it is the repo's default one.
     CiFailure { branch: String },
+    /// A review round asked for on the agent's open PR `pr_url` (#244):
+    /// changes requested, or `/aegis fix` in a comment, by `sender`, whose
+    /// right to write is checked before a job is made.
+    ReviewRound { pr_url: String, sender: String },
+}
+
+/// The command that asks for a review round in a comment on a PR.
+pub const FIX_COMMAND: &str = "/aegis fix";
+
+/// Whether a line of `body` is [`FIX_COMMAND`], alone or followed by a
+/// space.
+fn asks_for_fix(body: &str) -> bool {
+    body.lines().any(|line| {
+        let line = line.trim();
+        line == FIX_COMMAND
+            || line
+                .strip_prefix(FIX_COMMAND)
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    })
 }
 
 /// Why a delivery asks for nothing, or cannot be read.
@@ -116,9 +135,143 @@ struct HeadRepo {
     full_name: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct Sender {
+    login: String,
+    #[serde(rename = "type", default)]
+    kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrHead {
+    #[serde(rename = "ref")]
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubPull {
+    number: u64,
+    html_url: String,
+    state: String,
+    head: PrHead,
+}
+
+#[derive(Debug, Deserialize)]
+struct Review {
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubReview {
+    action: String,
+    review: Review,
+    pull_request: GithubPull,
+    repository: GithubRepo,
+    sender: Sender,
+}
+
+#[derive(Debug, Deserialize)]
+struct Commented {
+    #[serde(default)]
+    body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubReviewComment {
+    action: String,
+    comment: Commented,
+    pull_request: GithubPull,
+    repository: GithubRepo,
+    sender: Sender,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommentedIssue {
+    number: u64,
+    html_url: String,
+    state: String,
+    #[serde(default)]
+    pull_request: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubIssueComment {
+    action: String,
+    comment: Commented,
+    issue: CommentedIssue,
+    repository: GithubRepo,
+    sender: Sender,
+}
+
+/// A review round on PR `number` of `repo` at `pr_url`, by a person.
+fn review_round(
+    repo: GithubRepo,
+    number: u64,
+    pr_url: String,
+    sender: Sender,
+) -> Result<Wanted, Skip> {
+    if sender.kind == "Bot" {
+        return Err(ignored("sent by a bot"));
+    }
+    let path = checked_path(&repo.full_name, 2)?;
+    Ok(Wanted {
+        issue_ref: checked_ref(format!("{path}#{number}"))?,
+        repo_url: repo.html_url,
+        kind: Kind::ReviewRound {
+            pr_url,
+            sender: sender.login,
+        },
+    })
+}
+
+/// An open PR from an `agent/*` branch.
+fn agent_pull(pull: &GithubPull) -> Result<(), Skip> {
+    if pull.state != "open" {
+        return Err(ignored("the pull request is not open"));
+    }
+    if !pull.head.name.starts_with("agent/") {
+        return Err(ignored("not a pull request of the agent"));
+    }
+    Ok(())
+}
+
 /// A delivery of GitHub event `event` (`X-GitHub-Event`).
 pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     match event {
+        "pull_request_review" => {
+            let e: GithubReview = parse(body)?;
+            if e.action != "submitted" || !e.review.state.eq_ignore_ascii_case("changes_requested")
+            {
+                return Err(ignored("not a review that requests changes"));
+            }
+            agent_pull(&e.pull_request)?;
+            let (number, url) = (e.pull_request.number, e.pull_request.html_url);
+            review_round(e.repository, number, url, e.sender)
+        }
+        "pull_request_review_comment" => {
+            let e: GithubReviewComment = parse(body)?;
+            if e.action != "created" || !asks_for_fix(e.comment.body.as_deref().unwrap_or("")) {
+                return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
+            }
+            agent_pull(&e.pull_request)?;
+            let (number, url) = (e.pull_request.number, e.pull_request.html_url);
+            review_round(e.repository, number, url, e.sender)
+        }
+        "issue_comment" => {
+            let e: GithubIssueComment = parse(body)?;
+            if e.action != "created" || !asks_for_fix(e.comment.body.as_deref().unwrap_or("")) {
+                return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
+            }
+            if e.issue.pull_request.is_none() {
+                return Err(ignored("a comment on an issue, not a pull request"));
+            }
+            if e.issue.state != "open" {
+                return Err(ignored("the pull request is not open"));
+            }
+            // An issue comment does not say the PR's branch: the job that
+            // opened the PR is what makes it the agent's.
+            review_round(e.repository, e.issue.number, e.issue.html_url, e.sender)
+        }
         "issues" => {
             let e: GithubIssues = parse(body)?;
             if e.action != "labeled" || e.label.is_none_or(|l| l.name != label) {
@@ -264,6 +417,119 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn pull(state: &str, head: &str) -> serde_json::Value {
+        json!({ "number": 100, "html_url": "https://github.com/bot/demo/pull/100",
+                "state": state, "head": { "ref": head } })
+    }
+
+    fn repo() -> serde_json::Value {
+        json!({ "full_name": "bot/demo", "html_url": "https://github.com/bot/demo" })
+    }
+
+    fn person() -> serde_json::Value {
+        json!({ "login": "lan", "type": "User" })
+    }
+
+    #[test]
+    fn a_review_that_requests_changes_on_an_agent_pr_asks_for_a_round() {
+        let review = |state: &str, head: &str, sender: serde_json::Value| {
+            json!({ "action": "submitted", "review": { "state": state, "body": "…" },
+                    "pull_request": pull("open", head), "repository": repo(), "sender": sender })
+            .to_string()
+            .into_bytes()
+        };
+        let wanted = github(
+            "pull_request_review",
+            &review("changes_requested", "agent/demo-1", person()),
+            "aegis",
+        )
+        .unwrap();
+        assert_eq!(wanted.issue_ref, "bot/demo#100");
+        assert_eq!(
+            wanted.kind,
+            Kind::ReviewRound {
+                pr_url: "https://github.com/bot/demo/pull/100".into(),
+                sender: "lan".into()
+            }
+        );
+        for (state, head, sender) in [
+            ("approved", "agent/demo-1", person()),
+            ("commented", "agent/demo-1", person()),
+            ("changes_requested", "feature/x", person()),
+            (
+                "changes_requested",
+                "agent/demo-1",
+                json!({ "login": "ci[bot]", "type": "Bot" }),
+            ),
+        ] {
+            assert!(
+                matches!(
+                    github("pull_request_review", &review(state, head, sender), "aegis"),
+                    Err(Skip::Ignored(_))
+                ),
+                "{state} {head}"
+            );
+        }
+        let closed = json!({ "action": "submitted", "review": { "state": "changes_requested" },
+                             "pull_request": pull("closed", "agent/demo-1"),
+                             "repository": repo(), "sender": person() });
+        assert!(matches!(
+            github(
+                "pull_request_review",
+                closed.to_string().as_bytes(),
+                "aegis"
+            ),
+            Err(Skip::Ignored(_))
+        ));
+    }
+
+    #[test]
+    fn a_comment_asks_for_a_round_only_with_the_command_on_a_line_of_its_own() {
+        let comment = |body: &str| {
+            json!({ "action": "created", "comment": { "body": body },
+                    "issue": { "number": 100, "html_url": "https://github.com/bot/demo/pull/100",
+                               "state": "open", "pull_request": {} },
+                    "repository": repo(), "sender": person() })
+            .to_string()
+            .into_bytes()
+        };
+        for body in [
+            "/aegis fix",
+            "Please look again.\n  /aegis fix the empty case\n",
+        ] {
+            let wanted = github("issue_comment", &comment(body), "aegis").unwrap();
+            assert!(matches!(wanted.kind, Kind::ReviewRound { .. }), "{body}");
+        }
+        for body in ["aegis fix", "do not /aegis fix yet", "/aegis fixit", ""] {
+            assert!(
+                matches!(
+                    github("issue_comment", &comment(body), "aegis"),
+                    Err(Skip::Ignored(_))
+                ),
+                "{body:?}"
+            );
+        }
+        let on_issue = json!({ "action": "created", "comment": { "body": "/aegis fix" },
+                               "issue": { "number": 3, "html_url": "https://github.com/bot/demo/issues/3",
+                                          "state": "open" },
+                               "repository": repo(), "sender": person() });
+        assert!(matches!(
+            github("issue_comment", on_issue.to_string().as_bytes(), "aegis"),
+            Err(Skip::Ignored(_))
+        ));
+        let line = json!({ "action": "created", "comment": { "body": "/aegis fix" },
+                           "pull_request": pull("open", "agent/demo-1"),
+                           "repository": repo(), "sender": person() });
+        assert!(
+            github(
+                "pull_request_review_comment",
+                line.to_string().as_bytes(),
+                "aegis"
+            )
+            .is_ok()
+        );
+    }
 
     fn labeled(label: &str, full_name: &str) -> Vec<u8> {
         json!({
