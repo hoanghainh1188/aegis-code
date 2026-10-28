@@ -35,6 +35,39 @@ fn normalized_remote(remote: &str) -> String {
     bare.strip_suffix(".git").unwrap_or(bare).to_owned()
 }
 
+fn max_jobs(n: u32) -> Result<i32, StoreError> {
+    i32::try_from(n)
+        .ok()
+        .filter(|n| *n >= 1)
+        .ok_or_else(|| StoreError::Invalid {
+            field: "max_concurrent_jobs",
+            message: format!("{n}: from 1 to {}", i32::MAX),
+        })
+}
+
+/// The repo's settings as they are after `action`, in the audit log.
+async fn audit_repo(
+    tx: &mut sqlx::PgConnection,
+    actor: &Actor,
+    action: &str,
+    repo: &Repo,
+) -> Result<(), StoreError> {
+    let detail = serde_json::json!({
+        "slug": repo.slug,
+        "url": repo.url,
+        "default_branch": repo.default_branch,
+        "language": repo.language,
+        "mode": repo.mode.as_str(),
+        "max_concurrent_jobs": repo.max_concurrent_jobs,
+        "config": repo.config,
+    });
+    let target = Target {
+        repo: Some(repo.id),
+        job: None,
+    };
+    audit::record(tx, actor, action, target, detail).await
+}
+
 struct RepoRow {
     id: i64,
     slug: String,
@@ -74,13 +107,7 @@ impl Store {
     /// settings it registered.
     pub async fn create_repo_by(&self, repo: &NewRepo, actor: &Actor) -> Result<Repo, StoreError> {
         check_slug(&repo.slug)?;
-        let max_jobs = i32::try_from(repo.max_concurrent_jobs)
-            .ok()
-            .filter(|n| *n >= 1)
-            .ok_or_else(|| StoreError::Invalid {
-                field: "max_concurrent_jobs",
-                message: format!("{}: from 1 to {}", repo.max_concurrent_jobs, i32::MAX),
-            })?;
+        let max_jobs = max_jobs(repo.max_concurrent_jobs)?;
         let mut tx = self.pool.begin().await?;
         let created: Repo = sqlx::query_as!(
             RepoRow,
@@ -99,20 +126,40 @@ impl Store {
         .await
         .map_err(StoreError::from_db)?
         .try_into()?;
-        let detail = serde_json::json!({
-            "slug": created.slug,
-            "url": created.url,
-            "mode": created.mode.as_str(),
-            "max_concurrent_jobs": created.max_concurrent_jobs,
-            "config": created.config,
-        });
-        let target = Target {
-            repo: Some(created.id),
-            job: None,
-        };
-        audit::record(&mut tx, actor, "repo.register", target, detail).await?;
+        audit_repo(&mut tx, actor, "repo.register", &created).await?;
         tx.commit().await?;
         Ok(created)
+    }
+
+    /// Replaces everything but the slug of the repo `repo.slug` names,
+    /// audited as done by `actor` with the settings it now has (#234).
+    /// `NotFound` when there is no such repo.
+    pub async fn update_repo_by(&self, repo: &NewRepo, actor: &Actor) -> Result<Repo, StoreError> {
+        let max_jobs = max_jobs(repo.max_concurrent_jobs)?;
+        let mut tx = self.pool.begin().await?;
+        let updated: Repo = sqlx::query_as!(
+            RepoRow,
+            "UPDATE repos
+             SET url = $2, default_branch = $3, language = $4, mode = $5,
+                 max_concurrent_jobs = $6, config = $7
+             WHERE slug = $1
+             RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+            repo.slug,
+            repo.url,
+            repo.default_branch,
+            repo.language,
+            repo.mode.as_str(),
+            max_jobs,
+            repo.config,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(StoreError::from_db)?
+        .ok_or_else(|| StoreError::NotFound(format!("repo `{}`", repo.slug)))?
+        .try_into()?;
+        audit_repo(&mut tx, actor, "repo.update", &updated).await?;
+        tx.commit().await?;
+        Ok(updated)
     }
 
     pub async fn repo(&self, id: RepoId) -> Result<Option<Repo>, StoreError> {

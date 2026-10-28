@@ -12,6 +12,7 @@
 mod answer;
 mod batch;
 mod checks;
+pub mod clone;
 mod code_graph;
 mod config;
 mod error;

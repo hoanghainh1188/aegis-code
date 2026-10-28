@@ -10,6 +10,7 @@ pub mod config;
 pub mod lifecycle;
 pub mod logs;
 pub mod metrics;
+pub mod repo_cli;
 pub mod runner;
 pub mod secrets;
 pub mod sonar;
