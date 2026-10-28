@@ -198,7 +198,8 @@ fn each_part_has_its_own_language_server_chosen_by_the_file() {
     .unwrap();
     let mut aci = Aci::new(&repo.repo(), profiles).unwrap();
     assert!(aci.has_language_server());
-    aci.start_language_server().unwrap();
+    // No server runs before the agent asks one (#268).
+    assert!(!root_record.exists() && !py_record.exists());
 
     let py = aci.find_definition(at("py/cart/__init__.py")).unwrap();
     assert_eq!(py.hits.len(), 1, "{py}");
@@ -206,6 +207,8 @@ fn each_part_has_its_own_language_server_chosen_by_the_file() {
         (py.hits[0].path.as_str(), py.hits[0].line),
         ("py/cart/__init__.py", 1)
     );
+    // Only the part asked about has one.
+    assert!(py_record.exists() && !root_record.exists());
     let rust = aci.find_definition(at("src/lib.rs")).unwrap();
     assert_eq!(
         (rust.hits[0].path.as_str(), rust.hits[0].line),
@@ -265,11 +268,31 @@ fn a_part_without_a_language_server_says_so() {
     )
     .unwrap();
     let mut aci = Aci::new(&repo.repo(), profiles).unwrap();
-    aci.start_language_server().unwrap();
     let err = aci
         .find_definition(at("py/cart/__init__.py"))
         .unwrap_err()
         .to_string();
     assert!(err.contains("`py/` (Python)"), "{err}");
     assert!(aci.find_definition(at("src/lib.rs")).is_ok());
+}
+
+/// #268: a server that cannot start says why at each call, and is not
+/// started again.
+#[test]
+fn a_server_that_cannot_start_says_why_and_is_not_retried() {
+    let repo = Scratch::two_languages();
+    let mut rust = profile(Language::Rust, &ProfileOverrides::default());
+    let missing = vec!["/nonexistent/aegis-language-server".to_string()];
+    rust.profile.aci.lsp = Some(missing.try_into().unwrap());
+    let mut aci = Aci::new(&repo.repo(), RepoProfiles::single(rust)).unwrap();
+    let first = aci
+        .find_definition(at("src/lib.rs"))
+        .unwrap_err()
+        .to_string();
+    assert!(first.contains("aegis-language-server"), "{first}");
+    let again = aci
+        .find_references(at("src/lib.rs"))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(first, again);
 }

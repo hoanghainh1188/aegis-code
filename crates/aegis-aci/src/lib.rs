@@ -47,9 +47,10 @@ pub use workspace::{FormatContainer, Workspace};
 pub struct Aci {
     workspace: Workspace,
     viewer: viewer::Viewer,
-    /// Each part's language server, by the part's directory, once started
-    /// (#199).
-    lsp: BTreeMap<String, lsp::Lsp>,
+    /// Each part's language server, by the part's directory, once asked
+    /// for (#199, #268); a start that failed keeps its reason, so later
+    /// calls do not try again.
+    lsp: BTreeMap<String, Result<lsp::Lsp, String>>,
     /// Files written since their part's language server last saw them.
     changed: lsp::Changed,
     tests: run_tests::TestRunner,
@@ -126,21 +127,17 @@ impl Aci {
             .any(|p| p.profile.profile.aci.lsp.is_some())
     }
 
-    /// Starts the language server of each part whose profile names one, on
-    /// the part's directory and in its format container when there is one,
-    /// so they index while the agent reads the issue. One that cannot start
-    /// leaves the others running.
+    /// Starts the language server of each part whose profile names one now,
+    /// rather than at the first `find_definition` / `find_references` on
+    /// the part. One that cannot start leaves the others running.
     pub fn start_language_server(&mut self) -> Result<(), AciError> {
         let mut failed = Vec::new();
         for part in self.workspace.profiles().parts() {
             if part.profile.profile.aci.lsp.is_none() {
                 continue;
             }
-            match start_server(&self.workspace, part) {
-                Ok(server) => {
-                    self.lsp.insert(part.dir.clone(), server);
-                }
-                Err(e) => failed.push((part.label(), e)),
+            if let Err(e) = server_of(&mut self.lsp, &self.workspace, part) {
+                failed.push((part.label(), e));
             }
         }
         match (failed.len(), self.workspace.profiles().parts().len()) {
@@ -167,19 +164,17 @@ impl Aci {
     }
 
     fn lookup(&mut self, kind: Lookup, at: LookupAt<'_>) -> Result<LookupResult, AciError> {
-        if self.lsp.is_empty() {
-            return Err(AciError::LanguageServer(
-                "no language server is running for this repo; use search_symbol".into(),
-            ));
-        }
         let target = navigate::resolve(&self.workspace, at)?;
         let part = self.workspace.profiles().part_of(&target.relative);
-        let Some(server) = self.lsp.get_mut(&part.dir) else {
+        if part.profile.profile.aci.lsp.is_none() {
             return Err(AciError::LanguageServer(format!(
                 "no language server is running for {}; use search_symbol",
                 part.label()
             )));
-        };
+        }
+        // Started at the first call on its part (#268): most jobs never ask,
+        // and an index of the whole repo is not free.
+        let server = server_of(&mut self.lsp, &self.workspace, part)?;
         server.ready(lsp::CALL_WAIT)?;
         // The server reads files from disk only when it opens them: what the
         // ACI wrote in its part since goes to it first.
@@ -260,6 +255,19 @@ impl Aci {
         }
         Ok(outcome)
     }
+}
+
+/// `part`'s language server, started now if it was not yet.
+fn server_of<'a>(
+    servers: &'a mut BTreeMap<String, Result<lsp::Lsp, String>>,
+    workspace: &Workspace,
+    part: &ProfilePart,
+) -> Result<&'a mut lsp::Lsp, AciError> {
+    servers
+        .entry(part.dir.clone())
+        .or_insert_with(|| start_server(workspace, part).map_err(|e| e.to_string()))
+        .as_mut()
+        .map_err(|e| AciError::LanguageServer(e.clone()))
 }
 
 /// `part`'s language server, with the part's options.

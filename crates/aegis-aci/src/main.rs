@@ -203,18 +203,15 @@ fn test_sandbox(container: &FormatContainer) -> Sandbox {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let mut aci = match parse_args(std::env::args().skip(1)).and_then(build) {
+    let aci = match parse_args(std::env::args().skip(1)).and_then(build) {
         Ok(aci) => aci,
         Err(message) => {
             eprintln!("aegis-aci: {message}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
-    // It indexes while the agent reads; a server that cannot start leaves
-    // its two tools answering why.
-    if let Err(e) = aci.start_language_server() {
-        eprintln!("aegis-aci: {e}");
-    }
+    // The language server starts at the first find_definition /
+    // find_references (#268), not here.
     let server = AciServer::new(aci);
     let served = async {
         server
