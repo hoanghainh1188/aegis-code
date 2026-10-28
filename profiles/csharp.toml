@@ -33,6 +33,15 @@ coverage = [
     "--results-directory", "TestResults",
     "--collect", "XPlat Code Coverage;Format=opencover",
 ]
+# `--collect` là tùy chọn của VSTest. Repo chạy test bằng
+# Microsoft.Testing.Platform (global.json `"test": {"runner": …}`) không nhận
+# nó, và coverage ở đó đi qua extension mà repo tự tham chiếu
+# (Microsoft.Testing.Extensions.CodeCoverage, coverlet.MTP), nên gate bỏ qua
+# bước này. Repo có coverage thì khai `[gate] coverage` cùng `[coverage]`
+# trong RepoConfig (#228).
+coverage_skip = [
+    { file = "global.json", pattern = '"runner"\s*:\s*"Microsoft\.Testing\.Platform"' },
+]
 
 # SonarQube C# không đọc Cobertura; coverlet xuất OpenCover vào một thư mục
 # GUID, nên đường dẫn có `*`.

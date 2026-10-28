@@ -284,6 +284,11 @@ fn without_params(id: &str) -> &str {
     }
 }
 
+/// Directories between a part's `dir` and the repo root.
+fn depth(dir: &str) -> usize {
+    Path::new(dir).components().count()
+}
+
 fn skip_of(reason: SkipReason) -> Skip {
     match reason {
         SkipReason::NotInProfile => Skip::NotInProfile,
@@ -1159,6 +1164,14 @@ impl<'a> Run<'a> {
             Step::Skipped(reason) => return Ok(StepReport::skipped(name, skip_of(*reason))),
             Step::Run(c) => c,
         };
+        let root = self.part.repo.ancestors().nth(depth(&self.part.dir));
+        let not_for_repo = root.is_some_and(|root| {
+            let skip = &self.part.profile.gate.coverage_skip;
+            skip.iter().any(|m| m.matches(&self.part.repo, root))
+        });
+        if not_for_repo {
+            return Ok(StepReport::skipped(name, Skip::NotForRepo));
+        }
         let pattern = self.part.profile.coverage.as_ref().map(|c| c.path.as_str());
         if let Some(pat) = pattern {
             for old in aegis_lang::find_reports(&self.part.repo, pat) {

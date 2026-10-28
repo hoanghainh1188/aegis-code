@@ -6,8 +6,8 @@ use serde::Deserialize;
 
 use crate::profile::{check_audit, check_gate, check_image, check_repo_path, check_tree};
 use crate::{
-    CommandTemplate, Coverage, DependencyTree, GateSteps, LangError, Language, Placeholder,
-    Profile, TestOutput,
+    CommandTemplate, Coverage, DependencyTree, FileMatch, GateSteps, LangError, Language,
+    Placeholder, Profile, TestOutput,
 };
 
 /// A command from the repo, or `false` to turn the step off.
@@ -121,6 +121,9 @@ pub struct GatePlan {
     /// Never skipped: a gate without tests proves nothing.
     pub test: CommandTemplate,
     pub coverage: Step,
+    /// Repos the profile's coverage command does not run on; empty when
+    /// the repo gives its own command.
+    pub coverage_skip: Vec<FileMatch>,
     pub test_output: Option<TestOutput>,
     pub harness: Option<CustomHarness>,
     pub update_references: Option<ReferenceUpdate>,
@@ -161,6 +164,10 @@ impl Profile {
                 Step::Skipped(_) => return Err(invalid("gate.test cannot be turned off".into())),
             },
             coverage: step(&self.gate.coverage, &o.coverage).map_err(invalid)?,
+            coverage_skip: match &o.coverage {
+                Some(StepOverride::Run(_)) => Vec::new(),
+                _ => self.gate.coverage_skip.clone(),
+            },
             // A repo's own test command may print differently: its format
             // is used only when the repo names it.
             test_output: match &o.test {
@@ -182,6 +189,7 @@ impl Profile {
             repro_test: gate.repro_test.command().cloned(),
             test: gate.test.clone(),
             coverage: gate.coverage.command().cloned(),
+            coverage_skip: Vec::new(),
             test_output: gate.test_output,
         })
         .map_err(invalid)?;
@@ -629,6 +637,22 @@ mod tests {
         assert!(err(&gradle.replace("gradle-dependencies", "deps")).contains("no reader"));
         assert!(err(&gradle.replace(" > {output}", "")).contains("must contain `{output}`"));
         assert!(err(&gradle.replace("\"*.versions.toml\"", "")).contains("on_change"));
+    }
+
+    #[test]
+    fn a_repo_coverage_command_runs_where_the_profile_s_is_skipped() {
+        let csharp = Profiles::builtin()
+            .unwrap()
+            .get(Language::CSharp)
+            .unwrap()
+            .clone();
+        let default = csharp.resolve(&ProfileOverrides::default()).unwrap();
+        assert_eq!(default.gate.coverage_skip.len(), 1);
+        let own = overrides(
+            "[gate]\ncoverage = [\"dotnet\", \"test\", \"--coverage\"]\n\
+             [coverage]\nformat = \"cobertura\"\npath = \"TestResults/coverage.xml\"\n",
+        );
+        assert!(csharp.resolve(&own).unwrap().gate.coverage_skip.is_empty());
     }
 
     #[test]

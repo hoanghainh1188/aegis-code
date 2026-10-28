@@ -28,7 +28,11 @@ fn tools() -> bool {
 }
 
 fn fetched(profile: &ResolvedProfile) -> Workspace {
-    let ws = Workspace::new("csharp");
+    fetched_fixture(profile, "csharp")
+}
+
+fn fetched_fixture(profile: &ResolvedProfile, fixture: &str) -> Workspace {
+    let ws = Workspace::new(fixture);
     ws.run_ok(
         "fetch",
         &profile.fetch.command().unwrap().render(&[]).unwrap(),
@@ -93,6 +97,47 @@ fn gate_steps_pass_offline_after_fetch() {
     let report = find_report(&ws.repo(), pattern).expect("OpenCover report");
     let xml = std::fs::read_to_string(report).unwrap();
     assert!(xml.contains("<CoverageSession"), "OpenCover XML expected");
+}
+
+/// #228: under Microsoft.Testing.Platform the profile's test steps run but
+/// `--collect` does not, so its coverage is skipped there and only there.
+#[test]
+fn testing_platform_runs_the_tests_and_skips_the_coverage() {
+    let profile = csharp();
+    let skipped = |ws: &Workspace| {
+        let repo = ws.repo();
+        profile
+            .gate
+            .coverage_skip
+            .iter()
+            .any(|m| m.matches(&repo, &repo))
+    };
+    assert!(!skipped(&Workspace::new("csharp")));
+    assert!(skipped(&Workspace::new("csharp-mtp")));
+    if !tools() {
+        return;
+    }
+    let ws = fetched_fixture(&profile, "csharp-mtp");
+    let gate = &profile.gate;
+    let plain = |c: &aegis_lang::CommandTemplate| c.render(&[]).unwrap();
+    ws.run_ok("format", &plain(gate.format.command().unwrap()));
+    ws.run_ok("lint", &plain(gate.lint.command().unwrap()));
+    ws.run_ok("test", &plain(&gate.test));
+    let repro = gate
+        .repro_test
+        .command()
+        .unwrap()
+        .render(&[(
+            Placeholder::Test,
+            "FullyQualifiedName~CartTests.AddsUpPrices",
+        )])
+        .unwrap();
+    let out = ws.run_ok("repro_test", &repro);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("total: 1"), "one test: {stdout}");
+    // What the skip is for: VSTest's `--collect` is an unknown option here.
+    let coverage = ws.run(&plain(gate.coverage.command().unwrap()));
+    assert!(!coverage.status.success());
 }
 
 #[test]

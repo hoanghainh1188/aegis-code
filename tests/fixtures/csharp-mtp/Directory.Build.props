@@ -1,0 +1,7 @@
+<Project>
+  <!-- Repo mẫu cho profile C#/.NET chạy test bằng Microsoft.Testing.Platform
+       (#228). Lockfile để gate so phụ thuộc. -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+</Project>
