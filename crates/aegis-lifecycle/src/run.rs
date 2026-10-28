@@ -37,7 +37,8 @@ use crate::code_graph::{self, CodeGraph, ServerCalls};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
-use crate::publish::publish;
+use crate::publish::{fork_remote, publish, publish_round};
+use crate::review::{MAX_DIFF_CHARS, ReviewRound};
 use crate::{IssueInput, LifecycleError, RunConfig};
 
 /// Final answers the agent may get wrong before the job stops.
@@ -109,6 +110,8 @@ pub(crate) enum Finish {
     Publish,
     /// A commit in the clone, merged later with the batch's other groups.
     Keep(Author),
+    /// One more commit on an open PR's branch, and a reply (#243).
+    Update(Box<ReviewRound>),
 }
 
 /// Runs one issue. `cancel` is checked before every model call and stops a
@@ -116,6 +119,35 @@ pub(crate) enum Finish {
 pub async fn run_issue<P, S>(
     platform: Arc<Platform<P, S>>,
     issue: IssueInput,
+    cancel: CancellationToken,
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    run(platform, issue, None, cancel).await
+}
+
+/// Runs a review round (#243) of `issue`'s PR under `issue.id`, its own
+/// ledger: the agent goes on from the PR's branch and, when the gate
+/// passes, pushes to it and replies on the PR.
+pub async fn run_review<P, S>(
+    platform: Arc<Platform<P, S>>,
+    issue: IssueInput,
+    round: ReviewRound,
+    cancel: CancellationToken,
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    run(platform, issue, Some(round), cancel).await
+}
+
+async fn run<P, S>(
+    platform: Arc<Platform<P, S>>,
+    issue: IssueInput,
+    round: Option<ReviewRound>,
     cancel: CancellationToken,
 ) -> Result<IssueReport, LifecycleError>
 where
@@ -140,7 +172,11 @@ where
         )));
     }
 
-    let ending = match prepare_and_work(&platform, &mut ledger, &issue, &cancel).await {
+    let prepared = match round {
+        Some(round) => review_and_work(&platform, &mut ledger, &issue, round, &cancel).await,
+        None => prepare_and_work(&platform, &mut ledger, &issue, &cancel).await,
+    };
+    let ending = match prepared {
         Ok(ending) => ending,
         // The ledger still gets an outcome, so the run is not left open.
         Err(e) => Ending::stop(Outcome::StoppedSteps, format!("error: {e}")),
@@ -214,6 +250,73 @@ where
         issue,
         first,
         &Finish::Publish,
+        cancel,
+    )
+    .await
+}
+
+/// A review round: the PR's branch fetched into the clone, the review as
+/// the first message, no triage (it is the issue's).
+async fn review_and_work<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    issue: &IssueInput,
+    round: ReviewRound,
+    cancel: &CancellationToken,
+) -> Result<Ending, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    let cfg = &platform.config;
+    if cancel.is_cancelled() {
+        return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
+    }
+    let (title, body) = (redact(&issue.title), redact(&issue.body));
+    let (round, in_notes) = round.redacted();
+    ledger
+        .secrets_redacted(count(title.count() + body.count() + in_notes))
+        .await?;
+    let issue = &IssueInput {
+        title: title.text,
+        body: body.text,
+        ..issue.clone()
+    };
+    ledger.classified(aegis_ledger::IssueKind::Bug).await?;
+    // The branch as it is now, reviewers' commits included.
+    let remote = fork_remote(platform)?;
+    let (clone, branch) = (cfg.repo.path.clone(), round.pull.head_ref.clone());
+    let (url, token) = (remote.url().to_owned(), platform.github_token.clone());
+    let into = format!("review/{}", round.branch_id());
+    let head = tokio::task::spawn_blocking(move || {
+        let source = crate::clone::Source {
+            url: &url,
+            token: Some(&token).filter(|t| !t.is_empty()).map(String::as_str),
+        };
+        crate::clone::fetch_ref(&clone, source, &branch, &into)
+    })
+    .await
+    .map_err(|e| LifecycleError::Config(format!("fetching the PR's branch: {e}")))??;
+    let base = job::merge_base(&cfg.repo.path, &head, &cfg.repo.base)?;
+    let diff = job::diff(&cfg.repo.path, &base, &head, MAX_DIFF_CHARS)?;
+    let diff = redact(&diff);
+    ledger.secrets_redacted(count(diff.count())).await?;
+    let first = round.first_message(issue, &diff.text);
+    let round = ReviewRound {
+        pull: aegis_pr::PullState {
+            head_sha: head,
+            ..round.pull
+        },
+        ..round
+    };
+    let profiles = cfg.repo.profiles(&platform.profiles)?;
+    work(
+        platform,
+        ledger,
+        &profiles,
+        issue,
+        first,
+        &Finish::Update(Box::new(round)),
         cancel,
     )
     .await
@@ -352,12 +455,23 @@ where
     S: LedgerStore + Send + Sync + 'static,
 {
     let cfg = &platform.config;
-    let base = job::resolve(
-        &cfg.repo.path,
-        issue.base.as_deref().unwrap_or(&cfg.repo.base),
-    )?;
+    // A review round starts from the PR's head and is still checked
+    // against the PR's base (#243).
+    let (base, start) = match finish {
+        Finish::Update(round) => (
+            job::merge_base(&cfg.repo.path, &round.pull.head_sha, &cfg.repo.base)?,
+            round.pull.head_sha.clone(),
+        ),
+        _ => {
+            let base = job::resolve(
+                &cfg.repo.path,
+                issue.base.as_deref().unwrap_or(&cfg.repo.base),
+            )?;
+            (base.clone(), base)
+        }
+    };
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
-    let tree = Worktree::create(&cfg.repo.path, &base, &job_dir.join("repo"))?;
+    let tree = Worktree::create(&cfg.repo.path, &start, &job_dir.join("repo"))?;
 
     let map = module_map(cfg, profiles, tree.path(), &base)?;
     let conventions = language_conventions(profiles);
@@ -1109,6 +1223,16 @@ where
                     reason: None,
                     pr_url: None,
                     kept: Some(Kept { commit, answer }),
+                });
+            }
+            if let Finish::Update(round) = finish {
+                let published =
+                    publish_round(platform, ledger, tree, issue, round, &answer, &report).await?;
+                return Ok(Ending {
+                    outcome: Outcome::PrOpened,
+                    reason: published.note,
+                    pr_url: Some(published.url),
+                    kept: None,
                 });
             }
             let pr_url = if cfg.run.open_prs {

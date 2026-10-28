@@ -261,6 +261,8 @@ mod tests {
             reason: None,
             pr_url: None,
             retry_of: None,
+            review_of: None,
+            review_round: 0,
         }
     }
 

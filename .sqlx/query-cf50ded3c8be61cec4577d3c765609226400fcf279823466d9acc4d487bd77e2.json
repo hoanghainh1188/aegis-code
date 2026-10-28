@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, status, reason)\n             SELECT $1, $2, $3, $4,\n                    CASE WHEN $5::text IS NULL THEN 'queued' ELSE 'cancelled' END, $5\n             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2\n                               AND status IN ('queued', 'running'))\n             ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round\n             FROM jobs WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -200,15 +200,33 @@
             "name": "retry_of"
           }
         }
+      },
+      {
+        "ordinal": 18,
+        "name": "review_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_of"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "review_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "review_round"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -229,8 +247,10 @@
       false,
       true,
       true,
-      true
+      true,
+      true,
+      false
     ]
   },
-  "hash": "083eb3e6f94abb42a6c9436c96e15542a234bd65a096944debc2536d7632b5ae"
+  "hash": "cf50ded3c8be61cec4577d3c765609226400fcf279823466d9acc4d487bd77e2"
 }

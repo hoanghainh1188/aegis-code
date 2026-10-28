@@ -54,6 +54,41 @@ pub fn resolve(repo: &Path, rev: &str) -> Result<String, LifecycleError> {
     git(repo, &["rev-parse", "--verify", "--end-of-options", &spec])
 }
 
+/// The best common ancestor of `a` and `b` in the clone.
+pub fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, LifecycleError> {
+    git(repo, &["merge-base", "--end-of-options", a, b])
+}
+
+/// The changes from `from` to `to`, as `git diff` shows them, at most
+/// `max_chars` (cut at a line, with a note of what was left out).
+pub fn diff(repo: &Path, from: &str, to: &str, max_chars: usize) -> Result<String, LifecycleError> {
+    let full = git(
+        repo,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--end-of-options",
+            from,
+            to,
+        ],
+    )?;
+    if full.chars().count() <= max_chars {
+        return Ok(full);
+    }
+    let mut kept = String::new();
+    for line in full.lines() {
+        if kept.chars().count() + line.chars().count() + 1 > max_chars {
+            break;
+        }
+        kept.push_str(line);
+        kept.push('\n');
+    }
+    let left = full.lines().count() - kept.lines().count();
+    kept.push_str(&format!("[{left} more lines of the diff not shown]"));
+    Ok(kept)
+}
+
 /// A digest of the files at `rev` that `keep` selects: their paths and
 /// blob ids (the hash of each file's content). The same files give the
 /// same digest whatever the commit, so an index made from it is redone

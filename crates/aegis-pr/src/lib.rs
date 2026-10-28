@@ -19,6 +19,7 @@ mod error;
 mod git;
 mod github;
 mod gitlab;
+mod review;
 
 use std::path::Path;
 
@@ -35,6 +36,7 @@ pub use error::PrError;
 pub use git::{Identity, Remote, token_env};
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, IssueNote};
+pub use review::{NoteAt, PullState, REPLY_MARKER, ReviewNote};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pushed {
@@ -57,6 +59,29 @@ pub fn push_gated(
     let branch = AgentBranch::for_issue(issue_id)?;
     let staging = git::Staging::new(repo)?;
     let commit = git::commit_tree(&staging, &gate.tree, &gate.base, message, who)?;
+    git::push(&staging, remote, &branch, &commit)?;
+    Ok(Pushed { branch, commit })
+}
+
+/// A review round's commit (#243): the tree the gate passed on top of
+/// `parent`, the PR branch's head the round started from, pushed to
+/// `agent/<issue_id>` without force. If someone pushed to the branch
+/// since, the push is refused and their commits stay.
+pub fn push_gated_onto(
+    repo: &Path,
+    issue_id: &str,
+    gate: &GateReport,
+    parent: &str,
+    message: &str,
+    who: &Identity,
+    remote: &Remote,
+) -> Result<Pushed, PrError> {
+    if !gate.passed() {
+        return Err(PrError::GateNotPassed);
+    }
+    let branch = AgentBranch::for_issue(issue_id)?;
+    let staging = git::Staging::new(repo)?;
+    let commit = git::commit_tree(&staging, &gate.tree, parent, message, who)?;
     git::push(&staging, remote, &branch, &commit)?;
     Ok(Pushed { branch, commit })
 }

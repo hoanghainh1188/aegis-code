@@ -31,6 +31,8 @@ pub(crate) struct JobRow {
     pub(crate) reason: Option<String>,
     pub(crate) pr_url: Option<String>,
     pub(crate) retry_of: Option<i64>,
+    pub(crate) review_of: Option<i64>,
+    pub(crate) review_round: i32,
 }
 
 impl TryFrom<JobRow> for Job {
@@ -56,6 +58,8 @@ impl TryFrom<JobRow> for Job {
             reason: row.reason,
             pr_url: row.pr_url,
             retry_of: row.retry_of.map(JobId),
+            review_of: row.review_of.map(JobId),
+            review_round: count("jobs.review_round", row.review_round)?,
         })
     }
 }
@@ -108,7 +112,7 @@ impl Store {
              VALUES ($1, $2, $3, $4)
              RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
                        attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
+                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
             job.repo_id.0,
             job.issue_ref,
             job.ledger_key.as_str(),
@@ -138,7 +142,7 @@ impl Store {
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
                     attempts, locked_by, locked_until, created_at, updated_at,
-                    run_after, retries, cancel_requested, reason, pr_url, retry_of
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
              FROM jobs WHERE id = $1",
             id.0,
         )
@@ -169,7 +173,7 @@ impl Store {
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
                     attempts, locked_by, locked_until, created_at, updated_at,
-                    run_after, retries, cancel_requested, reason, pr_url, retry_of
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
              FROM jobs
              WHERE ($1::bigint IS NULL OR repo_id = $1)
                AND ($2::text IS NULL OR status = $2)
@@ -339,7 +343,7 @@ impl Store {
              WHERE id = $1
              RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
                        attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of",
+                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
             job.0,
             status.as_str(),
             outcome,

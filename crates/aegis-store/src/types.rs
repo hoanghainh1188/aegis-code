@@ -58,6 +58,7 @@ text_enum! {
         Backlog = "backlog",
         Sonar = "sonar",
         Ci = "ci",
+        Review = "review",
     }
 }
 
@@ -184,6 +185,10 @@ pub struct Job {
     pub pr_url: Option<String>,
     /// The job this one runs again.
     pub retry_of: Option<JobId>,
+    /// A review round (#243): the job that opened the PR it works on.
+    pub review_of: Option<JobId>,
+    /// The PR's review round this is, from 1; 0 when not one.
+    pub review_round: u32,
 }
 
 /// A webhook delivery that asks for a job.

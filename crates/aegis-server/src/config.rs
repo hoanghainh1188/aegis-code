@@ -37,6 +37,8 @@ pub struct ServerConfig {
     pub trackers: TrackersSection,
     #[serde(default)]
     pub sonar: SonarSection,
+    #[serde(default)]
+    pub reviews: ReviewsSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
@@ -95,6 +97,22 @@ pub struct SonarSection {
 impl Default for SonarSection {
     fn default() -> Self {
         Self { check_s: 60 }
+    }
+}
+
+/// Review rounds on the agent's PRs (#243).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewsSection {
+    /// Rounds a PR may have after the job that opened it.
+    pub max_rounds: u32,
+}
+
+impl Default for ReviewsSection {
+    fn default() -> Self {
+        Self {
+            max_rounds: aegis_store::DEFAULT_MAX_REVIEW_ROUNDS,
+        }
     }
 }
 

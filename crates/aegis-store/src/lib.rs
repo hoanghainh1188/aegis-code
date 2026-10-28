@@ -19,6 +19,7 @@ mod page;
 mod polls;
 mod queue;
 mod repos;
+mod reviews;
 mod sonar;
 mod stats;
 mod types;
@@ -40,6 +41,7 @@ pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
 pub use queue::{AttemptEnd, Claim, Lease};
+pub use reviews::{DEFAULT_MAX_REVIEW_ROUNDS, pr_issue_ref};
 pub use sonar::MAX_BATCH_WARNINGS;
 pub use stats::QueueStats;
 pub use types::{
@@ -67,6 +69,8 @@ pub struct Store {
     /// How monthly budgets apply (#31); [`BudgetRules::default`] until
     /// [`Store::with_budget`].
     budget: Arc<BudgetRules>,
+    /// Review rounds a PR may have (#243).
+    max_review_rounds: u32,
 }
 
 impl Store {
@@ -85,6 +89,7 @@ impl Store {
         Ok(Self {
             pool,
             budget: Arc::default(),
+            max_review_rounds: reviews::DEFAULT_MAX_REVIEW_ROUNDS,
         })
     }
 

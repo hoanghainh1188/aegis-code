@@ -92,3 +92,8 @@ poll_s = 300
 # warnings on its own `sonar_poll.every_s` (#27); this is how often the
 # `api` role looks which are due, one process at a time. 0 polls none.
 check_s = 60
+
+[reviews]
+# Review rounds a PR of the agent may have after the job that opened it
+# (#243): each goes on with the PR's branch and has a budget of its own.
+max_rounds = 3
