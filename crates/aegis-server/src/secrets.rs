@@ -1,19 +1,23 @@
 //! The server's secrets (ADR 0003 §6, #30): read from AWS Secrets Manager
 //! at start, kept in memory only, read again every `refresh_s` and when a
-//! call with one is refused. `[secrets] source = "env"` reads the process
-//! environment instead, for dev and tests only; there is no default.
+//! call with one is refused. On premises, `source = "file"` reads one file
+//! per secret in `dir` (#261): Docker secrets, a Kubernetes Secret volume,
+//! systemd's credentials. `source = "env"` reads the process environment,
+//! for dev and tests only; there is no default.
 //!
 //! A deployment that runs `customer-jp` repos reads its secrets in
 //! `ap-northeast-1`, like everything else of theirs.
 //!
 //! Secret names: [`DATABASE_URL`], the webhook secrets, the comment token,
 //! each mode's `api_key_env`, each repo's `fork.token_env` and
-//! `sonar.token_env`. In Secrets Manager, `<prefix><name>`.
+//! `sonar.token_env`. In Secrets Manager, `<prefix><name>`; as files, the
+//! file `<dir>/<name>`.
 
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use aegis_secrets::{EnvSource, Secrets};
+use aegis_secrets::{EnvSource, FileSource, Secrets};
 use aegis_store::Store;
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
@@ -28,6 +32,8 @@ pub const JAPAN_REGION: &str = "ap-northeast-1";
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     Aws,
+    /// A directory of secret files, on premises.
+    File,
     /// Dev and tests only.
     Env,
 }
@@ -42,6 +48,9 @@ pub struct SecretsSection {
     /// Before each name in Secrets Manager, e.g. `aegis/prod/`.
     #[serde(default)]
     pub prefix: String,
+    /// Required with `file`, e.g. `/run/secrets`.
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
     #[serde(default = "default_refresh_s")]
     pub refresh_s: u64,
 }
@@ -57,6 +66,15 @@ impl SecretsSection {
 
     /// Checks the section; `customer_jp` when that mode is configured.
     pub fn check(&self, customer_jp: bool) -> Result<(), String> {
+        match (&self.source, &self.dir) {
+            (SourceKind::File, None) => {
+                return Err("[secrets]: `dir` is required with `file`".into());
+            }
+            (SourceKind::Aws | SourceKind::Env, Some(_)) => {
+                return Err("[secrets]: `dir` is for `file`".into());
+            }
+            _ => {}
+        }
         match (&self.source, self.region.as_deref()) {
             (SourceKind::Aws, None) => Err("[secrets]: `region` is required with `aws`".into()),
             (SourceKind::Aws, Some(region)) if customer_jp && region != JAPAN_REGION => {
@@ -64,7 +82,9 @@ impl SecretsSection {
                     "[secrets]: a deployment with `customer_jp` reads its secrets in {JAPAN_REGION}, not {region}"
                 ))
             }
-            (SourceKind::Env, Some(_)) => Err("[secrets]: `region` is for `aws`, not `env`".into()),
+            (SourceKind::Env | SourceKind::File, Some(_)) => {
+                Err("[secrets]: `region` is for `aws`".into())
+            }
             _ => Ok(()),
         }
     }
@@ -79,6 +99,13 @@ impl SecretsSection {
                     aegis_secrets::AwsSource::new(region, &self.prefix).await,
                 ))
             }
+            SourceKind::File => {
+                let dir = self
+                    .dir
+                    .as_deref()
+                    .ok_or("[secrets]: `dir` is required with `file`")?;
+                Ok(Secrets::new(FileSource::open(dir)?))
+            }
             SourceKind::Env => {
                 tracing::warn!("secrets are read from the environment: for dev and tests only");
                 Ok(Secrets::new(EnvSource::for_dev_and_tests()))
@@ -90,7 +117,9 @@ impl SecretsSection {
 /// `[secrets]` is required: reading the environment must be chosen.
 pub fn section(section: Option<&SecretsSection>) -> Result<&SecretsSection, String> {
     section.ok_or_else(|| {
-        "[secrets] is required: `source = \"aws\"` with `region`, or `source = \"env\"` for dev and tests".into()
+        "[secrets] is required: `source = \"aws\"` with `region`, `source = \"file\"` with \
+         `dir`, or `source = \"env\"` for dev and tests"
+            .into()
     })
 }
 
@@ -178,7 +207,34 @@ mod tests {
         assert_eq!(env.source, SourceKind::Env);
         assert!(env.check(true).is_ok());
         assert!(toml::from_str::<SecretsSection>("").is_err());
-        assert!(toml::from_str::<SecretsSection>("source = \"file\"").is_err());
+        assert!(toml::from_str::<SecretsSection>("source = \"vault\"").is_err());
+    }
+
+    #[tokio::test]
+    async fn files_need_their_directory() {
+        let err = parse("source = \"file\"").check(false).unwrap_err();
+        assert!(err.contains("`dir` is required"), "{err}");
+        let err = parse("source = \"env\"\ndir = \"/run/secrets\"")
+            .check(false)
+            .unwrap_err();
+        assert!(err.contains("`dir` is for `file`"), "{err}");
+        let err = parse("source = \"file\"\ndir = \"/x\"\nregion = \"us-east-1\"")
+            .check(false)
+            .unwrap_err();
+        assert!(err.contains("`region` is for `aws`"), "{err}");
+        let dir = std::env::temp_dir();
+        let files = parse(&format!(
+            "source = \"file\"\ndir = {:?}",
+            dir.display().to_string()
+        ));
+        let secrets = files.open(true).await.unwrap();
+        assert!(
+            secrets.source().starts_with("files in "),
+            "{}",
+            secrets.source()
+        );
+        let missing = parse("source = \"file\"\ndir = \"/surely/not/here\"");
+        assert!(missing.open(false).await.is_err());
     }
 
     #[tokio::test]

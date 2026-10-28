@@ -138,6 +138,20 @@ Lộ secret: thu hồi ở nơi cấp **trước**, rồi đặt giá trị mớ
 
 Thêm secret mới cho repo: thêm tên vào `repo_secret_names` trong `TOFU_TFVARS_<ENV>`, `action=apply`, rồi đặt giá trị.
 
+**On-premise, secret dạng file (#261).** Cấu hình: `[secrets] source = "file"`, `dir = "/run/secrets"`. Mỗi secret là một file trùng tên trong `dir`: Docker secrets, Kubernetes Secret mount thành volume (`defaultMode: 0400`), hoặc `LoadCredential=` của systemd (khi đó `dir` là `$CREDENTIALS_DIRECTORY`).
+- Khi đọc, server bỏ khoảng trắng và xuống dòng ở cuối file.
+- **Server từ chối:**
+  - file mà nhóm hay người khác có quyền đọc hoặc ghi (chỉ `0400` hoặc `0600`);
+  - symlink trỏ ra ngoài `dir`.
+  - Nếu đó là secret bắt buộc thì server dừng và nêu tên secret.
+- **Xoay secret:** thay file bằng cách ghi file tạm cạnh đó rồi `mv`, để server không bao giờ đọc phải file đang ghi dở. Server dùng giá trị mới ở lần đọc lại kế tiếp (`refresh_s`, hoặc ngay khi một lời gọi bị từ chối), không cần restart.
+
+  ```bash
+  umask 077; printf '%s\n' "$VALUE" > /run/secrets/.TÊN.new && mv /run/secrets/.TÊN.new /run/secrets/TÊN
+  ```
+
+- File bị xoá hay hỏng quyền giữa chừng thì server giữ giá trị cũ và ghi cảnh báo `refreshing a secret`.
+
 ## 4. Xử lý sự cố
 
 Vào máy: `aws ssm start-session --target <instance_id>`. Log: CloudWatch Logs `/aegis/<env>/server` (JSON; lọc `{ $.level = "ERROR" }`), trên máy `sudo journalctl -u aegis` (systemd, script deploy). Trạng thái: `systemctl status aegis`, `sudo docker ps`. Metric, cảnh báo và dashboard: [5. Giám sát](#5-giám-sát).

@@ -11,6 +11,12 @@ source = "env"
 # source = "aws"
 # region = "ap-northeast-1"
 # prefix = "aegis/prod/"
+# On premises (#261): one file per secret, secret X being `<dir>/X`, as
+# Docker secrets, a Kubernetes Secret volume or systemd's LoadCredential=
+# give them. Each file only its owner may read (0400 or 0600); a link
+# must stay inside `dir`. Replacing a file rotates the secret.
+# source = "file"
+# dir = "/run/secrets"
 # Read every secret again this often (rotation); a refused call also
 # reads its secret again.
 # refresh_s = 300
