@@ -7,3 +7,6 @@ lcov.info
 .DS_Store
 .claude/settings.local.json
 /target/
+
+# Python bytecode (scripts/)
+__pycache__/

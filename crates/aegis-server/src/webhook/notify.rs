@@ -64,6 +64,39 @@ impl GitHubNotifier {
     }
 }
 
+impl GitHubNotifier {
+    /// Whether `login` may write to `owner/repo` (#244), asked with the
+    /// comment token; `Err` when there is no token or GitHub fails.
+    pub async fn can_write(&self, owner: &str, repo: &str, login: &str) -> Result<bool, String> {
+        let token = self
+            .secrets
+            .get(COMMENT_TOKEN_ENV)
+            .ok_or_else(|| format!("no secret {COMMENT_TOKEN_ENV} to check the sender's rights"))?;
+        let github =
+            GitHub::new(&self.api, owner, repo, token.expose()).map_err(|e| e.to_string())?;
+        let permission = github.permission(login).await.map_err(|e| e.to_string())?;
+        Ok(matches!(
+            permission.as_str(),
+            "admin" | "maintain" | "write"
+        ))
+    }
+
+    /// Posts `text` on issue or PR `number` of `owner/repo`, if the store
+    /// has the comment token; failures are logged.
+    pub async fn comment(&self, owner: &str, repo: &str, number: u64, text: &str) {
+        let Some(token) = self.secrets.get(COMMENT_TOKEN_ENV) else {
+            return;
+        };
+        let posted = match GitHub::new(&self.api, owner, repo, token.expose()) {
+            Ok(github) => github.comment_on_issue(number, text).await.map(drop),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = posted {
+            tracing::warn!(error = %e, "commenting on the pull request");
+        }
+    }
+}
+
 impl JobNotifier for GitHubNotifier {
     async fn job_ended(&self, job: &Job) {
         if job.source != JobSource::Github {

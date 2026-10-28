@@ -8,6 +8,7 @@ GET  /repos/<o>/<r>/pulls/<n>/reviews     its reviews
 GET  /repos/<o>/<r>/pulls/<n>/comments    their line comments
 POST /repos/<o>/<r>/issues/<n>/comments   a comment of the agent (issue or PR)
 GET  /repos/<o>/<r>/issues/<n>/comments   comments on an issue or PR
+GET  /repos/<o>/<r>/collaborators/<u>/permission   admin for the reviewer only
 GET  /<o>/<r>/pull/<n>                    the PR as a page: body, diff, review, replies
 GET  /<o>/<r>/issues/<n>                  the issue and its comments
 
@@ -92,6 +93,11 @@ class Handler(BaseHTTPRequestHandler):
         self.not_found()
 
     def api_get(self, o, r, rest):
+        if rest[0] == "collaborators" and rest[2:] == ["permission"]:
+            # The reviewer may write; anyone else is not a collaborator.
+            if rest[1] != REVIEWER["login"]:
+                return self.not_found()
+            return self.json(200, {"permission": "admin"})
         kind, number = rest[0], int(rest[1])
         if kind == "issues" and rest[2:] == []:
             issue = ISSUES.get(number)

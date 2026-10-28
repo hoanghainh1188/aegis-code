@@ -5,7 +5,11 @@
 //! transaction; the answer comes right after, the worker runs the job.
 //!
 //! - `POST /webhooks/github`: `X-Hub-Signature-256` with the secret
-//!   `AEGIS_GITHUB_WEBHOOK_SECRET`; events `issues` and `workflow_run`.
+//!   `AEGIS_GITHUB_WEBHOOK_SECRET`; events `issues` and `workflow_run`,
+//!   and for review rounds of the agent's PRs (#244)
+//!   `pull_request_review` (changes requested), `pull_request_review_comment`
+//!   and `issue_comment` (a line `/aegis fix`), from people who can write
+//!   to the repo (asked of GitHub with the comment token).
 //! - `POST /webhooks/gitlab`: `X-Gitlab-Token` equal to the secret
 //!   `AEGIS_GITLAB_WEBHOOK_TOKEN`; events `Issue Hook` and `Pipeline Hook`.
 //!
@@ -362,6 +366,18 @@ async fn deliver(
             return refuse(StatusCode::BAD_REQUEST, "bad_request", why).into_response();
         }
     };
+    if let Kind::ReviewRound { pr_url, sender } = &wanted.kind {
+        return review_round(
+            hooks,
+            source,
+            delivery,
+            event,
+            &wanted.issue_ref,
+            pr_url,
+            sender,
+        )
+        .await;
+    }
     let repo = match hooks.store.repo_by_remote(&wanted.repo_url).await {
         Ok(Some(repo)) => repo,
         Ok(None) => return ignored(delivery, "repository not registered"),
@@ -378,6 +394,7 @@ async fn deliver(
         // Polled (`crate::tracker`), never posted here.
         (Kind::Issue, WebhookSource::Jira) => JobSource::Jira,
         (Kind::Issue, WebhookSource::Backlog) => JobSource::Backlog,
+        (Kind::ReviewRound { .. }, _) => unreachable!("handled above"),
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
         Ok(key) => key,
@@ -450,9 +467,124 @@ async fn deliver(
     }
 }
 
+/// `owner/name` of a repo URL (`https://github.com/owner/name`, with or
+/// without `.git`).
+fn owner_and_name(url: &str) -> Option<(&str, &str)> {
+    let path = url.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (rest, name) = path.rsplit_once('/')?;
+    let owner = rest.rsplit('/').next()?;
+    (!owner.is_empty() && !name.is_empty()).then_some((owner, name))
+}
+
+/// A review round asked for on the agent's PR (#244): the job that opened
+/// it is found by the PR's URL, the sender must be able to write to the
+/// job's repo, and the store queues the round, within the PR's rounds.
+/// A refused round is told on the PR.
+async fn review_round(
+    hooks: &Hooks,
+    source: WebhookSource,
+    delivery: &str,
+    event: &str,
+    issue_ref: &str,
+    pr_url: &str,
+    sender: &str,
+) -> Response {
+    let root = match hooks.store.job_by_pr_url(pr_url).await {
+        Ok(Some(job)) => job,
+        Ok(None) => return ignored(delivery, "no job opened this pull request"),
+        Err(e) => return internal(delivery, &e),
+    };
+    let repo = match hooks.store.repo(root.repo_id).await {
+        Ok(Some(repo)) => repo,
+        Ok(None) => return ignored(delivery, "repository not registered"),
+        Err(e) => return internal(delivery, &e),
+    };
+    let Some(notifier) = hooks.config.notifier.as_ref() else {
+        return ignored(delivery, "no GitHub client to check the sender's rights");
+    };
+    let Some((owner, name)) = owner_and_name(&repo.url) else {
+        return ignored(delivery, "the repository's URL names no owner and name");
+    };
+    match notifier.can_write(owner, name, sender).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!(delivery, sender, repo = %repo.slug, "review round asked by someone who cannot write");
+            return ignored(delivery, "the sender cannot write to the repository");
+        }
+        Err(why) => {
+            tracing::warn!(delivery, why, "checking the sender's rights");
+            return ignored(delivery, "the sender's rights could not be checked");
+        }
+    }
+    let delivered = hooks
+        .store
+        .deliver_review(
+            &NewDelivery {
+                source,
+                delivery_id: delivery.to_owned(),
+                event: event.to_owned(),
+            },
+            root.id,
+        )
+        .await;
+    let refused = |why: String| async move {
+        tracing::info!(delivery, why, "review round refused");
+        if let Ok((owner, name, number)) = crate::lifecycle::parse_issue_ref(issue_ref) {
+            let text = format!(
+                "{}\n**aegis-code** will not take this review: {}.",
+                aegis_pr::REPLY_MARKER,
+                aegis_pr::inert(&why)
+            );
+            notifier.comment(&owner, &name, number, &text).await;
+        }
+        answer(
+            StatusCode::OK,
+            json!({ "status": "refused", "job_id": root.id.0, "reason": why }),
+        )
+    };
+    match delivered {
+        Ok(Delivered::Queued(job)) => {
+            tracing::info!(delivery, job = job.id.0, repo = %repo.slug, round = job.review_round, "review round queued from a webhook");
+            answer(
+                StatusCode::ACCEPTED,
+                json!({ "status": "queued", "job_id": job.id.0 }),
+            )
+        }
+        Ok(Delivered::Duplicate) => {
+            tracing::info!(delivery, "webhook delivery received before");
+            answer(StatusCode::OK, json!({ "status": "duplicate" }))
+        }
+        Ok(other) => internal(
+            delivery,
+            &StoreError::Conflict(format!("unexpected delivery result {other:?}")),
+        ),
+        // A live round is not a refusal: the review is read when it runs.
+        Err(StoreError::Conflict(why)) if why.contains("live review round") => answer(
+            StatusCode::OK,
+            json!({ "status": "already_queued", "job_id": root.id.0, "reason": why }),
+        ),
+        Err(StoreError::Conflict(why) | StoreError::BudgetSpent(why)) => refused(why).await,
+        Err(e) => internal(delivery, &e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_repo_url_gives_its_owner_and_name() {
+        assert_eq!(
+            owner_and_name("https://github.com/typst/typst.git/"),
+            Some(("typst", "typst"))
+        );
+        assert_eq!(
+            owner_and_name("file:///srv/trial/upstream/demo"),
+            Some(("upstream", "demo"))
+        );
+        assert_eq!(owner_and_name("demo"), None);
+    }
 
     #[test]
     fn the_rate_limit_lets_a_burst_through_then_refuses() {

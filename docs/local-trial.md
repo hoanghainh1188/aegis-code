@@ -85,13 +85,13 @@ sequenceDiagram
 
 4. **Kết quả:** job mở được PR thì xem ở <http://127.0.0.1:8070/demo-org/demo/pull/100> (mô tả, commit, diff; PR của GitHub giả đánh số từ 100). Chấm nó trên dashboard (trang job → review). Job dừng (`stopped_budget`, `stopped_steps`…) thì lý do ở trang job và trong comment; với Ollama đây là chuyện thường, gửi lại webhook để chạy lần nữa.
 
-5. **Vòng sửa theo review** (#243): gửi một review "Request changes" lên PR, kèm (tùy chọn) một comment theo dòng, rồi xin một vòng sửa qua API như người bảo trì:
+5. **Vòng sửa theo review** (#243, #244): gửi một review "Request changes" lên PR với tên `reviewer`, kèm (tùy chọn) một comment theo dòng, rồi gửi webhook `pull_request_review` đã ký như GitHub gửi:
 
    ```bash
    scripts/trial/send-review.sh 100 "Keep the cut on a rune boundary." textutil/textutil.go 9 "Explain why max <= 1 is special."
    ```
 
-   Job `review` mới sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit vào PR 100 (không force) và trả lời từng ý trên trang PR. Mỗi PR có tối đa `[reviews] max_rounds` vòng (3).
+   Server tìm job đã mở PR 100, kiểm `reviewer` có quyền ghi (GitHub giả trả `admin` cho `reviewer`, không cho ai khác), rồi tạo job `review`. Job này sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit vào PR 100 (không force) và trả lời từng ý trên trang PR. Mỗi PR có tối đa `[reviews] max_rounds` vòng (3); vượt thì server comment lý do lên PR.
 
 6. **Dọn:**
 

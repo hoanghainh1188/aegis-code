@@ -299,6 +299,11 @@ Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmana
    - *Let me select individual events*: **Issues** và **Workflow runs**.
 
    Gắn nhãn `aegis` (biến `AEGIS_WEBHOOK_LABEL` đổi được) lên một issue tạo job; một lần chạy CI thất bại trên nhánh của chính repo (không phải PR) tạo job sửa CI.
+
+   **Vòng sửa theo review** (#243, #244): trên **repo chứa PR của agent** (repo `fork`; nếu khác repo gốc thì thêm webhook như trên ở đó), chọn thêm **Pull request reviews**, **Pull request review comments** và **Issue comments**. Review "Request changes", hoặc comment có một dòng `/aegis fix`, trên PR còn mở của agent tạo một job `review`: agent sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit (không force) và trả lời từng ý.
+   - Chỉ người có quyền ghi trên repo gốc kích hoạt được. Server hỏi GitHub bằng `AEGIS_GITHUB_COMMENT_TOKEN`, nên token này cần xem được collaborator của repo gốc. Bot và người khác: bỏ qua.
+   - Mỗi PR tối đa `[reviews] max_rounds` vòng (mặc định 3), mỗi vòng có ngân sách riêng. Vượt, hoặc hết ngân sách tháng: server comment lý do lên PR. Đang có vòng chạy thì review mới được đọc trong vòng đó.
+   - Maintainer cũng xin được một vòng qua API: `POST /api/v1/jobs/<id của job đã mở PR>/review`.
 10. **GitLab:** project → Settings → Webhooks: URL `https://<domain>/webhooks/gitlab`, *Secret token* = `AEGIS_GITLAB_WEBHOOK_TOKEN`, sự kiện **Issues events** và **Pipeline events**.
 
 Endpoint của nền tảng nào chưa có secret trong store thì trả 404. Webhook khớp repo theo URL (`html_url`/`web_url`, không phân biệt hoa thường, bỏ `.git`): `url` trong file repo phải là URL của repo gốc.

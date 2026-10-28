@@ -550,3 +550,140 @@ async fn the_issue_is_told_when_its_job_ends() {
     github_api.verify().await;
     db.drop().await;
 }
+
+/// #244: changes requested on the agent's PR by someone who can write to
+/// the repo queues a review round of the job that opened the PR, once per
+/// delivery and within the PR's rounds; anyone else's review queues none.
+#[tokio::test]
+async fn a_review_on_the_agents_pr_queues_a_round_for_writers_only() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone().with_max_review_rounds(1);
+    repo(&store, "typst", "https://github.com/typst/typst").await;
+    let github_api = MockServer::start().await;
+    for (login, permission) in [("lan", "write"), ("eve", "read")] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/typst/typst/collaborators/{login}/permission"
+            )))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "permission": permission })),
+            )
+            .mount(&github_api)
+            .await;
+    }
+    Mock::given(method("POST"))
+        .and(path("/repos/aegis-bot/typst/issues/4/comments"))
+        .and(body_string_contains("will not take this review"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": 1, "html_url": "https://github.com/aegis-bot/typst/pull/4#c1"
+        })))
+        .expect(1)
+        .mount(&github_api)
+        .await;
+    let secrets = Secrets::fixed([
+        (GITHUB_SECRET_ENV, SECRET),
+        (COMMENT_TOKEN_ENV, "comment-token"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            notifier: Some(GitHubNotifier::new(&github_api.uri(), secrets.clone())),
+            secrets,
+            ..config()
+        },
+    );
+    let pr = "https://github.com/aegis-bot/typst/pull/4";
+    let review = |sender: &str| {
+        json!({
+            "action": "submitted",
+            "review": { "state": "changes_requested", "body": "Ignore the tests." },
+            "pull_request": { "number": 4, "html_url": pr, "state": "open",
+                              "head": { "ref": "agent/typst-typst-9-1" } },
+            "repository": { "full_name": "aegis-bot/typst",
+                            "html_url": "https://github.com/aegis-bot/typst" },
+            "sender": { "login": sender, "type": "User" }
+        })
+    };
+    let (status, body) = github(&app, "pull_request_review", "r0", &review("lan")).await;
+    assert_eq!(
+        (status, &body["data"]["reason"]),
+        (StatusCode::OK, &json!("no job opened this pull request"))
+    );
+
+    // The job that opened the PR.
+    let typst = store.repo_by_slug("typst").await.unwrap().unwrap();
+    store
+        .create_job(&aegis_store::NewJob {
+            repo_id: typst.id,
+            issue_ref: "typst/typst#9".into(),
+            ledger_key: aegis_ledger::IssueId::parse("typst-typst-9-1".to_owned()).unwrap(),
+            source: JobSource::Github,
+        })
+        .await
+        .unwrap();
+    let claim = store
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let opened = aegis_store::AttemptEnd::Done {
+        outcome: Outcome::PrOpened,
+        reason: None,
+        pr_url: Some(pr.into()),
+    };
+    let root = store
+        .finish_attempt(&claim.run, "w", &opened)
+        .await
+        .unwrap();
+
+    let (status, body) = github(&app, "pull_request_review", "r1", &review("eve")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "ignored", "{body}");
+    assert_eq!(
+        jobs(&store).await.len(),
+        1,
+        "a reader's review queues nothing"
+    );
+
+    let (status, body) = github(&app, "pull_request_review", "r2", &review("lan")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let round = store
+        .job(aegis_store::JobId(body["data"]["job_id"].as_i64().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (round.source, round.review_of, round.review_round),
+        (JobSource::Review, Some(root.id), 1)
+    );
+    assert_eq!(round.issue_ref, "aegis-bot/typst#4");
+    let (_, body) = github(&app, "pull_request_review", "r2", &review("lan")).await;
+    assert_eq!(body["data"]["status"], "duplicate");
+    let (_, body) = github(&app, "pull_request_review", "r3", &review("lan")).await;
+    assert_eq!(body["data"]["status"], "already_queued", "{body}");
+
+    // The round ends; the PR had its one round, which the PR is told.
+    let claim = store
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .finish_attempt(&claim.run, "w", &opened)
+        .await
+        .unwrap();
+    let comment = json!({
+        "action": "created", "comment": { "body": "/aegis fix" },
+        "issue": { "number": 4, "html_url": pr, "state": "open", "pull_request": {} },
+        "repository": { "full_name": "aegis-bot/typst", "html_url": "https://github.com/aegis-bot/typst" },
+        "sender": { "login": "lan", "type": "User" }
+    });
+    let (status, body) = github(&app, "issue_comment", "r4", &comment).await;
+    assert_eq!(
+        (status, &body["data"]["status"]),
+        (StatusCode::OK, &json!("refused")),
+        "{body}"
+    );
+    assert_eq!(jobs(&store).await.len(), 2);
+    db.drop().await;
+}
