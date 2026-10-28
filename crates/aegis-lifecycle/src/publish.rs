@@ -13,9 +13,9 @@ use aegis_pr::{
 };
 use aegis_provider::ModelProvider;
 
-use crate::ForkPlatform;
 use crate::answer::FinalAnswer;
 use crate::review::ReviewRound;
+use crate::{ForkConfig, ForkPlatform};
 use crate::{IssueInput, LifecycleError, Platform};
 
 /// Line coverage from the reports the gate's coverage step left in
@@ -143,33 +143,19 @@ where
     }
 }
 
-/// The fork's forge: a GitHub repository or a GitLab project (#252).
-fn fork_forge<P, S>(platform: &Platform<P, S>) -> Result<Forge, LifecycleError> {
-    let fork = &platform.config.repo.fork;
+/// The fork's forge: a GitHub repository or a GitLab project (#252),
+/// reached with `token`.
+pub fn fork_forge_of(fork: &ForkConfig, token: &str) -> Result<Forge, LifecycleError> {
     Ok(match fork.platform {
-        ForkPlatform::GitHub => Forge::GitHub(fork_github(platform)?),
-        ForkPlatform::GitLab => Forge::GitLab(GitLab::new(
-            &fork.api,
-            &fork.path(),
-            &platform.github_token,
-        )?),
+        ForkPlatform::GitHub => {
+            Forge::GitHub(GitHub::new(&fork.api, &fork.owner, &fork.name, token)?)
+        }
+        ForkPlatform::GitLab => Forge::GitLab(GitLab::new(&fork.api, &fork.path(), token)?),
     })
 }
 
-/// The fork on GitHub; review rounds (#243) are GitHub's for now (#254).
-fn fork_github<P, S>(platform: &Platform<P, S>) -> Result<GitHub, LifecycleError> {
-    let fork = &platform.config.repo.fork;
-    if fork.platform != ForkPlatform::GitHub {
-        return Err(LifecycleError::Config(
-            "review rounds on a GitLab merge request are not supported yet (#254)".into(),
-        ));
-    }
-    Ok(GitHub::new(
-        &fork.api,
-        &fork.owner,
-        &fork.name,
-        &platform.github_token,
-    )?)
+fn fork_forge<P, S>(platform: &Platform<P, S>) -> Result<Forge, LifecycleError> {
+    fork_forge_of(&platform.config.repo.fork, &platform.github_token)
 }
 
 /// Where the agent's branches are: the fork, or a local bare repo.
@@ -239,8 +225,8 @@ where
     // The commit is on the PR: a reply that fails to post is told, not
     // an error.
     let reply = round.reply(&pushed.commit, answer);
-    let note = fork_github(platform)?
-        .comment_on_issue(round.pull.number, &reply)
+    let note = fork_forge(platform)?
+        .comment_on_request(round.pull.number, &reply)
         .await
         .err()
         .map(|e| format!("pushed, but the reply was not posted: {e}"));

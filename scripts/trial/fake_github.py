@@ -16,7 +16,9 @@ GET  /<o>/<r>/issues/<n>                  the issue and its comments
 
 GitLab: GET  /api/v4/projects/<path>/issues/<iid>, POST .../merge_requests,
 POST .../issues/<iid>/notes, GET .../pipelines/77[/jobs] and .../jobs/1/trace
-(a failed pipeline); the MR as a page at /<path>/-/merge_requests/<iid>.
+(a failed pipeline), GET .../merge_requests/<iid>[/notes], POST .../notes (as the
+reviewer with `X-Trial-User: reviewer`), GET .../members/all/42 (the reviewer);
+the MR as a page at /<path>/-/merge_requests/<iid>.
 
 PRs are numbered from 100, so they never share a number with an issue.
 """
@@ -48,7 +50,9 @@ ISSUES = {
     }
 }
 PULLS, COMMENTS, REVIEWS, LINE_COMMENTS = [], [], [], []
-MERGE_REQUESTS, NOTES = [], []
+MERGE_REQUESTS, NOTES, MR_NOTES = [], [], []
+GITLAB_REVIEWER = {"id": 42, "username": "reviewer", "bot": False}
+GITLAB_AGENT = {"id": 99, "username": "aegis-bot", "bot": False}
 CI_RUN = 77
 CI_LOG = (
     "2026-10-28T09:00:01Z go test ./...\n"
@@ -123,6 +127,13 @@ class Handler(BaseHTTPRequestHandler):
                                         "web_url": f"{ROOT}/{project}/-/jobs/1"}])
         if method == "GET" and tail == ["jobs", "1", "trace"]:
             return self.send(200, CI_LOG, "text/plain; charset=utf-8")
+        if method == "GET" and len(tail) == 3 and tail[0] == "members" and tail[1] == "all":
+            # The reviewer is a Maintainer; anyone else is not a member.
+            if int(tail[2]) != GITLAB_REVIEWER["id"]:
+                return self.not_found()
+            return self.json(200, {"id": GITLAB_REVIEWER["id"], "access_level": 40})
+        if len(tail) >= 2 and tail[0] == "merge_requests" and tail[1] != "":
+            return self.merge_request_api(method, project, int(tail[1]), tail[2:], body)
         if method == "POST" and tail == ["merge_requests"]:
             MERGE_REQUESTS.append(body)
             iid = len(MERGE_REQUESTS)
@@ -265,16 +276,47 @@ class Handler(BaseHTTPRequestHandler):
                   f"<h2>Replies</h2>{replies or '<p>none</p>'}"
                   f"<h2>Diff</h2><pre>{lines}</pre>")
 
+    def merge_request_api(self, method, project, iid, rest, body):
+        if not 0 < iid <= len(MERGE_REQUESTS):
+            return self.not_found()
+        mr = MERGE_REQUESTS[iid - 1]
+        if method == "GET" and rest == []:
+            return self.json(200, {
+                "iid": iid, "web_url": f"{ROOT}/{project}/-/merge_requests/{iid}",
+                "state": "opened", "source_branch": mr["source_branch"],
+                "target_branch": mr["target_branch"],
+                "sha": git("rev-parse", f"refs/heads/{mr['source_branch']}"),
+                "source_project_id": 7, "target_project_id": 7})
+        if method == "GET" and rest == ["notes"]:
+            return self.json(200, [n for i, n in MR_NOTES if i == iid])
+        if method == "POST" and rest == ["notes"]:
+            # send-gitlab-review.sh writes as the reviewer; the agent as itself.
+            author = GITLAB_REVIEWER if self.headers.get("X-Trial-User") == "reviewer" else GITLAB_AGENT
+            note = {"author": author, "body": body.get("body", ""), "system": False,
+                    "created_at": now()}
+            if body.get("path"):
+                note["position"] = {"new_path": body["path"], "new_line": body.get("line")}
+            MR_NOTES.append((iid, note))
+            return self.json(201, {"id": len(MR_NOTES)})
+        return self.not_found()
+
     def merge_request_page(self, iid):
         if not 0 < iid <= len(MERGE_REQUESTS):
             return self.not_found()
         mr = MERGE_REQUESTS[iid - 1]
         diff = git("diff", f"{mr['target_branch']}...{mr['source_branch']}")
         notes = "".join(f"<pre>{html.escape(b)}</pre>" for _, b in NOTES)
+        discussion = "".join(
+            f"<pre>{html.escape(n['author']['username'])}"
+            f"{' ' + html.escape(n['position']['new_path']) + ':' + str(n['position']['new_line']) if n.get('position') else ''}"
+            f": {html.escape(n['body'])}</pre>" for i, n in MR_NOTES if i == iid)
+        commits = git("log", "--format=%h %an: %s", f"{mr['target_branch']}..{mr['source_branch']}")
         self.page(mr["title"], f"<h1>{html.escape(mr['title'])} !{iid}</h1>"
                   f"<p><code>{html.escape(mr['source_branch'])}</code> → "
                   f"<code>{html.escape(mr['target_branch'])}</code></p>"
                   f"<h2>Description</h2><pre>{html.escape(mr['description'])}</pre>"
+                  f"<h2>Commits</h2><pre>{html.escape(commits)}</pre>"
+                  f"<h2>Discussion</h2>{discussion or '<p>none</p>'}"
                   f"<h2>Diff</h2><pre>{html.escape(diff)}</pre>"
                   f"<h2>Notes on the issue</h2>{notes or '<p>none</p>'}")
 

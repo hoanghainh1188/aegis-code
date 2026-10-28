@@ -244,7 +244,7 @@ Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmana
 
    Đặt giá trị như [mục 3](#3-xoay-secret); tên mới thì thêm vào `repo_secret_names` trước.
 
-   **Fork trên GitLab** (#252): `[settings.fork]` thêm `platform = "gitlab"` và `api` là API root của instance (`https://gitlab.com/api/v4` hoặc tự host); `owner` là namespace (có thể có subgroup), `name` là project. Agent đẩy nhánh `agent/*` qua HTTPS (token gửi với user `oauth2`, trong header) và mở **merge request** (draft khi `draft_prs`). Token (project hoặc personal access token) cần scope `api` (đọc issue, mở MR) và `write_repository`; repo private thì thêm `read_repository`. Issue GitLab (nhãn `aegis`, webhook ở mục 10) và pipeline GitLab hỏng trên nhánh chính (job sửa CI, #253: agent đọc các job hỏng và cuối log của chúng) chỉ chạy được trên repo có fork GitLab. Vòng sửa theo review trên MR chưa có (#254).
+   **Fork trên GitLab** (#252): `[settings.fork]` thêm `platform = "gitlab"` và `api` là API root của instance (`https://gitlab.com/api/v4` hoặc tự host); `owner` là namespace (có thể có subgroup), `name` là project. Agent đẩy nhánh `agent/*` qua HTTPS (token gửi với user `oauth2`, trong header) và mở **merge request** (draft khi `draft_prs`). Token (project hoặc personal access token) cần scope `api` (đọc issue, mở MR) và `write_repository`; repo private thì thêm `read_repository`. Issue GitLab (nhãn `aegis`, webhook ở mục 10) và pipeline GitLab hỏng trên nhánh chính (job sửa CI, #253: agent đọc các job hỏng và cuối log của chúng) chỉ chạy được trên repo có fork GitLab. Vòng sửa theo review trên MR (#254): comment có một dòng `/aegis fix` trên MR còn mở của agent, của người có quyền Developer trở lên trong project của repo, tạo vòng sửa như trên GitHub (webhook bật thêm **Comments**; server kiểm quyền bằng `AEGIS_GITLAB_COMMENT_TOKEN`, nên token này cần đọc được thành viên project). Agent chỉ đọc note của Developer trở lên, bỏ note hệ thống, bot và trả lời của chính nó.
 3. **Comment lên issue** (một lần cho cả server): secret `AEGIS_GITHUB_COMMENT_TOKEN`, token có quyền *Issues* ghi trên các repo gốc; thiếu thì job vẫn chạy nhưng không comment. GitLab: `AEGIS_GITLAB_COMMENT_TOKEN`. GitHub Enterprise hay GitLab tự host: biến `AEGIS_GITHUB_API` / `AEGIS_GITLAB_API` (không phải secret) của container.
 
 ### Đăng ký và clone
@@ -306,7 +306,7 @@ Mở http://localhost:3000, user `admin`. Prometheus (cổng 9090) và Alertmana
    - Chỉ người có quyền ghi trên repo gốc kích hoạt được. Server hỏi GitHub bằng `AEGIS_GITHUB_COMMENT_TOKEN`, nên token này cần xem được collaborator của repo gốc. Bot và người khác: bỏ qua.
    - Mỗi PR tối đa `[reviews] max_rounds` vòng (mặc định 3), mỗi vòng có ngân sách riêng. Vượt, hoặc hết ngân sách tháng: server comment lý do lên PR. Đang có vòng chạy thì review mới được đọc trong vòng đó.
    - Maintainer cũng xin được một vòng qua API: `POST /api/v1/jobs/<id của job đã mở PR>/review`.
-10. **GitLab:** project → Settings → Webhooks: URL `https://<domain>/webhooks/gitlab`, *Secret token* = `AEGIS_GITLAB_WEBHOOK_TOKEN`, sự kiện **Issues events** và **Pipeline events**.
+10. **GitLab:** project → Settings → Webhooks: URL `https://<domain>/webhooks/gitlab`, *Secret token* = `AEGIS_GITLAB_WEBHOOK_TOKEN`, sự kiện **Issues events**, **Pipeline events** và **Comments** (vòng sửa trên MR, #254).
 
 Endpoint của nền tảng nào chưa có secret trong store thì trả 404. Webhook khớp repo theo URL (`html_url`/`web_url`, không phân biệt hoa thường, bỏ `.git`): `url` trong file repo phải là URL của repo gốc.
 

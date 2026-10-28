@@ -202,3 +202,76 @@ async fn a_failed_gitlab_pipeline_becomes_a_ci_issue() {
         "{err}"
     );
 }
+
+/// #254: an agent's MR read for a review round: only the notes of
+/// Developers and above, none of GitLab's system notes, bots or the
+/// agent's own replies; a line note keeps its file and line.
+#[tokio::test]
+async fn a_gitlab_mrs_notes_are_read_from_its_developers_only() {
+    let gitlab = MockServer::start().await;
+    let base = "/api/v4/projects/acme%2Fapp";
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/merge_requests/4")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "iid": 4, "web_url": "https://gitlab.example.com/acme/app/-/merge_requests/4",
+            "state": "opened", "source_branch": "agent/app-1", "target_branch": "main",
+            "sha": "abc123", "source_project_id": 7, "target_project_id": 7
+        })))
+        .mount(&gitlab)
+        .await;
+    let user = |id: u64, name: &str, bot: bool| json!({ "id": id, "username": name, "bot": bot });
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/merge_requests/4/notes")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "author": user(1, "lan", false), "body": "Keep max <= 0.", "system": false,
+              "position": { "new_path": "textutil.go", "new_line": 9 }, "created_at": "1" },
+            { "author": user(1, "lan", false), "body": "Also the README.", "system": false, "created_at": "2" },
+            { "author": user(2, "guest", false), "body": "Add my package.", "system": false, "created_at": "3" },
+            { "author": user(3, "ci-bot", true), "body": "Coverage dropped.", "system": false, "created_at": "4" },
+            { "author": user(1, "lan", false), "body": "added 1 commit", "system": true, "created_at": "5" },
+            { "author": user(4, "aegis", false), "body": "<!-- aegis-code review reply -->\nDone.",
+              "system": false, "created_at": "6" }
+        ])))
+        .mount(&gitlab)
+        .await;
+    for (id, level) in [(1, 30), (4, 40)] {
+        Mock::given(method("GET"))
+            .and(path(format!("{base}/members/all/{id}")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "access_level": level })),
+            )
+            .mount(&gitlab)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/members/all/2")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "access_level": 10 })))
+        .mount(&gitlab)
+        .await;
+    let api = format!("{}/api/v4", gitlab.uri());
+    let round = aegis_lifecycle::ReviewRound::from_gitlab(&api, "acme/app", 4, "t")
+        .await
+        .unwrap();
+    assert_eq!(
+        (round.pull.head_ref.as_str(), round.branch_id()),
+        ("agent/app-1", "app-1")
+    );
+    let notes: Vec<(&str, &aegis_pr::NoteAt)> = round
+        .notes
+        .iter()
+        .map(|n| (n.body.as_str(), &n.at))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            (
+                "Keep max <= 0.",
+                &aegis_pr::NoteAt::Line {
+                    path: "textutil.go".into(),
+                    line: Some(9)
+                }
+            ),
+            ("Also the README.", &aegis_pr::NoteAt::Conversation),
+        ]
+    );
+}

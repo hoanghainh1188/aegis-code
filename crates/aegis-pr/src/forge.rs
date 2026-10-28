@@ -18,6 +18,14 @@ impl Forge {
         }
     }
 
+    /// Comments on PR or MR `number` (#254). The caller makes `body` inert.
+    pub async fn comment_on_request(&self, number: u64, body: &str) -> Result<(), PrError> {
+        match self {
+            Self::GitHub(github) => github.comment_on_issue(number, body).await.map(drop),
+            Self::GitLab(gitlab) => gitlab.comment_on_merge_request(number, body).await,
+        }
+    }
+
     /// Opens a PR or MR from `head` into `base`; its web URL.
     pub async fn open_request(
         &self,

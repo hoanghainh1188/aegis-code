@@ -111,6 +111,8 @@ sequenceDiagram
 
    Pipeline GitLab hỏng (#253): `scripts/trial/send-gitlab-ci-failure.sh` gửi `Pipeline Hook` của pipeline 77 (cùng test hỏng như lần chạy GitHub ở bước 6); job `ci` đọc pipeline, job `go-test` và log qua API GitLab giả rồi mở MR.
 
+   Vòng sửa trên MR (#254): `scripts/trial/send-gitlab-review.sh 1 "Explain why max <= 1 is special." textutil/textutil.go 9` comment lên MR !1 với tên `reviewer` (Maintainer của project giả), kết thúc bằng dòng `/aegis fix`, rồi gửi `Note Hook`. Job `review` sửa tiếp trên nhánh của MR, đẩy thêm commit và trả lời trên MR.
+
 8. **Dọn:**
 
    ```bash

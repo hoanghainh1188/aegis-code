@@ -373,9 +373,73 @@ struct Pipeline {
 /// GitLab subgroups nest up to 20 deep.
 const MAX_GITLAB_PARTS: usize = 21;
 
+#[derive(Debug, Deserialize)]
+struct GitlabNoteHook {
+    project: GitlabProject,
+    user: GitlabUser,
+    object_attributes: GitlabNote,
+    #[serde(default)]
+    merge_request: Option<GitlabMergeRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitlabUser {
+    id: u64,
+    #[serde(default)]
+    bot: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitlabNote {
+    #[serde(default)]
+    note: String,
+    noteable_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitlabMergeRequest {
+    iid: u64,
+    url: String,
+    state: String,
+    source_branch: String,
+}
+
 /// A delivery of GitLab event `event` (`X-Gitlab-Event`).
 pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     match event {
+        // `/aegis fix` on the agent's MR (#254); the sender is GitLab's
+        // user id, whose access level is checked before a job is made.
+        "Note Hook" => {
+            let e: GitlabNoteHook = parse(body)?;
+            if e.object_attributes.noteable_type != "MergeRequest"
+                || !asks_for_fix(&e.object_attributes.note)
+            {
+                return Err(ignored(format!(
+                    "not a comment with `{FIX_COMMAND}` on a merge request"
+                )));
+            }
+            let mr = e
+                .merge_request
+                .ok_or_else(|| Skip::Malformed("a merge request note without its MR".into()))?;
+            if mr.state != "opened" {
+                return Err(ignored("the merge request is not open"));
+            }
+            if !mr.source_branch.starts_with("agent/") {
+                return Err(ignored("not a merge request of the agent"));
+            }
+            if e.user.bot {
+                return Err(ignored("sent by a bot"));
+            }
+            let path = checked_path(&e.project.path_with_namespace, MAX_GITLAB_PARTS)?;
+            Ok(Wanted {
+                issue_ref: checked_ref(format!("{path}!{}", mr.iid))?,
+                repo_url: e.project.web_url,
+                kind: Kind::ReviewRound {
+                    pr_url: mr.url,
+                    sender: e.user.id.to_string(),
+                },
+            })
+        }
         "Issue Hook" => {
             let e: GitlabIssueHook = parse(body)?;
             let has = |list: &[Titled]| list.iter().any(|l| l.title == label);
@@ -482,6 +546,62 @@ mod tests {
             ),
             Err(Skip::Ignored(_))
         ));
+    }
+
+    #[test]
+    fn a_fix_note_on_the_agents_gitlab_mr_asks_for_a_round() {
+        let note = |noteable: &str, body: &str, state: &str, branch: &str, bot: bool| {
+            json!({
+                "object_kind": "note",
+                "project": { "path_with_namespace": "acme/platform/app",
+                             "web_url": "https://gitlab.com/acme/platform/app" },
+                "user": { "id": 42, "username": "lan", "bot": bot },
+                "object_attributes": { "note": body, "noteable_type": noteable },
+                "merge_request": { "iid": 4, "state": state, "source_branch": branch,
+                                   "url": "https://gitlab.com/acme/platform/app/-/merge_requests/4" }
+            })
+            .to_string()
+            .into_bytes()
+        };
+        let wanted = gitlab(
+            "Note Hook",
+            &note(
+                "MergeRequest",
+                "Please:\n/aegis fix",
+                "opened",
+                "agent/app-1",
+                false,
+            ),
+            "aegis",
+        )
+        .unwrap();
+        assert_eq!(wanted.issue_ref, "acme/platform/app!4");
+        assert_eq!(
+            wanted.kind,
+            Kind::ReviewRound {
+                pr_url: "https://gitlab.com/acme/platform/app/-/merge_requests/4".into(),
+                sender: "42".into()
+            }
+        );
+        for (noteable, body, state, branch, bot) in [
+            ("Issue", "/aegis fix", "opened", "agent/app-1", false),
+            ("MergeRequest", "looks fine", "opened", "agent/app-1", false),
+            ("MergeRequest", "/aegis fix", "merged", "agent/app-1", false),
+            ("MergeRequest", "/aegis fix", "opened", "feature/x", false),
+            ("MergeRequest", "/aegis fix", "opened", "agent/app-1", true),
+        ] {
+            assert!(
+                matches!(
+                    gitlab(
+                        "Note Hook",
+                        &note(noteable, body, state, branch, bot),
+                        "aegis"
+                    ),
+                    Err(Skip::Ignored(_))
+                ),
+                "{noteable} {body} {state} {branch} {bot}"
+            );
+        }
     }
 
     #[test]
