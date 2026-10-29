@@ -1,18 +1,20 @@
-# `aegis-job`: giao và theo dõi job từ terminal
+# Developer CLI: `aegis-job`
 
-Client cho developer ([ADR 0006](adr/0006-developer-client.md)). Nó chỉ gọi API của `aegis-server`; agent, gate và model đều chạy trên server. Bạn chỉ cần một token của chính mình.
+The command-line interface for software engineers to dispatch and track maintenance jobs directly from their terminal ([ADR 0006](adr/0006-developer-client.md)). The client communicates exclusively with the REST API of `aegis-server`; the agent, execution sandbox, and model inference run on the remote platform. All interactions require only a personal access token.
 
-## Cài
+## Installation
 
-**npm** (macOS arm64/x86_64, Linux arm64/x86_64; cần Node 18+):
+### Via npm (Recommended)
+Supported on macOS (arm64/x86_64) and Linux (arm64/x86_64), requires Node 18+:
 
 ```bash
 npm install -g @hoanghainh1188/aegis-job
 ```
 
-Gói chứa sẵn binary cho bốn nền tảng, không tải gì lúc cài. Cùng phiên bản với server (`vX.Y.Z`, [docs/release.md](release.md)).
+The package bundles native pre-compiled binaries for all four architectures with zero runtime downloads. Versioning mirrors `aegis-server` (`vX.Y.Z`, [docs/release.md](release.md)).
 
-**Binary:** tải `aegis-job-<version>-<target>.tar.gz` ở trang Releases của repo (tag `v…`), kiểm SHA-256 rồi đặt vào `PATH`:
+### Prebuilt Binary
+Download `aegis-job-<version>-<target>.tar.gz` from the repository Releases page, verify its SHA-256 checksum, and place it in your `PATH`:
 
 ```bash
 shasum -a 256 -c aegis-job-<version>-<target>.tar.gz.sha256
@@ -20,48 +22,67 @@ tar -xzf aegis-job-<version>-<target>.tar.gz
 install aegis-job-<version>-<target>/aegis-job ~/.local/bin/
 ```
 
-**Từ source** (cần Rust stable):
+### From Source
+Requires Rust stable (1.85+):
 
 ```bash
 cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client
 ```
 
-## Đăng nhập
+---
 
-1. Mở dashboard (`https://<server>/`), đăng nhập SSO, vào **Token** (`/me/tokens`). Đặt tên (ví dụ `laptop`), chọn số ngày (tối đa 90), bấm **Tạo token**. Token chỉ hiện một lần: chép ngay.
-2. Trên máy:
+## Authentication
+
+1. Open the Aegis dashboard (`https://<server>/`), log in via OIDC SSO, and navigate to **Tokens** (`/me/tokens`). Specify a friendly name (e.g. `laptop`), set an expiration period (up to 90 days), and click **Create Token**. Copy the token string immediately; it is presented only once.
+2. Log in on your local machine:
 
    ```bash
    aegis-job login https://<server>
    ```
 
-   Dán token khi được hỏi (không hiện ra màn hình). Login được lưu ở `~/.config/aegis/job.toml`, chỉ bạn đọc được.
-3. Kiểm tra: `aegis-job whoami` và `aegis-job repos` (các repo bạn có vai trò, kèm vai trò).
+   Paste your token when prompted (input is hidden). Session credentials are saved securely in `~/.config/aegis/job.toml` with restricted user permissions (`0600`).
+3. Verify authentication:
+   ```bash
+   aegis-job whoami
+   aegis-job repos
+   ```
 
-Token làm việc với đúng quyền của bạn: giao, huỷ, chạy lại job cần vai trò maintainer trên repo đó. Mất máy hoặc lộ token: thu hồi trên `/me/tokens`. Cho CI hay script: đặt `AEGIS_JOB_SERVER` và `AEGIS_JOB_TOKEN` thay vì `login`.
+Tokens enforce RBAC rules assigned to your user account: submitting, canceling, or retrying jobs requires `maintainer` role on the target repository. In case of token compromise, revoke the token immediately via `/me/tokens`. For CI/CD environments or scripts, supply `AEGIS_JOB_SERVER` and `AEGIS_JOB_TOKEN` environment variables instead of interactive login.
 
-## Giao và theo dõi
+---
+
+## Command Reference
 
 ```bash
-aegis-job submit <repo> <issue>        # vd. aegis-job submit typst typst/typst#123
-aegis-job watch <job>                  # in mỗi lần trạng thái đổi; thoát 0 khi có PR
-aegis-job show <job>                   # job, các lượt chạy, lý do kết thúc
-aegis-job open <job>                   # mở PR, hoặc trang job trên dashboard
+aegis-job submit <repo> <issue>        # e.g. aegis-job submit typst typst/typst#123
+aegis-job watch <job>                  # Streams state changes; exits 0 when PR is opened
+aegis-job show <job>                   # Displays job metadata, run history, and termination cause
+aegis-job open <job>                   # Opens generated PR URL or job dashboard page in browser
 aegis-job list --repo <repo> --status running
 ```
 
-- `<issue>`: `owner/repo#12` là issue GitHub, `KEY-12` là ticket Jira. Còn lại thì nói rõ nguồn: `--source gitlab` (`group/project#12`), `--source backlog`.
-- `aegis-job cancel <job>`, `aegis-job retry <job>` (job thất bại hoặc đã huỷ), `aegis-job review <job>` (vòng sửa theo review của PR mà job đã mở, #243).
-- Thêm `--json` vào bất kỳ lệnh nào để có đúng dữ liệu server trả về, cho script.
+- `<issue>` format: `owner/repo#12` for GitHub issues, `KEY-12` for Jira tickets. Other sources require the explicit `--source` flag: `--source gitlab` (`group/project#12`), `--source backlog`.
+- Action commands: `aegis-job cancel <job>`, `aegis-job retry <job>` (for failed or canceled jobs), `aegis-job review <job>` (triggers automated review round on the opened PR, #243).
+- Structured Output: Append `--json` to any command for raw machine-readable JSON output suitable for automation scripts.
 
-## Mã thoát
+---
 
-| Mã | Nghĩa |
-| --- | --- |
-| 0 | Thành công; với `watch`: job kết thúc và đã mở PR |
-| 1 | `watch`: job kết thúc mà không có PR (dừng, thất bại, bị huỷ) |
-| 2 | Lỗi: sai cú pháp, chưa đăng nhập, server từ chối (kèm lý do) |
+## Exit Codes
 
-## Thử trên máy
+| Code | Semantics |
+| :---: | --- |
+| 0 | Success; for `watch`: the job completed and successfully opened a Pull Request |
+| 1 | `watch`: the job completed without opening a PR (stopped by budget/steps, failed, or canceled) |
+| 2 | Error: invalid syntax, unauthenticated, or server rejected request (with error details) |
 
-Trên trial ([local-trial.md](local-trial.md)): `up.sh` xong thì đăng nhập dashboard tại <http://localhost:8080>, tạo token ở **Token**, rồi `aegis-job login http://localhost:8080` và `aegis-job submit demo demo-org/demo#1`.
+---
+
+## Local Walkthrough
+
+When running the local trial ([docs/local-trial.md](local-trial.md)): once `up.sh` finishes, log in to the dashboard at <http://localhost:8080>, generate a personal token under **Tokens**, then authenticate and submit:
+
+```bash
+aegis-job login http://localhost:8080
+aegis-job submit demo demo-org/demo#1
+aegis-job watch 1
+```

@@ -1,137 +1,143 @@
-# Chạy thử end-to-end trên máy dev
+# Local End-to-End Walkthrough
 
-Dựng cả luồng của platform trên một máy: issue được gắn nhãn → webhook → job trong hàng đợi → agent sửa → gate kiểm trong sandbox → PR → comment lên issue → chấm PR trên dashboard. GitHub và SSO là bản giả chạy tại chỗ; repo mẫu là một package Go nhỏ có sẵn bug. Không cần tài khoản cloud nào; với Ollama thì không tốn tiền.
+Run the complete platform pipeline on a single workstation: issue labeled $\rightarrow$ webhook $\rightarrow$ queued job $\rightarrow$ agent synthesizes patch $\rightarrow$ gate verifies in sandbox $\rightarrow$ PR opened $\rightarrow$ comment posted to issue $\rightarrow$ human review on web dashboard. GitHub and SSO run locally as lightweight mock services; the sample repo is a small Go package with an intentional multi-byte string truncation bug. Requires zero external cloud accounts; running with Ollama is 100% free.
 
-Khoảng 30 phút, chưa tính thời gian tải image (~2 GB) và model (~13 GB với Ollama).
+Runtime: ~30 minutes (excluding initial image downloads of ~2 GB and model weights of ~13 GB for Ollama).
 
-## Cần có
+## Prerequisites
 
-| | |
+| Requirement | Description |
 | --- | --- |
-| Rust stable (edition 2024) | build `aegis-server`, `aegis-aci` |
-| Docker đang chạy | PostgreSQL, SSO giả, sandbox của gate |
-| `git`, `python3`, `openssl`, `curl` | repo mẫu, GitHub giả, ký webhook |
-| **Một** trong hai model | xem dưới |
+| Rust stable (edition 2024) | Compiles `aegis-server`, `aegis-aci` |
+| Docker Engine running | Runs PostgreSQL, mock SSO, gate sandboxes |
+| `git`, `python3`, `openssl`, `curl` | Clones sample repo, mock GitHub server, signs HMAC webhooks |
+| **One** of the two LLM options | See below |
 
-**Chọn model:**
+**Model Selection:**
 
-- **Ollama** (mặc định, `up.sh ollama`): miễn phí, chạy trên máy; cần ~16 GB RAM cho `gpt-oss:20b`. Chậm (một issue 10–30 phút) và kết quả thất thường: có lần mở được PR, có lần dừng vì hết lượt gọi. Cài [Ollama](https://ollama.com) rồi `ollama serve`.
-- **Claude API** (`up.sh claude`): nhanh và ổn định hơn nhiều; vài cent tới vài USD mỗi issue (trần của job: `max_cost_usd = 2.0` trong `scripts/trial/mode-claude.toml`). Cần `export ANTHROPIC_API_KEY=…`.
+- **Ollama** (Default, `up.sh ollama`): Free, runs 100% locally; requires ~16 GB RAM for `gpt-oss:20b`. Slower (10–30 minutes per issue) with variable task success rates. Install [Ollama](https://ollama.com) and execute `ollama serve`.
+- **Claude API** (`up.sh claude`): Significantly faster and more deterministic; typical cost: a few cents to a few dollars per issue (governed by job budget cap: `max_cost_usd = 2.0` in `scripts/trial/mode-claude.toml`). Requires `export ANTHROPIC_API_KEY=...`.
 
-Cổng dùng: 5433 (PostgreSQL), 8070 (GitHub giả), 8080 (server), 8090 (SSO giả), 9464 (metric).
+Port allocations: 5433 (PostgreSQL), 8070 (Mock GitHub), 8080 (Aegis Server), 8090 (Mock SSO), 9464 (Prometheus metrics).
 
-## Luồng
+---
+
+## Workflow Architecture
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Dev as Bạn
-    participant GH as GitHub giả :8070
+    actor Dev as Developer
+    participant GH as Mock GitHub :8070
     participant API as aegis-server (api)
     participant DB as PostgreSQL :5433
     participant W as aegis-server (worker)
     participant M as Model (Ollama / Claude)
-    participant G as Gate (sandbox Docker)
+    participant G as Gate (Docker sandbox)
     participant D as Dashboard :8080
 
-    Dev->>API: send-webhook.sh: issue #1 gắn nhãn aegis (ký HMAC)
-    API->>API: kiểm chữ ký, tìm repo theo URL
-    API->>DB: ghi job (queued)
-    API-->>Dev: 202
-    W->>DB: nhận job (SKIP LOCKED, lease)
-    W->>W: fetch nhánh chính vào clone, tạo worktree
-    W->>GH: đọc issue #1
-    loop tới khi gate qua hoặc hết ngân sách
-        W->>M: Light phân loại, Core sửa (công cụ ACI)
-        M-->>W: patch, id test tái hiện
-        W->>G: build, test, test tái hiện (fail trước / pass sau), lint…
-        G-->>W: kết quả từng bước
+    Dev->>API: send-webhook.sh: issue #1 labeled 'aegis' (HMAC signed)
+    API->>API: verify signature, resolve repo by URL
+    API->>DB: enqueue job (queued)
+    API-->>Dev: HTTP 202 Accepted
+    W->>DB: lease job (SELECT FOR UPDATE SKIP LOCKED)
+    W->>W: fetch default branch into clone, create worktree
+    W->>GH: fetch issue #1 details
+    loop Until gate passes or budget ceiling reached
+        W->>M: Light classifies, Core solves (ACI tools)
+        M-->>W: patch & repro test identifier
+        W->>G: build, test, repro test (FAIL before / PASS after), lint...
+        G-->>W: step verification outputs
     end
-    W->>GH: đẩy nhánh agent/*, mở PR (draft)
-    W->>GH: comment kết quả lên issue #1
-    W->>DB: job xong, ledger chi phí
-    Dev->>D: đăng nhập (SSO giả), xem job, chấm PR
-    D->>DB: ghi review
+    W->>GH: push branch agent/*, open PR (draft)
+    W->>GH: comment results on issue #1
+    W->>DB: mark job finished, persist token cost ledger
+    Dev->>D: log in (Mock SSO), inspect job, review PR
+    D->>DB: submit human review
 ```
 
-## Các bước
+---
 
-1. **Dựng** (từ gốc repo):
+## Step-by-Step Instructions
+
+1. **Start Environment** (from repo root):
 
    ```bash
-   scripts/trial/up.sh          # hoặc: scripts/trial/up.sh claude
+   scripts/trial/up.sh          # Default with Ollama
+   # Or with Claude API:
+   scripts/trial/up.sh claude
    ```
 
-   Script kiểm công cụ và cổng, build bản release, tạo image `aegis-sandbox-go` nếu chưa có, (Ollama) tải `gpt-oss:20b` và tạo `aegis-gpt-oss` với context 32k. Sau đó nó dựng mọi thứ trong `.workspace/trial/`:
-   - `env.sh`: secret thử, sinh ngẫu nhiên; server đọc secret từ biến môi trường (`[secrets] source = "env"`), chỉ dành cho dev;
-   - PostgreSQL và SSO giả ([mock-oauth2-server](https://github.com/navikt/mock-oauth2-server)), đăng nhập ai cũng thành `dev@example.com` với `email_verified = true`;
-   - repo mẫu `upstream/demo` (`Truncate` cắt chuỗi theo byte, làm hỏng ký tự nhiều byte) và `fork.git`, nơi job đẩy nhánh;
-   - GitHub giả (`scripts/trial/fake_github.py`): trả issue #1, nhận PR và comment, có trang xem PR và issue;
-   - `aegis-server --role all`, rồi `repo add demo.toml` (đăng ký và clone) và `grant dev@example.com admin`.
+   The script verifies tools and port availability, compiles release binaries, builds `aegis-sandbox-go` if absent, (for Ollama) pulls `gpt-oss:20b`, and constructs `aegis-gpt-oss` with a 32k context window. It then initializes `.workspace/trial/`:
+   - `env.sh`: Ephemeral test secrets generated randomly; server loads secrets via environment variables (`[secrets] source = "env"`);
+   - PostgreSQL and Mock SSO ([mock-oauth2-server](https://github.com/navikt/mock-oauth2-server)), authenticating all logins as `dev@example.com` (`email_verified = true`);
+   - Sample repository `upstream/demo` (contains `Truncate` function improperly splitting multi-byte runes) and `fork.git` target repo;
+   - Mock GitHub service (`scripts/trial/fake_github.py`): serves issue #1, receives PRs and comments, includes a local web inspector;
+   - Launches `aegis-server --role all`, registers repository `repo add demo.toml`, and grants `dev@example.com admin`.
 
-2. **Gửi webhook** như GitHub gửi khi gắn nhãn `aegis` lên issue #1:
+2. **Trigger Issue Webhook** simulating GitHub labeling issue #1 with `aegis`:
 
    ```bash
    scripts/trial/send-webhook.sh
    ```
 
-   Trả về `{"data":{"job_id":1,"status":"queued"},…}`.
+   Returns payload: `{"data":{"job_id":1,"status":"queued"},...}`.
 
-3. **Theo dõi:**
-   - Log server: `tail -f .workspace/trial/server.log` (JSON, mỗi dòng của job có `job_id`).
-   - Dashboard: <http://localhost:8080>, bấm đăng nhập là vào. Trang job có trạng thái, lượt gọi model, chi phí.
-   - Log từng bước gate: `.workspace/trial/state/jobs/demo-org-demo-1-<số>/gate/logs/`.
-   - Issue và comment: <http://127.0.0.1:8070/demo-org/demo/issues/1>.
+3. **Monitor Execution:**
+   - Server logs: `tail -f .workspace/trial/server.log` (JSON format, each line tagged with `job_id`).
+   - Web Dashboard: <http://localhost:8080> (click login to enter). Displays live state, model calls, and token cost ledger.
+   - Verification gate logs: `.workspace/trial/state/jobs/demo-org-demo-1-<run>/gate/logs/`.
+   - Issue tracker: <http://127.0.0.1:8070/demo-org/demo/issues/1>.
 
-4. **Kết quả:** job mở được PR thì xem ở <http://127.0.0.1:8070/demo-org/demo/pull/100> (mô tả, commit, diff; PR của GitHub giả đánh số từ 100). Chấm nó trên dashboard (trang job → review). Job dừng (`stopped_budget`, `stopped_steps`…) thì lý do ở trang job và trong comment; với Ollama đây là chuyện thường, gửi lại webhook để chạy lần nữa.
+4. **Review Generated PR:** Once completed, view the pull request at <http://127.0.0.1:8070/demo-org/demo/pull/100> (summary, reproduction proof, diff; mock GitHub numbers PRs starting at 100). Review and grade the PR on the web dashboard (job page $\rightarrow$ review). If the run terminates early (`stopped_budget`, `stopped_steps`), review explanations on the job page and issue comment.
 
-5. **Vòng sửa theo review** (#243, #244): gửi một review "Request changes" lên PR với tên `reviewer`, kèm (tùy chọn) một comment theo dòng, rồi gửi webhook `pull_request_review` đã ký như GitHub gửi:
+5. **Automated Review Rounds (#243, #244):** Submit a "Request changes" review on PR 100 under username `reviewer` with inline review comments, then deliver a signed `pull_request_review` webhook:
 
    ```bash
    scripts/trial/send-review.sh 100 "Keep the cut on a rune boundary." textutil/textutil.go 9 "Explain why max <= 1 is special."
    ```
 
-   Server tìm job đã mở PR 100, kiểm `reviewer` có quyền ghi (GitHub giả trả `admin` cho `reviewer`, không cho ai khác), rồi tạo job `review`. Job này sửa tiếp trên nhánh của PR, chạy lại gate, đẩy thêm một commit vào PR 100 (không force) và trả lời từng ý trên trang PR. Mỗi PR có tối đa `[reviews] max_rounds` vòng (3); vượt thì server comment lý do lên PR.
+   The server resolves the original job for PR 100, confirms write permissions for `reviewer`, and schedules a `review` job. The agent resumes work on the existing PR branch, re-verifies against the gate, pushes a follow-up commit (no force-push), and responds to reviewer questions on the PR thread.
 
-6. **Job sửa CI** (#250): gửi webhook `workflow_run` như GitHub gửi khi workflow `test` thất bại trên `main` (lần chạy 77 của GitHub giả, log có một test hỏng vì cắt giữa ký tự nhiều byte):
+6. **Automated CI Failure Repair (#250):** Deliver a `workflow_run` failure webhook simulating a broken CI run on `main` (run 77 of mock GitHub):
 
    ```bash
    scripts/trial/send-ci-failure.sh
    ```
 
-   Job `ci` đọc lần chạy, job và bước hỏng, cuối log; agent sửa trên đầu `main` rồi mở PR như issue thường.
+   The `ci` repair job inspects the failed step and trailing logs, synthesizes a fix on `main`, and opens a PR following standard verification gates.
 
-7. **Job GitLab** (#252): repo `demo-gl` là cùng code nhưng là project GitLab, fork trên GitLab giả. Gửi webhook `Issue Hook` như GitLab gửi khi gắn nhãn `aegis` lên issue 1:
+7. **GitLab Pipeline Walkthrough (#252, #253, #254):** The trial includes `demo-gl`, a GitLab project fork. Simulate GitLab issue labeling:
 
    ```bash
    scripts/trial/send-gitlab-webhook.sh
    ```
 
-   Job `gitlab` đọc issue qua API GitLab giả, chạy như issue GitHub rồi mở merge request (draft). Xem MR ở <http://127.0.0.1:8070/demo-org/demo/-/merge_requests/1> và comment kết quả trên issue ở cùng trang.
+   Inspect the opened merge request at <http://127.0.0.1:8070/demo-org/demo/-/merge_requests/1>.
 
-   Pipeline GitLab hỏng (#253): `scripts/trial/send-gitlab-ci-failure.sh` gửi `Pipeline Hook` của pipeline 77 (cùng test hỏng như lần chạy GitHub ở bước 6); job `ci` đọc pipeline, job `go-test` và log qua API GitLab giả rồi mở MR.
-
-   Vòng sửa trên MR (#254): `scripts/trial/send-gitlab-review.sh 1 "Explain why max <= 1 is special." textutil/textutil.go 9` comment lên MR !1 với tên `reviewer` (Maintainer của project giả), kết thúc bằng dòng `/aegis fix`, rồi gửi `Note Hook`. Job `review` sửa tiếp trên nhánh của MR, đẩy thêm commit và trả lời trên MR.
-
-8. **Dọn:**
+8. **Environment Teardown:**
 
    ```bash
    scripts/trial/down.sh
    ```
 
-   Dừng server và GitHub giả, xóa hai container và `.workspace/trial/` (cả dữ liệu DB). Image Docker và model Ollama giữ lại.
+   Terminates background services, removes temporary containers, and deletes `.workspace/trial/` including database volumes. Docker images and Ollama weights remain cached locally.
 
-## Khi có lỗi
+---
 
-| Hiện tượng | Xem |
+## Troubleshooting Trial Errors
+
+| Symptom | Diagnostic Step |
 | --- | --- |
-| `up.sh: port … is taken` | Một lần thử trước chưa dọn (`down.sh`), hoặc dịch vụ khác giữ cổng |
-| `the server did not start` | `.workspace/trial/server.log`: thiếu secret, DB chưa lên |
-| Webhook trả `401` | `env.sh` đã đổi sau khi server chạy: chạy lại `down.sh` và `up.sh` |
-| Job `rejected` `no configuration for mode` hoặc `no secret` | `mode.toml`, `env.sh` trong `.workspace/trial/` |
-| Job dừng ngay với lỗi model `404` | Ollama chưa có `aegis-gpt-oss`: `ollama create aegis-gpt-oss -f scripts/trial/Modelfile` |
-| Gate lỗi ở bước đầu | `docker image inspect aegis-sandbox-go`; log của bước trong `gate/logs/` |
+| `up.sh: port ... is taken` | Previous session not cleaned up (`down.sh`), or existing service bound to port |
+| `the server did not start` | Inspect `.workspace/trial/server.log`: missing secret or database startup failure |
+| Webhooks return HTTP `401` | Ephemeral `env.sh` regenerated after server boot: run `down.sh` followed by `up.sh` |
+| Job marked `rejected` with `no configuration for mode` or `no secret` | Verify `mode.toml` and `env.sh` inside `.workspace/trial/` |
+| Immediate termination with model `404` | Ollama model missing: execute `ollama create aegis-gpt-oss -f scripts/trial/Modelfile` |
+| Gate fails during initial step | Run `docker image inspect aegis-sandbox-go`; inspect step output in `gate/logs/` |
 
-## Khác với bản triển khai thật
+---
 
-Thật: GitHub thật (webhook ở `https://<domain>/webhooks/github`), secret trong Secrets Manager, SSO của công ty, repo đăng ký bằng URL thật. Cách đưa một repo thật vào dùng: [runbook, 6. Thêm repo](runbook/README.md#6-thêm-repo).
+## Transitioning to Production
+
+Production deployments connect to real forges (webhooks routed to `https://<domain>/webhooks/github`), read secrets from AWS Secrets Manager or secure local files, authenticate via enterprise OIDC SSO, and register real repository URLs. For full production instructions, see [AWS Runbook: Adding Repositories](runbook/README.md#6-adding-repositories) or [On-Premise Operations Runbook](runbook/on-premise.md).

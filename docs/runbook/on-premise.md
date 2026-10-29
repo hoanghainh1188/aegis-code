@@ -1,125 +1,187 @@
-# Runbook on-premise
+# Operations Runbook: On-Premise Deployment
 
-Cho người vận hành aegis trên máy của mình, không dùng AWS ([ADR 0007](../adr/0007-on-premise-deployment.md), #262). Bản trên AWS: [README.md](README.md).
+For operators running Aegis on self-hosted infrastructure without AWS ([ADR 0007](../adr/0007-on-premise-deployment.md), #262). For AWS cloud deployments, see [AWS Runbook](README.md).
 
-Bốn việc: [dựng](#1-dựng), [đăng ký repo](#2-đăng-ký-repo), [nâng cấp và rollback](#3-nâng-cấp-và-rollback), [sao lưu và khôi phục](#4-sao-lưu-và-khôi-phục). Có hai cách dựng; mặc định là **Docker Compose**. Cách **systemd** ở [mục 5](#5-systemd-thay-cho-compose).
+Core operations: [Installation & Setup](#1-installation-setup), [Registering Repositories](#2-registering-repositories), [Upgrades & Rollback](#3-upgrades-rollback), [Backup & Disaster Recovery](#4-backup-disaster-recovery). Two installation methods are supported; the recommended default is **Docker Compose**. The **systemd** method is detailed in [Section 5](#5-systemd-alternative-to-compose).
 
-## Cần có
+## Prerequisites
 
-| | |
+| Requirement | Specification |
 | --- | --- |
-| Máy | Linux x86_64 hoặc arm64. Từ 4 vCPU, 16 GB RAM; đĩa 100 GB, vì image sandbox, clone và cache build đều nằm trên máy. Máy chỉ nên chạy aegis |
-| Docker | Engine 24+ và plugin Compose v2 |
-| Mạng ra ngoài | Tới forge (GitHub, GitLab) và API model (Claude API, Bedrock), trừ khi model là local. Không ra được Internet thì dùng [gói offline](../release.md#máy-không-ra-được-internet) |
-| Vào | Cổng 8080 sau reverse proxy TLS của bạn: dashboard, API, webhook |
+| Host Machine | Linux x86_64 or arm64. Minimum: 4 vCPUs, 16 GB RAM, 100 GB SSD storage (sandbox images, git clones, and build caches reside locally). The machine should be dedicated exclusively to Aegis |
+| Docker Engine | Docker Engine 24+ and Docker Compose plugin v2 |
+| Outbound Network | Access to forges (GitHub, GitLab) and model APIs (Claude API, AWS Bedrock), unless utilizing local models. For isolated networks without Internet access, use the [offline bundle](../release.md#air-gapped--offline-environments) |
+| Inbound Traffic | Port 8080 behind your TLS reverse proxy: dashboard, REST API, webhooks |
 
-**Rủi ro:** container `aegis` nắm socket Docker để chạy sandbox của gate, tức nắm root của máy ([README](README.md#worker-và-docker), "Worker và Docker").
+> [!WARNING]
+> **Privilege Boundary:** The `aegis` container accesses the host Docker daemon via `/var/run/docker.sock` to orchestrate gate verification sandboxes. Controlling the Docker daemon grants effective root privileges on the host machine ([AWS Runbook](README.md#worker-and-docker-isolation), "Worker and Docker Isolation").
 
-## 1. Dựng
+---
 
-Làm từ một bản checkout của repo, ở tag của phiên bản (`git checkout vX.Y.Z`), trong `deploy/compose/`:
+## 1. Installation & Setup
 
-1. Chuẩn bị máy, một lần:
+Execute from a clean repository checkout pinned to your target release tag (`git checkout vX.Y.Z`), located in `deploy/compose/`:
+
+1. **Host Preparation (One-Time Execution):**
 
    ```bash
    sudo ./install.sh
    ```
 
-   Script không ghi đè gì đã có. Nó tạo:
-   - `/srv/aegis/.workspace`, thuộc uid 10001;
-   - thư mục `./secrets`. Mật khẩu và URL database, session key và secret webhook GitHub được sinh sẵn;
-   - file `.env`, chứa group của socket Docker và danh sách sandbox cần kéo;
-   - file `server.toml` (chép từ `server.toml.example`).
-2. Sửa `server.toml`:
-   - `public_url`: địa chỉ người dùng và webhook đi tới;
-   - `[auth.oidc]`: SSO của bạn;
-   - `[modes]`: mode cho các repo. Model local thì viết file mode vào `./modes/local.toml`, theo mẫu [config/local.toml](../../config/local.toml), rồi đặt `poc = "/etc/aegis/modes/local.toml"`.
-3. Thêm secret, mỗi secret một file trong `./secrets`, quyền `0400`, thuộc uid 10001 ([xoay secret](README.md#3-xoay-secret)):
-   - `ANTHROPIC_API_KEY`: khóa của model (mode `poc`); model local thì không cần;
-   - `AEGIS_OIDC_CLIENT_SECRET`;
-   - `AEGIS_GITHUB_COMMENT_TOKEN`;
-   - token fork của từng repo, tên đặt ở `token_env` của repo.
+   The script is idempotent and never overwrites existing configurations. It provisions:
+   - `/srv/aegis/.workspace`, owned by container uid `10001:10001`;
+   - `./secrets/` directory containing randomly generated database credentials, session key, and GitHub webhook secret;
+   - `.env` file populated with host Docker socket GID and default sandbox profile image lists;
+   - Initial `server.toml` (copied from `server.toml.example`).
+
+2. **Configure `server.toml`:**
+   - `public_url`: Publicly accessible URL for webhooks and user dashboard;
+   - `[auth.oidc]`: Enterprise OIDC Single Sign-On credentials;
+   - `[modes]`: Configuration modes for onboarded repos. To use a local model (Ollama / vLLM), create a mode file in `./modes/local.toml` based on [config/local.toml](../../config/local.toml), and configure `poc = "/etc/aegis/modes/local.toml"`.
+
+3. **Populate Secrets:** Place each secret as a file inside `./secrets/`, with permissions `0400` owned by uid `10001:10001` ([Secret Rotation](README.md#3-secret-rotation)):
+   - `ANTHROPIC_API_KEY`: Model API key (required for `poc` mode; not required for local models);
+   - `AEGIS_OIDC_CLIENT_SECRET`: SSO client secret;
+   - `AEGIS_GITHUB_COMMENT_TOKEN`: Token for posting comments to upstream issues;
+   - Fork tokens for onboarded repositories (named as defined in `token_env` of each repo).
 
    ```bash
    sudo sh -c 'umask 077; printf "%s\n" "$VALUE" > secrets/ANTHROPIC_API_KEY; chown 10001:10001 secrets/ANTHROPIC_API_KEY'
    ```
 
-4. Chạy một phiên bản:
+4. **Deploy Application Version:**
 
    ```bash
-   sudo ./aegis-deploy.sh X.Y.Z             # kéo image từ GHCR
-   sudo ./aegis-deploy.sh --offline X.Y.Z   # image đã nạp từ gói offline (load-images.sh)
+   sudo ./aegis-deploy.sh X.Y.Z             # Pull images from GHCR
+   sudo ./aegis-deploy.sh --offline X.Y.Z   # Deploy using preloaded offline bundle
    ```
 
-   Script kéo image server và sandbox (hoặc kiểm chúng đã được nạp), gắn tên trần cho sandbox, ghi `AEGIS_VERSION` vào `.env`, `docker compose up`, rồi chờ healthcheck. Server tự chạy migration khi khởi động.
-5. Kiểm tra:
-   - `curl http://127.0.0.1:8080/api/v1/health`;
-   - mở dashboard, đăng nhập SSO;
-   - cấp vai trò admin đầu tiên:
+   The deployment script pulls server and sandbox images (or verifies pre-loaded offline images), tags sandboxes with bare names expected by profiles, updates `AEGIS_VERSION` in `.env`, triggers `docker compose up`, and polls healthcheck endpoints until healthy. Database migrations run automatically during startup.
+
+5. **Post-Installation Verification:**
+   - Verify health: `curl http://127.0.0.1:8080/api/v1/health`
+   - Access dashboard at your configured domain and log in via OIDC.
+   - Grant initial administrator privileges:
 
    ```bash
-   docker compose exec aegis aegis-server --config /etc/aegis/server.toml grant you@example.com admin
+   docker compose exec aegis aegis-server --config /etc/aegis/server.toml grant admin@example.com admin
    ```
 
-`/metrics` chỉ mở trên `127.0.0.1:9464` của máy. Prometheus của bạn đọc nó ở đó; quy tắc cảnh báo dùng lại [deploy/alerts](../../deploy/alerts/).
+### Reverse Proxy Configuration (TLS Termination)
 
-## 2. Đăng ký repo
+Aegis listens on `127.0.0.1:8080`. Configure a reverse proxy with TLS termination to forward requests:
 
-Như [mục 6 của runbook AWS](README.md#6-thêm-repo). Lệnh `…` ở đó trở thành `docker compose exec aegis aegis-server --config /etc/aegis/server.toml`.
-- **File repo:** đặt trong workspace để container đọc được, ví dụ `sudo install -o 10001 -g 10001 typst.toml /srv/aegis/.workspace/repo-files/`.
-- **Token fork:** là file `./secrets/<token_env>`.
-- **Webhook GitHub:** URL `https://<public_url>/webhooks/github`. Secret là nội dung file `./secrets/AEGIS_GITHUB_WEBHOOK_SECRET`.
+#### Nginx Example
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name aegis.internal.example.com;
 
-## 3. Nâng cấp và rollback
+    ssl_certificate     /etc/ssl/certs/aegis.crt;
+    ssl_certificate_key /etc/ssl/private/aegis.key;
 
-1. Đọc CHANGELOG của phiên bản mới. Có migration thì xem mục [expand/contract](README.md#migration-expandcontract).
-2. Sao lưu DB ([mục 4](#4-sao-lưu-và-khôi-phục)).
-3. Lấy file của phiên bản mới (`git checkout vX.Y.Z`; `server.toml`, `.env` và `secrets/` không bị đụng), rồi chạy `sudo ./aegis-deploy.sh X.Y.Z`. Job đang chạy được tối đa `drain_s` (10 phút) để xong trước khi container cũ dừng.
-4. **Rollback:** `sudo ./aegis-deploy.sh <phiên bản trước>`; script in sẵn lệnh này sau mỗi lần dựng. DB không lùi: phiên bản cũ chạy được trên DB đã có migration mới hơn nó. Nếu migration của bản lỗi làm hỏng dữ liệu, khôi phục DB từ bản sao lưu ở bước 2.
-
-## 4. Sao lưu và khôi phục
-
-```bash
-sudo ./backup.sh /backup              # DB: aegis-db-<thời điểm>.dump (pg_dump -Fc)
-sudo ./backup.sh /backup --workspace  # thêm .workspace/state (clone, map, index; không bắt buộc)
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
-Chạy hằng ngày (cron hoặc systemd timer). Chép kết quả ra máy khác cùng với `server.toml` và `secrets/`; hai thứ này không có trong bản sao lưu.
+#### Caddy Example
+```caddy
+aegis.internal.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
 
-**Khôi phục** lên máy mới, hoặc sau sự cố:
+Prometheus metrics listen locally at `127.0.0.1:9464/metrics`. Standard alerting rules can be adopted from [deploy/alerts/](../../deploy/alerts/).
+
+---
+
+## 2. Registering Repositories
+
+Repository onboarding follows the procedure outlined in [AWS Runbook Section 6](README.md#6-adding-repositories). Replace CLI execution prefix with:
+```bash
+docker compose exec aegis aegis-server --config /etc/aegis/server.toml <command>
+```
+
+- **Repository Configuration File:** Store definition files within the workspace so the container can access them:
+  ```bash
+  sudo install -o 10001 -g 10001 typst.toml /srv/aegis/.workspace/repo-files/
+  ```
+- **Fork Authentication:** Placed as `./secrets/<token_env>` (`0400`, uid 10001).
+- **Webhooks:** Payload URL `https://<public_url>/webhooks/github`, secret read from `./secrets/AEGIS_GITHUB_WEBHOOK_SECRET`.
+
+---
+
+## 3. Upgrades & Rollback
+
+1. Read CHANGELOG for breaking changes and review schema modifications against [Expand/Contract Guidelines](README.md#database-migrations-expandcontract-pattern).
+2. Create an immediate database backup ([Section 4](#4-backup-disaster-recovery)).
+3. Switch git tracking to the target version (`git checkout vX.Y.Z`; existing configuration in `server.toml`, `.env`, and `./secrets/` is untouched), then run:
+   ```bash
+   sudo ./aegis-deploy.sh X.Y.Z
+   ```
+   Active jobs are permitted up to `drain_s` (10 minutes) to complete before previous containers shut down.
+4. **Rollback:**
+   ```bash
+   sudo ./aegis-deploy.sh <previous-version>
+   ```
+   The database schema is not rolled back; older versions safely execute on schemas migrated by newer releases. If a bug corrupted data, restore PostgreSQL from the backup taken in Step 2.
+
+---
+
+## 4. Backup & Disaster Recovery
 
 ```bash
-sudo ./install.sh                     # rồi chép lại server.toml và secrets/ cũ
+sudo ./backup.sh /backup              # Database snapshot: aegis-db-<timestamp>.dump (pg_dump -Fc)
+sudo ./backup.sh /backup --workspace  # Adds .workspace/state (git clones, AST indexes, module maps)
+```
+
+Schedule backups daily via cron or systemd timer. Store generated dumps, `./server.toml`, and `./secrets/` in an offsite vault.
+
+### Disaster Recovery / Host Migration
+
+```bash
+# On new host:
+sudo ./install.sh                     # Restores directory structure; restore server.toml and secrets/
 docker compose up --detach --wait postgres
-docker compose exec -T postgres pg_restore -U aegis -d aegis --clean --if-exists < /backup/aegis-db-<thời điểm>.dump
-sudo tar -C /srv/aegis -xzf /backup/aegis-workspace-<thời điểm>.tar.gz   # nếu có
-sudo ./aegis-deploy.sh <phiên bản đang dùng>
+docker compose exec -T postgres pg_restore -U aegis -d aegis --clean --if-exists < /backup/aegis-db-<timestamp>.dump
+sudo tar -C /srv/aegis -xzf /backup/aegis-workspace-<timestamp>.tar.gz   # Optional workspace cache
+sudo chown -R 10001:10001 /srv/aegis/.workspace                         # Ensure uid 10001 ownership
+sudo ./aegis-deploy.sh <current-version>
 ```
 
-Không có workspace thì worker clone lại repo trước job đầu tiên, và module map được dựng lại.
+If workspace cache is omitted, workers will automatically re-clone repositories and regenerate module maps prior to executing jobs.
 
-## 5. systemd thay cho Compose
+---
 
-Dùng khi bạn đã có PostgreSQL (trên máy này hoặc máy khác) và muốn quản lý bằng systemd. Unit [deploy/systemd/aegis.service](../../deploy/systemd/aegis.service) là cùng một file với bản AWS.
+## 5. systemd Alternative to Compose
+
+For environments with an existing PostgreSQL instance wishing to manage Aegis via systemd services. The systemd unit [deploy/systemd/aegis.service](../../deploy/systemd/aegis.service) is identical to the unit deployed on AWS:
 
 ```bash
-sudo deploy/systemd/install.sh   # /etc/aegis, /srv/aegis/.workspace, unit, /usr/local/bin/aegis-deploy
+sudo deploy/systemd/install.sh   # Sets up /etc/aegis, /srv/aegis/.workspace, unit, /usr/local/bin/aegis-deploy
 ```
 
-- `/etc/aegis/server.toml` đổi `[metrics] listen` thành `127.0.0.1:9464`: unit chạy `--network host`, nên cổng này sẽ mở trên máy.
-- `/etc/aegis/secrets/AEGIS_DATABASE_URL`: ví dụ `postgres://aegis:…@127.0.0.1:5432/aegis`.
-- Tham số riêng của máy nằm trong `/etc/aegis/aegis.env`: `AEGIS_RUN_ARGS` (network, mount), `AEGIS_SANDBOXES`.
+- Configure `/etc/aegis/server.toml` with `[metrics] listen = "127.0.0.1:9464"` (the unit runs with `--network host`).
+- Store database connection string in `/etc/aegis/secrets/AEGIS_DATABASE_URL`.
+- Host-specific parameters are maintained in `/etc/aegis/aegis.env`: `AEGIS_RUN_ARGS` (network, mounts), `AEGIS_SANDBOXES`.
+- Deploy or rollback using `sudo aegis-deploy X.Y.Z` (or `--offline X.Y.Z`). Inspect service logs via `journalctl -u aegis`.
 
-Rồi chạy `sudo aegis-deploy X.Y.Z` (hoặc `--offline X.Y.Z`); rollback cũng vậy, với phiên bản trước. Log xem bằng `journalctl -u aegis`. Sao lưu bằng `pg_dump` trên PostgreSQL của bạn.
+---
 
-## Sự cố
+## Troubleshooting Guide
 
-| Hiện tượng | Xem |
+| Issue | Remediation |
 | --- | --- |
-| `aegis-deploy.sh: … is not healthy` | `docker compose logs aegis`. Server dừng khi thiếu secret bắt buộc, và nêu tên secret |
-| `secret … is open to others than its owner` | `chmod 0400` file đó, `chown 10001:10001` |
-| `permission denied … docker.sock` trong log job | `DOCKER_GID` trong `.env` (systemd: `/etc/aegis/aegis.env`) phải là group của `/var/run/docker.sock` |
-| Gate lỗi `No such image: aegis-sandbox-…` | Sandbox của profile chưa có trong `AEGIS_SANDBOXES`, hoặc chưa được nạp. Bước fetch luôn cần `aegis-sandbox-python` (proxy egress) |
-| Job dừng với `API root … must use https` | API của forge (`fork.api`, `AEGIS_GITHUB_API`) phải là `https://`. `http://` chỉ được tới chính máy (loopback) |
-| `aegis-job` báo `not_found` với token service | Token service cần vai trò: `… grant <tên token> maintainer` (hoặc `admin`) |
-| Job lỗi mount `/work` | `/srv/aegis/.workspace` phải có thật trên máy (cùng đường dẫn với trong container) và thuộc uid 10001 |
+| `aegis-deploy.sh: ... is not healthy` | Inspect `docker compose logs aegis`. The server halts startup if required secrets are missing, printing the missing secret name |
+| `secret ... is open to others than its owner` | Run `chmod 0400 secrets/<NAME>` and `chown 10001:10001 secrets/<NAME>` |
+| `permission denied ... docker.sock` in job logs | Verify `DOCKER_GID` in `.env` (or `/etc/aegis/aegis.env` for systemd) matches host group of `/var/run/docker.sock` |
+| Gate fails with `No such image: aegis-sandbox-...` | Required language sandbox image is missing from `AEGIS_SANDBOXES` or not loaded. Note: the `fetch` step always requires `aegis-sandbox-python` (egress proxy) |
+| Job halted with `API root ... must use https` | Forge API roots (`fork.api`, `AEGIS_GITHUB_API`) must utilize `https://`. Insecure `http://` is allowed strictly for loopback test environments |
+| `aegis-job` CLI reports `not_found` with service token | Service tokens require RBAC roles: `... grant <token-name> maintainer` |
+| Job mount error on `/work` | `/srv/aegis/.workspace` must exist on host matching container path, owned by uid 10001 |

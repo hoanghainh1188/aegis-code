@@ -278,7 +278,7 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [Release Operations](docs/release.md) – Release-please, GHCR container images, and offline packages
 * [Contributing & Development Conventions](CLAUDE.md) – Commit formats, branching, and pre-PR verification
 
-> *Note on Documentation Languages: The core architectural specifications (ADRs) and this README are maintained in English. Detailed operations runbooks and step-by-step procedural guides in `docs/` are available in Vietnamese for operational clarity.*
+> *Note: All architectural specifications (ADRs), operations runbooks, and developer procedural guides across `docs/` are fully maintained in English.*
 
 ---
 

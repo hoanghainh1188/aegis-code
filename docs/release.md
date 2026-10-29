@@ -1,51 +1,59 @@
-# Phát hành
+# Release Operations
 
-Một bản phát hành `vX.Y.Z` gồm image server và image sandbox trên GHCR, gói offline, client `aegis-job` (binary và npm), cùng một version (#263). Cách làm theo komainu: release-please lo version và CHANGELOG, GitHub Release kích hoạt mọi bước phát hành, npm publish bằng OIDC nên không có token npm nào.
+A release `vX.Y.Z` bundles the server and sandbox container images on GHCR, offline bundles, and the developer client `aegis-job` (binaries and npm package) under a synchronized version (#263). The process follows modern GitOps standards: `release-please` manages versioning and changelogs, GitHub Releases trigger downstream pipelines, and npm packages are published via OIDC without storing long-lived npm tokens.
 
 ```mermaid
 flowchart LR
-    A[commit lên main] --> B[release-please.yml: PR chore release X.Y.Z]
+    A[Commit to main] --> B[release-please.yml: PR chore release X.Y.Z]
     B -- squash-merge --> C[tag vX.Y.Z + GitHub Release]
     C --> D[release.yml]
-    D --> E[GHCR: aegis-server, aegis-sandbox-* X.Y.Z, ký cosign]
-    D --> F[Release: gói offline, versions.txt]
-    D --> G[Release: aegis-job tar.gz] --> H[npmjs: @hoanghainh1188/aegis-job]
+    D --> E[GHCR: aegis-server, aegis-sandbox-* X.Y.Z, cosign keyless sign]
+    D --> F[Release Assets: offline bundle, versions.txt]
+    D --> G[Release Assets: aegis-job tar.gz] --> H[npmjs: @hoanghainh1188/aegis-job]
 ```
 
-## Ra một bản
+---
 
-1. **Merge PR release.** Commit theo Conventional Commits vào `main` thì release-please mở hoặc cập nhật PR `chore(release): aegis-code X.Y.Z`. `feat` tăng minor, `fix` tăng patch; khi version còn `0.x`, thay đổi phá vỡ (`!`) cũng chỉ tăng minor. PR đổi version ở `Cargo.toml`, `Cargo.lock`, `npm/aegis-job/package.json`, `version.txt`, và viết `CHANGELOG.md`.
-2. **Duyệt và squash-merge PR đó.** release-please tạo tag và GitHub Release, rồi [release.yml](../.github/workflows/release.yml) chạy:
-   - `version`: tag phải khớp version ở cả ba file;
-   - `images`: build và đẩy 7 image, tag `X.Y.Z` và `X.Y`, ký bằng cosign keyless;
-   - `offline`: `docker save` từng image, gắn vào Release;
-   - `client`, `publish-client`: binary cho bốn nền tảng, gói npm, publish.
-3. **Chạy lại một bản lỗi giữa chừng:** Actions → Release → *Run workflow* với tag. Các bước đều ghi đè được: `--clobber`, cùng tag image. Riêng npm từ chối publish lại cùng một version.
+## Publishing a Release
 
-## Thiết lập một lần
+1. **Merge Release PR:** When Conventional Commits land on `main`, `release-please` opens or updates a pull request titled `chore(release): aegis-code X.Y.Z`. `feat` increments minor version, `fix` increments patch; during `0.x`, breaking changes (`!`) also increment minor version. The PR updates versions across `Cargo.toml`, `Cargo.lock`, `npm/aegis-job/package.json`, `version.txt`, and generates `CHANGELOG.md`.
+2. **Approve and Squash-Merge:** `release-please` automatically tags the repository and publishes a GitHub Release, triggering [.github/workflows/release.yml](../.github/workflows/release.yml):
+   - `version`: Validates that tag matches versions across all manifests;
+   - `images`: Builds and pushes 7 container images tagged `X.Y.Z` and `X.Y`, signed via Cosign keyless signing;
+   - `offline`: Runs `docker save` for each image and attaches tarballs to the GitHub Release;
+   - `client`, `publish-client`: Compiles binaries for four target architectures, builds npm package, and publishes to npmjs.
+3. **Re-running Failed Release Jobs:** Actions $\rightarrow$ Release $\rightarrow$ *Run workflow* targeting the release tag. Artifact publishing steps are idempotent (`--clobber` for release assets, identical image tags). Note: npm rejects republishing an existing version.
 
-| Việc | Ở đâu |
+---
+
+## One-Time Setup
+
+| Task | Configuration Surface |
 | --- | --- |
-| Secret `RELEASE_PLEASE_TOKEN`: fine-grained PAT chỉ cho repo này, quyền Contents, Pull requests, Issues đọc và ghi. Release do `GITHUB_TOKEN` tạo không kích hoạt `release.yml` | Settings → Secrets and variables → Actions |
-| Environment `npm-release` (có thể thêm người duyệt) | Settings → Environments |
-| **Lần publish npm đầu tiên làm bằng tay:** npm chỉ cấu hình được trusted publisher cho gói đã tồn tại. Tải `hoanghainh1188-aegis-job-X.Y.Z.tgz` từ Release, `npm login`, rồi `npm publish hoanghainh1188-aegis-job-X.Y.Z.tgz --access public`. Bước `npm publish` của `release.yml` sẽ lỗi ở lần đầu này: chạy lại sau khi cấu hình | máy của người phát hành |
-| Trusted publisher cho gói: repo `hoanghainh1188/aegis-code`, workflow `release.yml`, environment `npm-release` | npmjs.com → gói → Settings |
-| Image GHCR để **Public**, để khách kéo không cần đăng nhập (sau lần đẩy đầu) | GitHub → Packages → từng `aegis-*` → Package settings |
+| Secret `RELEASE_PLEASE_TOKEN`: Fine-grained PAT scoped strictly to this repo with Contents, Pull requests, and Issues Read/Write. Releases triggered by default `GITHUB_TOKEN` do not cascade to `release.yml` | Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions |
+| Environment `npm-release` (optional required reviewers) | Settings $\rightarrow$ Environments |
+| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh1188-aegis-job-X.Y.Z.tgz` from Release, run `npm login`, then `npm publish hoanghainh1188-aegis-job-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured | Operator workstation |
+| Configure Trusted Publisher for package: Repository `hoanghainh1188/aegis-code`, workflow `release.yml`, environment `npm-release` | npmjs.com $\rightarrow$ package $\rightarrow$ Settings |
+| Make GHCR Packages **Public** so users can pull without authentication | GitHub $\rightarrow$ Packages $\rightarrow$ each `aegis-*` $\rightarrow$ Package settings |
 
-## Ma trận phiên bản
+---
 
-Mọi thành phần của một bản dùng cùng version:
+## Version Matrix
 
-| Thành phần | Tên |
+All components of a release share an identical version:
+
+| Component | Identifier |
 | --- | --- |
 | Server | `ghcr.io/hoanghainh1188/aegis-server:X.Y.Z` |
-| Sandbox của gate | `ghcr.io/hoanghainh1188/aegis-sandbox-<python\|rust\|node\|java\|go\|dotnet>:X.Y.Z`; server gọi chúng bằng tên trần `aegis-sandbox-<profile>` |
+| Gate Sandboxes | `ghcr.io/hoanghainh1188/aegis-sandbox-<python\|rust\|node\|java\|go\|dotnet>:X.Y.Z`; server calls these locally by bare names `aegis-sandbox-<profile>` |
 | Client | `aegis-job-X.Y.Z-<target>.tar.gz`, npm `@hoanghainh1188/aegis-job@X.Y.Z` |
-| Database | migration cuối của bản, ghi trong `versions.txt` của Release; server tự chạy migration khi khởi động |
+| Database | Final migration included in the release, documented in `versions.txt`; server runs migrations automatically on boot |
 
-Server và sandbox phải cùng version. Client thì khác version vẫn chạy được, vì API `/api/v1` chỉ thêm, không đổi.
+Server and sandboxes must run identical versions. The client supports backward compatibility, as `/api/v1` APIs are additive and non-breaking.
 
-## Kiểm image
+---
+
+## Verifying Container Image Signatures
 
 ```bash
 cosign verify ghcr.io/hoanghainh1188/aegis-server:X.Y.Z \
@@ -53,19 +61,21 @@ cosign verify ghcr.io/hoanghainh1188/aegis-server:X.Y.Z \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Digest của từng image có trong `versions.txt` của Release.
+Digest values for each image are recorded in `versions.txt` attached to the GitHub Release.
 
-## Máy không ra được Internet
+---
 
-Tải từ trang Release về một máy có mạng:
-- các file `aegis-*-X.Y.Z.tar.gz` cùng `.sha256` của chúng (mỗi image một file; có thể bỏ sandbox của ngôn ngữ không dùng, trừ `sandbox-python`, là proxy egress của gate);
-- `aegis-dep-*.tar.gz`: image của bên thứ ba mà Compose chạy (`postgres:17-alpine`);
-- `versions.txt` và `load-images.sh`.
+## Air-Gapped / Offline Environments
 
-Chép tất cả sang máy đích, rồi chạy:
+Download the following assets from the GitHub Release page on an Internet-connected workstation:
+- Image tarballs `aegis-*-X.Y.Z.tar.gz` and their respective `.sha256` files (you may omit unused language sandboxes, except `sandbox-python` which serves as the egress proxy for gate fetch operations);
+- Third-party dependencies bundle `aegis-dep-*.tar.gz` for Compose (`postgres:17-alpine`);
+- `versions.txt` and `load-images.sh`.
+
+Transfer all files to the target host and run:
 
 ```bash
-./load-images.sh            # kiểm SHA-256 từng file, docker load, gắn tên trần cho sandbox
+./load-images.sh            # Validates SHA-256 checksums, loads docker images, tags sandboxes with bare names
 ```
 
-Sau đó dựng hệ thống theo runbook on-premise (#262), dùng đúng tag `X.Y.Z`.
+Proceed with host deployment using [On-Premise Operations Runbook](runbook/on-premise.md), passing tag `X.Y.Z`.
