@@ -1,0 +1,95 @@
+# C# eval set (#259): StackExchange.Redis, same models and budget as poc.toml (ADR 0005).
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Model per tier (design §5.1). Read by aegis-router.
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+# Gate steps in docker/<profile> images, --network none (#5); dependencies
+# come from the fetch step behind the egress proxy (#66).
+sandbox = true
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 40
+
+# Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
+# Before the first gate run the platform asks it for the code linked to the
+# patch outside its files and shows it to the agent (#203). The agent gets
+# none of its tools: it made no graph query in the 32 runs of #185.
+# Each job indexes its tree under `<state_dir>/index` (`{index_dir}`, the
+# server's HOME), shared by every repo: the server's daemon is one per
+# user and serves one cache.
+# `codebase-memory-mcp` is on PATH: in docker/server, and locally as
+# eval/README.md says. `--ui=false`: no graph UI on port 9749.
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+# The repo: a clone of the fork, each job gets a worktree.
+[repo]
+path = ".workspace/repos/StackExchange.Redis"
+language = "csharp"
+base = "main"
+key = "stackexchange-redis"
+# Hidden tests of eval runs (#98): eval/issues lists the test classes,
+# `Namespace.Class`; the trailing dot keeps `FooTests` from matching
+# `FooTestsExtra` (verify.py).
+hidden_test = ["sh", "-c", """f=""; for t; do f="${f:+$f|}FullyQualifiedName~$t."; done
+p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p="--project $p"; exec dotnet test --no-restore $p --framework net10.0 --filter "$f" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled""", "sh", "{tests}"]
+conventions = """
+- In this repository the library is `src/StackExchange.Redis`, its tests
+  `tests/StackExchange.Redis.Tests`; the checks have no Redis server, so the
+  reproduction test must not need one (a unit test of the code you fix, for
+  example in `RoundTripUnitTests`).
+"""
+
+# The gate runs the one test project the issues are about, for net10.0 (the image's only runtime): the
+# solution also targets frameworks the image cannot run (net462, net48).
+# Under Microsoft.Testing.Platform (a runner in global.json) the project is
+# named by `--project`, under VSTest as a bare path; the issues' bases have
+# either. Coverage collection is off: a threshold of the repo's own
+# fails a filtered run, and the profile skips the coverage step under this
+# runner anyway. NuGet audit is off: an advisory published after the fix
+# fails a restore that treats warnings as errors; so is Nerdbank.GitVersioning,
+# which walks a history a job's worktree lacks (#224).
+# The root holds Build.csproj next to the solution: commands that take the
+# folder have to be told which one.
+#
+# Without a Redis server about 90 of the suite's tests fail at the base
+# already, and the gate cannot yet tell them from the patch's: no profile
+# reads .NET test output (#291). Until then StackExchange.Redis-2689 cannot
+# pass the gate whatever the patch.
+[repo.overrides]
+fetch = ["dotnet", "restore", "StackExchange.Redis.slnx", "-p:NuGetAudit=false"]
+
+[repo.overrides.gate]
+format = ["dotnet", "format", "StackExchange.Redis.slnx", "--verify-no-changes", "--no-restore"]
+lint = ["dotnet", "build", "StackExchange.Redis.slnx", "--no-restore", "-warnaserror"]
+repro_test = ["sh", "-c", "p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 --filter \"$1\" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled", "sh", "{test}"]
+test = ["sh", "-c", "p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled"]
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "StackExchange.Redis"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

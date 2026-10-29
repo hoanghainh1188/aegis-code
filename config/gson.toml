@@ -1,0 +1,101 @@
+# Java eval set (#259): gson, same models and budget as poc.toml (ADR 0005).
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Model per tier (design §5.1). Read by aegis-router.
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+# Gate steps in docker/<profile> images, --network none (#5); dependencies
+# come from the fetch step behind the egress proxy (#66).
+sandbox = true
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 40
+
+# Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
+# Before the first gate run the platform asks it for the code linked to the
+# patch outside its files and shows it to the agent (#203). The agent gets
+# none of its tools: it made no graph query in the 32 runs of #185.
+# Each job indexes its tree under `<state_dir>/index` (`{index_dir}`, the
+# server's HOME), shared by every repo: the server's daemon is one per
+# user and serves one cache.
+# `codebase-memory-mcp` is on PATH: in docker/server, and locally as
+# eval/README.md says. `--ui=false`: no graph UI on port 9749.
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+# The repo: a clone of the fork, each job gets a worktree.
+[repo]
+path = ".workspace/repos/gson"
+language = "java"
+base = "main"
+key = "gson"
+# Hidden tests of eval runs (#98): eval/issues lists gson's as test classes,
+# all in the `gson` module; Surefire takes them comma-separated.
+hidden_test = ["sh", "-c", "IFS=,; exec mvn -B -o -q test -pl gson -Dtest=\"$*\"", "sh", "{tests}"]
+conventions = """
+- The library is the `gson` module: its code is in `gson/src/main/java`,
+  its tests in `gson/src/test/java`. The other modules (`test-jpms`,
+  `test-graal`, `test-shrinker`, `extras`, `metrics`, `proto`) test packaging
+  or add-ons; leave them alone.
+"""
+
+# Only the `gson` module: in the `test` phase test-jpms needs the gson jar
+# installed, which no step does (eval/README.md, verify.py). The other
+# modules are not what the issues are about.
+# With `-Dgroups` Surefire downloads its JUnit 4.7 provider; the gate's
+# runs, without groups, need the JUnit 4 one, at the Surefire version of
+# gson's root pom (#288).
+[repo.overrides]
+fetch = ["sh", "-c", """surefire=$(sed -n '/<artifactId>maven-surefire-plugin</{n;s/.*<version>\\(.*\\)<\\/version>.*/\\1/p;}' pom.xml | head -n 1)
+exec mvn -B -q -pl gson \\
+    dependency:go-offline \\
+    org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent \\
+    test \\
+    org.jacoco:jacoco-maven-plugin:0.8.12:report \\
+    -Dgroups=aegis-fetch-only \\
+    -Dsurefire.failIfNoSpecifiedTests=false \\
+    -DfailIfNoTests=false \\
+    dependency:get "-Dartifact=org.apache.maven.surefire:surefire-junit4:$surefire""""]
+
+[repo.overrides.gate]
+lint = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test-compile"]
+repro_test = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test", "-Dtest={test}"]
+test = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test"]
+# gson's own `argLine` replaces the one prepare-agent sets, so the tests' JVM
+# would run without JaCoCo's agent and no report would be written. The
+# agent comes through the environment instead; the fetch step downloaded it.
+coverage = ["sh", "-c", """agent=$HOME/.m2/repository/org/jacoco/org.jacoco.agent/0.8.12/org.jacoco.agent-0.8.12-runtime.jar
+JAVA_TOOL_OPTIONS="-javaagent:$agent=destfile=$PWD/gson/target/jacoco.exec" \\
+exec mvn -B -o -q -pl gson test org.jacoco:jacoco-maven-plugin:0.8.12:report"""]
+
+[repo.overrides.coverage]
+format = "jacoco"
+path = "gson/target/site/jacoco/jacoco.xml"
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "gson"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

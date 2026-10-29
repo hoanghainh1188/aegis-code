@@ -1,0 +1,100 @@
+# TypeScript eval set (#259): zod, same models and budget as poc.toml (ADR 0005).
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Model per tier (design §5.1). Read by aegis-router.
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+# Gate steps in docker/<profile> images, --network none (#5); dependencies
+# come from the fetch step behind the egress proxy (#66).
+sandbox = true
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 40
+
+# Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
+# Before the first gate run the platform asks it for the code linked to the
+# patch outside its files and shows it to the agent (#203). The agent gets
+# none of its tools: it made no graph query in the 32 runs of #185.
+# Each job indexes its tree under `<state_dir>/index` (`{index_dir}`, the
+# server's HOME), shared by every repo: the server's daemon is one per
+# user and serves one cache.
+# `codebase-memory-mcp` is on PATH: in docker/server, and locally as
+# eval/README.md says. `--ui=false`: no graph UI on port 9749.
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+# The repo: a clone of the fork, each job gets a worktree.
+[repo]
+path = ".workspace/repos/zod"
+language = "typescript"
+base = "main"
+key = "zod"
+# Hidden tests of eval runs (#98): eval/issues lists zod's as test files,
+# run by the root vitest config (its projects are packages/*).
+hidden_test = ["npx", "--no-install", "vitest", "run", "{tests}"]
+conventions = """
+- The library is `packages/zod`: v4 in `src/v4` (`classic`, `core`, `mini`),
+  v3 in `src/v3`. Tests sit next to the code in `tests/` directories, for
+  example `packages/zod/src/v4/classic/tests/`.
+- Put the reproduction test in a new file in the `tests/` directory of the
+  code you fix, named `<topic>.test.ts`. Report its path from the repo
+  root, `packages/zod/src/v4/classic/tests/<topic>.test.ts`, as its id and
+  its only file.
+"""
+
+# zod's scripts go through its own package manager (`nub`), its packages
+# depend on each other as `workspace:*`, which npm cannot read, and it locks
+# them with pnpm: pnpm installs them. Some bases have no
+# pnpm-workspace.yaml (`workspaces` in package.json only); the fetch writes
+# one, which the clone's .git/info/exclude keeps out of the patch
+# (eval/README.md). npx fetches pnpm with a cache of its own: on the
+# mounted npm cache its lock fails (`ECOMPROMISED`). pnpm would refuse a
+# project whose `packageManager` is not pnpm. The lockfile is neither read
+# nor written: at the bases of the nub era it lacks entries pnpm needs, and
+# rewriting it would put it in the patch. Formatting and linting are biome's, not prettier and
+# eslint.
+[repo.overrides]
+fetch = ["sh", "-c", """[ -e pnpm-workspace.yaml ] || printf 'packages:\\n  - packages/*\\n' > pnpm-workspace.yaml
+npm_config_cache=/tmp/npm exec npx --yes pnpm@10.12.1 install --ignore-scripts --config.lockfile=false \\
+    --config.package-manager-strict=false --config.manage-package-manager-versions=false"""]
+edit_format = ["npx", "--no-install", "biome", "format", "--write", "{file}"]
+
+[repo.overrides.gate]
+format = ["npx", "--no-install", "biome", "format", "."]
+lint = ["npx", "--no-install", "biome", "lint", "."]
+# vitest type-checks the tests itself (`typecheck.enabled`).
+typecheck = false
+repro_test = ["npx", "--no-install", "vitest", "run", "{test}"]
+# packages/treeshake tests the built bundle (`nub run build`), which no step
+# builds; the issues are about the library's behaviour.
+test = ["npx", "--no-install", "vitest", "run", "--project", "!@zod/treeshaking"]
+# No coverage provider among zod's dependencies.
+coverage = false
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "zod"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

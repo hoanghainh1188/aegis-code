@@ -70,6 +70,27 @@ Môi trường kiểm:
 
 Tổng cộng bộ thử gồm **52 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson, 5 C#.
 
+**Chạy qua platform (#259).** Mỗi repo có một cấu hình riêng, cùng model và ngân sách với `config/poc.toml`:
+- `config/gin.toml`
+- `config/zod.toml`
+- `config/gson.toml`
+- `config/polly.toml`
+- `config/nsubstitute.toml`
+- `config/stackexchange-redis.toml`
+
+`eval` chọn issue theo ngôn ngữ, mà ba repo C# dùng chung một ngôn ngữ, nên với chúng phải nêu issue bằng `--only`:
+
+```bash
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/gin.toml --set eval/issues --replay --no-pr
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/polly.toml --set eval/issues --only Polly-3086 --only Polly-3286
+```
+
+Gate chạy trong sandbox, nên các cấu hình ghi lại cách cài và chạy test của từng repo:
+- **zod:** phụ thuộc cài bằng pnpm, không đọc lockfile. Gate dùng biome thay cho prettier/eslint và bỏ test `@zod/treeshaking`, vốn cần bundle đã build.
+- **gson:** gate chỉ chạy module `gson`. Bước fetch tải thêm provider JUnit 4 của Surefire (#288), và JaCoCo được gắn qua `JAVA_TOOL_OPTIONS`, vì gson tự đặt `argLine`.
+- **C#:** gate chạy một project test với `net10.0`, runtime duy nhất trong image. Project được nêu bằng `--project` khi repo chạy Microsoft.Testing.Platform, bằng đường dẫn trần khi chạy VSTest.
+- **StackExchange.Redis-2689:** chưa qua được gate. Không có Redis server thì khoảng 90 test fail ngay ở base, mà gate chưa đọc được từng test fail của .NET để so với base (#291).
+
 ## Định dạng
 
 | Trường | Nghĩa |
