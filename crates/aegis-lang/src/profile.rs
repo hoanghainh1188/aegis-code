@@ -1136,6 +1136,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A whole ignored directory the profile does not cache is opened by
+    /// the gate, file by file: restore's `*.nuget.g.props` under MSBuild's
+    /// artifacts output must not look like hidden build input (#290).
+    #[test]
+    fn csharp_caches_the_artifacts_output_like_bin_and_obj() {
+        let cs = builtin().get(Language::CSharp).unwrap().clone();
+        for dir in ["bin", "obj", "artifacts"] {
+            assert!(cs.sandbox.cache_dirs.iter().any(|d| d == dir), "{dir}");
+        }
+    }
+
     #[test]
     fn csharp_skips_its_coverage_under_the_testing_platform() {
         let root = std::env::temp_dir().join(format!("aegis_test_mtp_{}", std::process::id()));
