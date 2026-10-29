@@ -50,7 +50,7 @@ Dựa trên phân tích ledger thực tế tại [Báo cáo Định vị Lỗi](
 
 ## 4. Cài đặt Kỹ thuật trong Crate `aegis-aci`
 
-Crate `aegis-aci` đã được bổ sung module `sbfl` độc lập ([`crates/aegis-aci/src/sbfl.rs`](file:///Users/hoanghainh/Projects/aegis-code/crates/aegis-aci/src/sbfl.rs)) với đầy đủ tính năng:
+Crate `aegis-aci` đã được bổ sung module `sbfl` độc lập ([`crates/aegis-aci/src/sbfl.rs`](../../crates/aegis-aci/src/sbfl.rs)) với đầy đủ tính năng:
 * **Công thức Tarantula:**
   $$\text{Score}_{Tarantula}(e) = \frac{\frac{e_f}{N_{fail}}}{\frac{e_f}{N_{fail}} + \frac{e_p}{N_{pass}}}$$
 * **Công thức Ochiai:**

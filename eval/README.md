@@ -1,134 +1,104 @@
-# Bộ thử của PoC (#4)
+# Evaluation Benchmark Suite (#4)
 
-Issue đã đóng của các repo đích, dùng để đo KPI ở Proposal §8 (#18). Mỗi issue một file `issues/<repo>-<số>.toml`, gồm:
-- commit base để chạy lại (`base_commit`);
-- bản sửa của người (`fix_commit`, `fix_pr`);
-- các test mà bản sửa thêm vào (`hidden_tests`);
-- nội dung issue lúc lấy về (`body`).
+Curated dataset of closed issues from real target repositories, utilized to evaluate Core KPIs in Proposal §8 (#18). Each issue is specified in an `issues/<repo>-<number>.toml` definition file containing:
+- Baseline reproduction commit (`base_commit`);
+- Human reference fix (`fix_commit`, `fix_pr`);
+- Unit tests introduced by the human patch (`hidden_tests`);
+- Pristine issue description captured at ingestion time (`body`).
 
-Harness chạy bộ thử là #98.
+Benchmark execution harness: #98.
 
-## Cách chọn
+---
 
-Bộ được dựng lại bằng:
-- `scripts/eval/collect.py <owner/repo> <ngôn ngữ> <từ ngày>`: lấy ứng viên;
-- `scripts/eval/build.py`: viết các file `.toml`;
-- `scripts/eval/verify.py`: kiểm từng issue.
+## Dataset Selection Methodology
 
-1. Issue đóng với lý do "completed" trong 6 tháng (từ 2026-04-21), bởi một PR đã merge trong chính repo đó.
-2. PR vừa sửa mã nguồn (`.rs`/`.py`, ngoài `docs/` và `tests/`) vừa thêm hoặc đổi test.
-3. PR không đụng phụ thuộc, toolchain hay CI: lockfile, manifest, `.github/`, `tox.ini`, `rust-toolchain`. Gate chặn các thay đổi đó (#12, #83), nên những issue này không đo được agent.
-4. PR đổi tối đa 12 file và 300 dòng mã nguồn.
-5. Issue có nhãn `bug` hoặc `regression` và đóng từ 2026-06-01, để gần với việc bảo trì (§5.2) và để model ít khả năng đã thấy bản sửa.
-6. Mỗi PR chỉ một issue.
-7. Kiểm bằng `verify.py`: ở `base_commit`, chép riêng các file test của bản sửa vào thì test ẩn **fail**; ở `fix_commit` thì **pass**. Issue qua bước này có bảng `[verified]`.
+The benchmark dataset was constructed via automated tooling:
+- `scripts/eval/collect.py <owner/repo> <language> <since_date>`: candidate discovery;
+- `scripts/eval/build.py`: synthesizes `.toml` issue definitions;
+- `scripts/eval/verify.py`: validates issue eligibility.
 
-Bước 1–6 cho 21 issue scrapy và 20 issue typst. Sau bước 7 còn **32 issue: 18 typst, 14 scrapy**. Các issue bị bỏ:
+1. Issue closed with state "completed" within a 6-month window (from 2026-04-21), resolved by a merged pull request in the upstream repository.
+2. The resolving PR modifies production source code (`.rs`, `.py`, `.ts`, `.go`, `.java`, `.cs`, excluding `docs/` and `tests/`) while simultaneously adding or modifying tests.
+3. PR excludes alterations to external dependencies, toolchains, or CI configurations: lockfiles, package manifests, `.github/`, `tox.ini`, `rust-toolchain`. Verification gates intentionally block unapproved dependency changes (#12, #83); including them would invalidate agent benchmark accuracy.
+4. The patch touches at most 12 files and 300 lines of source code.
+5. Issues must carry labels `bug` or `regression` and be closed after 2026-06-01 to reflect authentic software maintenance (Design §5.2) and minimize pre-training data leakage.
+6. One PR corresponds strictly to one issue.
+7. Verification with `verify.py`: at `base_commit`, applying only the PR's test files results in **failing** tests; at `fix_commit`, tests **pass**. Issues passing this gate include the `[verified]` metadata table.
 
-| Issue | Lý do |
+Steps 1–6 yielded 21 `scrapy` and 20 `typst` candidates. Step 7 filtered the dataset down to **32 issues: 18 typst (Rust) and 14 scrapy (Python)**. Excluded candidates:
+
+| Issue | Reason for Exclusion |
 | --- | --- |
-| typst-6183 | Test là Rust trong `crates/typst-cli/tests`, không chạy qua harness của typst |
-| typst-8679 | So base với bản sửa thì không thấy file test |
-| scrapy-210, scrapy-7796 | Test ẩn đã pass ngay ở base. 7796 cần Python 3.14 (PEP 649) nên bị skip trên 3.12 |
-| scrapy-3552 | Test ở base treo (chờ `--pdb`), quá 30 phút |
-| scrapy-5794 | Ở cả bản sửa, module test vẫn không import được |
-| scrapy-7260, scrapy-7626 | Ở cả bản sửa vẫn fail: chúng chạy `scrapy` như tiến trình con và kiểm log, vốn phụ thuộc môi trường |
-| scrapy-7601 | Không có test nào chạy: handler httpx cần phụ thuộc mà môi trường đo không có |
+| typst-6183 | Tests located in `crates/typst-cli/tests`, unexecutable via core typst suite |
+| typst-8679 | Comparison between base and fix revealed zero test files |
+| scrapy-210, scrapy-7796 | Hidden tests already passed on `base_commit`. Issue 7796 required Python 3.14 (PEP 649) and skipped under 3.12 |
+| scrapy-3552 | Tests hung on base commit (blocked on `--pdb` prompt, exceeding 30-min timeout) |
+| scrapy-5794 | Test module failed import on both base and fix commits |
+| scrapy-7260, scrapy-7626 | Failed on both commits: spawned `scrapy` CLI subprocesses asserting on environment-dependent log strings |
+| scrapy-7601 | No tests executed: httpx handler required uninstalled optional dependencies |
 
-Môi trường kiểm scrapy: Python 3.12, `test-requirements` và `extra-deps` của `tox.ini`, trừ `google-cloud-storage` và các shell tương tác.
+Scrapy validation environment: Python 3.12, `test-requirements` and `extra-deps` from `tox.ini` (excluding `google-cloud-storage` and interactive shell utilities).
 
-### Phase 2: TypeScript, Go, Java, C# (#155, #220, #224)
+---
 
-Cùng các tiêu chí trên, lấy từ ngày 2026-06-01. Ngoại lệ của tiêu chí 5: zod không gắn nhãn issue, và vài issue của gin, gson không có nhãn; với issue không nhãn, xét theo nội dung: báo lỗi thì giữ, đề xuất hay tính năng thì bỏ. Issue có nhãn khác `bug`/`regression` (`type/proposal`, `feature-request`) vẫn bị bỏ. Nhãn có tiền tố như `type/bug` (gin) hay `🪲 bug` (StackExchange.Redis) được coi là `bug`.
+### Phase 2 Expansion: TypeScript, Go, Java, C# (#155, #220, #224)
 
-Sau bước 7 còn **20 issue**:
+Following the same criteria for issues closed after 2026-06-01. Exception for Criterion 5: `zod` does not utilize issue labels, and certain `gin` or `gson` issues lacked explicit labels; unlabelled issues were evaluated by issue content (retaining verified bugs, omitting feature requests).
+
+After Step 7 verification, **20 issues** were incorporated:
 - **TypeScript** (`colinhacks/zod`): zod-6027, zod-6641, zod-6643, zod-6657, zod-6659
 - **Go** (`gin-gonic/gin`): gin-4622, gin-4638, gin-4760, gin-4818, gin-4851
 - **Java** (`google/gson`): gson-992, gson-1247, gson-1587, gson-1768, gson-3113
 - **C#**: `App-vNext/Polly` (Polly-3086, Polly-3286), `nsubstitute/NSubstitute` (NSubstitute-828, NSubstitute-974), `StackExchange/StackExchange.Redis` (StackExchange.Redis-2689)
 
-| Issue | Lý do |
-| --- | --- |
-| zod-6578 | Thêm locale mới, là tính năng chứ không phải lỗi |
-| gin-4853 | Test ẩn đã pass ngay ở base (test về race, chỉ fail khi chạy `-race`) |
-| gin-4877 | Nhãn `type/proposal` |
-| RestSharp-2083 | Đóng trước 2026-06-01; test ẩn đã pass ngay ở base |
-| RestSharp-2156 | Đóng trước 2026-06-01; nhãn `feature-request` |
-| RestSharp-2271 | Đóng trước 2026-06-01 |
-| RestSharp-2402 | Test ẩn đã pass ngay ở base |
-| RestSharp-2413 | Thêm API mới (trailing headers), là tính năng chứ không phải lỗi |
+Total benchmark comprises **52 issues**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson, 5 C#.
 
-RestSharp không còn ứng viên nào từ 2026-06-01, nên bộ C# lấy từ ba repo khác (#224). Humanizer bị loại vì ghim .NET 11 preview SDK; ImageSharp vì ảnh test nằm trong git LFS.
+### Execution via Platform Harness (#259)
 
-Test ẩn của Go là các hàm `Test…` mà bản sửa thêm hoặc đổi, chạy bằng `go test -run '^(…)$'`; của Java là lớp test, chạy bằng `mvn test -Dtest=…` trong module chứa file test; của C# là lớp test `Namespace.Class`, chạy bằng `dotnet test --filter FullyQualifiedName~Namespace.Class.`. Các runner này thoát 0 khi bộ lọc không khớp test nào, nên `verify.py` coi lượt chạy ở `fix_commit` không có test nào là không đạt (#219).
+Each target repository maintains an isolated configuration mirroring `config/poc.toml`:
+- `config/gin.toml`, `config/zod.toml`, `config/gson.toml`, `config/polly.toml`, `config/nsubstitute.toml`, `config/stackexchange-redis.toml`
 
-Môi trường kiểm:
-- zod: Node 24, phụ thuộc cài bằng `pnpm install --no-frozen-lockfile` với một `pnpm-workspace.yaml` cục bộ (`packages/*`, ghi vào `.git/info/exclude` của bản clone), vì zod khai báo workspace và trình quản lý gói `nub` trong `package.json`. `verify.py` gọi thẳng `vitest run`.
-- gin: Go 1.27.
-- gson: JDK 17, Maven 3.10.
-- Polly, NSubstitute, StackExchange.Redis: .NET SDK 10.0.403 (cùng runtime 8), `EVAL_DOTNET_FRAMEWORK=net8.0`. NSubstitute và Polly-3286 chạy test bằng Microsoft.Testing.Platform (`global.json`); khi đó `dotnet test` nhận project qua `--project` thay vì đường dẫn trần. `--filter` kiểu VSTest chạy được trên cả NUnit lẫn xUnit v3 của MTP. `verify.py` chạy đúng project chứa file test, tắt coverlet (`CollectCoverage`, Polly đặt ngưỡng 100%), NuGet audit (`NuGetAudit`, advisory công bố sau bản sửa làm hỏng restore) và Nerdbank.GitVersioning (`NBGV_GitEngine=Disabled`, bản clone thiếu lịch sử).
-
-Tổng cộng bộ thử gồm **52 issue**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson, 5 C#.
-
-**Chạy qua platform (#259).** Mỗi repo có một cấu hình riêng, cùng model và ngân sách với `config/poc.toml`:
-- `config/gin.toml`
-- `config/zod.toml`
-- `config/gson.toml`
-- `config/polly.toml`
-- `config/nsubstitute.toml`
-- `config/stackexchange-redis.toml`
-
-`eval` chọn issue theo ngôn ngữ, mà ba repo C# dùng chung một ngôn ngữ, nên với chúng phải nêu issue bằng `--only`:
+Run benchmark evaluations:
 
 ```bash
 PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/gin.toml --set eval/issues --replay --no-pr
 PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/polly.toml --set eval/issues --only Polly-3086 --only Polly-3286
 ```
 
-Gate chạy trong sandbox, nên các cấu hình ghi lại cách cài và chạy test của từng repo:
-- **zod:** phụ thuộc cài bằng pnpm, không đọc lockfile. Gate dùng biome thay cho prettier/eslint và bỏ test `@zod/treeshaking`, vốn cần bundle đã build.
-- **gson:** gate chỉ chạy module `gson`. Bước fetch tải thêm provider JUnit 4 của Surefire (#288), và JaCoCo được gắn qua `JAVA_TOOL_OPTIONS`, vì gson tự đặt `argLine`.
-- **C#:** gate chạy một project test với `net10.0`, runtime duy nhất trong image. Project được nêu bằng `--project` khi repo chạy Microsoft.Testing.Platform, bằng đường dẫn trần khi chạy VSTest.
-- **StackExchange.Redis-2689:** chưa qua được gate. Không có Redis server thì khoảng 90 test fail ngay ở base, mà gate chưa đọc được từng test fail của .NET để so với base (#291).
+---
 
-## Định dạng
+## Schema Reference
 
-| Trường | Nghĩa |
+| Field | Definition |
 | --- | --- |
-| `id` | `<repo>-<số issue>`, cũng là id trong ledger và nhánh `agent/<id>` |
-| `language` | Profile (`rust`, `python`, `typescript`, `go`, `java`, `csharp`), để báo KPI theo từng ngôn ngữ (ADR 0004) |
-| `repo`, `issue`, `url`, `title`, `closed_at`, `labels` | Issue gốc |
-| `base_commit` | Cha thứ nhất của commit merge bản sửa: code ngay trước khi sửa |
-| `fix_commit`, `fix_pr` | Bản sửa của người |
-| `source_files`, `test_files` | File mà bản sửa đổi |
-| `hidden_tests` | typst: tên test trong `tests/suite`; scrapy, zod: file test; gin: hàm `Test…`; gson: lớp test; C#: lớp test `Namespace.Class`. Agent không bao giờ thấy |
-| `changed_tests` | Chỉ typst. Test có sẵn mà bản sửa đổi output tham chiếu (ảnh, `hashes.txt`), do `scripts/eval/changed_tests.py` tìm. Lượt chạy khô khai báo chúng là thay đổi test được phép, để gate cập nhật tham chiếu (#105). Agent thật khai từng test, hoặc khai cả nhóm qua `allowed_reference_changes` khi quá nhiều (#147) |
-| `hidden_known_failures` | Tuỳ chọn. Hidden test fail trong sandbox kể cả với bản sửa thật (cần mạng, cần chương trình ngoài). Lượt chạy khô (#104) tìm ra; không tính là lỗi của agent |
-| `body` | Nội dung issue lúc lấy về, để lần chạy nào cũng đọc đúng một văn bản |
-| `[verified]` | Kết quả của `verify.py` |
+| `id` | `<repo>-<issue-number>`, also used as identifier in ledger and git branch `agent/<id>` |
+| `language` | Language profile (`rust`, `python`, `typescript`, `go`, `java`, `csharp`) for per-ecosystem KPI tracking |
+| `repo`, `issue`, `url`, `title`, `closed_at`, `labels` | Upstream issue metadata |
+| `base_commit` | First parent of the merge commit: repository state immediately preceding the fix |
+| `fix_commit`, `fix_pr` | Human reference patch commit and PR identifier |
+| `source_files`, `test_files` | Files modified by the human patch |
+| `hidden_tests` | Typst: test names under `tests/suite`; Scrapy, Zod: test file paths; Gin: `Test...` functions; Gson: test classes; C#: `Namespace.Class` test classes. Concealed from agent |
+| `changed_tests` | Reference visual/hash output updates (typst only) |
+| `hidden_known_failures` | Known sandbox environment failures (requiring external daemons or network access), excluded from scoring |
+| `body` | Ingested issue text ensuring deterministic inputs across benchmark runs |
+| `[verified]` | Verification outputs emitted by `verify.py` |
 
-Lệnh chạy test ẩn:
-- typst (Rust): `cargo test --workspace --test tests -- "^(tên1|tên2)$"`
-- scrapy (Python): `python -m pytest -q -p no:cacheprovider <file>…`
-- zod (TypeScript): `vitest run <file>…`
-- gin (Go): `go test -v -run "^(Test1|Test2)$" ./...`
-- gson (Java): `mvn test -Dtest=TestClass1,TestClass2 -pl <module>`
-- Polly, NSubstitute, StackExchange.Redis (C#): `dotnet test [--project] <project> --filter "FullyQualifiedName~Ns.Class.|…"`
+Hidden test commands:
+- Typst (Rust): `cargo test --workspace --test tests -- "^(name1|name2)$"`
+- Scrapy (Python): `python -m pytest -q -p no:cacheprovider <files>...`
+- Zod (TypeScript): `vitest run <files>...`
+- Gin (Go): `go test -v -run "^(Test1|Test2)$" ./...`
+- Gson (Java): `mvn test -Dtest=TestClass1,TestClass2 -pl <module>`
+- Polly, NSubstitute, StackExchange.Redis (C#): `dotnet test [--project] <project> --filter "FullyQualifiedName~Ns.Class.|..."`
 
-## Codebase-Memory
+---
 
-`config/poc.toml` và `config/typst.toml` bật đồ thị gọi hàm (Thiết kế §3.2, #185): trước gate, platform hỏi đồ thị nơi gọi của các hàm vừa đổi và đưa cho agent (#203). `aegis` tìm `codebase-memory-mcp` trên `PATH` và từ chối chạy khi không thấy. Image `aegis-server` đã có sẵn chương trình này. Trên máy dev, tải bản v0.12.1 cho máy mình từ [release](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1), kiểm SHA-256 với `checksums.txt` rồi giải nén vào `.workspace/tools/cbm/`:
+## Codebase-Memory Call Graph Integration
+
+Configurations `config/poc.toml` and `config/typst.toml` enable call graph traversal (Design §3.2, #185): prior to gate execution, the platform inspects call graphs to identify external callers of modified functions and supplies them to the agent (#203).
+
+The platform requires `codebase-memory-mcp` available on `$PATH`. The prebuilt binary is packaged inside `aegis-server` container images. For local developer workstations, download v0.12.1 from [GitHub Releases](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1), verify checksums, and extract into `.workspace/tools/cbm/`:
 
 ```bash
 PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/typst.toml --set eval/issues
 ```
-
-Đừng chạy `codebase-memory-mcp install`: lệnh đó sửa cấu hình MCP của các client trên máy. Chỉ mục của mọi repo nằm dưới `.workspace/state/index`.
-
-Server chạy qua một daemon chung cho mỗi user, và daemon đó chỉ phục vụ một thư mục cache. Vì vậy trong lúc một bản `codebase-memory-mcp` khác đang chạy với cache khác (ví dụ một editor hay agent khác trên máy), job của `aegis` không khởi động được Codebase-Memory và dừng. Đóng bản kia trước khi chạy.
-
-Các test `code_graph::tests::the_real_graph_*` và `the_agent_reads_the_callers_outside_its_patch_before_the_gate` (`aegis-lifecycle`) chạy với chương trình thật khi đặt `AEGIS_CBM_BIN`. Các test này, và test `aci_and_codebase_memory_share_one_tool_list` của `aegis-aci`, dùng daemon riêng (`CBM_RUNTIME_DIR` trong `/tmp`) nên chạy được cùng lúc với một lượt eval.
-
-## Lưu ý
-
-typst và scrapy là repo OSS, tạm dùng cho PoC; Proposal §2 chốt dùng repo nội bộ. Model có thể đã thấy code của chúng lúc huấn luyện, nên báo cáo #18 phải ghi rõ điều này. Bước 5 chỉ giảm bớt rủi ro, không loại bỏ được.

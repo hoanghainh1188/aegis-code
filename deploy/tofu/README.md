@@ -1,22 +1,22 @@
-# Hạ tầng aegis-server (OpenTofu)
+# Infrastructure Provisioning: aegis-server (OpenTofu)
 
-Vận hành, triển khai, rollback: [docs/runbook/README.md](../../docs/runbook/README.md).
+For operations, deployment, and rollback guides, refer to [AWS Operations Runbook](../../docs/runbook/README.md).
 
-| Thư mục | Nội dung |
+| Directory | Scope & Contents |
 | --- | --- |
-| `modules/aegis` | Một bản triển khai: VPC, EC2 có Docker (vai trò `all`), RDS PostgreSQL, ALB + ACM, chỗ cho secret trong Secrets Manager (không giá trị), SSM parameter tag image, CloudWatch Logs, IAM của máy; máy giám sát (Prometheus, Alertmanager, Grafana, SNS) đọc luật từ `deploy/alerts/` và dashboard từ `deploy/grafana/` |
-| `envs/staging` | Staging, chế độ `poc`, mặc định `ap-northeast-1` |
-| `envs/customer-jp` | Repo khách, vùng viết cứng `ap-northeast-1`, RDS Multi-AZ |
-| `bootstrap` | Một lần mỗi tài khoản: OIDC của GitHub, role `aegis-ci-plan`/`-image`/`-apply`, ECR |
+| `modules/aegis` | Complete deployment module: VPC, EC2 host with Docker (`all` role), RDS PostgreSQL, ALB + ACM certificate, Secrets Manager placeholders (empty values), SSM parameter for image tags, CloudWatch Logs, instance IAM roles; dedicated monitoring EC2 (Prometheus, Alertmanager, Grafana, SNS) consuming rules from `deploy/alerts/` and dashboards from `deploy/grafana/` |
+| `envs/staging` | Staging environment, `poc` mode, defaults to `ap-northeast-1` |
+| `envs/customer-jp` | Customer production environment, region hardcoded to `ap-northeast-1` (Tokyo), Multi-AZ RDS |
+| `bootstrap` | One-time setup per AWS account: GitHub OIDC provider, IAM roles `aegis-ci-plan`/`-image`/`-apply`, ECR repositories |
 
-State nằm trên S3, khóa bằng file lock (`use_lockfile`); `bucket`/`key`/`region` truyền qua `-backend-config` (mẫu: `backend.hcl.example`). Không commit state, `backend.hcl`, hay `*.tfvars` có giá trị thật (`.gitignore`); `example.tfvars` chỉ có giá trị mẫu.
+State is stored in an S3 bucket with native state locking (`use_lockfile`); `bucket`, `key`, and `region` are passed via `-backend-config` (template: `backend.hcl.example`). Never commit state files, `backend.hcl`, or real `*.tfvars` files (`.gitignore` enforced); `example.tfvars` contains only mock schema templates.
 
-Kiểm cấu hình không cần tài khoản AWS (CI chạy đúng script này):
+Validate configuration locally without requiring AWS credentials (CI executes this exact script):
 
 ```bash
 deploy/tofu/check.sh
 ```
 
-`fmt -check`, `tflint`, `validate`, rồi `plan` từng root với `example.tfvars`, `-var offline_plan=true` (provider bỏ kiểm credentials), backend local tạm, `-refresh=false`. Không có data source nào gọi API (AMI đọc qua `resolve:ssm:` lúc tạo máy, tài khoản truyền qua biến) nên `plan` này đầy đủ, nhưng không dùng để `apply`.
+Executes `tofu fmt -check`, `tflint`, `tofu validate`, and generates dry-run execution plans across roots with `example.tfvars`, `-var offline_plan=true` (bypasses credential verification), temporary local backend, and `-refresh=false`. All data sources avoid runtime API lookups (AMIs resolve via SSM aliases during boot; account IDs pass via variables), ensuring comprehensive validation offline.
 
-Với tài khoản thật: `tofu init -backend-config=backend.hcl`, `tofu plan -var-file=<env>.tfvars`. `apply` chỉ chạy qua workflow (GitHub environment có người duyệt).
+For real AWS accounts: run `tofu init -backend-config=backend.hcl`, followed by `tofu plan -var-file=<env>.tfvars`. The `apply` action runs strictly via CI/CD workflows under GitHub protected environments with mandatory reviewers.

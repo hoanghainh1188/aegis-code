@@ -1,37 +1,45 @@
-# ADR 0006 – Client cho developer: `aegis-job`
+# ADR 0006 – Developer CLI: `aegis-job`
 
-- Ngày: 2026-10-28
-- Trạng thái: Đã chấp nhận
-- Người quyết định: @Nguyen Han Hoang Hai
+- Date: 2026-10-28
+- Status: Accepted
+- Decider: @Nguyen Han Hoang Hai
 - Issue: #231
 
-## Bối cảnh
+## Context
 
-Developer làm việc với aegis-code qua tracker (Jira/Backlog), webhook (nhãn `aegis`, CI hỏng, review trên PR/MR) và dashboard. Không có client nào chạy trên máy developer. `aegis` (crate `aegis-cli`) là công cụ vận hành và eval: nó chạy cả pipeline tại chỗ, nên cần Docker, khóa model, token GitHub và file config, và chỉ build được từ source. `/api/v1` của `aegis-server` đã có đủ thao tác trên job (tạo, xem, lượt chạy, huỷ, chạy lại, vòng review), nhưng chỉ nhận token của service (`aegis-server token <service>`), không có danh tính người dùng.
+Developers interact with Aegis through issue trackers (Jira/Backlog), webhooks (labels like `aegis`, broken CI runs, PR/MR review comments), and the web dashboard. No dedicated lightweight client existed for developers' local terminals. The existing `aegis` binary (crate `aegis-cli`) is an internal operator and evaluation tool: it executes the full pipeline locally, requiring local Docker engines, model API keys, forge tokens, and configuration files, compiled directly from source.
 
-## Quyết định
+While `aegis-server` `/api/v1` exposed comprehensive job operations (create, inspect, cancel, retry, review rounds), it initially authenticated only service tokens (`aegis-server token <service>`) lacking individual human user identities.
 
-1. **Đăng nhập bằng token cá nhân.**
-   - Người đăng nhập dashboard qua SSO tạo token riêng ở `/me/tokens`: có tên, hết hạn sau tối đa 90 ngày, tối đa 10 token còn hạn mỗi người.
-   - Token chỉ hiện một lần, trên trang vừa tạo, không bao giờ nằm trong URL; server chỉ giữ hash, như token service.
-   - Request mang token này làm việc với tư cách người đó: đúng vai trò của họ trên từng repo, audit ghi tên họ. Người đó thu hồi được từng token; token hết hạn bị từ chối ngay.
-   - Không làm OIDC device flow lúc này: nó phụ thuộc SSO của công ty có hỗ trợ device authorization grant hay không, và cần thêm bước đổi token SSO lấy token API. Có thể thêm sau trong một issue riêng mà không đổi API.
+## Decision
 
-2. **Binary riêng `aegis-job`, crate `aegis-client`.**
-   - Chỉ phụ thuộc HTTP (reqwest, rustls) và JSON; không kéo agent, gate, Docker hay provider model, nên nhỏ, build nhanh và cài không cần gì khác.
-   - Chỉ gọi `/api/v1`, thêm `GET /api/v1/me` và `GET /api/v1/repos` (các repo người gọi có vai trò, kèm vai trò) để client biết mình là ai và đổi slug thành id.
-   - Lệnh: `login`, `logout`, `whoami`, `repos`, `submit`, `list`, `show`, `watch`, `cancel`, `retry`, `review`, `open`; `--json` cho script.
-   - Token chỉ gửi qua `https://`, hoặc `http://` tới chính máy (trial). Login lưu ở `~/.config/aegis/job.toml`, quyền 600; `AEGIS_JOB_SERVER` và `AEGIS_JOB_TOKEN` thay file cho CI.
+1. **Authentication via Personal Access Tokens:**
+   - Authenticated web dashboard users generate personal access tokens at `/me/tokens`: custom label, configurable expiration up to 90 days, capped at 10 active tokens per user.
+   - Tokens are displayed exactly once upon generation and never leaked in URLs; the server stores cryptographic SHA-256 hashes.
+   - Requests carrying personal tokens execute under that user's identity: honoring repo-specific RBAC roles and logging user identities in audit trails. Users can revoke individual tokens at any time.
+   - OIDC device authorization flow is deferred: corporate IdP device grant support varies, and personal web tokens fulfill CLI needs cleanly.
 
-3. **Phân phối: GitHub Releases và `cargo install`.**
-   - Tag `aegis-job-v<phiên bản>` chạy workflow build binary cho macOS (arm64, x86_64) và Linux (x86_64), đóng `tar.gz` kèm SHA-256, gắn vào GitHub Release.
-   - Người có Rust cài bằng `cargo install --git … aegis-client`.
-   - Homebrew tap và gói npm bọc binary để sau, khi có người dùng ngoài team.
-   - **Cập nhật (#263):** client nay phát hành cùng version với server (`vX.Y.Z`, [docs/release.md](../release.md)), thay cho tag `aegis-job-v*`. Có thêm gói npm `@hoanghainh1188/aegis-job`: một gói chứa sẵn binary cho bốn nền tảng (thêm Linux arm64) và một launcher JS, không tải gì khi cài.
+2. **Dedicated Binary `aegis-job` in Crate `aegis-client`:**
+   - Lightweight dependency tree: depends solely on HTTP (`reqwest`, `rustls`) and JSON parsing; excludes the agent loop, gate runner, Docker, or model providers. Compiles quickly and installs cleanly without runtime prerequisites.
+   - Consumes `/api/v1` endpoints, introducing `GET /api/v1/me` and `GET /api/v1/repos` (reporting accessible repositories and assigned RBAC roles) to resolve slugs to IDs.
+   - Commands: `login`, `logout`, `whoami`, `repos`, `submit`, `list`, `show`, `watch`, `cancel`, `retry`, `review`, `open`; `--json` flag for scripting.
+   - Enforces HTTPS for remote transmissions (HTTP permitted strictly for local test loops). Sessions persist in `~/.config/aegis/job.toml` with `0600` permissions; `AEGIS_JOB_SERVER` and `AEGIS_JOB_TOKEN` override for CI/CD scripting.
 
-## Hệ quả
+3. **Distribution Strategy:**
+   - Compiled for macOS (arm64, x86_64) and Linux (arm64, x86_64) bundled into `tar.gz` with SHA-256 checksums attached to GitHub Releases.
+   - Rust developers can install via `cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client`.
+   - **Update (#263):** Releases synchronize with server versions (`vX.Y.Z`, [docs/release.md](../release.md)). Pre-bundled npm package `@hoanghainh1188/aegis-job` embeds native binaries for four platforms with a lightweight JS launcher, requiring zero runtime compilation or downloads.
 
-- Developer cài một binary, tạo token trên dashboard, rồi giao và theo dõi job từ terminal mà không cần quyền vận hành. Audit phân biệt được người giao với service.
-- Token cá nhân nằm trên máy developer, nên có hạn và thu hồi được. Lộ token thì người đó thu hồi trên `/me/tokens`; admin vẫn thu hồi được mọi phiên bằng `aegis-server revoke-sessions`, còn token cá nhân cần thu hồi từng cái (chưa có lệnh thu hồi hàng loạt cho người).
-- Dashboard cần `public_url` để trang token chỉ đúng địa chỉ cho `aegis-job login`.
-- Kiểm tra cuối của #231 (giao job lên staging) chờ #33; đã thử trên trial (`scripts/trial/`).
+## Consequences
+
+- Developers install a single lightweight binary, authenticate via dashboard tokens, and dispatch and monitor maintenance jobs from their terminal without operator privileges. Audit logs distinguish human users from automated services.
+- Personal tokens are stored locally on developer workstations; risk is mitigated by expiration ceilings and granular user revocation.
+- Dashboard requires `public_url` configuration to display accurate login instructions for `aegis-job login`.
+
+## Considered Alternatives
+
+| Alternative | Rationale for Rejection |
+| --- | --- |
+| Distribute `aegis-cli` to developers | Bloated with heavy dependencies (Docker daemon, Tree-sitter, SQLite); requires local secrets and direct repo access |
+| OIDC Device Flow (`device_code`) | Complex IdP setup variations across enterprise customers; web token generation is universal and simple |
+| Interactive Web Browser OAuth Callback | Requires opening local listening ports on developer workstations, frequently blocked by enterprise host firewalls |

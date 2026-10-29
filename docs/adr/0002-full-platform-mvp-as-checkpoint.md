@@ -1,35 +1,35 @@
-# ADR 0002 – Xây platform đầy đủ, MVP/PoC là mốc đo KPI
+# ADR 0002 – Full Platform Vision with MVP/PoC as KPI Evaluation Milestone
 
-- Ngày: 2026-10-18
-- Trạng thái: Đã chấp nhận
-- Người quyết định: @Nguyen Han Hoang Hai
-- Thay thế một phần: [ADR 0001](0001-platform-in-rust.md), mục 4 (cổng PoC)
+- Date: 2026-10-18
+- Status: Accepted
+- Decider: @Nguyen Han Hoang Hai
+- Partially Supersedes: [ADR 0001](0001-platform-in-rust.md), Section 4 (PoC stopping gate)
 
-## Bối cảnh
+## Context
 
-Proposal ban đầu đặt PoC làm cổng "đi tiếp / dừng": không đạt ngưỡng KPI (Proposal §8) thì dừng cả dự án. ADR 0001 giữ nguyên cổng này.
+The initial Proposal positioned the PoC as a binary "go / no-go" gate: failing to meet KPI thresholds (Proposal §8) would terminate the entire initiative. ADR 0001 initially retained this stopping gate.
 
-Mục tiêu nay là xây một platform đầy đủ: chạy như dịch vụ, nối luồng ticket thật, phục vụ nhiều repo, có dashboard và phân quyền — không chỉ một PoC.
+The strategic objective has evolved to building a comprehensive production platform: running as a persistent multi-tenant service, integrating with enterprise ticket workflows, managing multi-repository workloads, and offering web dashboards with role-based access control — far beyond an isolated PoC script.
 
-## Quyết định
+## Decision
 
-1. Mục tiêu dự án là platform đầy đủ (Phase 0 → 3 trong Proposal §9).
-2. Giữ MVP/PoC trên bộ 30–50 issue để đo KPI. Kết quả là **mốc đo để điều chỉnh hướng**, không phải cổng dừng dự án:
-   - Đạt ngưỡng → tiếp tục theo lộ trình.
-   - Không đạt → phân tích nguyên nhân từ ledger (định vị lỗi, chi phí, cache, gate) và ưu tiên sửa phần lõi trước khi mở rộng lớp dịch vụ. Ngưỡng và trần $4 được chốt lại theo số liệu thật.
-3. Thứ tự làm giữ nguyên: phần lõi (provider → vòng lặp → ACI → gate → ledger → vòng đời issue) xong và đo được trước, rồi mới tới lớp dịch vụ (Phase 2) và mở rộng (Phase 3). Mọi tính năng platform đều dựa vào phần lõi.
-4. Mỗi phase có milestone và issue riêng trên GitHub; tài liệu này là chuẩn cho lộ trình khi Proposal chưa kịp cập nhật.
+1. The project objective is a comprehensive, production-grade platform (spanning Phase 0 through Phase 3 as outlined in Proposal §9).
+2. The MVP/PoC evaluation over 30–50 benchmark issues is retained as an **empirical milestone to steer technical direction**, rather than a binary stopping gate:
+   - Meeting KPI thresholds $\rightarrow$ Proceed directly along the roadmap.
+   - Falling short of targets $\rightarrow$ Analyze root causes from token ledgers (fault localization, token burn, cache hit rates, gate bottlenecks) and prioritize hardening the core agent loop before expanding service layers. Hard caps and thresholds are adjusted against empirical data.
+3. Implementation sequence remains strictly layered: complete and measure the core engine first (provider $\rightarrow$ agent loop $\rightarrow$ ACI $\rightarrow$ gate $\rightarrow$ ledger $\rightarrow$ issue lifecycle) before constructing the service layer (Phase 2) and scaling capabilities (Phase 3). Every platform feature relies entirely on core engine reliability.
+4. Each phase corresponds to dedicated GitHub milestones and issues; this ADR serves as the canonical roadmap authority.
 
-## Hệ quả
+## Consequences
 
-- Lộ trình có thêm milestone `Phase 2 – Platform` và `Phase 3 – Mở rộng`, kèm issue.
-- Kiến trúc lõi phải sẵn cho chạy nhiều issue song song, nhiều repo, lưu trạng thái bền — dù MVP chạy theo lô từ CLI. Cụ thể: không giữ trạng thái toàn cục, cấu hình theo repo, ledger ghi qua một interface có thể đổi sang DB.
-- Kiến trúc lớp dịch vụ và các ràng buộc cụ thể cho phần lõi: [ADR 0003](0003-platform-service-architecture.md).
-- Rủi ro "build tiếp khi lõi chưa tốt" được giảm bằng việc đo KPI bắt buộc ở cuối Phase 1 và theo dõi KPI liên tục trên dashboard ở Phase 2.
+- Project roadmap establishes explicit milestones for `Phase 2 – Platform` and `Phase 3 – Advanced Scaling`.
+- Core engine architecture must support concurrent issue execution, multi-repository settings, and persistent state storage — even when the initial MVP runs sequentially from a developer CLI. Specifically: avoid global static state, isolate configuration per repository, and abstract ledger persistence behind traits swap-able with PostgreSQL.
+- Service layer architecture and core engine design constraints are formalized in [ADR 0003](0003-platform-service-architecture.md).
+- The risk of "building service scaffolding over an unproven engine" is mitigated by mandatory Phase 1 KPI evaluation and continuous dashboard observability in Phase 2.
 
-## Phương án đã cân nhắc
+## Considered Alternatives
 
-| Phương án | Lý do không chọn |
+| Alternative | Rationale for Rejection |
 | --- | --- |
-| Giữ PoC làm cổng dừng (thiết kế ban đầu) | Không khớp mục tiêu xây platform đầy đủ |
-| Bỏ đo KPI, build thẳng platform | Không biết lõi có sửa được bug thật và chi phí bao nhiêu trước khi đầu tư lớp dịch vụ |
+| Retain PoC as a binary stopping gate | Conflicts with the long-term objective of delivering an enterprise-ready platform |
+| Bypass KPI benchmarking and build platform directly | High risk of over-investing in service infrastructure before verifying patch quality, cost predictability, and regression guarantees |

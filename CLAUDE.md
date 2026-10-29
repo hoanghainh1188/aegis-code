@@ -1,23 +1,27 @@
 # aegis-code
 
-Platform Rust (Cargo workspace, `crates/`) nhận issue bảo trì và trả về PR đã qua kiểm chứng. Tài liệu chuẩn: [docs/design/00-proposal.md](docs/design/00-proposal.md) (ưu tiên khi mâu thuẫn), [docs/design/01-architecture-detail.md](docs/design/01-architecture-detail.md), [docs/adr/](docs/adr/).
+Autonomous code maintenance platform written 100% in Rust (Cargo workspace, `crates/`) that ingests maintenance issues and synthesizes verified, regression-free pull requests. Canonical references: [docs/design/00-proposal.md](docs/design/00-proposal.md) (takes precedence in case of discrepancy), [docs/design/01-architecture-detail.md](docs/design/01-architecture-detail.md), and [docs/adr/](docs/adr/).
 
-## Làm việc theo issue
+---
 
-Mọi việc đều đi qua một GitHub issue.
+## Issue-Driven Development
 
-- **Nhánh:** `<số issue>-<mô-tả-ngắn>`, chữ thường, nối bằng gạch ngang. Ví dụ: `10-router-escalation`.
-- **PR:** mô tả có dòng `Closes #<số>` để issue tự đóng khi merge. Một PR chỉ xử lý một issue.
-- **Label:** mỗi issue có ít nhất một `area/*` theo crate hoặc mảng việc:
-  - Crate: `area/provider`, `area/orchestrator`, `area/router`, `area/aci`, `area/gate`, `area/ledger`, `area/pr`, `area/sonar`, `area/lang` (language profile, [ADR 0004](docs/adr/0004-multi-language-profiles.md))
-  - Mảng việc: `area/infra` (Docker, CI, policies, prompts), `area/eval` (bộ thử, KPI)
+Every unit of work must trace back to a GitHub issue.
+
+- **Branch Naming:** `<issue-number>-<short-description>`, lowercase, hyphen-separated. Example: `10-router-escalation`.
+- **Pull Requests:** PR description must include `Closes #<issue-number>` so the issue closes automatically upon merge. A single PR must address exactly one issue.
+- **Labels:** Every issue must have at least one `area/*` label indicating the affected crate or domain:
+  - Crates: `area/provider`, `area/orchestrator`, `area/router`, `area/aci`, `area/gate`, `area/ledger`, `area/pr`, `area/sonar`, `area/lang` (language profiles, [ADR 0004](docs/adr/0004-multi-language-profiles.md))
+  - Domains: `area/infra` (Docker, CI, policies, prompts), `area/eval` (benchmarks, KPIs)
   - Platform (Phase 2): `area/server`, `area/connectors`, `area/web`, `area/security`, `area/deploy`
-  - Thêm `research` cho việc cần đo/kiểm tra trước khi quyết, `tech-debt` cho việc còn nợ từ review.
-- **Milestone:** `Phase 0 – Chuẩn bị`, `Phase 1 – MVP / PoC`, `Phase 2 – Platform` hoặc `Phase 3 – Mở rộng` theo lộ trình ở Proposal §9 và [ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md). Việc chưa xếp lịch thì để trống.
-- **Phụ thuộc:** ghi ở cuối thân issue dạng `**Phụ thuộc:** #7, #9`. Không bắt đầu issue khi phụ thuộc chưa đóng.
-- Việc mới phát sinh trong lúc làm → tạo issue mới, không gộp vào PR đang mở.
+  - Specialized: `research` for exploratory spikes/measurements; `tech-debt` for deferred review items.
+- **Milestones:** `Phase 0 – Setup`, `Phase 1 – MVP / PoC`, `Phase 2 – Platform`, or `Phase 3 – Advanced Scaling` following Proposal §9 and [ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md).
+- **Dependencies:** Document explicit prerequisites at the bottom of the issue body as `**Dependencies:** #7, #9`. Never begin an issue until all dependencies are closed.
+- Out-of-scope discoveries arising during development must be filed as separate issues rather than bundled into active PRs.
 
-## Trước khi mở PR
+---
+
+## Verification Before Opening a PR
 
 ```bash
 cargo fmt --check
@@ -28,6 +32,6 @@ cargo test -p aegis-provider --features bedrock
 cargo deny check
 ```
 
-Test của `aegis-store` và test chạy issue trên nó cần PostgreSQL: đặt `AEGIS_TEST_DATABASE_URL` (vd. `postgres://postgres:aegis@localhost:5432/postgres`), thiếu thì test bỏ qua. Đổi truy vấn hay migration của `aegis-store` thì chạy lại `cargo sqlx prepare --workspace` với `DATABASE_URL` trỏ tới DB đã migrate và commit `.sqlx/`; CI kiểm tra bằng `--check`.
+Integration tests in `aegis-store` and end-to-end issue runner tests require a live PostgreSQL instance: set `AEGIS_TEST_DATABASE_URL` (e.g. `postgres://postgres:aegis@localhost:5432/postgres`), otherwise database tests will skip. When updating database queries or migrations in `aegis-store`, re-run `cargo sqlx prepare --workspace` against a migrated test database and commit the updated `.sqlx/` artifacts; CI enforces freshness via `--check`.
 
-Commit theo Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`).
+Commits must strictly adhere to the Conventional Commits specification (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`).

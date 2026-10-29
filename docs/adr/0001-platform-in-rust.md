@@ -1,49 +1,49 @@
-# ADR 0001 – Viết platform bằng Rust, tự làm vòng lặp agent
+# ADR 0001 – Platform Implementation in Rust with Custom Agent Loop
 
-- Ngày: 2026-10-17
-- Trạng thái: Đã chấp nhận
-- Người quyết định: @Nguyen Han Hoang Hai
+- Date: 2026-10-17
+- Status: Accepted
+- Decider: @Nguyen Han Hoang Hai
 
-## Bối cảnh
+## Context
 
-Bản Proposal và Thiết kế kỹ thuật ban đầu chọn Claude Agent SDK làm agent harness (dùng sẵn vòng lặp, công cụ đọc/sửa file, chạy lệnh) và chỉ tự làm phần còn thiếu.
+The initial Proposal and Technical Design selected the Claude Agent SDK as the agent harness (leveraging its built-in tool loop, file manipulation tools, and command execution primitives) while implementing custom logic only for missing components.
 
-Mục tiêu nay là xây platform đầy đủ, và team muốn dùng Rust — cùng ngôn ngữ với repo được bảo trì. Claude Agent SDK chỉ có bản Python và TypeScript; Anthropic không có SDK Rust chính thức.
+The project scope has since expanded to building a comprehensive production platform, and the engineering team decided to utilize Rust — the same language as the primary maintained repository (`typst`). The Claude Agent SDK only provides Python and TypeScript distributions; Anthropic does not maintain an official Rust SDK.
 
-Khi xét lại, phần Agent SDK thật sự đóng góp nhỏ hơn dự kiến, vì thiết kế đã tự định nghĩa:
+Upon re-evaluating the Agent SDK's value proposition, its actual contribution proved smaller than expected because the technical design already specified:
 
-- Bộ công cụ ACI riêng (Thiết kế §3.1), không dùng công cụ đọc/sửa file mặc định.
-- Luật thu gọn lịch sử riêng (§3.3).
-- Bố cục prompt và 4 điểm ngắt cache riêng (§4.1).
-- Router, ledger, gate runner (§5, §6, §8).
+- Custom ACI tool suite (Design §3.1), replacing default file read/edit tools;
+- Dedicated history compaction and observation collapsing rules (§3.3);
+- Deterministic prompt caching layout with 4 strict breakpoints (§4.1);
+- Model router, token ledger, and gate runner (§5, §6, §8).
 
-Phần còn lại là vòng lặp tool-use, khoảng vài trăm dòng.
+The remainder of the SDK amounted to a standard tool-use execution loop of several hundred lines of code.
 
-## Quyết định
+## Decision
 
-1. Platform viết bằng Rust, tổ chức thành Cargo workspace, mỗi thành phần một crate (`crates/`).
-2. Tự làm vòng lặp agent. Gọi model qua trait `ModelProvider` với hai bản cài:
-   - Claude API — gọi HTTP trực tiếp, không phụ thuộc crate cộng đồng.
-   - Bedrock — dùng AWS SDK for Rust chính thức.
-   Kiểm tra "model ID phải bắt đầu bằng `jp.`" (Thiết kế §7) nằm trong lớp provider.
-3. Bộ công cụ ACI viết thành MCP server (SDK Rust chính thức của MCP). Orchestrator gọi ACI và Codebase-Memory qua cùng một giao thức MCP.
-4. *(Được thay bằng [ADR 0002](0002-full-platform-mvp-as-checkpoint.md): PoC là mốc đo, không phải cổng dừng.)* Giữ cổng PoC của Proposal §9: thiết kế theo hướng platform đầy đủ, nhưng làm theo thứ tự provider → vòng lặp → ACI → gate → ledger, chạy bộ 30–50 issue trước khi làm phần Pilot (luồng ticket, dashboard).
+1. The platform is written entirely in **Rust**, structured as a Cargo workspace with one crate per module (`crates/`).
+2. Implement a custom agent loop. Model providers are invoked via the `ModelProvider` trait with two implementations:
+   - Claude API — direct HTTP client without third-party community crate dependencies.
+   - AWS Bedrock — official AWS SDK for Rust.
+   Data sovereignty assertion "Model ID must prefix with `jp.`" (Design §7) is enforced inside the provider layer.
+3. The ACI tool suite is implemented as an MCP server using the official Rust MCP SDK. The orchestrator interacts with ACI and Codebase-Memory using the standard MCP protocol.
+4. *(Superseded by [ADR 0002](0002-full-platform-mvp-as-checkpoint.md): PoC is an evaluation milestone, not a stopping gate.)* Retain the PoC evaluation milestone from Proposal §9: design toward a full platform, but implement sequentially (provider $\rightarrow$ agent loop $\rightarrow$ ACI $\rightarrow$ gate $\rightarrow$ ledger), evaluating against a 30–50 issue suite before building pilot interfaces (ticket connectors, web dashboard).
 
-## Phương án dự phòng
+## Fallback Strategy
 
-Nếu vòng lặp tự làm chậm tiến độ PoC: chương trình Rust gọi Claude Code ở chế độ headless (`claude -p`) như subprocess, gắn ACI qua MCP, ledger đọc usage từ output JSON. Chỉ dùng cho cấu hình PoC (Claude API); cấu hình code khách vẫn đi qua provider Bedrock.
+If developing the custom agent loop delays the PoC timeline: invoke Claude Code headless (`claude -p`) as a subprocess from Rust, connect ACI via MCP, and parse token usage from the output JSON. This fallback applies strictly to the PoC configuration (Claude API); enterprise customer workloads remain routed through the Bedrock provider.
 
-## Hệ quả
+## Consequences
 
-- Tự chịu trách nhiệm phần vòng lặp, retry, streaming, đặt `cache_control`, thu gọn lịch sử.
-- Kiểm soát hoàn toàn bố cục prompt và điểm ngắt cache → dễ đạt KPI tỉ lệ đọc cache ≥ 70%.
-- Không bị chặn khi SDK Python/TS đổi API; nhưng phải tự theo dõi thay đổi của Messages API.
-- Platform cùng ngôn ngữ với repo đích: team bảo trì dễ đóng góp, và có thể cho platform tự sửa chính nó. *(Xem lại ở [ADR 0004](0004-multi-language-profiles.md): repo đích có thể viết bằng ngôn ngữ khác; platform vẫn giữ Rust.)*
+- Direct ownership of the agent loop, retry strategies, streaming, `cache_control` placement, and history collapsing.
+- Complete control over prompt layout and cache breakpoints $\rightarrow$ ensures meeting the KPI threshold of cache read ratio $\ge 70\%$.
+- Immune to breaking upstream changes in Python/TypeScript SDKs, while requiring self-managed alignment with Anthropic Messages API updates.
+- Language parity with target repositories facilitates contributions and opens the path toward self-hosting and self-maintenance. *(Re-evaluated in [ADR 0004](0004-multi-language-profiles.md): target repositories span multiple languages; the platform remains in Rust).*
 
-## Phương án đã cân nhắc
+## Considered Alternatives
 
-| Phương án | Lý do không chọn |
+| Alternative | Rationale for Rejection |
 | --- | --- |
-| Python/TS + Agent SDK (thiết kế ban đầu) | Không phải ngôn ngữ team muốn; phần SDK đóng góp nhỏ vì ACI, cache, thu gọn đều tự định nghĩa |
-| Kết hợp: orchestrator Python/TS, công cụ Rust | Hai ngôn ngữ, hai bộ build/test cho một platform nhỏ |
-| Crate cộng đồng cho Claude API | Không chính thức, có thể chậm cập nhật tính năng cache/effort mới |
+| Python/TS + Agent SDK (Original Design) | Team prefers Rust; SDK provides minimal leverage given custom ACI, caching, and collapsing requirements |
+| Hybrid: Python/TS Orchestrator + Rust Tools | Dual-language runtime creates excessive operational and CI/CD overhead for a compact platform |
+| Community Rust crates for Claude API | Unofficial and prone to delays in adopting prompt caching and reasoning effort parameters |
