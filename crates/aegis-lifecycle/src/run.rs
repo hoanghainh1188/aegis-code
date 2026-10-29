@@ -14,16 +14,17 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{MAP_FORMAT, REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    BuildCache, CancelToken, Egress, FetchStep, GatePart, GateReport, GateRequest, ReferenceGroup,
-    Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with, run_gate,
+    BuildCache, CLIENT_ENV, CancelToken, Egress, FetchStep, GatePart, GateReport, GateRequest,
+    ReferenceGroup, Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with,
+    run_gate,
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
     GateRun, IssueId, IssueKind, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
-    LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session, TurnRecord,
-    run_loop, system_blocks,
+    INHERITED_ENV, LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session,
+    TurnRecord, run_loop, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Classification, Decision, Router, Signal, Spent};
@@ -362,6 +363,16 @@ fn parts_file(cfg: &RunConfig, profiles: &RepoProfiles) -> Result<String, Lifecy
     toml::to_string(&file).map_err(|e| LifecycleError::Config(format!("repo.dirs: {e}")))
 }
 
+/// The variables the `docker` client needs to find the daemon, as `lookup`
+/// gives them, other than those every MCP server gets anyway (#278).
+fn docker_client_env(lookup: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    CLIENT_ENV
+        .iter()
+        .filter(|k| !INHERITED_ENV.contains(k))
+        .filter_map(|k| Some(((*k).to_owned(), lookup(k)?)))
+        .collect()
+}
+
 fn tool_specs(
     cfg: &RunConfig,
     profiles: &RepoProfiles,
@@ -395,8 +406,13 @@ fn tool_specs(
     }
     // With the gate in containers, `edit`'s formatter and `run_tests` run
     // there too: the machine needs no language tools (#104), and the test
-    // sees what the gate's would (#137).
-    if let Some(sandbox) = sandbox(cfg, root)? {
+    // sees what the gate's would (#137), on the daemon the gate uses (#278).
+    let sandboxed = sandbox(cfg, root)?;
+    let aci_env = match sandboxed {
+        Some(_) => docker_client_env(|k| std::env::var(k).ok()),
+        None => vec![],
+    };
+    if let Some(sandbox) = sandboxed {
         args.extend([
             "--format-image".into(),
             profile.image.clone(),
@@ -418,7 +434,7 @@ fn tool_specs(
         program: cfg.aci_bin().display().to_string(),
         args,
         cwd: None,
-        env: vec![],
+        env: aci_env,
         tools: None,
     }];
     if let Some(cbm) = &cfg.codebase_memory {
@@ -1362,6 +1378,33 @@ mod tests {
         let cbm = specs.iter().find(|s| s.name == code_graph::SERVER).unwrap();
         assert_eq!(cbm.cwd, Some(cfg.run.state_dir.join("index")));
         assert_eq!(cbm.tools, Some(vec![]));
+    }
+
+    #[test]
+    fn the_aci_reaches_the_daemon_the_gate_does() {
+        // #278: its formatter and `run_tests` run `docker` too; MCP
+        // servers otherwise get only PATH, HOME and a few more.
+        let env = docker_client_env(|k| {
+            ["PATH", "DOCKER_HOST", "ANTHROPIC_API_KEY"]
+                .contains(&k)
+                .then(|| format!("<{k}>"))
+        });
+        assert_eq!(
+            env,
+            [("DOCKER_HOST".to_owned(), "<DOCKER_HOST>".to_owned())]
+        );
+
+        let cfg = monorepo(true);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let job_dir = cfg.run.state_dir.join("jobs/docker-env");
+        std::fs::create_dir_all(&job_dir).unwrap();
+        let specs = tool_specs(&cfg, &profiles, &job_dir.join("repo"), &job_dir).unwrap();
+        let aci = specs.iter().find(|s| s.name == "aci").unwrap();
+        assert_eq!(aci.env, docker_client_env(|k| std::env::var(k).ok()));
+        let cfg = monorepo(false);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let specs = tool_specs(&cfg, &profiles, &job_dir.join("repo"), &job_dir).unwrap();
+        assert_eq!(specs[0].env, []);
     }
 
     #[test]
