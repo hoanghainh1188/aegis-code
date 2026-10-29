@@ -4,7 +4,7 @@
 mod common;
 
 use aegis_aci::{AciError, EditOutcome, EditRequest, Hits, MAX_RESULTS, WINDOW};
-use aegis_lang::{Language, ProfileOverrides};
+use aegis_lang::{Language, ProfileOverrides, StepOverride};
 use common::{Scratch, profile};
 
 fn rust_repo() -> (Scratch, aegis_aci::Aci) {
@@ -297,6 +297,44 @@ fn a_syntax_error_on_the_edited_lines_is_refused_even_if_one_is_fixed() {
         })
         .unwrap();
     assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+}
+
+#[test]
+fn an_error_the_file_had_before_does_not_block_an_edit_over_it() {
+    // #289: tree-sitter misreads lines that compile (TypeScript's `out`
+    // variance); rewriting the whole file keeps them as they are. No
+    // formatter: rustfmt would refuse the file anyway.
+    let repo = Scratch::empty();
+    let no_formatter = ProfileOverrides {
+        edit_format: Some(StepOverride::Enabled(false)),
+        ..ProfileOverrides::default()
+    };
+    let mut aci = repo.aci(profile(Language::Rust, &no_formatter));
+    repo.write("src/broken.rs", "fn a() {\n    let x = ;\n}\nfn b() {}\n");
+
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/broken.rs",
+            from: 1,
+            to: 4,
+            content: "fn a() {\n    let x = ;\n}\nfn b() { c(); }",
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Applied(_)), "{outcome}");
+    assert_eq!(
+        repo.read("src/broken.rs"),
+        "fn a() {\n    let x = ;\n}\nfn b() { c(); }\n"
+    );
+    // The same rewrite with an error of its own is refused.
+    let outcome = aci
+        .edit(EditRequest {
+            file: "src/broken.rs",
+            from: 1,
+            to: 4,
+            content: "fn a() {\n    let x = ;\n}\nfn b( { c(); }",
+        })
+        .unwrap();
+    assert!(matches!(outcome, EditOutcome::Rejected { .. }), "{outcome}");
 }
 
 #[test]

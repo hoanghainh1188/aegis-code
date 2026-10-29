@@ -3,6 +3,7 @@
 //! it. A refused edit leaves the file as it was and shows the proposed
 //! lines so the agent can fix them.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 
@@ -108,7 +109,9 @@ fn snippet(path: &str, lines: &[String], start: usize, end: usize) -> Snippet {
 
 /// Rejects the edit when it adds a tree-sitter error, or when an error
 /// falls on the edited lines `start..=end`. A file tree-sitter already
-/// misreads elsewhere can still be edited.
+/// misreads elsewhere can still be edited, and so can those lines: an
+/// error on an edited line whose text had one before is not the edit's
+/// (#289; TypeScript's `out` variance, which tree-sitter does not read).
 fn syntax_rejection(
     ws: &Workspace,
     path: &Path,
@@ -124,13 +127,26 @@ fn syntax_rejection(
     }
     let errors = |s| syntax_errors_in(profile.language, Some(path), s);
     let after_errors = errors(after)?;
-    let on_edit = after_errors
+    let before_errors = errors(before)?;
+    let misread_before: HashSet<&str> = before_errors
         .iter()
-        .any(|e| e.line >= start && e.line <= end.max(start));
-    if on_edit || after_errors.len() > errors(before)?.len() {
+        .filter_map(|e| line_text(before, e.line))
+        .map(str::trim)
+        .collect();
+    let on_edit = after_errors.iter().any(|e| {
+        e.line >= start
+            && e.line <= end.max(start)
+            && !line_text(after, e.line).is_some_and(|l| misread_before.contains(l.trim()))
+    });
+    if on_edit || after_errors.len() > before_errors.len() {
         return Ok(Some(Rejection::Syntax(after_errors)));
     }
     Ok(None)
+}
+
+/// Line `line` (from 1) of `text`.
+fn line_text(text: &str, line: usize) -> Option<&str> {
+    text.lines().nth(line.checked_sub(1)?)
 }
 
 fn write(path: &Path, text: &str) -> Result<(), AciError> {
