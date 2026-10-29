@@ -1,0 +1,62 @@
+# Go eval set (#259): gin, same models and budget as poc.toml (ADR 0005).
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Model per tier (design §5.1). Read by aegis-router.
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+# Gate steps in docker/<profile> images, --network none (#5); dependencies
+# come from the fetch step behind the egress proxy (#66).
+sandbox = true
+
+[budget]
+max_cost_usd = 4.0
+max_model_calls = 40
+
+# Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
+# Before the first gate run the platform asks it for the code linked to the
+# patch outside its files and shows it to the agent (#203). The agent gets
+# none of its tools: it made no graph query in the 32 runs of #185.
+# Each job indexes its tree under `<state_dir>/index` (`{index_dir}`, the
+# server's HOME), shared by every repo: the server's daemon is one per
+# user and serves one cache.
+# `codebase-memory-mcp` is on PATH: in docker/server, and locally as
+# eval/README.md says. `--ui=false`: no graph UI on port 9749.
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+# The repo: a clone of the fork, each job gets a worktree.
+[repo]
+path = ".workspace/repos/gin"
+language = "go"
+base = "master"
+key = "gin"
+# Hidden tests of eval runs (#98): eval/issues lists gin's as `Test…`
+# functions (eval/README.md).
+hidden_test = ["go", "test", "-v", "-run", "{tests_regex}", "./..."]
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "gin"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"
