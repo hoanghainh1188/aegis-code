@@ -169,6 +169,7 @@ Progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188
 * [Technical Architecture Specification](docs/design/01-architecture-detail.md) (Phase 1 core specification; the service layer is in [ADR 0003](docs/adr/0003-platform-service-architecture.md))
 * [Operations Runbook](docs/runbook/README.md) (Deploy, rollback, secret rotation, incidents, monitoring)
 * [On-premise Runbook](docs/runbook/on-premise.md) (One Linux machine with Docker: Compose or systemd, offline bundle, upgrade, backup; [ADR 0007](docs/adr/0007-on-premise-deployment.md))
+* [Gate Sandbox on Kubernetes](docs/adr/0008-gate-sandbox-on-kubernetes.md) (Docker-in-Docker sidecar per worker Pod, tried on kind; Helm chart in #281)
 * [Developer Client `aegis-job`](docs/client.md) (Submit and follow jobs from your terminal with a personal token, [ADR 0006](docs/adr/0006-developer-client.md))
 * [Local End-to-End Trial](docs/local-trial.md) (The whole flow on one machine: `scripts/trial/up.sh`, a fake GitHub, Ollama or the Claude API)
 * [Measurements](docs/measurements/) (Eval runs and KPI reports)
