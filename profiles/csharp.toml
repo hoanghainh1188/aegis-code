@@ -74,7 +74,9 @@ protected = ["Directory.Build.rsp", "*.rsp"]
 
 [sandbox]
 image = "aegis-sandbox-dotnet"
-cache_dirs = ["bin", "obj", "/home/aegis/.nuget/packages"]
+# `artifacts`: MSBuild's artifacts output (`UseArtifactsOutput`, .NET 8) puts
+# every project's bin and obj there (#290).
+cache_dirs = ["bin", "obj", "artifacts", "/home/aegis/.nuget/packages"]
 
 # Gate gộp Sonar vào build: `dotnet sonarscanner begin` → lệnh này → `end`.
 # Build chạy trong sandbox không mạng như các bước khác; chỉ begin/end có
