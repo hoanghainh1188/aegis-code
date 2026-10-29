@@ -62,6 +62,10 @@ manifests = ["*.csproj", "*.fsproj", "*.vbproj", "*.proj", "*.props", "*.targets
 lockfiles = ["packages.lock.json", "*.csproj", "*.fsproj", "*.vbproj", "*.proj", "*.props", "*.targets", "nuget.config", "global.json", "dotnet-tools.json"]
 official_source = "https://api.nuget.org/v3/index.json"
 fetch = ["dotnet", "restore"]
+# Registry hosts the fetch container may reach (#66, #279): the feed and
+# its packages. The signature checks' revocation lookups (plain http to the
+# CAs) are refused; restore goes on without them.
+fetch_hosts = ["api.nuget.org"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]

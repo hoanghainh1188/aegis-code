@@ -39,6 +39,9 @@ manifests = ["package.json"]
 lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
 official_source = "https://registry.npmjs.org"
 fetch = ["npm", "ci", "--ignore-scripts"]
+# Registry hosts the fetch container may reach (#66, #279): metadata and
+# tarballs both come from the registry.
+fetch_hosts = ["registry.npmjs.org"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]

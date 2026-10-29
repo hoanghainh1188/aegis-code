@@ -41,6 +41,9 @@ RUN set -eu; \
     chmod 0755 /usr/local/bin/osv-scanner; \
     osv-scanner --version
 
+# Ahead of /usr/bin/mvn on PATH: gives Maven the fetch step's proxy.
+COPY --chmod=0755 mvn /usr/local/bin/mvn
+
 RUN mkdir -p /home/aegis/.m2/repository /home/aegis/.gradle/caches \
  && chmod -R a+rwX /home/aegis
 # The host user has no entry in /etc/passwd, so Java's user.home would be
