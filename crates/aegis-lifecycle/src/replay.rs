@@ -12,6 +12,7 @@ use aegis_provider::{
 };
 use serde_json::{Value, json};
 
+use crate::code_graph::IMPACT_OPENING;
 use crate::eval::EvalIssue;
 use crate::{LifecycleError, job};
 
@@ -177,17 +178,33 @@ impl ReplayProvider {
             .iter()
             .filter(|m| m.role == Role::Assistant)
             .count();
-        // A text message after the first turn is the gate's feedback (or a
-        // retry request): the fix is all there is.
-        let feedback = turns > 0
-            && request.messages.last().is_some_and(|m| {
-                m.role == Role::User
-                    && m.content
-                        .iter()
-                        .all(|b| matches!(b, ContentBlock::Text { .. }))
+        // A text message after the first turn is the code graph's impact
+        // note, which asks for the answer again (#280), or the gate's
+        // feedback (or a retry request): the fix is all there is.
+        let last_text = request
+            .messages
+            .last()
+            .filter(|m| m.role == Role::User)
+            .filter(|m| {
+                m.content
+                    .iter()
+                    .all(|b| matches!(b, ContentBlock::Text { .. }))
+            })
+            .map(|m| {
+                m.content
+                    .iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>()
             });
-        if feedback {
-            return stopped(&request.messages);
+        match last_text {
+            Some(text) if turns > 0 && text.starts_with(IMPACT_OPENING) => {
+                return vec![ContentBlock::text(replay.answer)];
+            }
+            Some(_) if turns > 0 => return stopped(&request.messages),
+            _ => {}
         }
         match replay.calls.get(turns) {
             Some((name, input)) => vec![ContentBlock::ToolUse {
@@ -303,5 +320,33 @@ mod tests {
         assert!(text.contains(r#""status":"stopped""#), "{text}");
         assert!(text.contains(STOPPED), "{text}");
         assert_eq!(third.usage, Usage::default());
+    }
+
+    #[tokio::test]
+    async fn the_graph_s_impact_note_gets_the_same_answer_again() {
+        // #280: the note comes before the checks, not after them; the
+        // upstream fix is all the replay has to say.
+        let provider = ReplayProvider::default();
+        provider.start(Replay {
+            calls: vec![],
+            answer: "{\"status\": \"fixed\"}".into(),
+        });
+        let issue = Message::user_text("issue");
+        let first = provider.send(&request(vec![issue.clone()])).await.unwrap();
+        let answered = Message {
+            role: Role::Assistant,
+            content: first.content.clone(),
+        };
+        let note = crate::code_graph::Impact {
+            callers: [("fs.go".to_owned(), ["Save".to_owned()].into())].into(),
+            callees: Default::default(),
+        }
+        .note()
+        .unwrap();
+        let again = provider
+            .send(&request(vec![issue, answered, Message::user_text(note)]))
+            .await
+            .unwrap();
+        assert_eq!(again.content, first.content);
     }
 }

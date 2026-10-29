@@ -41,6 +41,10 @@ const INDEX_MODE: &str = "fast";
 /// not to send the agent reading half the repo.
 const IMPACT_FILES: usize = 8;
 const IMPACT_NAMES: usize = 4;
+/// How the impact note starts: the replay (#280) tells it from the gate's
+/// feedback by it.
+pub(crate) const IMPACT_OPENING: &str = "Before the checks run: the code graph links the \
+     functions you changed to code in files your patch does not touch.\n";
 
 /// The calls the platform makes itself, on a server's tools the agent may
 /// not have.
@@ -242,10 +246,7 @@ impl Impact {
         if self.callers.is_empty() && self.callees.is_empty() {
             return None;
         }
-        let mut text = String::from(
-            "Before the checks run: the code graph links the functions you changed to code \
-             in files your patch does not touch.\n",
-        );
+        let mut text = String::from(IMPACT_OPENING);
         for (title, side) in [
             ("Called from", &self.callers),
             ("Calls into", &self.callees),
