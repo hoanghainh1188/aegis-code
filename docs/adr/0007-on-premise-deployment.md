@@ -45,7 +45,7 @@ Hệ thống vốn nhỏ:
    - Server và sandbox luôn cùng tag.
    - Rollback chạy lại `aegis-deploy` với phiên bản trước. DB không lùi: server bỏ qua migration nó không biết (#176).
 
-5. **Kubernetes chưa làm.** Gate cần một daemon Docker, mà node Kubernetes thường không có. Cách chạy sandbox trong cluster được quyết định riêng ở #264.
+5. **Kubernetes chưa làm.** Gate cần một daemon Docker, mà node Kubernetes thường không có. Cách chạy sandbox trong cluster được quyết định riêng ở #264: [ADR 0008](0008-gate-sandbox-on-kubernetes.md), Docker-in-Docker trong Pod worker; Helm chart ở #281.
 
 ## Hệ quả
 

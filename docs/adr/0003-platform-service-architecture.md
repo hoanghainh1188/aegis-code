@@ -115,6 +115,6 @@ Phase 2 chỉ bắt đầu khi lõi xong và đo được (ADR 0002), nhưng lõ
 | ORM (SeaORM, Diesel) | Schema nhỏ, truy vấn đơn giản; `sqlx` kiểm tra SQL lúc biên dịch là đủ |
 | actix-web | Cả hai đều dùng được; axum xây trên tokio (dự án đã dùng) và dùng chung middleware của hệ `tower` |
 | SPA (React/Vue) cho dashboard | Thêm ngôn ngữ, bộ build và lần triển khai thứ hai cho một UI chủ yếu là bảng và form |
-| Kubernetes, mỗi job một Pod | Nặng cho team nhỏ; sandbox Docker trên VM đã đủ cách ly. Xem lại khi cần co giãn worker tự động |
+| Kubernetes, mỗi job một Pod | Nặng cho team nhỏ; sandbox Docker trên VM đã đủ cách ly. Xem lại khi cần co giãn worker tự động. Khi chạy trên Kubernetes: [ADR 0008](0008-gate-sandbox-on-kubernetes.md) |
 | Checkpoint session sau mỗi lượt, chạy tiếp sau restart | `Session` là giá trị bất biến nên làm được, nhưng phải lưu cả trạng thái workspace và nhánh. Để sau khi ledger cho thấy chi phí chạy lại đáng kể |
 | Một bản triển khai toàn cầu, tách dữ liệu Nhật theo bảng | Khó chứng minh dữ liệu không ra khỏi Nhật; log, cache, backup dễ lọt ra ngoài |
