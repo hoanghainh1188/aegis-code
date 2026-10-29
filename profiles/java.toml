@@ -56,6 +56,10 @@ fetch = [
     "-Dsurefire.failIfNoSpecifiedTests=false",
     "-DfailIfNoTests=false",
 ]
+# Registry hosts the fetch container may reach (#66, #279): plugins and
+# dependencies both come from Maven Central. Maven reads the proxy from the
+# settings the image's `mvn` writes (docker/java/mvn).
+fetch_hosts = ["repo.maven.apache.org"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]

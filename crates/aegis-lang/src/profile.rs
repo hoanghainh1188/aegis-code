@@ -762,6 +762,20 @@ mod tests {
         );
     }
 
+    /// The fetch container's only way out is the egress proxy, which lets
+    /// through `fetch_hosts` and nothing else: a fetch with none can only
+    /// fail (#279).
+    #[test]
+    fn every_profile_that_fetches_names_its_registry_hosts() {
+        let profiles = builtin();
+        for language in Language::ALL {
+            let deps = &profiles.get(language).unwrap().dependencies;
+            if deps.fetch.is_some() {
+                assert!(!deps.fetch_hosts.is_empty(), "{language:?}");
+            }
+        }
+    }
+
     #[test]
     fn rust_profile_matches_the_design() {
         let rust = builtin().get(Language::Rust).unwrap().clone();

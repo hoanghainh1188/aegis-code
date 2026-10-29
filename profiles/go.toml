@@ -39,6 +39,9 @@ manifests = ["go.mod"]
 lockfiles = ["go.mod", "go.sum"]
 official_source = "proxy.golang.org"
 fetch = ["go", "mod", "download"]
+# Registry hosts the fetch container may reach (#66, #279): the module
+# proxy, and the checksum database for a module go.sum does not list yet.
+fetch_hosts = ["proxy.golang.org", "sum.golang.org"]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]

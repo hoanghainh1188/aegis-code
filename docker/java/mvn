@@ -1,0 +1,15 @@
+#!/bin/sh
+# Maven takes no proxy from the environment, only from settings.xml (#279):
+# in the fetch container, whose only way out is the egress proxy named by
+# HTTPS_PROXY (#66), it is given one. Elsewhere it runs as is.
+set -eu
+real=/usr/share/maven/bin/mvn
+if [ -z "${HTTPS_PROXY:-}" ]; then
+    exec "$real" "$@"
+fi
+hostport=${HTTPS_PROXY#*://}
+hostport=${hostport%%/*}
+settings=$(mktemp)
+printf '<settings><proxies><proxy><id>aegis-egress</id><active>true</active><protocol>https</protocol><host>%s</host><port>%s</port></proxy></proxies></settings>\n' \
+    "${hostport%:*}" "${hostport##*:}" > "$settings"
+exec "$real" -s "$settings" "$@"
