@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,15 +11,15 @@
 <body>
 <header class="masthead">
   <a class="brand" href="/">aegis<span>ledger</span></a>
-  <nav aria-label="Chính">
-    <a href="/">KPI</a>
-    <a href="/jobs">Job</a>
-    <a href="/me/tokens">Token</a>
+  <nav aria-label="Main">
+    <a href="/">KPIs</a>
+    <a href="/jobs">Jobs</a>
+    <a href="/me/tokens">Tokens</a>
   </nav>
   <form class="session" method="post" action="/auth/logout">
     {% include "form_guard.html" %}
     <span class="who">{{ me.name }}</span>
-    <button type="submit" class="ghost">Đăng xuất</button>
+    <button type="submit" class="ghost">Sign out</button>
   </form>
 </header>
 <main>

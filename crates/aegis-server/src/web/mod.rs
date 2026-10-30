@@ -78,10 +78,7 @@ impl WebError {
     }
 
     pub(crate) fn not_found(what: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::NOT_FOUND,
-            format!("{} không tồn tại", what.into()),
-        )
+        Self::new(StatusCode::NOT_FOUND, format!("{} not found", what.into()))
     }
 }
 
@@ -91,7 +88,7 @@ impl From<StoreError> for WebError {
             StoreError::NotFound(what) => Self::not_found(what),
             other => {
                 tracing::error!(error = %other, "web: store");
-                Self::new(StatusCode::INTERNAL_SERVER_ERROR, "Lỗi nội bộ")
+                Self::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
         }
     }
@@ -100,7 +97,7 @@ impl From<StoreError> for WebError {
 impl From<aegis_ledger::LedgerError> for WebError {
     fn from(e: aegis_ledger::LedgerError) -> Self {
         tracing::error!(error = %e, "web: ledger");
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "Lỗi nội bộ")
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
     }
 }
 
@@ -141,10 +138,7 @@ async fn job_for(
     if !access.can(job.repo_id, needed) {
         return Err(WebError::new(
             StatusCode::FORBIDDEN,
-            format!(
-                "bạn cần vai trò {} trong repo của job {id}",
-                needed.as_str()
-            ),
+            format!("you need role {} in repo of job {id}", needed.as_str()),
         ));
     }
     Ok(job)
@@ -155,6 +149,6 @@ fn render(page: &impl Template) -> WebResult {
         .map(|html| Html(html).into_response())
         .map_err(|e| {
             tracing::error!(error = %e, "web: template");
-            WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Lỗi nội bộ")
+            WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         })
 }

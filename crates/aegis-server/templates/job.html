@@ -5,48 +5,48 @@
   <p class="eyebrow">{{ repo }} · <span class="ref">{{ issue_ref }}</span></p>
   <h1 id="job-heading">Job #{{ id }} <span class="status s-{{ status }}">{{ status }}</span></h1>
   <dl class="facts">
-    <div><dt>Kết quả</dt><dd>{{ outcome }}</dd></div>
-    <div><dt>Tầng model</dt><dd>{{ tiers }}</dd></div>
-    <div><dt>Lượt gọi model</dt><dd>{{ model_calls }}</dd></div>
-    <div><dt>Chi phí</dt><dd>{{ cost }}</dd></div>
-    <div><dt>Thời gian</dt><dd>{{ wall_time }}</dd></div>
+    <div><dt>Outcome</dt><dd>{{ outcome }}</dd></div>
+    <div><dt>Model tiers</dt><dd>{{ tiers }}</dd></div>
+    <div><dt>Model calls</dt><dd>{{ model_calls }}</dd></div>
+    <div><dt>Cost</dt><dd>{{ cost }}</dd></div>
+    <div><dt>Wall time</dt><dd>{{ wall_time }}</dd></div>
     <div><dt>Ledger</dt><dd><code>{{ ledger_key }}</code></dd></div>
   </dl>
-  {% if !reason.is_empty() %}<p class="note">Lý do kết thúc: {{ reason }}</p>{% endif %}
-  {% if let Some(root) = review_of %}<p class="note">Vòng sửa theo review của PR do <a href="/jobs/{{ root }}">job #{{ root }}</a> mở; PR được duyệt ở đó.</p>{% endif %}
+  {% if !reason.is_empty() %}<p class="note">Termination reason: {{ reason }}</p>{% endif %}
+  {% if let Some(root) = review_of %}<p class="note">Review fix round for PR opened by <a href="/jobs/{{ root }}">job #{{ root }}</a>; PR is reviewed there.</p>{% endif %}
   <p class="actions">
-    {%- if let Some(url) = pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Mở PR</a>{% endif %}
-    {%- if can_review %} <a class="button" href="/jobs/{{ id }}/review">Duyệt PR</a>{% endif -%}
+    {%- if let Some(url) = pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Open PR</a>{% endif %}
+    {%- if can_review %} <a class="button" href="/jobs/{{ id }}/review">Review PR</a>{% endif -%}
   </p>
 </section>
 
 {% if !rounds.is_empty() %}
 <section aria-labelledby="rounds-heading" class="band">
-  <h2 id="rounds-heading">Vòng sửa theo review</h2>
+  <h2 id="rounds-heading">Review fix rounds</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Vòng</th><th scope="col">Job</th><th scope="col">Trạng thái</th><th scope="col">Kết quả</th><th scope="col" class="num">Lượt gọi</th><th scope="col" class="num">Chi phí</th><th scope="col">Tạo lúc</th></tr></thead>
+    <thead><tr><th scope="col">Round</th><th scope="col">Job</th><th scope="col">Status</th><th scope="col">Outcome</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Cost</th><th scope="col">Created at</th></tr></thead>
     <tbody>
     {% for r in rounds %}
       <tr{% if r.current %} aria-current="true"{% endif %}><td>{% if r.round == 0 %}PR{% else %}{{ r.round }}{% endif %}</td><td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td><td><span class="status s-{{ r.status }}">{{ r.status }}</span></td><td>{{ r.outcome }}</td><td class="num">{{ r.model_calls }}</td><td class="num">{{ r.cost }}</td><td>{{ r.created_at }}</td></tr>
     {% endfor %}
     </tbody>
-    <tfoot><tr><th scope="row" colspan="5">Cả PR</th><td class="num">{{ rounds_cost }}</td><td></td></tr></tfoot>
+    <tfoot><tr><th scope="row" colspan="5">Total PR</th><td class="num">{{ rounds_cost }}</td><td></td></tr></tfoot>
   </table>
   </div>
 </section>
 {% endif %}
 
 <section aria-labelledby="runs-heading" class="band">
-  <h2 id="runs-heading">Các lần chạy</h2>
+  <h2 id="runs-heading">Attempts</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Lần</th><th scope="col">Trạng thái</th><th scope="col">Bắt đầu</th><th scope="col">Kết thúc</th><th scope="col">Lỗi</th></tr></thead>
+    <thead><tr><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Ended</th><th scope="col">Error</th></tr></thead>
     <tbody>
     {% for r in runs %}
       <tr><td>{{ r.attempt }}</td><td>{{ r.status }}</td><td>{{ r.started_at }}</td><td>{{ r.ended_at }}</td><td>{{ r.error }}</td></tr>
     {% else %}
-      <tr><td colspan="5" class="empty">Chưa chạy.</td></tr>
+      <tr><td colspan="5" class="empty">No attempts yet.</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -54,12 +54,12 @@
 </section>
 
 <section aria-labelledby="events-heading" class="band">
-  <h2 id="events-heading">Lịch sử trong ledger</h2>
+  <h2 id="events-heading">Ledger history</h2>
   <ol class="timeline">
   {% for e in events %}
     <li><span class="kind">{{ e.kind }}</span><span class="detail">{{ e.detail }}</span><span class="cost">{{ e.cost }}</span></li>
   {% else %}
-    <li class="empty">Ledger chưa có sự kiện.</li>
+    <li class="empty">No events in ledger yet.</li>
   {% endfor %}
   </ol>
 </section>

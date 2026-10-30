@@ -107,7 +107,7 @@ async fn a_persons_token_acts_as_them_until_they_revoke_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{html}");
-    assert!(html.contains("chỉ hiện lần này"), "{html}");
+    assert!(html.contains("shown only once"), "{html}");
     let token = between(&html, "<pre class=\"token\"><code>", "</code>").to_owned();
 
     let (status, me) = api(&app, &token, "GET", "/api/v1/me", None).await;

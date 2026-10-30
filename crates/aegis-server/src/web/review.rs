@@ -36,10 +36,10 @@ const CLOCK_SKEW_MS: i64 = 5_000;
 pub fn review_minutes(opened_at_ms: i64, now_ms: i64) -> Result<f64, &'static str> {
     let elapsed = now_ms - opened_at_ms;
     if elapsed < -CLOCK_SKEW_MS {
-        return Err("thời điểm mở trang nằm ở tương lai; tải lại trang");
+        return Err("page open timestamp is in the future; reload the page");
     }
     if elapsed > REVIEW_MAX_AGE_MS {
-        return Err("trang đã mở quá 24 giờ; tải lại trang rồi duyệt");
+        return Err("page was open for more than 24 hours; reload the page and review again");
     }
     Ok(elapsed.max(0) as f64 / 60_000.0)
 }
@@ -99,14 +99,14 @@ async fn reviewable(store: &Store, access: &Access, id: i64) -> Result<Job, WebE
     if job.outcome != Some(Outcome::PrOpened) {
         return Err(WebError::new(
             StatusCode::CONFLICT,
-            format!("job {id} không mở PR nên không có gì để duyệt"),
+            format!("job {id} did not open a PR so there is nothing to review"),
         ));
     }
     if let Some(root) = job.review_of {
         return Err(WebError::new(
             StatusCode::CONFLICT,
             format!(
-                "job {id} là một vòng sửa theo review; PR được duyệt ở job {}",
+                "job {id} is a review fix round; PR is reviewed on job {}",
                 root.0
             ),
         ));
@@ -123,7 +123,7 @@ async fn page(
 ) -> WebResult {
     let existing = record(store, job).await?.review.map(|r| {
         format!(
-            "{:?}, sửa {} dòng, {:.1} phút",
+            "{:?}, {} lines edited, {:.1} min",
             r.verdict, r.lines_edited, r.review_minutes
         )
     });
@@ -187,16 +187,16 @@ pub struct ReviewForm {
 }
 
 fn parse(form: &ReviewForm, now: i64) -> Result<Review, String> {
-    let verdict = verdict(&form.verdict).ok_or("chọn một kết luận")?;
+    let verdict = verdict(&form.verdict).ok_or("choose a verdict")?;
     let lines_edited = form
         .lines_edited
         .trim()
         .parse::<u32>()
-        .map_err(|_| "số dòng sửa là số nguyên từ 0")?;
+        .map_err(|_| "lines edited must be an integer >= 0")?;
     let opened_at = form
         .opened_at
         .parse::<i64>()
-        .map_err(|_| "thiếu thời điểm mở trang; tải lại trang")?;
+        .map_err(|_| "missing page open timestamp; reload the page")?;
     Ok(Review {
         verdict,
         lines_edited,
@@ -230,7 +230,7 @@ pub async fn submit(
             .verify(OPENED_AT_PURPOSE, &message, &form.opened_sig)
     });
     let Some(opened_at) = signed else {
-        let why = "thời điểm mở trang không hợp lệ; tải lại trang rồi duyệt".to_owned();
+        let why = "invalid page open timestamp; reload the page and review again".to_owned();
         return page(&store, &viewer, &job, now, Some(why)).await;
     };
     let review = match parse(&form, now) {
@@ -243,7 +243,8 @@ pub async fn submit(
     {
         Ok(_) => Ok(Redirect::to(&format!("/jobs/{id}")).into_response()),
         Err(StoreError::Conflict(_)) => {
-            let why = "PR này đã có review; đánh dấu \"thay review cũ\" để đổi".to_owned();
+            let why = "this PR already has a review; check \"replace existing review\" to update"
+                .to_owned();
             page(&store, &viewer, &job, opened_at, Some(why)).await
         }
         Err(e) => Err(e.into()),

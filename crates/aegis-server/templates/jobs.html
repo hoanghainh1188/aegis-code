@@ -1,22 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Job{% endblock %}
+{% block title %}Jobs{% endblock %}
 {% block content %}
 <section aria-labelledby="jobs-heading">
-  <h1 id="jobs-heading">Job</h1>
+  <h1 id="jobs-heading">Jobs</h1>
   <form class="filters" action="/jobs" method="get" hx-get="/jobs" hx-target="#jobs-table" hx-push-url="true" hx-trigger="change">
     <label>Repo
       <select name="repo_id">
-        <option value="">tất cả</option>
+        <option value="">all</option>
         {% for c in repos %}<option value="{{ c.value }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
       </select>
     </label>
-    <label>Trạng thái
+    <label>Status
       <select name="status">
-        <option value="">tất cả</option>
+        <option value="">all</option>
         {% for c in statuses %}<option value="{{ c.value }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
       </select>
     </label>
-    <button type="submit">Lọc</button>
+    <button type="submit">Filter</button>
   </form>
   <div id="jobs-table">
   {% include "jobs_table.html" %}

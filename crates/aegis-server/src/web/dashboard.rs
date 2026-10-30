@@ -22,7 +22,7 @@ use crate::auth::Access;
 /// Weeks the dashboard shows, the latest last.
 const WEEKS_SHOWN: usize = 12;
 /// Runs not started by a job: `aegis run`, eval and CLI runs.
-pub const OUTSIDE_JOBS: &str = "ngoài job (CLI, eval)";
+pub const OUTSIDE_JOBS: &str = "outside jobs (CLI, eval)";
 
 /// The KPIs of one group of runs.
 #[derive(Debug, Clone, PartialEq)]
@@ -203,7 +203,7 @@ pub async fn page(
     render(&DashboardPage {
         nonce: nonce.as_str(),
         me: &me,
-        total: KpiRow::new("Tổng", &d.total, ACCEPT_RATE_MIN).with_rounds(d.total_review_rounds),
+        total: KpiRow::new("Total", &d.total, ACCEPT_RATE_MIN).with_rounds(d.total_review_rounds),
         languages: rows(&d.languages, LANGUAGE_ACCEPT_RATE_MIN),
         repos: rows(&d.repos, ACCEPT_RATE_MIN),
         weeks: rows(&d.weeks, ACCEPT_RATE_MIN),
