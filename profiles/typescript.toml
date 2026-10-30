@@ -24,6 +24,9 @@ lint = ["npx", "--no-install", "eslint", "."]
 typecheck = ["npx", "--no-install", "tsc", "--noEmit"]
 repro_test = ["npm", "test", "--", "{test}"]
 test = ["npm", "test"]
+# Gate đọc tên test fail từ reporter mặc định của Jest và Vitest (#291);
+# runner khác (node:test, mocha) thì chỉ so exit code như trước.
+test_output = "jest_vitest"
 # c8 đo coverage V8 cho test runner chạy trên Node (node:test, mocha…).
 # Repo dùng Jest/Vitest thì ghi đè bằng lệnh coverage của runner đó.
 coverage = ["npx", "--no-install", "c8", "--reporter=lcov", "npm", "test"]

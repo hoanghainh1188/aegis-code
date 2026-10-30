@@ -22,7 +22,7 @@ use aegis_lang::{
 use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner};
 use crate::egress::{Egress, EgressSession};
-use crate::failures::{failing_tests_with, ran_tests};
+use crate::failures::{failing_tests_with, names_test, ran_tests};
 use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
@@ -240,7 +240,7 @@ fn is_test(id: &str, test: &str) -> bool {
 
 /// Whether `id` is the test named `test` or one inside it, when `test` names
 /// a file or a class (#136).
-fn is_in(id: &str, test: &str) -> bool {
+pub(crate) fn is_in(id: &str, test: &str) -> bool {
     let id = without_params(id);
     is_test(id, test) || id.starts_with(&format!("{test}::")) || id.contains(&format!("::{test}::"))
 }
@@ -254,7 +254,7 @@ fn harness_name(id: &str) -> &str {
 
 /// Whether `text` matches `pattern`, where `*` matches any run of
 /// characters.
-fn glob(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob(pattern: &str, text: &str) -> bool {
     let mut parts = pattern.split('*');
     let Some(mut rest) = parts.next().and_then(|first| text.strip_prefix(first)) else {
         return false;
@@ -853,7 +853,7 @@ impl<'a> Run<'a> {
             // The test itself must fail there, not the build around it.
             (_, Some(format)) => failing_tests_with(format, harness, &read_log(&base.log))
                 .iter()
-                .any(|id| is_in(id, &repro.test)),
+                .any(|id| names_test(format, id, &repro.test)),
             (e, None) => matches!(e, Exit::Code(_)),
         };
         if failed_on_base {

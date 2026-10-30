@@ -1,0 +1,69 @@
+
+> test
+> jest
+
+FAIL src/cart.test.js
+  ● Cart › adds up prices
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 4
+    Received: 3
+
+    [0m [90m 1 |[39m describe([32m"Cart"[39m[33m,[39m () [33m=>[39m {
+     [90m 2 |[39m   it([32m"passes"[39m[33m,[39m () [33m=>[39m {})[33m;[39m
+    [31m[1m>[22m[39m[90m 3 |[39m   it([32m"adds up prices"[39m[33m,[39m () [33m=>[39m { expect([35m1[39m [33m+[39m [35m2[39m)[33m.[39mtoBe([35m4[39m)[33m;[39m })[33m;[39m
+     [90m   |[39m                                              [31m[1m^[22m[39m
+     [90m 4 |[39m   describe([32m"nested group"[39m[33m,[39m () [33m=>[39m { it[33m.[39meach([[35m1[39m[33m,[39m [35m2[39m])([32m"case %i"[39m[33m,[39m (x) [33m=>[39m { expect(x)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m })[33m;[39m
+     [90m 5 |[39m })[33m;[39m
+     [90m 6 |[39m it([32m"top level fails"[39m[33m,[39m () [33m=>[39m { [36mthrow[39m [36mnew[39m [33mError[39m([32m"boom"[39m)[33m;[39m })[33m;[39m[0m
+
+      at Object.toBe (src/cart.test.js:3:46)
+
+  ● Cart › nested group › case 2
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 1
+    Received: 2
+
+    [0m [90m 2 |[39m   it([32m"passes"[39m[33m,[39m () [33m=>[39m {})[33m;[39m
+     [90m 3 |[39m   it([32m"adds up prices"[39m[33m,[39m () [33m=>[39m { expect([35m1[39m [33m+[39m [35m2[39m)[33m.[39mtoBe([35m4[39m)[33m;[39m })[33m;[39m
+    [31m[1m>[22m[39m[90m 4 |[39m   describe([32m"nested group"[39m[33m,[39m () [33m=>[39m { it[33m.[39meach([[35m1[39m[33m,[39m [35m2[39m])([32m"case %i"[39m[33m,[39m (x) [33m=>[39m { expect(x)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m })[33m;[39m
+     [90m   |[39m                                                                                  [31m[1m^[22m[39m
+     [90m 5 |[39m })[33m;[39m
+     [90m 6 |[39m it([32m"top level fails"[39m[33m,[39m () [33m=>[39m { [36mthrow[39m [36mnew[39m [33mError[39m([32m"boom"[39m)[33m;[39m })[33m;[39m
+     [90m 7 |[39m[0m
+
+      at toBe (src/cart.test.js:4:82)
+
+  ● top level fails
+
+    boom
+
+    [0m [90m 4 |[39m   describe([32m"nested group"[39m[33m,[39m () [33m=>[39m { it[33m.[39meach([[35m1[39m[33m,[39m [35m2[39m])([32m"case %i"[39m[33m,[39m (x) [33m=>[39m { expect(x)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m })[33m;[39m
+     [90m 5 |[39m })[33m;[39m
+    [31m[1m>[22m[39m[90m 6 |[39m it([32m"top level fails"[39m[33m,[39m () [33m=>[39m { [36mthrow[39m [36mnew[39m [33mError[39m([32m"boom"[39m)[33m;[39m })[33m;[39m
+     [90m   |[39m                                     [31m[1m^[22m[39m
+     [90m 7 |[39m[0m
+
+      at Object.<anonymous> (src/cart.test.js:6:37)
+
+FAIL src/broken.test.js
+  ● Test suite failed to run
+
+    Cannot find module './missing' from 'src/broken.test.js'
+
+    [0m[31m[1m>[22m[39m[90m 1 |[39m [36mconst[39m { nothing } [33m=[39m require([32m"./missing"[39m)[33m;[39m
+     [90m   |[39m                     [31m[1m^[22m[39m
+     [90m 2 |[39m it([32m"never runs"[39m[33m,[39m () [33m=>[39m { nothing()[33m;[39m })[33m;[39m
+     [90m 3 |[39m[0m
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/resolver.js:427:11)
+      at Object.require (src/broken.test.js:1:21)
+
+Test Suites: 2 failed, 2 total
+Tests:       3 failed, 2 passed, 5 total
+Snapshots:   0 total
+Time:        1.225 s
+Ran all test suites.

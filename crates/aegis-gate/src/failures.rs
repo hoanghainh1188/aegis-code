@@ -2,6 +2,11 @@
 //! [`TestOutput`], so the gate can tell new failures from ones the base
 //! branch already has.
 
+mod dotnet;
+mod go_test;
+mod js;
+mod surefire;
+
 use std::collections::BTreeSet;
 
 use aegis_lang::{CustomHarness, TestOutput};
@@ -59,12 +64,50 @@ pub fn failing_tests_with(
             }
             failed
         }
+        TestOutput::GoTest => go_test::failing(output),
+        TestOutput::Surefire => surefire::failing(output),
+        TestOutput::JestVitest => js::failing(output),
+        TestOutput::Dotnet => dotnet::failing(output),
     }
 }
 
+/// Whether `id`, a failing test read in `format`, is the test the repro
+/// step ran, `test` given as that runner's own selector (`-run` regex,
+/// `Class#method`, `--filter` expression…), or one inside it.
+pub(crate) fn names_test(format: TestOutput, id: &str, test: &str) -> bool {
+    match format {
+        TestOutput::Libtest | TestOutput::Pytest => crate::gate::is_in(id, test),
+        TestOutput::GoTest => go_test::names(id, test),
+        TestOutput::Surefire => surefire::names(id, test),
+        TestOutput::JestVitest => js::names(id, test),
+        TestOutput::Dotnet => dotnet::names(id, test),
+    }
+}
+
+/// `line` without ANSI escapes: Vitest and Jest color their output even
+/// when it goes to a file.
+fn plain(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Every test a run reports, whatever its result, when the format names
-/// them all: libtest's `test <name> ... <result>`. `None` for pytest, whose
-/// output names only the tests that fail.
+/// them all: libtest's `test <name> ... <result>`. `None` for the others,
+/// whose output names only the tests that fail.
 pub fn ran_tests(format: TestOutput, output: &str) -> Option<BTreeSet<String>> {
     match format {
         TestOutput::Libtest => Some(
@@ -76,7 +119,12 @@ pub fn ran_tests(format: TestOutput, output: &str) -> Option<BTreeSet<String>> {
                 .map(|(name, _)| name.to_owned())
                 .collect(),
         ),
-        TestOutput::Pytest => None,
+        // These name only the tests that fail.
+        TestOutput::Pytest
+        | TestOutput::GoTest
+        | TestOutput::Surefire
+        | TestOutput::JestVitest
+        | TestOutput::Dotnet => None,
     }
 }
 

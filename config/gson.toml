@@ -80,6 +80,8 @@ fetch = [
 lint = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test-compile"]
 repro_test = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test", "-Dtest={test}"]
 test = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test"]
+# A test command of the repo's own drops the profile's test_output.
+test_output = "surefire"
 # gson's own `argLine` replaces the one prepare-agent sets, so the tests' JVM
 # would run without JaCoCo's agent and no report would be written. The
 # agent comes through the environment instead; the fetch step downloaded it.

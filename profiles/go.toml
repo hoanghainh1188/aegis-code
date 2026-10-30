@@ -26,6 +26,8 @@ repro_test = ["go", "test", "./...", "-run", "{test}"]
 # trả 0; package có chạy test in `ok <package> <thời gian>` (#235).
 repro_ran = '(?m)^ok\s+\S+\s+(\d+(\.\d+)?s|\(cached\))\s*$'
 test = ["go", "test", "./..."]
+# `--- FAIL: <test>` rồi `FAIL <package>`: gate so test fail với nhánh gốc (#291).
+test_output = "go_test"
 coverage = ["go", "test", "./...", "-coverprofile=coverage.out"]
 
 [coverage]

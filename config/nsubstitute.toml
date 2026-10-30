@@ -72,6 +72,8 @@ conventions = """
 [repo.overrides.gate]
 repro_test = ["sh", "-c", "p=tests/NSubstitute.Acceptance.Specs/NSubstitute.Acceptance.Specs.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 --filter \"$1\" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled", "sh", "{test}"]
 test = ["sh", "-c", "p=tests/NSubstitute.Acceptance.Specs/NSubstitute.Acceptance.Specs.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled"]
+# A test command of the repo's own drops the profile's test_output.
+test_output = "dotnet"
 
 [repo.fork]
 owner = "hoanghainh1188"
