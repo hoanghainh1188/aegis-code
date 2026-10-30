@@ -76,6 +76,8 @@ repro_test = ["sh", "-c", "p=test/Polly.Core.Tests/Polly.Core.Tests.csproj; grep
 # 100% threshold fails any run of one project.
 coverage = false
 test = ["sh", "-c", "p=test/Polly.Core.Tests/Polly.Core.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled"]
+# A test command of the repo's own drops the profile's test_output.
+test_output = "dotnet"
 
 [repo.fork]
 owner = "hoanghainh1188"

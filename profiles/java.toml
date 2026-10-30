@@ -31,7 +31,11 @@ lsp = ["jdtls"]
 # Lỗi biên dịch, kể cả test, chặn bản vá ngay.
 lint = ["mvn", "-B", "-o", "-q", "test-compile"]
 repro_test = ["mvn", "-B", "-o", "-q", "test", "-Dtest={test}"]
-test = ["mvn", "-B", "-o", "-q", "test"]
+# `--fail-at-end`: test của một module fail sẵn ở nhánh gốc không chặn test
+# của các module khác (module phụ thuộc nó vẫn bị bỏ qua). Gate đọc dòng
+# `<Class>.<method> -- Time elapsed … <<< FAILURE!` của Surefire (#291).
+test = ["mvn", "-B", "-o", "-q", "--fail-at-end", "test"]
+test_output = "surefire"
 coverage = [
     "mvn", "-B", "-o", "-q",
     "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",

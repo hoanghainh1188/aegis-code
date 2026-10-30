@@ -172,6 +172,16 @@ pub enum TestOutput {
     Libtest,
     /// pytest's short summary: `FAILED path::name`.
     Pytest,
+    /// `go test`: `--- FAIL: TestName`, then `FAIL <package>` (#291).
+    GoTest,
+    /// Maven Surefire: `<Class>.<method> -- Time elapsed: … <<< FAILURE!`.
+    Surefire,
+    /// Jest's `FAIL <file>` with `● describe › name`, and Vitest's
+    /// `FAIL <file> > describe > name`.
+    JestVitest,
+    /// `dotnet test`: VSTest's `Failed <name> [<time>]` and
+    /// Microsoft.Testing.Platform's `failed <name> (<time>)`.
+    Dotnet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -1,0 +1,28 @@
+Running tests from /work/bin/Debug/net10.0/mtp.dll (net10.0|arm64)
+failed FailsAssert (8ms)
+  Assert.AreEqual failed. Expected:<3>. Actual:<4>. 
+  from /work/bin/Debug/net10.0/mtp.dll (net10.0|arm64)
+  Assert.AreEqual failed. Expected:<3>. Actual:<4>. 
+    
+failed ThrowsError (0ms)
+  Test method Shop.Tests.CartTests.ThrowsError threw exception: 
+System.InvalidOperationException: boom
+  from /work/bin/Debug/net10.0/mtp.dll (net10.0|arm64)
+  Test method Shop.Tests.CartTests.ThrowsError threw exception: 
+  System.InvalidOperationException: boom
+    
+failed Param (2) (0ms)
+  Assert.AreEqual failed. Expected:<1>. Actual:<2>. 
+  from /work/bin/Debug/net10.0/mtp.dll (net10.0|arm64)
+  Assert.AreEqual failed. Expected:<1>. Actual:<2>. 
+    
+/work/bin/Debug/net10.0/mtp.dll (net10.0|arm64) failed with 3 error(s) (95ms)
+Exit code: 2
+
+Test run summary: Failed!
+  total: 5
+  failed: 3
+  succeeded: 2
+  skipped: 0
+  duration: 179ms
+Test run completed with non-success exit code: 2 (see: https://aka.ms/testingplatform/exitcodes)

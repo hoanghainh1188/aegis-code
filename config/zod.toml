@@ -87,6 +87,8 @@ repro_test = ["npx", "--no-install", "vitest", "run", "{test}"]
 # packages/treeshake tests the built bundle (`nub run build`), which no step
 # builds; the issues are about the library's behaviour.
 test = ["npx", "--no-install", "vitest", "run", "--project", "!@zod/treeshaking"]
+# A test command of the repo's own drops the profile's test_output.
+test_output = "jest_vitest"
 # No coverage provider among zod's dependencies.
 coverage = false
 

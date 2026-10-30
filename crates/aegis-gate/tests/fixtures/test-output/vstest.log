@@ -1,0 +1,32 @@
+  vs -> /work/bin/Debug/net10.0/vs.dll
+Test run for /work/bin/Debug/net10.0/vs.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.07]     Shop.Tests.NeedsServerTests.Connects [FAIL]
+[xUnit.net 00:00:00.08]     Shop.Tests.CartTests.Param(x: 2) [FAIL]
+[xUnit.net 00:00:00.08]     Shop.Tests.CartTests.FailsAssert [FAIL]
+[xUnit.net 00:00:00.08]     Shop.Tests.CartTests.ThrowsError [FAIL]
+  Failed Shop.Tests.NeedsServerTests.Connects [1 ms]
+  Error Message:
+   Class fixture type 'Shop.Tests.Fixture' threw in its constructor
+---- System.Exception : no server
+  Stack Trace:
+  
+----- Inner Stack Trace -----
+  Failed Shop.Tests.CartTests.Param(x: 2) [3 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 1
+Actual:   2
+  Stack Trace:
+  Failed Shop.Tests.CartTests.FailsAssert [< 1 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 3
+Actual:   4
+  Stack Trace:
+  Failed Shop.Tests.CartTests.ThrowsError [< 1 ms]
+  Error Message:
+   System.InvalidOperationException : boom
+  Stack Trace:
+
+Failed!  - Failed:     4, Passed:     2, Skipped:     0, Total:     6, Duration: 12 ms - vs.dll (net10.0)

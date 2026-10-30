@@ -32,6 +32,9 @@ repro_test = ["dotnet", "test", "--no-restore", "--filter", "{test}"]
 # `total: <n>` (#235).
 repro_ran = '(?i)\btotal(\s+tests)?:\s*[1-9]'
 test = ["dotnet", "test", "--no-restore"]
+# `Failed <name> [<time>]` của VSTest, `failed <name> (<time>)` của
+# Microsoft.Testing.Platform (#291).
+test_output = "dotnet"
 coverage = [
     "dotnet", "test", "--no-restore",
     "--results-directory", "TestResults",
