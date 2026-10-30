@@ -88,6 +88,15 @@ mod tests {
     }
 
     #[test]
+    fn reads_vitest_4() {
+        let log = include_str!("../../tests/fixtures/test-output/vitest4.log");
+        assert_eq!(
+            failing(log).into_iter().collect::<Vec<_>>(),
+            expected("src/cart.test.ts", "src/broken.test.ts")
+        );
+    }
+
+    #[test]
     fn reads_jest() {
         let log = include_str!("../../tests/fixtures/test-output/jest.log");
         assert_eq!(
