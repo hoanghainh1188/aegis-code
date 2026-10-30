@@ -190,7 +190,7 @@ fn internal(what: &str, e: impl std::fmt::Display) -> Response {
     tracing::error!(error = %e, "sign-in: {what}");
     login_page(
         StatusCode::BAD_GATEWAY,
-        "Không đăng nhập được qua SSO; thử lại sau.",
+        "Could not sign in via SSO; try again later.",
         true,
     )
 }
@@ -204,7 +204,7 @@ pub async fn login(Extension(auth): Extension<Auth>, Query(q): Query<LoginQuery>
     let Some(oidc) = auth.oidc() else {
         return login_page(
             StatusCode::SERVICE_UNAVAILABLE,
-            "Chưa cấu hình SSO ([auth.oidc] trong server.toml) nên chưa đăng nhập được.",
+            "SSO is not configured ([auth.oidc] in server.toml); cannot sign in.",
             false,
         );
     };
@@ -284,13 +284,13 @@ async fn finish_sign_in(auth: &Auth, headers: &HeaderMap, q: CallbackQuery) -> R
         None => None,
     };
     if q.error.is_some() {
-        return refused("SSO không cho đăng nhập.");
+        return refused("SSO refused sign-in.");
     }
     let (Some(pending), Some(code), Some(state)) = (pending, q.code, q.state) else {
-        return refused("Phiên đăng nhập đã hết hạn hoặc không hợp lệ.");
+        return refused("Login session expired or invalid.");
     };
     if !bool::from(state.as_bytes().ct_eq(pending.state.as_bytes())) {
-        return refused("Phiên đăng nhập không khớp.");
+        return refused("Login session mismatch.");
     }
     let client = match oidc.metadata(false).await {
         Ok(m) => oidc.client(m),
@@ -323,11 +323,11 @@ async fn finish_sign_in(auth: &Auth, headers: &HeaderMap, q: CallbackQuery) -> R
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(error = %e, "sign-in: ID token refused");
-            return refused("SSO trả về thông tin đăng nhập không hợp lệ.");
+            return refused("SSO returned invalid credentials.");
         }
     };
     let Some(email) = claims.email() else {
-        return refused("Tài khoản SSO không có e-mail.");
+        return refused("SSO account has no email.");
     };
     // Only an e-mail the SSO says it verified may take over roles granted
     // by e-mail before the first sign-in.
@@ -340,7 +340,9 @@ async fn finish_sign_in(auth: &Auth, headers: &HeaderMap, q: CallbackQuery) -> R
         Ok(user) => user,
         Err(aegis_store::StoreError::Conflict(e)) => {
             tracing::warn!(error = %e, "sign-in: e-mail taken");
-            return refused("E-mail này đã gắn với một tài khoản khác, hoặc SSO chưa xác minh nó.");
+            return refused(
+                "This email is already associated with another account, or SSO has not verified it.",
+            );
         }
         Err(e) => return internal("user", e),
     };
@@ -388,7 +390,7 @@ pub async fn logout(
 }
 
 pub async fn signed_out() -> Response {
-    login_page(StatusCode::OK, "Đã đăng xuất.", true)
+    login_page(StatusCode::OK, "Signed out.", true)
 }
 
 #[cfg(test)]

@@ -214,7 +214,7 @@ async fn the_dashboard_matches_the_ledger_report() {
     let label = |g: &aegis_server::web::Group| g.label.clone();
     assert_eq!(
         d.languages.iter().map(label).collect::<Vec<_>>(),
-        ["ngoài job (CLI, eval)", "python", "rust"]
+        ["outside jobs (CLI, eval)", "python", "rust"]
     );
     let rust = &d.languages[2].kpi;
     assert_eq!((rust.runs, rust.accepted, rust.expert_runs), (2, 1, 1));
@@ -331,7 +331,11 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
 
     let again = post_form(&app, &format!("/jobs/{}/review", id.0), &fields).await;
     assert_eq!(again.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(again.body.contains("đã có review"), "{}", again.body);
+    assert!(
+        again.body.contains("already has a review"),
+        "{}",
+        again.body
+    );
     let replace = format!(
         "verdict=rejected&lines_edited=0&broke_tests=on&replace=on&opened_at={opened_at}&opened_sig={sig}"
     );
@@ -354,7 +358,7 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     )
     .await;
     assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(bad.body.contains("số dòng sửa"), "{}", bad.body);
+    assert!(bad.body.contains("lines edited"), "{}", bad.body);
     let no_pr = get(&app, &format!("/jobs/{}/review", stopped.0)).await;
     assert_eq!(no_pr.status, StatusCode::CONFLICT);
     db.drop().await;
@@ -465,7 +469,7 @@ async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
     for id in [root, round.id] {
         let page = get(&app, &format!("/jobs/{}", id.0)).await;
         assert_eq!(page.status, StatusCode::OK);
-        assert!(page.body.contains("Vòng sửa theo review"), "{}", page.body);
+        assert!(page.body.contains("Review fix rounds"), "{}", page.body);
         assert!(
             page.body
                 .contains(&format!("href=\"/jobs/{}\"", round.id.0)),
@@ -480,11 +484,18 @@ async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
     }
     let round_page = get(&app, &format!("/jobs/{}", round.id.0)).await;
     assert!(
-        round_page.body.contains(&format!("job #{}</a> mở", root.0)),
+        round_page.body.contains(&format!(
+            "opened by <a href=\"/jobs/{}\">job #{}</a>",
+            root.0, root.0
+        )),
         "{}",
         round_page.body
     );
-    assert!(!round_page.body.contains("Duyệt PR"), "{}", round_page.body);
+    assert!(
+        !round_page.body.contains("Review PR"),
+        "{}",
+        round_page.body
+    );
     let review = get(&app, &format!("/jobs/{}/review", round.id.0)).await;
     assert_eq!(review.status, StatusCode::CONFLICT, "{}", review.body);
 
@@ -496,6 +507,6 @@ async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
     assert_eq!(d.total.mean_cost_usd, Some(1.5));
     assert_eq!(d.total_review_rounds, Some(1.0));
     let home = get(&app, "/").await;
-    assert!(home.body.contains("Vòng sửa / PR"), "{}", home.body);
+    assert!(home.body.contains("Review rounds / PR"), "{}", home.body);
     db.drop().await;
 }

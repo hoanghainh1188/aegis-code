@@ -4,16 +4,16 @@
   <thead>
     <tr>
       <th scope="col">{{ heading }}</th>
-      <th scope="col" class="num">Lượt chạy</th>
-      <th scope="col" class="num">PR mở</th>
-      <th scope="col" class="num">Chờ duyệt</th>
-      <th scope="col" class="num">PR được chấp nhận</th>
-      <th scope="col" class="num">Phá test cũ</th>
-      <th scope="col" class="num">Chi phí / issue</th>
-      <th scope="col" class="num">Thời gian duyệt</th>
-      <th scope="col" class="num">Đọc cache</th>
-      <th scope="col" class="num">Lên Expert</th>
-      <th scope="col" class="num" title="Số vòng sửa theo review trung bình của một PR được chấp nhận">Vòng sửa / PR</th>
+      <th scope="col" class="num">Runs</th>
+      <th scope="col" class="num">PRs opened</th>
+      <th scope="col" class="num">Awaiting review</th>
+      <th scope="col" class="num">Accepted PRs</th>
+      <th scope="col" class="num">Broke tests</th>
+      <th scope="col" class="num">Cost / issue</th>
+      <th scope="col" class="num">Review time</th>
+      <th scope="col" class="num">Cache read</th>
+      <th scope="col" class="num">Escalated</th>
+      <th scope="col" class="num" title="Average review fix rounds per accepted PR">Review rounds / PR</th>
     </tr>
   </thead>
   <tbody>
@@ -32,7 +32,7 @@
       <td class="num">{{ r.rounds }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="10" class="empty">Chưa có lượt chạy nào.</td></tr>
+    <tr><td colspan="10" class="empty">No runs yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -48,7 +48,7 @@
   <rect class="bar {{ r.accept_class }}" x="120" y="{{ loop.index0 * 26 + 5 }}" width="{{ r.accept_bar }}" height="16"></rect>
   {%- endfor %}
   <line class="threshold" x1="{{ 120 + min }}" x2="{{ 120 + min }}" y1="0" y2="{{ rows.len() * 26 + 6 }}"></line>
-  <text class="tick" x="{{ 120 + min }}" y="{{ rows.len() * 26 + 19 }}">ngưỡng</text>
+  <text class="tick" x="{{ 120 + min }}" y="{{ rows.len() * 26 + 19 }}">target</text>
 </svg>
 {%- endif %}
 

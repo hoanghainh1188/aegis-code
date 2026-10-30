@@ -3,9 +3,9 @@
   <thead>
     <tr>
       <th scope="col">Job</th><th scope="col">Repo</th><th scope="col">Issue</th>
-      <th scope="col">Trạng thái</th><th scope="col">Kết quả</th><th scope="col">Tầng model</th>
-      <th scope="col" class="num">Chi phí</th><th scope="col" class="num">Thời gian</th>
-      <th scope="col">Tạo lúc (UTC)</th><th scope="col">PR</th>
+      <th scope="col">Status</th><th scope="col">Outcome</th><th scope="col">Model tiers</th>
+      <th scope="col" class="num">Cost</th><th scope="col" class="num">Wall time</th>
+      <th scope="col">Created (UTC)</th><th scope="col">PR</th>
     </tr>
   </thead>
   <tbody>
@@ -22,15 +22,15 @@
       <td>{{ r.created_at }}</td>
       <td>
         {%- if let Some(url) = r.pr_url %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">PR</a>{% endif -%}
-        {%- if r.can_review %} · <a href="/jobs/{{ r.id }}/review">duyệt</a>{% endif -%}
+        {%- if r.can_review %} · <a href="/jobs/{{ r.id }}/review">review</a>{% endif -%}
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="10" class="empty">Không có job nào khớp bộ lọc.</td></tr>
+    <tr><td colspan="10" class="empty">No jobs match the filter.</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
 {% if let Some(next) = next %}
-<p class="pager"><a href="{{ next }}" hx-get="{{ next }}" hx-target="#jobs-table" hx-push-url="true">Trang sau →</a></p>
+<p class="pager"><a href="{{ next }}" hx-get="{{ next }}" hx-target="#jobs-table" hx-push-url="true">Next page →</a></p>
 {% endif %}

@@ -93,7 +93,7 @@ fn optional<T>(text: &str, parse: impl Fn(&str) -> Option<T>) -> Result<Option<T
     parse(text).map(Some).ok_or_else(|| {
         WebError::new(
             axum::http::StatusCode::BAD_REQUEST,
-            format!("giá trị lọc không hợp lệ: `{text}`"),
+            format!("invalid filter value: `{text}`"),
         )
     })
 }
@@ -195,16 +195,16 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
         cost: String::new(),
     };
     Some(match event {
-        LedgerEvent::Classified { kind } => row("phân loại", format!("{kind:?}")),
+        LedgerEvent::Classified { kind } => row("classify", format!("{kind:?}")),
         LedgerEvent::ModelCall {
             tier,
             model,
             tokens,
             cost_usd,
         } => EventRow {
-            kind: "gọi model",
+            kind: "model call",
             detail: format!(
-                "{tier:?} · {model} · input {} · output {} · cache đọc {}",
+                "{tier:?} · {model} · input {} · output {} · cache read {}",
                 tokens.input, tokens.output, tokens.cache_read
             ),
             cost: dollars(*cost_usd),
@@ -221,46 +221,47 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
                     format!("{}{target}{error}", c.name)
                 })
                 .collect();
-            row("công cụ", format!("{tier:?}: {}", calls.join(", ")))
+            row("tools", format!("{tier:?}: {}", calls.join(", ")))
         }
         LedgerEvent::TestReminded { tier, calls } => {
-            row("nhắc chạy test", format!("{tier:?}, sau {calls} lượt"))
+            row("test reminder", format!("{tier:?}, after {calls} turns"))
         }
         LedgerEvent::ImpactChecked { files, error } => {
             let text = match (error, files.is_empty()) {
-                (Some(why), _) => format!("không hỏi được: {why}"),
-                (None, true) => "không có nơi gọi ngoài bản vá".to_owned(),
+                (Some(why), _) => format!("failed to query: {why}"),
+                (None, true) => "no callers outside patch".to_owned(),
                 (None, false) => files.join(", "),
             };
-            row("đồ thị gọi", text)
+            row("call graph", text)
         }
-        LedgerEvent::Escalated { reason, calls } => {
-            row("lên Expert", format!("sau {calls} lượt: {reason}"))
-        }
+        LedgerEvent::Escalated { reason, calls } => row(
+            "escalate to Expert",
+            format!("after {calls} turns: {reason}"),
+        ),
         LedgerEvent::GateRun(run) => {
             let result = match (&run.failed_step, run.passed) {
-                (_, true) => "qua".to_owned(),
-                (Some(step), false) => format!("không qua ở bước {step}"),
-                (None, false) => "không qua".to_owned(),
+                (_, true) => "passed".to_owned(),
+                (Some(step), false) => format!("failed at step {step}"),
+                (None, false) => "failed".to_owned(),
             };
             row(
                 "gate",
                 format!("{result} · {}", seconds(Some(run.duration_s))),
             )
         }
-        LedgerEvent::SecretsRedacted { count } => row("che secret", format!("{count} giá trị")),
+        LedgerEvent::SecretsRedacted { count } => row("redact secrets", format!("{count} values")),
         LedgerEvent::HiddenTests { .. } => return None,
         LedgerEvent::Finished {
             outcome,
             wall_time_s,
         } => row(
-            "kết thúc",
+            "finished",
             format!("{outcome:?} · {}", seconds(Some(*wall_time_s))),
         ),
         LedgerEvent::Reviewed(r) => row(
             "review",
             format!(
-                "{:?} · sửa {} dòng · {:.1} phút",
+                "{:?} · {} lines edited · {:.1} min",
                 r.verdict, r.lines_edited, r.review_minutes
             ),
         ),
@@ -415,6 +416,6 @@ mod tests {
             outcome: Outcome::PrOpened,
             wall_time_s: 90.0,
         };
-        assert_eq!(event_row(&finished).unwrap().detail, "PrOpened · 1.5 phút");
+        assert_eq!(event_row(&finished).unwrap().detail, "PrOpened · 1.5 min");
     }
 }

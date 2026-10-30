@@ -484,7 +484,7 @@ async fn a_changed_opened_at_is_refused() {
     ] {
         let sent = send(&app, form(&uri, &rev.cookie, &changed)).await;
         assert_eq!(sent.status, StatusCode::UNPROCESSABLE_ENTITY, "{why}");
-        assert!(sent.body.contains("không hợp lệ"), "{why}: {}", sent.body);
+        assert!(sent.body.contains("invalid"), "{why}: {}", sent.body);
     }
     assert!(!reviewed(s, "a-1").await);
     db.drop().await;

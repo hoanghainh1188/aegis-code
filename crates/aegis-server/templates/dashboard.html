@@ -1,32 +1,32 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
-{% block title %}KPI{% endblock %}
+{% block title %}KPIs{% endblock %}
 {% block content %}
 <section class="hero" aria-labelledby="kpi-heading">
-  <p class="eyebrow">Ledger · mọi lượt chạy đã kết thúc</p>
-  <h1 id="kpi-heading">PR được chấp nhận <strong class="{{ total.accept_class }}">{{ total.accept }}</strong></h1>
+  <p class="eyebrow">Ledger · all completed runs</p>
+  <h1 id="kpi-heading">Accepted PRs <strong class="{{ total.accept_class }}">{{ total.accept }}</strong></h1>
   <dl class="figures">
-    <div><dt>Chi phí / issue</dt><dd class="{{ total.cost_class }}">{{ total.cost }}</dd><dd class="threshold">ngưỡng ≤ $4</dd></div>
-    <div><dt>Thời gian duyệt / PR</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">≤ 15 phút</dd></div>
-    <div><dt>Đọc cache</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
-    <div><dt>Lên Expert</dt><dd>{{ total.expert }}</dd><dd class="threshold">theo dõi</dd></div>
-    <div><dt>Chờ duyệt</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">PR chưa có review</dd></div>
+    <div><dt>Cost / issue</dt><dd class="{{ total.cost_class }}">{{ total.cost }}</dd><dd class="threshold">target ≤ $4</dd></div>
+    <div><dt>Review time / PR</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">≤ 15 min</dd></div>
+    <div><dt>Cache read</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
+    <div><dt>Escalated to Expert</dt><dd>{{ total.expert }}</dd><dd class="threshold">tracked</dd></div>
+    <div><dt>Awaiting review</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">PRs without review</dd></div>
   </dl>
-  <p class="note">Cùng công thức với <code>aegis report</code> (ADR 0005): ngưỡng chấp nhận ≥ 40% tổng, ≥ 35% mỗi ngôn ngữ. Kết quả test ẩn không hiện ở đây.</p>
+  <p class="note">Same formulas as <code>aegis report</code> (ADR 0005): acceptance target ≥ 40% overall, ≥ 35% per language. Hidden test results are not shown here.</p>
 </section>
 
 <section aria-labelledby="budget-heading" class="band">
-  <h2 id="budget-heading">Ngân sách tháng</h2>
+  <h2 id="budget-heading">Monthly budget</h2>
   <div class="scroll">
   <table class="budget">
     <thead>
       <tr>
         <th scope="col">Repo</th>
-        <th scope="col" class="num">Đã dùng</th>
-        <th scope="col" class="num">Trần</th>
-        <th scope="col" class="num">Còn lại</th>
-        <th scope="col">Mức dùng</th>
-        <th scope="col">Trạng thái</th>
+        <th scope="col" class="num">Spent</th>
+        <th scope="col" class="num">Cap</th>
+        <th scope="col" class="num">Remaining</th>
+        <th scope="col">Usage</th>
+        <th scope="col">Status</th>
       </tr>
     </thead>
     <tbody>
@@ -38,7 +38,7 @@
         <td class="num">{{ b.left }}</td>
         <td>
           {%- if b.capped %}
-          <svg class="spend" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ b.used }} trần">
+          <svg class="spend" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ b.used }} of cap">
             <rect class="track" x="0" y="0" width="100" height="10"></rect>
             <rect class="bar {{ b.class }}" x="0" y="0" width="{{ b.bar }}" height="10"></rect>
             <line class="threshold" x1="{{ warn_at }}" x2="{{ warn_at }}" y1="0" y2="10"></line>
@@ -48,32 +48,32 @@
         <td class="{{ b.class }}">{{ b.state }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="empty">Chưa có repo nào.</td></tr>
+      <tr><td colspan="6" class="empty">No repos yet.</td></tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
-  <p class="note">Tháng tính theo múi giờ {{ time_zone }}. Cảnh báo từ {{ warn_at }}% trần; còn dưới {{ reserve }} (trần một issue) thì repo không nhận job mới, job đang xếp hàng chờ sang tháng hoặc khi trần được nâng.</p>
+  <p class="note">Month tracked in {{ time_zone }} timezone. Warning threshold at {{ warn_at }}% of cap; below {{ reserve }} (reserve per issue), repo accepts no new jobs; queued jobs wait for next month or until cap is raised.</p>
 </section>
 
 <section aria-labelledby="lang-heading" class="band">
   <div class="band-head">
-    <h2 id="lang-heading">Theo ngôn ngữ</h2>
-    {% call m::bars(languages, language_min, "Tỉ lệ chấp nhận theo ngôn ngữ, ngưỡng 35%") %}{% endcall %}
+    <h2 id="lang-heading">By language</h2>
+    {% call m::bars(languages, language_min, "Acceptance rate by language, target 35%") %}{% endcall %}
   </div>
-  {% call m::kpi_table("Ngôn ngữ", languages) %}{% endcall %}
+  {% call m::kpi_table("Language", languages) %}{% endcall %}
 </section>
 
 <section aria-labelledby="repo-heading" class="band">
-  <h2 id="repo-heading">Theo repo</h2>
+  <h2 id="repo-heading">By repo</h2>
   {% call m::kpi_table("Repo", repos) %}{% endcall %}
 </section>
 
 <section aria-labelledby="week-heading" class="band">
   <div class="band-head">
-    <h2 id="week-heading">Theo tuần tạo job</h2>
-    {% call m::bars(weeks, total_min, "Tỉ lệ chấp nhận theo tuần, ngưỡng 40%") %}{% endcall %}
+    <h2 id="week-heading">By job creation week</h2>
+    {% call m::bars(weeks, total_min, "Acceptance rate by week, target 40%") %}{% endcall %}
   </div>
-  {% call m::kpi_table("Tuần", weeks) %}{% endcall %}
+  {% call m::kpi_table("Week", weeks) %}{% endcall %}
 </section>
 {% endblock %}

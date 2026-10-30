@@ -62,7 +62,7 @@ fn person(access: &Access) -> Result<UserId, WebError> {
     access.actor.user.ok_or_else(|| {
         WebError::new(
             StatusCode::FORBIDDEN,
-            "Chỉ người đăng nhập mới có token riêng",
+            "Only signed-in users can have personal tokens",
         )
     })
 }
@@ -124,11 +124,11 @@ pub async fn create(
     };
     let refused = |why: String| (None, Some(why), StatusCode::UNPROCESSABLE_ENTITY);
     let (made, error, status) = match days {
-        Err(_) => refused(format!("Số ngày phải từ 1 tới {MAX_TOKEN_DAYS}")),
+        Err(_) => refused(format!("Days must be between 1 and {MAX_TOKEN_DAYS}")),
         Ok(days) => {
             let token = random_token().map_err(|e| {
                 tracing::error!(error = %e, "web: no randomness for a token");
-                WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Lỗi nội bộ")
+                WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             })?;
             match store
                 .create_personal_token(user, &form.label, days, &token_hash(&token), &access.actor)
@@ -136,13 +136,13 @@ pub async fn create(
             {
                 Ok(_) => (Some(token), None, StatusCode::OK),
                 Err(StoreError::Invalid { field: "label", .. }) => {
-                    refused("Tên token từ 1 tới 64 ký tự".into())
+                    refused("Token label must be between 1 and 64 characters".into())
                 }
                 Err(StoreError::Invalid { .. }) => {
-                    refused(format!("Số ngày phải từ 1 tới {MAX_TOKEN_DAYS}"))
+                    refused(format!("Days must be between 1 and {MAX_TOKEN_DAYS}"))
                 }
                 Err(StoreError::Conflict(_)) => refused(format!(
-                    "Đã có {MAX_PERSONAL_TOKENS} token còn hạn; thu hồi bớt một cái trước"
+                    "Already reached {MAX_PERSONAL_TOKENS} active tokens; revoke one first"
                 )),
                 Err(e) => return Err(e.into()),
             }

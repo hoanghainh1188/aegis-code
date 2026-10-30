@@ -1,29 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Duyệt job #{{ id }}{% endblock %}
+{% block title %}Review job #{{ id }}{% endblock %}
 {% block content %}
 <section aria-labelledby="review-heading" class="review">
   <p class="eyebrow"><a href="/jobs/{{ id }}">Job #{{ id }}</a> · <span class="ref">{{ issue_ref }}</span></p>
-  <h1 id="review-heading">Duyệt PR</h1>
-  {% if let Some(url) = pr_url %}<p><a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Mở PR trên tab mới</a></p>{% endif %}
-  <p class="note">Thời gian duyệt được tính tự động, từ lúc mở trang này tới lúc gửi.</p>
+  <h1 id="review-heading">Review PR</h1>
+  {% if let Some(url) = pr_url %}<p><a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Open PR in new tab</a></p>{% endif %}
+  <p class="note">Review time is calculated automatically from opening this page until submission.</p>
   {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
-  {% if let Some(r) = existing %}<p class="notice">Review hiện có: {{ r }}</p>{% endif %}
+  {% if let Some(r) = existing %}<p class="notice">Existing review: {{ r }}</p>{% endif %}
   <form method="post" action="/jobs/{{ id }}/review">
     {% include "form_guard.html" %}
     <input type="hidden" name="opened_at" value="{{ opened_at }}">
     <input type="hidden" name="opened_sig" value="{{ opened_sig }}">
     <fieldset>
-      <legend>Kết luận</legend>
-      <label class="choice"><input type="radio" name="verdict" value="accepted" required> Chấp nhận</label>
-      <label class="choice"><input type="radio" name="verdict" value="accepted_with_edits"> Chấp nhận sau khi sửa</label>
-      <label class="choice"><input type="radio" name="verdict" value="rejected"> Từ chối</label>
+      <legend>Verdict</legend>
+      <label class="choice"><input type="radio" name="verdict" value="accepted" required> Accepted</label>
+      <label class="choice"><input type="radio" name="verdict" value="accepted_with_edits"> Accepted with edits</label>
+      <label class="choice"><input type="radio" name="verdict" value="rejected"> Rejected</label>
     </fieldset>
-    <label>Số dòng đã sửa
+    <label>Lines edited
       <input type="number" name="lines_edited" min="0" step="1" value="0" required inputmode="numeric">
     </label>
-    <label class="choice"><input type="checkbox" name="broke_tests" value="on"> PR làm vỡ test cũ</label>
-    {% if existing.is_some() %}<label class="choice"><input type="checkbox" name="replace" value="on"> Thay review cũ</label>{% endif %}
-    <button type="submit">Gửi kết quả</button>
+    <label class="choice"><input type="checkbox" name="broke_tests" value="on"> PR broke existing tests</label>
+    {% if existing.is_some() %}<label class="choice"><input type="checkbox" name="replace" value="on"> Replace existing review</label>{% endif %}
+    <button type="submit">Submit review</button>
   </form>
 </section>
 {% endblock %}

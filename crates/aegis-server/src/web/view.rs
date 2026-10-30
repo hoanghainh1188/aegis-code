@@ -41,7 +41,7 @@ pub fn tiers(record: &IssueRecord) -> String {
 
 pub fn seconds(value: Option<f64>) -> String {
     match value {
-        Some(s) if s >= 60.0 => format!("{:.1} phút", s / 60.0),
+        Some(s) if s >= 60.0 => format!("{:.1} min", s / 60.0),
         Some(s) => format!("{s:.0} s"),
         None => "—".into(),
     }
@@ -142,10 +142,10 @@ impl BudgetRow {
             }
         });
         let (state, class) = match budget.state(rules) {
-            BudgetState::Unlimited => ("Không giới hạn", "na"),
-            BudgetState::Ok => ("Ổn", "ok"),
-            BudgetState::Warn => ("Gần chạm trần", "warn"),
-            BudgetState::Spent => ("Hết: không nhận job mới", "bad"),
+            BudgetState::Unlimited => ("Unlimited", "na"),
+            BudgetState::Ok => ("OK", "ok"),
+            BudgetState::Warn => ("Near cap", "warn"),
+            BudgetState::Spent => ("Exhausted: no new jobs", "bad"),
         };
         Self {
             label: budget.slug.clone(),
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(pct(1, 2), "50% (1/2)");
         assert_eq!(pct(0, 0), "—");
         assert_eq!(dollars(2.0), "$2.00");
-        assert_eq!(seconds(Some(90.0)), "1.5 phút");
+        assert_eq!(seconds(Some(90.0)), "1.5 min");
         let row = KpiRow::new("rust", &Kpi::from_records(&[]), 0.35);
         assert_eq!((row.accept.as_str(), row.accept_class), ("—", "na"));
     }
