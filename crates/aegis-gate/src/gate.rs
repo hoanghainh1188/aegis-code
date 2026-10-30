@@ -377,13 +377,45 @@ impl<'a> Run<'a> {
         }
         let tree = self.base_tree.as_ref().expect("just created");
         if !self.part.base_seeded {
+            let dir = tree.path().join(&self.part.dir);
             if let Some(cache) = &self.part.build_cache {
-                cache.seed(&tree.path().join(&self.part.dir))?;
+                cache.seed(&dir)?;
                 self.seeded.push((cache.clone(), self.part.dir.clone()));
             }
+            self.fetch_base(&dir)?;
             self.part.base_seeded = true;
         }
-        Ok(tree)
+        Ok(self.base_tree.as_ref().expect("just created"))
+    }
+
+    /// The profile's fetch in the base copy's `dir`, through the egress
+    /// proxy, when the fetch leaves state in the tree (#303).
+    fn fetch_base(&self, dir: &Path) -> Result<(), GateError> {
+        let (Some(fetch), Some(sandbox)) = (&self.part.fetch, &self.part.sandbox) else {
+            return Ok(());
+        };
+        if !self.part.profile.profile.dependencies.fetch_base {
+            return Ok(());
+        }
+        let session = fetch.egress.start()?;
+        let ran = session.fetch(
+            sandbox,
+            &fetch.command,
+            dir,
+            &self.log("fetch-base"),
+            self.req.step_timeout,
+            self.req.cancel.clone(),
+        )?;
+        match ran.exit {
+            e if e.success() => Ok(()),
+            Exit::Cancelled => Ok(()),
+            e => Err(GateError::BaseFetch(format!(
+                "{}:\n{}\n\nproxy:\n{}",
+                exit_text(e),
+                tail(&ran.log),
+                session.log()
+            ))),
+        }
     }
 
     /// The base copy's directory of the part, once the copy exists.

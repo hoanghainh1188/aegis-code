@@ -221,6 +221,12 @@ pub struct Dependencies {
     /// the gate's containers.
     #[serde(default)]
     pub dirs: Vec<String>,
+    /// The fetch also writes state into the tree that `dirs` cannot mount,
+    /// spread over it (C#'s `obj/` in every project) or read-write
+    /// (`node_modules`). The gate's base copy has none of it, so the gate
+    /// runs the fetch there too before its first command (#303).
+    #[serde(default)]
+    pub fetch_base: bool,
     /// Build configuration the readers cannot check (e.g. `.npmrc`,
     /// `.cargo/config.toml`, `go.work`) that can change where dependencies
     /// come from or run code at build time. A patch that touches one is
@@ -784,6 +790,18 @@ mod tests {
                 assert!(!deps.fetch_hosts.is_empty(), "{language:?}");
             }
         }
+    }
+
+    // #303: only the profiles whose fetch leaves state in the tree that
+    // cannot be mounted have the base copy fetch it too.
+    #[test]
+    fn base_copies_fetch_where_dependencies_live_in_the_tree() {
+        let profiles = builtin();
+        let fetching: Vec<Language> = Language::ALL
+            .into_iter()
+            .filter(|l| profiles.get(*l).unwrap().dependencies.fetch_base)
+            .collect();
+        assert_eq!(fetching, [Language::TypeScript, Language::CSharp]);
     }
 
     #[test]
