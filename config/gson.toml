@@ -60,21 +60,21 @@ conventions = """
 
 # Only the `gson` module: in the `test` phase test-jpms needs the gson jar
 # installed, which no step does (eval/README.md, verify.py). The other
-# modules are not what the issues are about.
-# With `-Dgroups` Surefire downloads its JUnit 4.7 provider; the gate's
-# runs, without groups, need the JUnit 4 one, at the Surefire version of
-# gson's root pom (#288).
+# modules are not what the issues are about. Otherwise the profile's fetch:
+# its method filter keeps Surefire on the JUnit 4 provider the gate needs
+# (#288). gson's three `AllTests` suites still run here, since a method
+# filter does not reach them.
 [repo.overrides]
-fetch = ["sh", "-c", """surefire=$(sed -n '/<artifactId>maven-surefire-plugin</{n;s/.*<version>\\(.*\\)<\\/version>.*/\\1/p;}' pom.xml | head -n 1)
-exec mvn -B -q -pl gson \\
-    dependency:go-offline \\
-    org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent \\
-    test \\
-    org.jacoco:jacoco-maven-plugin:0.8.12:report \\
-    -Dgroups=aegis-fetch-only \\
-    -Dsurefire.failIfNoSpecifiedTests=false \\
-    -DfailIfNoTests=false \\
-    dependency:get "-Dartifact=org.apache.maven.surefire:surefire-junit4:$surefire""""]
+fetch = [
+    "mvn", "-B", "-q", "-pl", "gson",
+    "dependency:go-offline",
+    "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",
+    "test",
+    "org.jacoco:jacoco-maven-plugin:0.8.12:report",
+    "-Dtest=#aegisFetchOnly",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "-DfailIfNoTests=false",
+]
 
 [repo.overrides.gate]
 lint = ["mvn", "-B", "-o", "-q", "-pl", "gson", "test-compile"]
