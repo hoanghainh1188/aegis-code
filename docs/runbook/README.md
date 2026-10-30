@@ -321,7 +321,7 @@ Step-by-step onboarding of GitHub or GitLab repositories, from initial registrat
    ```
    This command:
    - Validates settings against deployment mode (`customer-jp` requires valid regional mode);
-   - Clones repository into `<state_dir>/repos/<slug>` (using fork token for private repos);
+   - Clones repository into `<state_dir>/repos/<slug>` (with the fork token, which is sent for public repos too, so it must be valid);
    - Records an audit log `repo.register` and outputs the repository ID.
 
    Workers fetch latest commits from the default branch before starting every job, requiring no manual git sync.

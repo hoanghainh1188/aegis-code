@@ -11,7 +11,7 @@ Core operations: [Installation & Setup](#1-installation--setup), [Registering Re
 | Host Machine | Linux x86_64 or arm64. Minimum: 4 vCPUs, 16 GB RAM, 100 GB SSD storage (sandbox images, git clones, and build caches reside locally). The machine should be dedicated exclusively to Aegis |
 | Docker Engine | Docker Engine 24+ and Docker Compose plugin v2 |
 | Outbound Network | Access to forges (GitHub, GitLab) and model APIs (Claude API, AWS Bedrock), unless utilizing local models. For isolated networks without Internet access, use the [offline bundle](../release.md#air-gapped--offline-environments) |
-| Inbound Traffic | Port 8080 behind your TLS reverse proxy: dashboard, REST API, webhooks |
+| Inbound Traffic | Port 8080 behind your TLS reverse proxy: dashboard, REST API, webhooks. Compose publishes it on all interfaces unless `AEGIS_PUBLISH` says otherwise ([Reverse Proxy](#reverse-proxy-configuration-tls-termination)) |
 
 ## Preparation Checklist
 
@@ -57,7 +57,7 @@ Execute from a clean repository checkout pinned to your target release tag (`git
    - `[auth.oidc]`: Enterprise OIDC Single Sign-On credentials;
    - `[modes]`: Configuration modes for onboarded repos. To use a local model (Ollama / vLLM), create a mode file in `./modes/local.toml` based on [config/local.toml](../../config/local.toml), and configure `poc = "/etc/aegis/modes/local.toml"`.
 
-3. **Populate Secrets:** Place each secret as a file inside `./secrets/`, with permissions `0400` owned by uid `10001:10001` ([Secret Rotation](README.md#3-secret-rotation)):
+3. **Populate Secrets:** Place each secret as a file inside `./secrets/`, readable only by their owner (`0400` or `0600`; the command below gives `0600`), owned by uid `10001:10001` ([Secret Rotation](README.md#3-secret-rotation)):
    - `ANTHROPIC_API_KEY`: Model API key (required for `poc` mode; not required for local models);
    - `AEGIS_OIDC_CLIENT_SECRET`: SSO client secret;
    - `AEGIS_GITHUB_COMMENT_TOKEN`: Token for posting comments to upstream issues;
@@ -105,7 +105,13 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 
 ### Reverse Proxy Configuration (TLS Termination)
 
-Aegis listens on `127.0.0.1:8080`. Configure a reverse proxy with TLS termination to forward requests:
+By default Docker Compose publishes port 8080 on **all interfaces** (`0.0.0.0:8080`), so plain HTTP is reachable from the network next to your proxy. When the proxy runs on the same host, keep the port on loopback by adding this line to `.env` and re-running `aegis-deploy.sh` (or `docker compose up -d`):
+
+```bash
+AEGIS_PUBLISH=127.0.0.1:8080
+```
+
+Check with `docker compose port aegis 8080`, which should print `127.0.0.1:8080`. Then configure a reverse proxy with TLS termination to forward requests:
 
 #### Nginx Example
 ```nginx
@@ -145,7 +151,7 @@ From `deploy/compose/`, with the server healthy. `aegis` below stands for `docke
 
 1. **Fork token:** `sudo sh -c 'umask 077; printf "%s\n" "$TOKEN" > secrets/AEGIS_TOKEN_MYREPO; chown 10001:10001 secrets/AEGIS_TOKEN_MYREPO'`. The server reads new secret files within `[secrets] refresh_s` (5 minutes); no restart needed.
 2. **Repo file:** write `myrepo.toml` (template in [AWS Runbook §6](README.md#registration-and-cloning), step 4) with `token_env = "AEGIS_TOKEN_MYREPO"`, then `sudo install -D -o 10001 -g 10001 myrepo.toml /srv/aegis/.workspace/repo-files/myrepo.toml`.
-3. **Register:** `aegis repo add /srv/aegis/.workspace/repo-files/myrepo.toml`. It clones the repo; a token or URL problem fails here, not later.
+3. **Register:** `aegis repo add /srv/aegis/.workspace/repo-files/myrepo.toml`. It clones the repo with the fork token, also for public repos; a token or URL problem fails here, not later (an invalid token shows as `could not read Username for 'https://github.com'`).
 4. **Roles:** `aegis grant <email> myrepo maintainer` for the people who start jobs, `reviewer` for those who only review.
 5. **Webhooks:** on the upstream repo, payload URL `https://<public_url>/webhooks/github`, content type `application/json`, secret from `sudo cat secrets/AEGIS_GITHUB_WEBHOOK_SECRET`, events **Issues** and **Workflow runs**. For review rounds, on the fork: **Pull request reviews**, **Pull request review comments**, **Issue comments**. GitLab: [AWS Runbook §6](README.md#webhook-configuration), step 10.
 6. **First job:** put the label `aegis` on a small, well-described bug. In the webhook's *Recent Deliveries* the response is `202`; the job appears on the dashboard within seconds, and a comment appears on the issue when it ends.
@@ -162,7 +168,7 @@ docker compose exec aegis aegis-server --config /etc/aegis/server.toml <command>
   ```bash
   sudo install -o 10001 -g 10001 typst.toml /srv/aegis/.workspace/repo-files/
   ```
-- **Fork Authentication:** Placed as `./secrets/<token_env>` (`0400`, uid 10001).
+- **Fork Authentication:** Placed as `./secrets/<token_env>` (owner-only `0400` or `0600`, uid 10001).
 - **Webhooks:** Payload URL `https://<public_url>/webhooks/github`, secret read from `./secrets/AEGIS_GITHUB_WEBHOOK_SECRET`.
 
 ---
@@ -234,4 +240,5 @@ sudo deploy/systemd/install.sh   # Sets up /etc/aegis, /srv/aegis/.workspace, un
 | Gate fails with `No such image: aegis-sandbox-...` | Required language sandbox image is missing from `AEGIS_SANDBOXES` or not loaded. Note: the `fetch` step always requires `aegis-sandbox-python` (egress proxy) |
 | Job halted with `API root ... must use https` | Forge API roots (`fork.api`, `AEGIS_GITHUB_API`) must utilize `https://`. Insecure `http://` is allowed strictly for loopback test environments |
 | `aegis-job` CLI reports `not_found` with service token | Service tokens require RBAC roles: `... grant <token-name> maintainer` |
+| `repo add` fails with `could not read Username for 'https://github.com'` | GitHub rejected the fork token (wrong value, expired, or no *Contents* read on the repo); the token is sent on every clone, public repos included. Fix the file `./secrets/<token_env>` and run `repo add` again |
 | Job mount error on `/work` | `/srv/aegis/.workspace` must exist on host matching container path, owned by uid 10001 |
