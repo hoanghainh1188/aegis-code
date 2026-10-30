@@ -23,12 +23,18 @@ Aegis transforms manual maintenance into an **Agentic Software Development Life 
 * **Automates 80% of Repetitive Tasks:** Ingests tickets $\rightarrow$ locates root causes via AST relational graphs $\rightarrow$ synthesizes failing reproduction test cases $\rightarrow$ implements patches $\rightarrow$ rigorously validates against a 6-step isolated sandbox gate $\rightarrow$ publishes comprehensive Pull Requests.
 * **Strict "Human-in-the-Loop" Principle:** Aegis **never merges autonomously**. Final approval and merge decisions always remain with human engineers. Review time drops from **3–5 hours to 5–10 minutes** per issue.
 
-### 3 Core KPIs
-| Metric | Target Threshold | Description |
-| :--- | :---: | :--- |
-| **Acceptance Rate** | $\ge 40\%$ | Proportion of generated PRs accepted and merged by engineers with minor edits ($\le 10$ lines). |
-| **Cost Efficiency** | $\le \$4 - \$8$ / issue | Average model API spend per issue (including retries, failed runs, and regional markups). |
-| **Zero Regression** | $0\%$ regressions | No PR that breaks existing tests or degrades code coverage is ever submitted to reviewers. |
+### Core KPIs: Targets and Measured Results
+Thresholds are set in [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md). "Measured" is the Phase 1 evaluation: 32 real, already-fixed issues from two open-source projects, scrapy (Python, 14) and typst (Rust, 18), with hidden tests ([eval/README.md](eval/README.md), [report](docs/measurements/2026-10-24-eval-kpi.md)).
+
+| Metric | Target | Measured (Phase 1) | Description |
+| :--- | :---: | :---: | :--- |
+| **Acceptance Rate** | $\ge 40\%$ total, $\ge 35\%$ per language | **50%** (Python 64%, Rust 39%) | PRs a reviewer accepts with at most 10 lines edited. |
+| **Zero Regression** | 0 | **0** | PRs that break an existing test and still reach a reviewer. |
+| **Cost per Issue** | $\le \$4$ average | **$0.55** | Model spend per issue, failed runs included. A job is stopped at $4 or 40 model calls. |
+| **Review Time** | $\le 15$ min | **1.8 min** | Human time to judge one PR. |
+| **Prompt Cache Reads** | $\ge 70\%$ | **92%** | Share of input tokens served from the prompt cache. |
+
+Caveats: both projects are public, so models may have seen their fixes during training; Phase 1 reviewers could see hidden test results, which shortens review time. Both are re-measured on internal repositories during the pilot (#158). The four Phase 2 profiles (TypeScript, Java, Go, C#) have passed a dry run (19/20 issues, [report](docs/measurements/2026-10-29-new-profiles-dry-run.md)); their KPI run is #259.
 
 ---
 
@@ -63,21 +69,56 @@ sequenceDiagram
 3. **Patch & Verify:** The agent edits code with syntax-safe linters and executes the 6-step gate inside an isolated Docker sandbox container (`--network none`).
 4. **Human Review & Review Rounds:** The agent opens a PR detailing the root cause, verification evidence, and cost breakdown. If a reviewer requests changes or comments `/aegis fix`, the agent triggers a review round on the same branch without force-pushing.
 
+### What You Get
+
+Screenshots from a [local trial](docs/local-trial.md) run with a free local model (Ollama `gpt-oss:20b`), fixing a Go function that cut multi-byte strings in the middle of a character. The PR body and the dashboard are currently written in Vietnamese; the annotations below give the English.
+
+**The pull request** — what a reviewer reads. *Issue*, *Nguyên nhân* (root cause), *Thay đổi* (changes, per hunk), *Test* (the reproducing test, FAIL before the patch and PASS after; *Test được phép đổi*: existing tests the patch was allowed to change, here none), *Kết quả gate* (every gate step), *Chi phí* (model, calls, USD). The diff holds the new test and the fix:
+
+<p align="center"><img src="assets/screenshots/trial-pull-request.png" alt="Pull request opened by Aegis: root cause, changes, reproducing test, gate result, cost, and diff" width="85%" /></p>
+
+**The job page** on the dashboard — every model call, tool call, escalation and gate run, with its cost. Here the Core model's edits were rejected by the syntax check twice, so the job moved up to the Expert tier, wrote the reproducing test, fixed the function, and passed the gate in 3.8 minutes:
+
+<p align="center"><img src="assets/screenshots/trial-job-page.png" alt="Dashboard job page: outcome PrOpened, model tiers, 19 model calls, cost, and the ledger of every call" width="85%" /></p>
+
+The reviewer's side of this, step by step, is in the [Reviewer Guide](docs/reviewing.md).
+
+### Glossary
+
+| Term | Meaning |
+| :--- | :--- |
+| **Job** | One attempt to resolve one issue (or one CI failure, or one review round). Visible on the dashboard and through `aegis-job`. |
+| **Gate** | The verification run in a network-isolated Docker sandbox: format, lint, reproducing test (FAIL → PASS), full test suite, coverage, Sonar, integrity. A PR is opened only when it passes. |
+| **Reproducing test** | A test the agent writes that fails on the current code and passes after the fix — the proof that the bug is real and fixed. |
+| **Language profile** | Per-language settings: sandbox image, build/test/lint commands, test conventions (`profiles/*.toml`, [ADR 0004](docs/adr/0004-multi-language-profiles.md)). |
+| **Mode** | A named server configuration a repo runs under: which models, provider and region (`poc` = Claude API, `customer-jp` = Bedrock in Tokyo, or your own local-model file). |
+| **Fork** | The repository the agent pushes `agent/*` branches to and opens PRs in. Either a bot-owned fork of the upstream repo, or the upstream repo itself. |
+| **Light / Core / Expert** | The three model tiers: triage, main solving, and escalation for hard cases. |
+| **Circuit breaker** | The per-job ceiling ($4 or 40 model calls). The job stops and reports `stopped_budget` / `stopped_steps` instead of opening a PR. |
+| **Review round** | A follow-up job on an open PR, started by *Request changes* or a `/aegis fix` comment; it pushes a new commit to the same branch. |
+| **Ledger** | The per-job record of every model call, its tokens and its cost. |
+
 ---
 
 ## 🚀 3. Quick Start & Installation
 
-Choose the path that fits your role:
+Choose the path that fits your role.
+
+> [!IMPORTANT]
+> **No release has been published yet.** There is no `vX.Y.Z` tag, so the npm package `@hoanghainh1188/aegis-job`, the GHCR images and the offline bundles do not exist yet; they appear with the first release ([docs/release.md](docs/release.md)). Until then:
+> * **Developers** install `aegis-job` from source (the `cargo install` line below).
+> * **Operators** build the images locally and deploy them with `--offline` ([On-Premise Runbook, "Before the First Release"](docs/runbook/on-premise.md#before-the-first-release-local-images)).
+> * The **local trial** and **building from source** work as written.
 
 ### 3.1 For Developers (Submit & Follow Jobs)
-Interact with an existing Aegis instance directly from your terminal using `aegis-job` ([ADR 0006](docs/adr/0006-developer-client.md), [docs/client.md](docs/client.md)):
+Interact with an Aegis instance your team already runs, from your terminal, using `aegis-job` ([ADR 0006](docs/adr/0006-developer-client.md), [docs/client.md](docs/client.md)). You need its URL and a role on your repo from its administrator; to try it without one, use the local trial (3.2). Most jobs do not need the CLI at all: adding the `aegis` label to an issue starts one.
 
 ```bash
-# Install via npm (macOS, Linux - prebuilt binaries bundled)
-npm install -g @hoanghainh1188/aegis-job
-
-# Or install from source via Cargo
+# Install from source via Cargo (until the first release)
 cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client
+
+# After the first release: install via npm (macOS, Linux - prebuilt binaries bundled)
+npm install -g @hoanghainh1188/aegis-job
 
 # Log in with your personal token (from https://<aegis-server>/me/tokens)
 aegis-job login https://aegis.internal.example.com
@@ -112,8 +153,9 @@ export ANTHROPIC_API_KEY="sk-ant-..."
   cd deploy/compose
   sudo ./install.sh                     # Prepares /srv/aegis/.workspace and ./secrets
   # Configure ./server.toml and secrets in ./secrets/
-  sudo ./aegis-deploy.sh v0.2.0        # Deploys server and sandbox containers
+  sudo ./aegis-deploy.sh 0.1.0          # Release version without "v" (images are tagged 0.1.0)
   ```
+  Before starting, collect what the [Preparation Checklist](docs/runbook/on-premise.md#preparation-checklist) lists (SSO client, bot account, tokens, domain with TLS, model API key).
 * **Cloud Infrastructure (AWS):** Production-grade deployment with OpenTofu (EC2, RDS PostgreSQL, Secrets Manager, ALB with TLS, CloudWatch) in [deploy/tofu/](deploy/tofu/) and [docs/runbook/README.md](docs/runbook/README.md).
 * **Kubernetes:** Run worker pods with Docker-in-Docker sidecars for safe sandbox isolation ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md)).
 
@@ -197,7 +239,7 @@ flowchart TD
 
 ### Backups & Rollbacks
 * **Database Backup:** Run `sudo ./deploy/compose/backup.sh` for atomic `pg_dump` snapshots.
-* **Instant Rollbacks:** Re-run `./aegis-deploy.sh <previous-version>`. Aegis utilizes expand/contract database migrations ensuring backwards compatibility across releases.
+* **Instant Rollbacks:** Re-run `./aegis-deploy.sh <previous-version>` (e.g. `0.1.0`, no `v`). Aegis utilizes expand/contract database migrations ensuring backwards compatibility across releases.
 
 ---
 
@@ -271,6 +313,7 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [ADR 0008: Gate Sandbox on Kubernetes](docs/adr/0008-gate-sandbox-on-kubernetes.md)
 
 ### Detailed Guides & Runbooks
+* [Reviewer Guide](docs/reviewing.md) – Reading an Aegis PR, asking for review rounds, recording the verdict
 * [Developer Client Guide (`aegis-job`)](docs/client.md) – Submitting and monitoring jobs from terminal
 * [Local End-to-End Trial Guide](docs/local-trial.md) – Step-by-step local platform walkthrough
 * [Production AWS Runbook](docs/runbook/README.md) – Deployment, secret rotation, and incident triage
