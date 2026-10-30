@@ -5,8 +5,13 @@
 # `{lockfile}` / `{licenses}` / `{osv_config}` ở audit.
 #
 # Gate chạy không mạng nên mọi lệnh Maven có `-o`. Bước lấy phụ thuộc chạy
-# pha `test` với một tag JUnit không có thật: surefire tải provider JUnit
-# Platform (dependency:go-offline không tải) mà không chạy test nào của repo.
+# pha `test` để surefire tải provider (dependency:go-offline không tải), với
+# bộ lọc tên method không khớp test nào (#288). Không dùng `-Dgroups`: có nó
+# surefire chọn provider JUnit 4.7 cho repo JUnit 4, còn gate cần provider
+# JUnit 4. Bộ lọc theo tên lớp cũng không được: không lớp nào khớp thì
+# surefire dừng trước khi tải provider. Suite dựng bằng `suite()` (JUnit 3,
+# `@RunWith(AllTests.class)`) không lọc theo method được nên vẫn chạy ở đây,
+# cùng quyền với các plugin build mà pha `test` vốn đã chạy.
 
 language = "java"
 display_name = "Java"
@@ -52,7 +57,7 @@ fetch = [
     "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",
     "test",
     "org.jacoco:jacoco-maven-plugin:0.8.12:report",
-    "-Dgroups=aegis-fetch-only",
+    "-Dtest=#aegisFetchOnly",
     "-Dsurefire.failIfNoSpecifiedTests=false",
     "-DfailIfNoTests=false",
 ]

@@ -89,6 +89,43 @@ fn gate_steps_pass_offline_after_fetch() {
     assert!(xml.contains("<report"), "JaCoCo XML expected");
 }
 
+// #288: Surefire picks its provider from the project's configuration, and
+// the gate's runs need the one for JUnit 4. A Maven repository of its own,
+// so a provider left in ~/.m2 by another build cannot hide a missing one.
+#[test]
+fn junit4_gate_passes_offline_after_fetch_without_running_tests() {
+    if !tools() {
+        return;
+    }
+    let profile = java();
+    let ws = Workspace::new("java-junit4");
+    let local = format!(
+        "-Dmaven.repo.local={}",
+        ws.repo().with_file_name("m2").display()
+    );
+    let isolated = |mut argv: Vec<String>| {
+        argv.push(local.clone());
+        argv
+    };
+    ws.run_ok(
+        "fetch",
+        &isolated(profile.fetch.command().unwrap().render(&[]).unwrap()),
+    );
+    let mark = ws.repo().join("target/tests-ran");
+    assert!(!mark.exists(), "the fetch step ran the repo's tests");
+
+    ws.run_ok("test", &isolated(profile.gate.test.render(&[]).unwrap()));
+    assert!(mark.exists(), "the gate's test step ran no test");
+    let repro = profile
+        .gate
+        .repro_test
+        .command()
+        .unwrap()
+        .render(&[(Placeholder::Test, "CartTest#addsUpPrices")])
+        .unwrap();
+    ws.run_ok("repro_test", &isolated(repro));
+}
+
 #[test]
 fn lint_fails_on_code_that_does_not_compile() {
     if !tools() {
