@@ -69,6 +69,11 @@ fetch = ["dotnet", "restore"]
 # its packages. The signature checks' revocation lookups (plain http to the
 # CAs) are refused; restore goes on without them.
 fetch_hosts = ["api.nuget.org"]
+# `dotnet restore` ghi `obj/project.assets.json` vào từng project. Bản sao
+# nhánh gốc không có thì `dotnet test --no-restore` ở đó không chạy test nào
+# mà vẫn trả 0, nên gate chạy restore cả ở đó (#303). Gói đã có trong
+# `~/.nuget/packages` nên lần này không tải lại.
+fetch_base = true
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]

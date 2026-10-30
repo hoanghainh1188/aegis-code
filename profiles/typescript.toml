@@ -45,6 +45,10 @@ fetch = ["npm", "ci", "--ignore-scripts"]
 # Registry hosts the fetch container may reach (#66, #279): metadata and
 # tarballs both come from the registry.
 fetch_hosts = ["registry.npmjs.org"]
+# `node_modules` nằm trong cây và runner ghi vào đó (cache của Vitest), nên
+# không mount read-only được như `.venv`: gate chạy `npm ci` cả trong bản
+# sao nhánh gốc trước lệnh đầu tiên ở đó (#303).
+fetch_base = true
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]

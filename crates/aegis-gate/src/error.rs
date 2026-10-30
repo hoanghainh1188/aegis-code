@@ -25,6 +25,11 @@ pub enum GateError {
     #[error("Sonar: {0}")]
     Sonar(String),
 
+    /// The base copy's dependencies could not be fetched (#303): its
+    /// commands would run without them. Not the patch's fault either.
+    #[error("fetching the base revision's dependencies failed: {0}")]
+    BaseFetch(String),
+
     #[error(transparent)]
     Lang(#[from] LangError),
 }
