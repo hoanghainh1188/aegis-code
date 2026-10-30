@@ -4,7 +4,10 @@ The command-line interface for software engineers to dispatch and track maintena
 
 ## Installation
 
-### Via npm (Recommended)
+> [!IMPORTANT]
+> No release has been published yet, so the npm package and the prebuilt binaries below do not exist until the first `vX.Y.Z` release ([release.md](release.md)). Until then, install [from source](#from-source).
+
+### Via npm (Recommended after the first release)
 Supported on macOS (arm64/x86_64) and Linux (arm64/x86_64), requires Node 18+:
 
 ```bash
