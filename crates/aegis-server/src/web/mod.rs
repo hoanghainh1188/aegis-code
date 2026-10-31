@@ -6,6 +6,7 @@
 //! only them, by nonce; nothing is inline. Every page needs a session
 //! (#29) and shows only the repos its user has a role in; see [`guard`].
 
+mod actions;
 mod dashboard;
 mod guard;
 mod jobs;
@@ -37,8 +38,10 @@ pub fn router(auth: Auth) -> Router<Store> {
         .route("/auth/logout", post(oidc::logout))
         .route("/auth/signed-out", get(oidc::signed_out))
         .route("/", get(dashboard::page))
-        .route("/jobs", get(jobs::list))
+        .route("/jobs", get(jobs::list).post(actions::create))
         .route("/jobs/{id}", get(jobs::detail))
+        .route("/jobs/{id}/cancel", post(actions::cancel))
+        .route("/jobs/{id}/retry", post(actions::retry))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
         .route("/me/tokens", get(tokens::list).post(tokens::create))
         .route("/me/tokens/{id}/revoke", post(tokens::revoke))
@@ -86,6 +89,13 @@ impl From<StoreError> for WebError {
     fn from(e: StoreError) -> Self {
         match e {
             StoreError::NotFound(what) => Self::not_found(what),
+            // What the store refuses, said as the API says it (#309).
+            StoreError::Conflict(why) | StoreError::BudgetSpent(why) => {
+                Self::new(StatusCode::CONFLICT, why)
+            }
+            StoreError::Invalid { field, message } => {
+                Self::new(StatusCode::BAD_REQUEST, format!("{field}: {message}"))
+            }
             other => {
                 tracing::error!(error = %other, "web: store");
                 Self::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

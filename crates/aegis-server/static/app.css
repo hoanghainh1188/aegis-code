@@ -157,7 +157,7 @@ dd.bad, strong.bad { color: var(--fail); }
 
 .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); margin-bottom: var(--space-3); }
 label { display: grid; gap: var(--space-1); font-size: var(--text-small); font-weight: 600; }
-select, input[type="number"] { font: inherit; padding: var(--space-2); border: 1px solid var(--rule-strong); background: var(--surface); color: var(--ink); border-radius: 0; }
+select, input[type="number"], input[type="text"] { font: inherit; padding: var(--space-2); border: 1px solid var(--rule-strong); background: var(--surface); color: var(--ink); border-radius: 0; }
 
 button, .button {
   font: 600 var(--text-small) var(--font-text);
@@ -173,7 +173,7 @@ button, .button {
 button:hover, .button:hover { background: var(--accent); border-color: var(--accent); }
 button:active, .button:active { transform: translateY(1px); }
 .button.ghost, button.ghost { background: transparent; color: var(--ink); }
-.button.ghost:hover, button.ghost:hover { color: var(--paper); }
+.button.ghost:hover, button.ghost:hover { background: var(--accent); border-color: var(--accent); color: var(--paper); }
 
 .review form { display: grid; gap: var(--space-4); max-width: 32rem; margin-top: var(--space-4); }
 fieldset { border: 1px solid var(--rule-strong); padding: var(--space-3); margin: 0; display: grid; gap: var(--space-2); }
@@ -197,3 +197,12 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--accent); width
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 form.inline { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
 pre.token { overflow-x: auto; user-select: all; }
+
+/* Job actions (#309): a disclosure opens each form, no script. */
+details.create, details.confirm { margin: var(--space-3) 0; }
+details.create > summary, details.confirm > summary { list-style: none; }
+details.create > summary::-webkit-details-marker, details.confirm > summary::-webkit-details-marker { display: none; }
+details[open] > summary { margin-bottom: var(--space-3); }
+details.create form, details.confirm form { border-left: 4px solid var(--rule-strong); padding-left: var(--space-3); }
+button.danger { background: var(--fail); border-color: var(--fail); }
+button.danger:hover { background: var(--ink); border-color: var(--ink); }

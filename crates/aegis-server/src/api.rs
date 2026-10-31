@@ -386,31 +386,37 @@ async fn create_job(
     if !access.can(repo_id, RepoRole::Maintainer) {
         return Err(ApiError::forbidden(repo_id, RepoRole::Maintainer));
     }
-    let issue_ref = body.issue_ref.trim();
+    let new = new_job(repo_id, &body.issue_ref, &body.source, body.ledger_key)
+        .map_err(ApiError::invalid)?;
+    let job = store.create_job_by(&new, &access.actor).await?;
+    Ok(ok(StatusCode::CREATED, JobView::from(job)))
+}
+
+/// The job a client asks for, checked as the API and the pages both check
+/// it (#309): an issue ref of 1 to 256 bytes, a known source that is not a
+/// review round, a valid ledger key. `Err` says which field is wrong.
+pub(crate) fn new_job(
+    repo_id: RepoId,
+    issue_ref: &str,
+    source: &str,
+    ledger_key: Option<String>,
+) -> Result<NewJob, String> {
+    let issue_ref = issue_ref.trim();
     if issue_ref.is_empty() || issue_ref.len() > MAX_ISSUE_REF_LEN {
-        return Err(ApiError::invalid(format!(
-            "issue_ref: 1 to {MAX_ISSUE_REF_LEN} bytes"
-        )));
+        return Err(format!("issue_ref: 1 to {MAX_ISSUE_REF_LEN} bytes"));
     }
-    let source = JobSource::parse(&body.source)
-        .ok_or_else(|| ApiError::invalid(format!("source: unknown `{}`", body.source)))?;
+    let source = JobSource::parse(source).ok_or_else(|| format!("source: unknown `{source}`"))?;
     if source == JobSource::Review {
-        return Err(ApiError::invalid(
-            "source: a review round is asked for at POST /api/v1/jobs/{id}/review",
-        ));
+        return Err("source: a review round is asked for at POST /api/v1/jobs/{id}/review".into());
     }
-    let key = body
-        .ledger_key
-        .unwrap_or_else(|| default_ledger_key(issue_ref));
-    let ledger_key = IssueId::parse(key).map_err(|e| ApiError::invalid(e.to_string()))?;
-    let new = NewJob {
+    let key = ledger_key.unwrap_or_else(|| default_ledger_key(issue_ref));
+    let ledger_key = IssueId::parse(key).map_err(|e| e.to_string())?;
+    Ok(NewJob {
         repo_id,
         issue_ref: issue_ref.to_owned(),
         ledger_key,
         source,
-    };
-    let job = store.create_job_by(&new, &access.actor).await?;
-    Ok(ok(StatusCode::CREATED, JobView::from(job)))
+    })
 }
 
 /// `owner/repo#12` → `owner-repo-12-<ms>`: a ledger of its own for each
