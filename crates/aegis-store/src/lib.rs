@@ -51,7 +51,7 @@ pub use types::{
     NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
     UserKind, WebhookSource,
 };
-pub use users::{PendingLogin, Session, TokenHash};
+pub use users::{PendingLogin, RepoMember, Session, TokenHash};
 
 /// The schema's migrations, expand/contract (`docs/runbook`): an older
 /// binary must start on a schema a newer one expanded, as a rollback does
