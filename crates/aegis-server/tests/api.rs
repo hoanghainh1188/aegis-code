@@ -243,6 +243,7 @@ async fn a_review_round_is_asked_for_on_the_job_that_opened_the_pr() {
         outcome: aegis_ledger::Outcome::PrOpened,
         reason: None,
         pr_url: Some("https://github.com/aegis-bot/typst/pull/4".into()),
+        patch: None,
     };
     store.finish_attempt(&claim.run, "w", &done).await.unwrap();
     let (status, body) = call(&app, "POST", &format!("/api/v1/jobs/{id}/review"), None).await;

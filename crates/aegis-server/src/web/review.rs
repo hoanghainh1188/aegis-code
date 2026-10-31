@@ -20,6 +20,7 @@ use axum::{Extension, Form};
 use serde::Deserialize;
 
 use super::jobs::record;
+use super::patch::PatchView;
 use super::{Me, Nonce, WebError, WebResult, job_for, render};
 use crate::auth::{Access, Auth, Signer};
 
@@ -84,6 +85,9 @@ struct ReviewPage<'a> {
     opened_at: i64,
     opened_sig: String,
     error: Option<String>,
+    /// The PR as it is now (#312): its latest review round's patch, or
+    /// the patch of the job that opened it.
+    patch: Option<PatchView>,
 }
 
 /// Who asks, and what the page needs to say it.
@@ -127,6 +131,17 @@ async fn page(
             r.verdict, r.lines_edited, r.review_minutes
         )
     });
+    let mut patch = None;
+    for round in store.review_rounds_of(job.id).await?.iter().rev() {
+        patch = super::patch::of(store, round.id).await?;
+        if patch.is_some() {
+            break;
+        }
+    }
+    let patch = match patch {
+        Some(p) => Some(p),
+        None => super::patch::of(store, job.id).await?,
+    };
     let status = if error.is_some() {
         StatusCode::UNPROCESSABLE_ENTITY
     } else {
@@ -147,6 +162,7 @@ async fn page(
             opened_at,
         ),
         error,
+        patch,
     })?;
     Ok((status, html).into_response())
 }

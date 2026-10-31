@@ -5,8 +5,8 @@ use std::time::Duration;
 use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Outcome};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    AttemptEnd, JobSource, JobStatus, Lease, NewJob, NewRepo, Page, RepoId, RepoMode, RunStatus,
-    Store, StoreError,
+    AttemptEnd, JobSource, JobStatus, Lease, NewJob, NewRepo, Page, Patch, RepoId, RepoMode,
+    RunStatus, Store, StoreError,
 };
 
 const LEASE: Duration = Duration::from_secs(60);
@@ -133,19 +133,27 @@ async fn only_the_lease_holder_renews_or_ends_a_run() {
         s.renew_lease(c.job.id, "w2", LEASE).await.unwrap(),
         Lease::Lost
     );
+    let patch = Patch {
+        diff: "diff --git a/src/lib.rs b/src/lib.rs\n-a\n+b\n".into(),
+        truncated: false,
+    };
     let done = AttemptEnd::Done {
         outcome: Outcome::PrOpened,
         reason: None,
         pr_url: Some("https://github.com/example/a/pull/1".into()),
+        patch: Some(patch.clone()),
     };
     let err = s.finish_attempt(&c.run, "w2", &done).await.unwrap_err();
     assert!(matches!(err, StoreError::Conflict(_)), "{err}");
+    assert_eq!(s.patch(c.job.id).await.unwrap(), None, "not the holder's");
 
     let job = s.finish_attempt(&c.run, "w1", &done).await.unwrap();
     assert_eq!(
         (job.status, job.outcome, job.locked_by),
         (JobStatus::Done, Some(Outcome::PrOpened), None)
     );
+    // The patch the PR holds is kept with the job (#312).
+    assert_eq!(s.patch(c.job.id).await.unwrap(), Some(patch));
     assert_eq!(
         job.pr_url.as_deref(),
         Some("https://github.com/example/a/pull/1")

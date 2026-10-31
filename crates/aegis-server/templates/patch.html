@@ -1,0 +1,15 @@
+{#- The patch a PR holds (#312), file by file; each file opens on its own. -#}
+{% if let Some(p) = patch %}
+<section aria-labelledby="patch-heading" class="band patch">
+  <h2 id="patch-heading">Changes</h2>
+  <p class="note">{{ p.files.len() }} files, as the gate checked them.
+    {%- if p.truncated %} The patch was truncated here; the PR has it whole.{% endif %}</p>
+  {% for f in p.files %}
+  <details class="file"{% if p.files.len() <= 3 %} open{% endif %}>
+    <summary><code>{{ f.path }}</code> <span class="counts"><span class="plus">+{{ f.added }}</span> <span class="minus">−{{ f.removed }}</span></span></summary>
+    {#- Each line is a block of its own: no newline between them, or each would show twice as tall. -#}
+    <pre class="diff">{% for l in f.lines %}<span class="{{ l.class }}">{{ l.text }}</span>{% endfor %}</pre>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}

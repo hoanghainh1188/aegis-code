@@ -41,11 +41,13 @@ pub enum Lease {
 /// How a claimed run ends, and what becomes of its job.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttemptEnd {
-    /// The agent's result: a PR or a stop. Never retried.
+    /// The agent's result: a PR or a stop. Never retried. `patch`: what
+    /// the PR holds, kept with the job (#312).
     Done {
         outcome: Outcome,
         reason: Option<String>,
         pr_url: Option<String>,
+        patch: Option<Patch>,
     },
     Cancelled {
         reason: String,
@@ -62,6 +64,51 @@ pub enum AttemptEnd {
     /// Cut short by a shutdown: the run is interrupted, the job queued
     /// again at once, with no retry spent.
     Released,
+}
+
+/// The patch a job's PR holds (#312): the diff the gate checked, as
+/// `git diff` shows it, redacted, `truncated` when it was cut.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Patch {
+    pub diff: String,
+    pub truncated: bool,
+}
+
+/// The most of a patch kept: a page shows it whole.
+pub const MAX_PATCH_BYTES: usize = 1 << 20;
+
+impl Patch {
+    /// At most [`MAX_PATCH_BYTES`], cut at the end of a line.
+    pub fn capped(&self) -> Patch {
+        if self.diff.len() <= MAX_PATCH_BYTES {
+            return self.clone();
+        }
+        let mut cut = MAX_PATCH_BYTES;
+        while !self.diff.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let end = self.diff[..cut].rfind('\n').map_or(cut, |i| i + 1);
+        Patch {
+            diff: self.diff[..end].to_owned(),
+            truncated: true,
+        }
+    }
+}
+
+impl Store {
+    /// The patch kept with `job`, if its PR was opened with one.
+    pub async fn patch(&self, job: JobId) -> Result<Option<Patch>, StoreError> {
+        let row = sqlx::query!(
+            "SELECT diff, truncated FROM job_patches WHERE job_id = $1",
+            job.0
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| Patch {
+            diff: r.diff,
+            truncated: r.truncated,
+        }))
+    }
 }
 
 impl AttemptEnd {
@@ -246,6 +293,22 @@ impl Store {
             } => (Some(outcome_str(*outcome)), pr_url.as_deref()),
             _ => (None, None),
         };
+        if let AttemptEnd::Done {
+            patch: Some(patch), ..
+        } = end
+        {
+            let diff = patch.capped();
+            sqlx::query!(
+                "INSERT INTO job_patches (job_id, diff, truncated) VALUES ($1, $2, $3)
+                 ON CONFLICT (job_id) DO UPDATE
+                 SET diff = EXCLUDED.diff, truncated = EXCLUDED.truncated, recorded_at = now()",
+                run.job_id.0,
+                diff.diff,
+                diff.truncated,
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
         let (retried, delay) = match end {
             AttemptEnd::Retry { after, .. } => (1, Some(secs(*after))),
             AttemptEnd::Released => (0, Some(0.0)),

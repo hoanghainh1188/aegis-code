@@ -229,6 +229,15 @@ async fn a_bug_goes_from_issue_to_pr() {
     );
     assert_eq!(report.model_calls, 4);
     assert_eq!(fork_refs(&scratch), "refs/heads/agent/fixture-7");
+    // The patch the PR holds, for the job's page (#312).
+    let patch = report.patch.as_ref().unwrap();
+    assert!(!patch.truncated);
+    assert!(
+        patch.diff.contains("diff --git a/src/lib.rs b/src/lib.rs")
+            && patch.diff.contains("tests/fourth_item.rs"),
+        "{}",
+        patch.diff
+    );
 
     let record = p
         .store

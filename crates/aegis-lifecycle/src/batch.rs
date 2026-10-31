@@ -430,6 +430,7 @@ where
             reason: Some("no PR opened".into()),
             pr_url: None,
             kept: None,
+            patch: None,
         });
     }
     // `agent/integration-<issue-id>` on the fork, like the local branch.
@@ -447,12 +448,14 @@ where
         report,
     )
     .await?;
+    let patch = crate::job::patch(checkout.path(), &report.base, &report.tree)?;
     drop(checkout);
     Ok(Ending {
         outcome: Outcome::PrOpened,
         reason: None,
         pr_url: Some(published.url),
         kept: None,
+        patch: Some(patch),
     })
 }
 

@@ -5,16 +5,18 @@
 use std::future::Future;
 
 use aegis_ledger::Outcome;
-use aegis_store::Claim;
+use aegis_store::{Claim, Patch};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Attempt {
     /// The lifecycle reached its outcome: a PR or a stop. Never retried.
+    /// `patch`: what the PR holds (#312).
     Ended {
         outcome: Outcome,
         reason: Option<String>,
         pr_url: Option<String>,
+        patch: Option<Patch>,
     },
     /// Infrastructure failed (provider, container, network, database):
     /// retried with backoff while retries remain.

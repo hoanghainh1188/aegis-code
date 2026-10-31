@@ -59,6 +59,28 @@ pub fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, LifecycleErro
     git(repo, &["merge-base", "--end-of-options", a, b])
 }
 
+/// The patch from `from` to `to` that a PR holds (#312), as `git diff`
+/// shows it, redacted as the platform redacts anything it keeps, and cut
+/// to what the store keeps.
+pub fn patch(repo: &Path, from: &str, to: &str) -> Result<aegis_store::Patch, LifecycleError> {
+    let full = git(
+        repo,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--end-of-options",
+            from,
+            to,
+        ],
+    )?;
+    let patch = aegis_store::Patch {
+        diff: aegis_aci::redact(&full).text,
+        truncated: false,
+    };
+    Ok(patch.capped())
+}
+
 /// The changes from `from` to `to`, as `git diff` shows them, at most
 /// `max_chars` (cut at a line, with a note of what was left out).
 pub fn diff(repo: &Path, from: &str, to: &str, max_chars: usize) -> Result<String, LifecycleError> {

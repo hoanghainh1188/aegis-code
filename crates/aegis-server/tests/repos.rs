@@ -94,6 +94,7 @@ impl JobRunner for Resolving {
             outcome: Outcome::PrOpened,
             reason: None,
             pr_url: Some(format!("https://github.com/me/{}/pull/1", run.repo.slug)),
+            patch: None,
         }
     }
 }

@@ -10,6 +10,7 @@ mod actions;
 mod dashboard;
 mod guard;
 mod jobs;
+mod patch;
 mod review;
 mod tokens;
 mod view;

@@ -246,6 +246,7 @@ impl LifecycleRunner {
                     repo.slug
                 )),
                 pr_url: None,
+                patch: None,
             });
         }
         // An earlier attempt may have closed the ledger before its worker
@@ -260,6 +261,7 @@ impl LifecycleRunner {
                 outcome,
                 reason: Some("ended by an earlier attempt".into()),
                 pr_url: None,
+                patch: None,
             });
         }
         let github_token = if config.run.open_prs {
@@ -389,6 +391,7 @@ impl LifecycleRunner {
             outcome: report.outcome,
             reason: report.reason,
             pr_url: report.pr_url,
+            patch: report.patch,
         })
     }
 }
