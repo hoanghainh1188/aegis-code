@@ -106,8 +106,23 @@ fn a_new_test_failure_fails_the_gate_and_names_the_test() {
         "{}",
         test.detail
     );
-    // The patched run, the base run, and the rerun that rules out a flake.
-    assert_eq!(test.logs.len(), 3);
+    // The patched run, the base run, and the three runs of the test alone
+    // that rule out a flake (#306).
+    let logs: Vec<String> = test
+        .logs
+        .iter()
+        .map(|l| l.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        logs,
+        [
+            "test.log",
+            "test-base.log",
+            "test-rerun-1.log",
+            "test-rerun-2.log",
+            "test-rerun-3.log"
+        ]
+    );
     assert_eq!(
         report.step(StepName::Coverage).unwrap().status,
         StepStatus::Skipped(Skip::NotRun)

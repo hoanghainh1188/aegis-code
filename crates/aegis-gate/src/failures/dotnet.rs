@@ -92,6 +92,49 @@ fn is_named(id: &str, value: &str, contains: bool) -> bool {
         || (!name.contains('.') && dotted(value, &name))
 }
 
+/// `FullyQualifiedName~A|FullyQualifiedName~B`, each name without its
+/// arguments and with the filter's own characters escaped.
+pub(super) fn selector(ids: &BTreeSet<String>) -> Option<String> {
+    let names: BTreeSet<String> = ids
+        .iter()
+        .map(|id| {
+            id.split_once('(')
+                .map_or(id.as_str(), |(name, _)| name)
+                .trim()
+        })
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            name.chars()
+                .flat_map(|c| {
+                    let special = "\\()&|=!~".contains(c);
+                    special.then_some('\\').into_iter().chain([c])
+                })
+                .collect()
+        })
+        .collect();
+    let clauses: Vec<String> = names
+        .iter()
+        .map(|n| format!("FullyQualifiedName~{n}"))
+        .collect();
+    (!clauses.is_empty()).then(|| clauses.join("|"))
+}
+
+/// The run reported no test: VSTest's "No test matches", a total of 0, or
+/// no total at all (a build that silently did nothing).
+pub(super) fn ran_nothing(output: &str) -> bool {
+    if output.contains("No test matches") {
+        return true;
+    }
+    let total = regex::Regex::new(r"(?i)\btotal(?:\s+tests)?:\s*(\d+)").expect("valid");
+    let totals: Vec<&str> = total
+        .captures_iter(output)
+        .filter_map(|c| c.get(1))
+        .map(|m| m.as_str())
+        .collect();
+    // Both runners print a total when they run anything.
+    totals.iter().all(|t| t.trim_start_matches('0').is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +183,49 @@ mod tests {
             failing(out).into_iter().collect::<Vec<_>>(),
             ["dotnet::<did not finish>"]
         );
+    }
+
+    #[test]
+    fn selects_by_name_without_arguments() {
+        let log = include_str!("../../tests/fixtures/test-output/vstest.log");
+        assert_eq!(
+            selector(&failing(log)).as_deref(),
+            Some(
+                "FullyQualifiedName~Shop.Tests.CartTests.FailsAssert|\
+                 FullyQualifiedName~Shop.Tests.CartTests.Param|\
+                 FullyQualifiedName~Shop.Tests.CartTests.ThrowsError|\
+                 FullyQualifiedName~Shop.Tests.NeedsServerTests.Connects"
+            )
+        );
+        let mtp = include_str!("../../tests/fixtures/test-output/mtp.log");
+        assert_eq!(
+            selector(&failing(mtp)).as_deref(),
+            Some(
+                "FullyQualifiedName~FailsAssert|FullyQualifiedName~Param|FullyQualifiedName~ThrowsError"
+            )
+        );
+        let odd: BTreeSet<String> = ["Ns.T.Has\\Slash|Pipe".to_owned()].into();
+        assert_eq!(
+            selector(&odd).as_deref(),
+            Some("FullyQualifiedName~Ns.T.Has\\\\Slash\\|Pipe")
+        );
+    }
+
+    #[test]
+    fn tells_a_run_of_nothing() {
+        assert!(ran_nothing(
+            "No test matches the given testcase filter `FullyQualifiedName~X` in /work/t.dll\n"
+        ));
+        assert!(!ran_nothing(
+            "Passed!  - Failed:     0, Passed:     1, Skipped:     0, Total:     1, Duration: 1 ms\n"
+        ));
+        assert!(!ran_nothing("Test run summary: Passed!\n  total: 1\n"));
+        assert!(ran_nothing(
+            "Test run summary: Zero tests ran\n  total: 0\n"
+        ));
+        assert!(ran_nothing(
+            "An issue was encountered verifying workloads. For more information, run \"dotnet workload update\".\n"
+        ));
     }
 
     #[test]

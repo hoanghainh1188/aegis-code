@@ -56,6 +56,26 @@ pub(super) fn names(id: &str, test: &str) -> bool {
         })
 }
 
+/// `-run ^(TestA|TestB)$`: the top-level tests, each with its subtests.
+pub(super) fn selector(ids: &BTreeSet<String>) -> Option<String> {
+    let tests: BTreeSet<String> = ids
+        .iter()
+        .filter_map(|id| id.split_once("::"))
+        .map(|(_, name)| regex::escape(name.split('/').next().unwrap_or(name)))
+        .collect();
+    let tests: Vec<String> = tests.into_iter().collect();
+    (!tests.is_empty()).then(|| format!("^({})$", tests.join("|")))
+}
+
+/// Every package printed `ok … [no tests to run]` or `? … [no test files]`.
+pub(super) fn ran_nothing(output: &str) -> bool {
+    !output.lines().any(|line| {
+        (line.starts_with("ok ") && !line.contains("[no tests to run]"))
+            || line.starts_with("FAIL")
+            || line.trim_start().starts_with("--- ")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +112,28 @@ FAIL
             ["example.com/m/slow::<did not finish>"]
         );
         assert!(failing("ok  \texample.com/m/a\t0.002s\n").is_empty());
+    }
+
+    #[test]
+    fn selects_the_top_level_tests() {
+        let ids: BTreeSet<String> = [
+            "example.com/m/a::TestSub/bad_case/deep",
+            "example.com/m/a::TestSub",
+            "example.com/m/b::TestPanic",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        assert_eq!(selector(&ids).as_deref(), Some("^(TestPanic|TestSub)$"));
+    }
+
+    #[test]
+    fn tells_a_run_of_nothing() {
+        assert!(ran_nothing(
+            "ok  \texample.com/m/a\t0.002s [no tests to run]\n?   \texample.com/m/d\t[no test files]\n"
+        ));
+        assert!(!ran_nothing("ok  \texample.com/m/a\t0.002s\n"));
+        assert!(!ran_nothing("ok  \texample.com/m/a\t(cached)\n"));
     }
 
     #[test]

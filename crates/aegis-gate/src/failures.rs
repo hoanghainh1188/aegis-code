@@ -84,6 +84,52 @@ pub(crate) fn names_test(format: TestOutput, id: &str, test: &str) -> bool {
     }
 }
 
+/// One value for the profile's `repro_test` `{test}` that runs `ids`, and
+/// nothing much else, again (#306); `None` when the runner cannot name
+/// them all in one: the gate then reruns the whole suite.
+pub(crate) fn selector(format: TestOutput, ids: &BTreeSet<String>) -> Option<String> {
+    if ids.is_empty() || ids.iter().any(|id| id.contains('<')) {
+        return None;
+    }
+    match format {
+        TestOutput::Libtest => single(ids).map(|id| {
+            id.split_once("::")
+                .map_or(id.as_str(), |(_, name)| name)
+                .to_owned()
+        }),
+        TestOutput::Pytest => single(ids).cloned(),
+        TestOutput::GoTest => go_test::selector(ids),
+        TestOutput::Surefire => surefire::selector(ids),
+        TestOutput::JestVitest => js::selector(ids),
+        TestOutput::Dotnet => dotnet::selector(ids),
+    }
+}
+
+fn single(ids: &BTreeSet<String>) -> Option<&String> {
+    (ids.len() == 1).then(|| ids.first()).flatten()
+}
+
+/// Whether a run that exited 0 shows it ran no test at all: a selector
+/// that matched nothing (libtest's `running 0 tests`, Go's `[no tests to
+/// run]`, VSTest's "No test matches"). The others exit non-zero then.
+pub(crate) fn ran_nothing(format: TestOutput, output: &str) -> bool {
+    match format {
+        TestOutput::Libtest => ran_tests(format, output).is_some_and(|ran| ran.is_empty()),
+        TestOutput::GoTest => go_test::ran_nothing(output),
+        TestOutput::Dotnet => dotnet::ran_nothing(output),
+        TestOutput::Pytest | TestOutput::Surefire | TestOutput::JestVitest => false,
+    }
+}
+
+/// Whether a run of `ids` alone shows it did not run them all: it ran
+/// nothing, or libtest, which names every test it runs, left one out.
+pub(crate) fn missed(format: TestOutput, output: &str, ids: &BTreeSet<String>) -> bool {
+    let name = |id: &str| -> String { id.split_once("::").map_or(id, |(_, n)| n).to_owned() };
+    ran_nothing(format, output)
+        || ran_tests(format, output)
+            .is_some_and(|ran| ids.iter().any(|id| !ran.contains(&name(id))))
+}
+
 /// `line` without ANSI escapes: Vitest and Jest color their output even
 /// when it goes to a file.
 fn plain(line: &str) -> String {
@@ -260,6 +306,35 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out
             ["issue_tests::refuses", "tests::slow"]
         );
         assert_eq!(ran_tests(TestOutput::Pytest, "1 passed in 0.1s"), None);
+    }
+
+    #[test]
+    fn selects_one_libtest_or_pytest_test_and_nothing_unnamed() {
+        let ids = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect();
+        assert_eq!(
+            selector(TestOutput::Libtest, &ids(&["cart::tests::refuses"])).as_deref(),
+            Some("tests::refuses")
+        );
+        assert_eq!(
+            selector(TestOutput::Pytest, &ids(&["tests/a.py::test_b[1]"])).as_deref(),
+            Some("tests/a.py::test_b[1]")
+        );
+        assert_eq!(
+            selector(TestOutput::Pytest, &ids(&["a.py::x", "a.py::y"])),
+            None
+        );
+        assert_eq!(
+            selector(TestOutput::Libtest, &ids(&["extra::<did not finish>"])),
+            None
+        );
+        assert!(ran_nothing(
+            TestOutput::Libtest,
+            "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\n"
+        ));
+        assert!(!ran_nothing(
+            TestOutput::Libtest,
+            "test tests::refuses ... ok\ntest result: ok. 1 passed; 0 failed\n"
+        ));
     }
 
     #[test]

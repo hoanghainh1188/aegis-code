@@ -126,6 +126,11 @@ pub struct GateSteps {
     /// the base branch. Without it only the exit code is compared.
     #[serde(default)]
     pub test_output: Option<TestOutput>,
+    /// How many times a test that fails on the patch and not on the base
+    /// runs again on its own before it counts as broken (#306); 3 when
+    /// unset.
+    #[serde(default)]
+    pub reruns: Option<u32>,
 }
 
 /// A file named `file` in the part's directory or the nearest one above it,
