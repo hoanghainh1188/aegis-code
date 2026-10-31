@@ -6,10 +6,22 @@
 
 > **Autonomous Code Maintenance Platform:** Agentic software maintenance powered by AI — ingests issues, localizes root causes via AST graphs, synthesizes verified patches, and opens high-quality Pull Requests for human review.
 
-[![Rust 2021](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Status: Phase 2 Platform](https://img.shields.io/badge/status-Phase%202%20Platform-yellow.svg)]()
-[![npm: @hoanghainh1188/aegis-job](https://img.shields.io/npm/v/@hoanghainh1188/aegis-job?color=crimson&label=aegis-job)](https://www.npmjs.com/package/@hoanghainh1188/aegis-job)
+[![Rust 2024](https://img.shields.io/badge/rust-2024-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
+[![Status: Phase 2 Platform](https://img.shields.io/badge/status-Phase%202%20Platform-00F5D4.svg?style=flat-square)]()
+[![npm: @hoanghainh1188/aegis-job](https://img.shields.io/npm/v/@hoanghainh1188/aegis-job?style=flat-square&color=crimson&label=aegis-job&logo=npm)](https://www.npmjs.com/package/@hoanghainh1188/aegis-job)
+[![PostgreSQL Queue](https://img.shields.io/badge/queue-PostgreSQL%20SKIP%20LOCKED-336791.svg?style=flat-square&logo=postgresql)]()
+[![Sandbox: Air-Gapped Docker](https://img.shields.io/badge/sandbox-Docker%20--network%20none-2496ED.svg?style=flat-square&logo=docker)]()
+
+<p align="center">
+  <a href="#-1-context--objectives">Context & KPIs</a> •
+  <a href="#-2-how-it-works-end-to-end-workflow">How It Works</a> •
+  <a href="#-3-quick-start--installation">Quick Start</a> •
+  <a href="#-4-system-architecture">System Architecture</a> •
+  <a href="#-5-deployment--operations">Deployment</a> •
+  <a href="#-7-repository-structure">Crate Topology</a> •
+  <a href="#-9-references--documentation">Docs & ADRs</a>
+</p>
 
 ---
 
@@ -179,46 +191,262 @@ cargo test -p aegis-provider --features bedrock
 
 ## 🏛️ 4. System Architecture
 
-The platform is engineered 100% in **Rust** as a Cargo Workspace ([ADR 0001](docs/adr/0001-platform-in-rust.md)), ensuring native speed, minimal memory overhead, and strong concurrency safety.
+The platform is engineered 100% in **Rust** as a Cargo Workspace ([ADR 0001](docs/adr/0001-platform-in-rust.md), [ADR 0003](docs/adr/0003-platform-service-architecture.md)), ensuring native speed, minimal memory overhead, and compile-time safety. To provide a complete architectural picture, this section breaks down Aegis from three perspectives:
+1. **System Context & External Integrations** — how Aegis interacts with developers, external DevOps/ticketing platforms, AI providers, and host infrastructure.
+2. **Internal Component & Crate Topology** — how the 16 internal Rust crates and subsystems are structured and wired together inside Aegis.
+3. **4-Layer Agent Control Pipeline** — how an individual issue is processed, cached, routed, and verified inside the agent execution loop.
 
-### 4-Layer Control Architecture
+---
+
+### 4.1 System Context & External Integrations (Aegis $\leftrightarrow$ External Ecosystem)
+
+Aegis sits between your engineering workflow tools (Git forges, issue trackers, static analyzers) and LLM providers, operating within a strictly controlled host boundary:
+
+<p align="center">
+  <img src="assets/architecture-context.svg" alt="Aegis System Context & External Integrations" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 View Interactive Mermaid Diagram (System Context)</b></summary>
+
+```mermaid
+flowchart LR
+    classDef actor fill:#0c2d48,stroke:#38BDF8,stroke-width:1.5px,color:#F8FAFC;
+    classDef external fill:#111927,stroke:#60A5FA,stroke-width:1.5px,color:#E2E8F0;
+    classDef aegis fill:#042f2e,stroke:#00F5D4,stroke-width:2px,color:#F8FAFC;
+    classDef sandbox fill:#451a03,stroke:#F59E0B,stroke-width:1.5px,color:#FEF3C7;
+    classDef llm fill:#2e1065,stroke:#A855F7,stroke-width:1.5px,color:#F3E8FF;
+    classDef infra fill:#064e3b,stroke:#10B981,stroke-width:1.5px,color:#ECFDF5;
+
+    subgraph Actors["👥 Human Actors"]
+        Dev["Developer / Reviewer"]:::actor
+        Op["Platform Operator"]:::actor
+    end
+
+    subgraph ExternalDevOps["🔗 External DevOps & Issue Systems"]
+        Forge["Git Forges<br/>(GitHub / GitLab)"]:::external
+        Tracker["Issue Trackers<br/>(Jira / Backlog)"]:::external
+        Sonar["Code Quality<br/>(SonarQube Server / Cloud)"]:::external
+    end
+
+    subgraph AegisBoundary["🛡️ Aegis Platform Boundary"]
+        CLI["aegis-job CLI<br/>(Developer Client)"]:::aegis
+        Server["aegis-server<br/>(API · Webhooks · Pollers · Dashboard · Workers)"]:::aegis
+        Sandbox["Isolated Docker Sandboxes<br/>(--network none · non-root · cap-drop ALL)"]:::sandbox
+        Proxy["Allow-listed Egress Proxy<br/>(Pre-gate dependency fetch)"]:::sandbox
+    end
+
+    subgraph AIProviders["🧠 AI / LLM Providers"]
+        Claude["Anthropic Claude API<br/>(PoC / Direct Mode)"]:::llm
+        Bedrock["AWS Bedrock ap-northeast-1<br/>(Japan Residency: jp.*)"]:::llm
+        Ollama["Local Ollama<br/>(Offline / Local Trial)"]:::llm
+    end
+
+    subgraph Infra["🗄️ State, Security & Observability"]
+        PG[("PostgreSQL<br/>(State & SKIP LOCKED Queue)")]:::infra
+        OIDC["OIDC Provider<br/>(SSO Authentication)"]:::infra
+        Secrets["Secrets Store<br/>(AWS Secrets Manager / Files)"]:::infra
+        Prom["Prometheus & Grafana<br/>(:9464/metrics & Alerts)"]:::infra
+    end
+
+    Dev -->|"Browser (SSR Dashboard)"| Server
+    Dev -->|"Terminal (REST API)"| CLI
+    CLI -->|"Submit / Watch / Cancel"| Server
+    Dev -->|"Label 'aegis' / Review PR / '/aegis fix'"| Forge
+
+    Forge -->|"HMAC Webhooks (Issues, CI fails, Reviews)"| Server
+    Server -->|"Clone worktree, push branch 'agent/*', open PR"| Forge
+    Server <-->|"Poll JQL/Filters & write back outcomes"| Tracker
+    Server <-->|"Fetch alerts & run Sonar Quality Gate"| Sonar
+
+    Server -->|"HTTPS / AWS SDK (Prompt Caching BP1–BP4)"| Claude
+    Server -->|"HTTPS / AWS SDK (ModelPolicy::JapanOnly)"| Bedrock
+    Server -->|"Local HTTP"| Ollama
+
+    Server <-->|"ACID transactions, leases, token ledger"| PG
+    Server <-->|"OAuth2 / OIDC login flow"| OIDC
+    Server <-- "Boot load & live rotation" --> Secrets
+    Prom -->|"Scrape :9464/metrics"| Server
+    Op -->|"Monitor & manage"| Prom
+
+    Server -->|"spawn_blocking (docker run)"| Sandbox
+    Sandbox -.->|"Pre-gate package resolution only"| Proxy
+```
+
+</details>
+
+| External System | Direction | Protocol / Mechanism | Purpose & Security Boundary | Handled By |
+| :--- | :---: | :--- | :--- | :--- |
+| **Developers & Reviewers** | $\leftrightarrow$ | HTTPS (Browser / `htmx`), REST API (`/api/v1/*`) | View job ledgers on the dashboard, submit/watch jobs via `aegis-job`, or review PRs on GitHub/GitLab. | `aegis-server`, `aegis-client` |
+| **GitHub / GitLab** | $\leftrightarrow$ | Webhooks (`X-Hub-Signature-256` / `X-Gitlab-Token`), Git / HTTPS API | Ingests labeled issues, `main` CI breakages, and PR review comments; pushes `agent/<id>` branches and opens structured PRs. | `aegis-server`, `aegis-pr` |
+| **Jira / Backlog** | $\leftrightarrow$ | REST API Polling (atomic `polls` schedule) | Polls issues matching configured JQL/filters and writes resolution status/PR links back to the ticket. | `aegis-tracker`, `aegis-server` |
+| **SonarQube** | $\leftrightarrow$ | Web API + `sonar-scanner` CLI | Ingests static analysis warnings (clustered by AST/dataflow) and verifies patches against the Sonar Quality Gate. | `aegis-sonar-batch`, `aegis-gate` |
+| **Claude / Bedrock / Ollama** | $\rightarrow$ | HTTPS / AWS SDK (`aws-sdk-bedrockruntime`) | Executes model inference across Light/Core/Expert tiers. Enforces `jp.` inference profiles in `ap-northeast-1` for `customer-jp`. | `aegis-provider`, `aegis-router` |
+| **PostgreSQL** | $\leftrightarrow$ | TCP / TLS (`sqlx` compile-time checked) | Stores repositories, transactional job queue (`FOR UPDATE SKIP LOCKED`), worker leases, user sessions, and token cost ledgers. | `aegis-store`, `aegis-ledger` |
+| **Docker Daemon & Host** | $\rightarrow$ | Host CLI (`docker run` / `docker kill`) | Runs per-job Git worktrees on host and spawns air-gapped verification containers (`--network none`, `--cap-drop ALL`, uid 10001). | `aegis-gate`, `aegis-lifecycle` |
+| **OIDC / Secrets / Metrics** | $\leftrightarrow$ | OIDC, AWS Secrets Manager API, Prometheus | Authenticates dashboard users via SSO, rotates credentials without restart, and exports operational/financial metrics on `:9464/metrics`. | `aegis-server`, `aegis-secrets` |
+
+---
+
+### 4.2 Internal Architecture & Component Topology (Inside Aegis)
+
+Internally, Aegis is structured into **five modular subsystems** across 16 Rust crates. The unified binary `aegis-server` can run all subsystems in a single process (`--role all`) or split horizontally into stateless API nodes (`--role api`) and compute workers (`--role worker`):
+
+<p align="center">
+  <img src="assets/architecture-internal.svg" alt="Aegis Internal Component & Crate Topology" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 View Interactive Mermaid Diagram (Internal Crate Topology)</b></summary>
+
+```mermaid
+flowchart TB
+    classDef entry fill:#0c2d48,stroke:#38BDF8,stroke-width:1.5px,color:#F8FAFC;
+    classDef service fill:#042f2e,stroke:#00F5D4,stroke-width:1.8px,color:#F8FAFC;
+    classDef store fill:#064e3b,stroke:#10B981,stroke-width:1.5px,color:#ECFDF5;
+    classDef engine fill:#2e1065,stroke:#A855F7,stroke-width:1.5px,color:#F3E8FF;
+    classDef tools fill:#451a03,stroke:#F59E0B,stroke-width:1.5px,color:#FEF3C7;
+
+    subgraph Entrypoints["1. Entrypoints & Clients"]
+        Client["aegis-client<br/>(aegis-job CLI)"]:::entry
+        LocalCLI["aegis-cli<br/>(aegis local & eval runner)"]:::entry
+    end
+
+    subgraph ServiceLayer["2. Platform Service Layer (aegis-server)"]
+        API["HTTP API & Webhook Ingress<br/>(Axum · HMAC · Rate Limiter)"]:::service
+        UI["SSR Web Dashboard<br/>(Askama + htmx · OIDC · CSRF)"]:::service
+        Poller["Background Pollers<br/>(Jira · Backlog · Sonar schedules)"]:::service
+        WorkerPool["Worker Pool & Lease Manager<br/>(Concurrency limits · CancellationToken)"]:::service
+    end
+
+    subgraph Persistence["3. State, Secrets & Accounting"]
+        Store["aegis-store<br/>(PostgreSQL Queue · Leases · Repos · Audit)"]:::store
+        Secrets["aegis-secrets<br/>(AWS Secrets Manager · File secrets · Rotation)"]:::store
+        Ledger["aegis-ledger<br/>(Per-call Token Accounting & USD Cost)"]:::store
+    end
+
+    subgraph CoreEngine["4. Issue Lifecycle & Agent Engine"]
+        Lifecycle["aegis-lifecycle<br/>(End-to-End Job Coordinator)"]:::engine
+        Orch["aegis-orchestrator<br/>(Agent Turn Loop · History Collapsing)"]:::engine
+        Router["aegis-router<br/>(Light / Core / Expert · $4 & 40-call Breaker)"]:::engine
+        Provider["aegis-provider<br/>(Claude / Bedrock / Ollama · BP1–BP4 Cache)"]:::engine
+    end
+
+    subgraph CodeAndDelivery["5. Code Intelligence, Verification & Delivery"]
+        ACI["aegis-aci<br/>(MCP Server: open, search, syntax-safe edit)"]:::tools
+        MemMCP["codebase-memory-mcp<br/>(SQLite Call Graph: CALLS, IMPORTS, TESTS)"]:::tools
+        Lang["aegis-lang<br/>(Tree-sitter AST · LSP · 6 Language Profiles)"]:::tools
+        Gate["aegis-gate<br/>(6-Step Docker Sandbox Runner)"]:::tools
+        PR["aegis-pr<br/>(Git Branching · PR Template · Golden Master)"]:::tools
+        SonarBatch["aegis-sonar-batch<br/>(AST / Dataflow Alert Clustering)"]:::tools
+        Tracker["aegis-tracker<br/>(Jira & Backlog REST Client)"]:::tools
+    end
+
+    Client -->|"REST /api/v1"| API
+    API --> Store
+    UI --> Store
+    Poller --> Tracker
+    Poller --> SonarBatch
+    Poller --> Store
+    WorkerPool <-->|"SELECT ... FOR UPDATE SKIP LOCKED"| Store
+    WorkerPool --> Lifecycle
+    LocalCLI --> Lifecycle
+
+    Lifecycle --> Secrets
+    Lifecycle --> Orch
+    Lifecycle --> Router
+    Lifecycle --> Gate
+    Lifecycle --> PR
+    Lifecycle --> Ledger
+    Lifecycle --> Tracker
+    Lifecycle --> SonarBatch
+    Store --> Ledger
+
+    Orch --> Router
+    Router --> Provider
+    Provider --> Secrets
+    Orch <-->|"MCP over stdio (rmcp)"| ACI
+    Orch <-->|"MCP over stdio (rmcp)"| MemMCP
+
+    ACI --> Lang
+    ACI --> Gate
+    Gate --> Lang
+    SonarBatch --> Lang
+    SonarBatch --> Gate
+    PR --> Gate
+    PR --> Provider
+```
+
+</details>
+
+#### How Internal Components Work Together
+1. **Service & Scheduling (`aegis-server`, `aegis-store`, `aegis-secrets`):**
+   * **Ingress & UI:** `aegis-server` exposes the REST API, HMAC-verified webhook endpoints, and an **Askama + htmx** server-rendered dashboard secured by OIDC SSO and in-memory token-bucket rate limiting.
+   * **Transactional PostgreSQL Queue:** Instead of external brokers (Redis/SQS), `aegis-store` manages the job queue directly in PostgreSQL using `SELECT ... FOR UPDATE SKIP LOCKED` with distributed worker leases (`locked_until`), per-repo concurrency caps, and graceful `SIGTERM` draining.
+2. **Lifecycle Coordination (`aegis-lifecycle`):**
+   * Serves as the central facade invoked by both `aegis-server` workers (in production) and `aegis-cli` (for local single-issue runs and evaluation benchmarks).
+   * Prepares an isolated Git worktree per job, builds the `codebase-memory-mcp` SQLite call graph index, and orchestrates the transition from triage $\rightarrow$ agent loop $\rightarrow$ verification gate $\rightarrow$ PR creation.
+3. **Agent Execution Loop (`aegis-orchestrator`, `aegis-router`, `aegis-provider`, `aegis-ledger`):**
+   * `aegis-orchestrator` manages multi-turn agent sessions, dispatches tool calls over MCP (`rmcp` child processes), and compacts older tool observations once context usage exceeds $60\%$.
+   * `aegis-router` selects the active tier (`Light` $\rightarrow$ `Core` $\rightarrow$ `Expert`) based on failure signals and enforces the economic circuit breaker ($\$4$ or 40 model calls) backed by real-time accounting in `aegis-ledger`.
+   * `aegis-provider` serializes requests with deterministic 4-breakpoint prompt caching (`BP1`–`BP4`) and enforces regional routing policies (`ModelPolicy::JapanOnly` for `customer-jp.toml`).
+4. **Code Intelligence & Sandboxed Verification (`aegis-aci`, `aegis-lang`, `aegis-gate`):**
+   * `aegis-aci` runs as an MCP tool server providing bounded code windows (`open`, `search_symbol`, `find_definition` via LSP) and syntax-guarded edits (`edit`).
+   * `aegis-lang` supplies ecosystem-specific rules (`profiles/*.toml`), Tree-sitter AST grammars, lockfile parsers, and test runners for **Rust, Python, TypeScript/JavaScript, Java, Go, and C#**.
+   * `aegis-gate` executes the 6-step verification suite inside a network-isolated Docker container (`--network none`), including automatic re-runs to filter out flaky tests.
+5. **External Delivery & Clustering (`aegis-pr`, `aegis-tracker`, `aegis-sonar-batch`):**
+   * `aegis-pr` pushes `agent/<issue-id>` branches, formats the bilingual/structured PR description (RCA, diff rationale, gate proof, Golden Master declarations, token ledger), and handles follow-up review rounds on the same branch.
+   * `aegis-sonar-batch` groups related SonarQube warnings by enclosing AST node or tainted dataflow trace and merges verified fixes into an integration branch.
+   * `aegis-tracker` synchronizes ticket context and final PR status with Jira and Backlog.
+
+---
+
+### 4.3 4-Layer Agent Control Pipeline
+
+Inside each job execution, the agent engine enforces a strict **4-Layer Control Pipeline** to maximize fix accuracy while bounding cost and preventing regressions:
+
+<p align="center">
+  <img src="assets/architecture-pipeline.svg" alt="Aegis 4-Layer Agent Control Pipeline" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 View Interactive Mermaid Flowchart (4-Layer Pipeline)</b></summary>
 
 ```mermaid
 flowchart TD
-    Issue["Input: Webhook / Poller / aegis-job submit"] --> L1["LAYER 1: CONTEXT ENGINE (Tree-sitter AST + Bounded ACI)"]
-    L1 --> L2["LAYER 2: PROMPT CACHING (4 Breakpoints BP1 → BP4)"]
-    L2 --> L3["LAYER 3: MODEL ROUTING (Light → Core → Expert)"]
-    L3 --> L4["LAYER 4: REGRESSION VERIFICATION GATE (Docker Sandbox --network none)"]
+    classDef input fill:#0c2d48,stroke:#38BDF8,stroke-width:1.5px,color:#F8FAFC;
+    classDef layer fill:#111a29,stroke:#00F5D4,stroke-width:1.8px,color:#F8FAFC;
+    classDef pass fill:#064e3b,stroke:#10B981,stroke-width:2px,color:#ECFDF5;
+    classDef stop fill:#450a0a,stroke:#EF4444,stroke-width:2px,color:#FEF2F2;
+
+    Issue["Input: Webhook / Poller / aegis-job submit"]:::input --> L1["LAYER 1: CONTEXT ENGINE (Tree-sitter AST + Bounded ACI)"]:::layer
+    L1 --> L2["LAYER 2: PROMPT CACHING (4 Breakpoints BP1 → BP4)"]:::layer
+    L2 --> L3["LAYER 3: MODEL ROUTING (Light → Core → Expert)"]:::layer
+    L3 --> L4["LAYER 4: REGRESSION VERIFICATION GATE (Docker Sandbox --network none)"]:::layer
     
-    L4 -->|Passes 6-Step Gate| PR["Open Pull Request (RCA + Golden Master + Token Ledger)"]
+    L4 -->|Passes 6-Step Gate| PR["Open Pull Request (RCA + Golden Master + Token Ledger)"]:::pass
     L4 -->|Gate Fail < 2 times| L3
-    L4 -->|Circuit Breaker Hit: $4 limit / 40 calls / Expert 2x fail| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]
+    L4 -->|Circuit Breaker Hit: $4 limit / 40 calls / Expert 2x fail| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]:::stop
 ```
 
-1. **Layer 1 – Context Engine:**
-   * Tree-sitter AST queries per language profile. Builds in-memory module maps and call graphs (`CALLS`, `IMPORTS`, `TESTS`) via Codebase-Memory MCP and language servers.
-   * **Bounded ACI Tools:** Reads code in capped windows (100 lines at a time, SWE-agent standard) and bounds search output to 50 results. The `edit` tool validates syntax via linters prior to persisting changes.
+</details>
+
+1. **Layer 1 – Context Engine (`aegis-aci`, `aegis-lang`, `codebase-memory-mcp`):**
+   * Tree-sitter AST queries per language profile. Builds in-memory module maps and relational call graphs (`CALLS`, `IMPORTS`, `TESTS`) in SQLite via Codebase-Memory MCP and language servers (LSP).
+   * **Bounded ACI Tools:** Reads code in capped windows (100 lines at a time, SWE-agent standard) and bounds search output to 50 results. The `edit` tool validates syntax via Tree-sitter and profile linters prior to persisting changes.
    * **Batch History Collapse:** Once context usage reaches $60\%$ of the model window, older tool observations collapse into `[Observation collapsed]` tokens, preserving reasoning while retaining cache efficiency.
-2. **Layer 2 – Deterministic Prompt Caching:**
+2. **Layer 2 – Deterministic Prompt Caching (`aegis-provider`):**
    * Strict 4-breakpoint hierarchy: `BP1` (Tool schemas) $\rightarrow$ `BP2` (System prompt, conventions) $\rightarrow$ `BP3` (Issue context, repo metadata, repro test) $\rightarrow$ `BP4` (Dynamic message history).
    * Byte-stable serialization (sorted keys, omitted dynamic timestamps) achieves **$\ge 70\%$ cache hit rates**, cutting input token costs by up to 90–95%.
-3. **Layer 3 – Model Hierarchy & Circuit Breakers:**
+3. **Layer 3 – Model Hierarchy & Circuit Breakers (`aegis-router`, `aegis-ledger`):**
    * **Light (`Haiku 5.5`):** Issue classification, stack trace pruning, and log summarization.
    * **Core (`Sonnet 5.5`):** Root-cause localization, reproducing test creation, patch synthesis.
-   * **Expert (`Opus 5.5`):** Complex architecture refactoring spanning $\ge 3$ files.
+   * **Expert (`Opus 5.5`):** Complex architecture refactoring spanning $\ge 3$ files or escalated after consecutive Core failures.
    * **Economic Circuit Breaker:** Stops execution immediately if cost exceeds $\$4$ or reaches 40 model calls (excluding Light preprocessing).
-4. **Layer 4 – 6-Step Verification Gate in Docker:**
+4. **Layer 4 – 6-Step Verification Gate in Docker (`aegis-gate`):**
    * Format $\rightarrow$ Lint $\rightarrow$ Repro Test (proves FAIL $\rightarrow$ PASS) $\rightarrow$ Full Test Suite $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate.
    * Runs in network-isolated containers (`--network none`, `--cap-drop ALL`, non-root user).
    * **Golden Master Technique:** For legacy code without test coverage, the agent writes characterization tests capturing existing behavior prior to patching; any modified output must be declared under *"Permitted Behavior Changes"* in the PR description.
-
-### Enterprise Service Architecture
-* **Unified Binary (`aegis-server`):** Written with Axum, runnable via `--role api|worker|all` ([ADR 0003](docs/adr/0003-platform-service-architecture.md)).
-* **PostgreSQL Queue:** ACID-compliant job scheduling using `SELECT ... FOR UPDATE SKIP LOCKED` (no Redis/SQS overhead, zero duplicate dispatch).
-* **Minimalist Dashboard:** Server-rendered with **Askama + htmx**, secured with OIDC SSO and role-based personal access tokens.
-* **Security & Data Residency:**
-  * **Japan Data Residency (`customer-jp.toml`):** Enforces routing exclusively via AWS Bedrock in `ap-northeast-1` (Tokyo). The `aegis-provider` crate enforces `ModelPolicy::JapanOnly`.
-  * **Indirect Prompt Injection Defense:** All comments, README files, and issue bodies are sanitized and handled as untrusted external input.
 
 ---
 
@@ -258,31 +486,48 @@ flowchart TD
 
 ## 📂 7. Repository Structure
 
+The Cargo workspace (`crates/`) is organized into 5 architectural layers matching the component topology in [Section 4.2](#42-internal-architecture--component-topology-inside-aegis), alongside operational and evaluation assets:
+
 ```
 aegis-code/
 ├── crates/
-│   ├── aegis-provider/       # LLM provider clients (Anthropic Claude API & AWS Bedrock jp)
-│   ├── aegis-orchestrator/   # Core agent loop, session state, observation collapsing
-│   ├── aegis-router/         # Light / Core / Expert hierarchy & economic circuit breakers
-│   ├── aegis-aci/            # MCP code tools: search, bounded open, syntax-guarded edit
-│   ├── aegis-lang/           # Multi-language profiles: Rust, Python, TS/JS, Java, Go, C# (ADR 0004)
-│   ├── aegis-gate/           # 6-step Docker verification sandbox runner
-│   ├── aegis-lifecycle/      # End-to-end issue workflow (triage, solve, verify, open PR)
-│   ├── aegis-ledger/         # Financial accounting: per-call token ledger and USD pricing
-│   ├── aegis-pr/             # Git branch management and structured PR description synthesis
-│   ├── aegis-sonar-batch/    # Static analysis clustering & integration branch merging
-│   ├── aegis-tracker/        # Issue trackers: Jira and Backlog integration
-│   ├── aegis-secrets/        # Secret management (AWS Secrets Manager & file-based secrets)
-│   ├── aegis-store/          # PostgreSQL data access: jobs, repos, leases, tokens, audit logs
-│   ├── aegis-server/         # Platform HTTP API, scheduler, webhook receiver, htmx dashboard (ADR 0003)
-│   ├── aegis-client/         # Developer CLI binary: aegis-job (ADR 0006)
-│   └── aegis-cli/            # Local developer CLI for evaluation benchmarks and single issues
-├── deploy/                   # Deployment scripts (compose, systemd, tofu, grafana, alerts)
-├── docker/                   # Dockerfiles for aegis-server and language sandboxes
-├── docs/                     # Architectural decision records (ADRs), runbooks, and design specs
-├── eval/                     # Empirical benchmark datasets (Rust, Python, TS, Java, Go, C#)
-├── npm/                      # Pre-bundled npm package wrapper for @hoanghainh1188/aegis-job
-└── scripts/                  # Operational scripts (local trial, releases, benchmarks)
+│   ├── # 1. Entrypoints & Developer Clients
+│   ├── aegis-client/         # Developer CLI binary `aegis-job`: submit, watch, cancel jobs via REST API (ADR 0006)
+│   ├── aegis-cli/            # Local CLI binary `aegis`: single-issue runner and evaluation benchmark harness
+│   │
+│   ├── # 2. Platform Service, State & Secrets
+│   ├── aegis-server/         # Unified service (`--role api|worker|all`): HTTP API, webhooks, pollers, workers, SSR UI (ADR 0003)
+│   ├── aegis-store/          # PostgreSQL persistence (`sqlx`): transactional job queue (`SKIP LOCKED`), leases, repos, audit logs
+│   ├── aegis-secrets/        # Secret loading & live rotation: AWS Secrets Manager, on-prem files, or environment variables
+│   ├── aegis-ledger/         # Financial accounting: per-call token ledger, prompt cache metrics, and USD cost calculation
+│   │
+│   ├── # 3. Issue Lifecycle & Core Agent Engine
+│   ├── aegis-lifecycle/      # End-to-end job coordinator: worktree setup, triage, agent loop, gate, escalation, PR handoff
+│   ├── aegis-orchestrator/   # Multi-turn agent loop, MCP tool dispatch (`rmcp`), and batch observation collapsing
+│   ├── aegis-router/         # Model tier selection (Light / Core / Expert), escalation matrix, and $4 / 40-call circuit breaker
+│   ├── aegis-provider/       # LLM backends (Claude API, AWS Bedrock `jp.*`, Ollama) and 4-breakpoint prompt caching (BP1–BP4)
+│   │
+│   ├── # 4. Code Intelligence & Sandboxed Verification
+│   ├── aegis-aci/            # MCP tool server (`rmcp` stdio): bounded `open`, `search_symbol`, LSP navigation, syntax-safe `edit`
+│   ├── aegis-lang/           # Language profiles (Rust, Python, TS/JS, Java, Go, C#): Tree-sitter AST, linters, lockfiles (ADR 0004)
+│   ├── aegis-gate/           # 6-step Docker sandbox runner (`--network none`): fmt, lint, repro test, suite, coverage, Sonar
+│   │
+│   └── # 5. External Integrations & PR Delivery
+│       ├── aegis-pr/             # Git branch management (`agent/<id>`), structured PR synthesis, Golden Master & review rounds
+│       ├── aegis-tracker/        # Issue tracker connectors: Jira and Backlog polling (JQL/filters) and status write-back
+│       └── aegis-sonar-batch/    # SonarQube integration: AST/dataflow alert clustering and integration branch merging
+│
+├── config/                   # Server mode configurations (`poc.toml`, `customer-jp.toml`, `local.toml`)
+├── profiles/                 # Per-language profile definitions (`rust.toml`, `python.toml`, `go.toml`, etc.)
+├── policies/                 # Security and dependency allow-list policies
+├── prompts/                  # System prompt templates and role instructions
+├── deploy/                   # Production deployment IaC & configs (compose, systemd, OpenTofu, Grafana, Alertmanager)
+├── docker/                   # Dockerfiles for `aegis-server` and per-language verification sandboxes
+├── docs/                     # Architectural Decision Records (ADRs), design specs, measurements, and operator runbooks
+├── eval/                     # Empirical benchmark datasets and harnesses across all 6 supported languages
+├── npm/                      # Pre-bundled npm package wrapper for `@hoanghainh1188/aegis-job`
+├── scripts/                  # Operational scripts (30-minute local trial, release bundling, benchmarks)
+└── tests/                    # Workspace-level end-to-end and integration test suites
 ```
 
 ---
