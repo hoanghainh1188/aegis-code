@@ -5,7 +5,7 @@
 //! Hidden test results are never shown (ADR 0005): the reviewer must not
 //! know them before giving a verdict.
 
-use aegis_ledger::{IssueRecord, LedgerEvent, LedgerStore, Outcome};
+use aegis_ledger::{AnswerSummary, IssueRecord, LedgerEvent, LedgerStore, Outcome};
 use aegis_store::{Job, JobFilter, JobStatus, Page, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
@@ -24,6 +24,16 @@ const PAGE_SIZE: u32 = 50;
 /// A PR link only when it is one: the URL is shown as an `href`.
 fn pr_link(job: &Job) -> Option<String> {
     job.pr_url
+        .as_deref()
+        .filter(|u| u.starts_with("https://"))
+        .map(str::to_owned)
+}
+
+/// The issue's URL as a link only when it is one (#316): it comes from the
+/// tracker and is shown as an `href`.
+fn issue_link(record: &IssueRecord) -> Option<String> {
+    record
+        .issue_url
         .as_deref()
         .filter(|u| u.starts_with("https://"))
         .map(str::to_owned)
@@ -50,6 +60,8 @@ struct JobRow {
     created_at: String,
     pr_url: Option<String>,
     can_review: bool,
+    /// The issue's title once a run read it (#316).
+    title: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,6 +169,7 @@ pub async fn list(
             cost: dollars(record.cost_usd),
             wall_time: seconds(record.wall_time_s),
             created_at: job.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            title: record.issue_title.clone().unwrap_or_default(),
             pr_url: pr_link(job),
             can_review: job.outcome == Some(Outcome::PrOpened)
                 && access.can(job.repo_id, RepoRole::Reviewer),
@@ -301,6 +314,12 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
                 r.verdict, r.lines_edited, r.review_minutes
             ),
         ),
+        LedgerEvent::IssueRead { title, .. } => row("issue", title.clone()),
+        LedgerEvent::Answered(a) => match (a.fixed, &a.stop_reason) {
+            (true, _) => row("answer", format!("fixed · {} changes", a.changes.len())),
+            (false, Some(why)) => row("answer", format!("stopped · {why}")),
+            (false, None) => row("answer", "stopped".into()),
+        },
     })
 }
 
@@ -365,6 +384,9 @@ struct JobHead {
     id: i64,
     repo: String,
     issue_ref: String,
+    /// The issue's title and link once a run read it (#316).
+    title: Option<String>,
+    issue_url: Option<String>,
     ledger_key: String,
     status: &'static str,
     outcome: String,
@@ -404,6 +426,8 @@ async fn head_of(
         id: job.id.0,
         repo: repo.map_or(format!("repo {}", job.repo_id.0), |r| r.slug),
         issue_ref: job.issue_ref.clone(),
+        title: record.issue_title.clone(),
+        issue_url: issue_link(record),
         ledger_key: job.ledger_key.as_str().to_owned(),
         status: job.status.as_str(),
         outcome: outcome(job),
@@ -437,6 +461,8 @@ struct JobPage<'a> {
     rounds_cost: String,
     /// What the form that led here did (#309).
     notice: Option<&'static str>,
+    /// The agent's last final answer (#316).
+    answer: Option<AnswerSummary>,
 }
 
 #[derive(Template)]
@@ -487,6 +513,7 @@ pub async fn detail(
         rounds,
         rounds_cost,
         notice: Done::parse(&q.done).map(Done::message),
+        answer: record.answer.clone(),
     })
 }
 

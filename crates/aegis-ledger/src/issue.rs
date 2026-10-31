@@ -3,9 +3,27 @@
 use aegis_provider::Usage;
 
 use crate::{
-    GateRun, IssueId, IssueKind, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome,
-    PriceTable, Review, Tier, TokenCounts, ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, GateRun, IssueId, IssueKind, IssueRecord,
+    LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review, Tier, TokenCounts,
+    ToolCall,
 };
+
+/// Caps on what [`IssueLedger::issue_read`] and [`IssueLedger::answered`]
+/// keep (#316): a page shows them, and a model's answer has no length.
+pub const MAX_TITLE_CHARS: usize = 300;
+pub const MAX_TEXT_CHARS: usize = 2_000;
+pub const MAX_NOTE_CHARS: usize = 500;
+pub const MAX_CHANGES: usize = 50;
+
+/// `text` cut to `max` characters, the last one `…` when cut.
+fn capped(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut out: String = text.chars().take(max - 1).collect();
+    out.push('…');
+    out
+}
 
 /// Prices each model call, appends every event to the store before
 /// updating the in-memory record, and saves the summary record when the
@@ -116,6 +134,49 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
             return Ok(());
         }
         self.push(LedgerEvent::SecretsRedacted { count }).await
+    }
+
+    /// The issue the job works on (#316): `title` already redacted, as the
+    /// model sees it, cut to [`MAX_TITLE_CHARS`].
+    pub async fn issue_read(&mut self, title: &str, url: &str) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::IssueRead {
+            title: capped(title, MAX_TITLE_CHARS),
+            url: capped(url, MAX_TEXT_CHARS),
+        })
+        .await
+    }
+
+    /// The agent's final answer (#316), its text already redacted, each
+    /// field cut to its cap.
+    pub async fn answered(&mut self, answer: AnswerSummary) -> Result<(), LedgerError> {
+        let text = |t: &str| capped(t, MAX_TEXT_CHARS);
+        let note = |t: &str| capped(t, MAX_NOTE_CHARS);
+        let answer = AnswerSummary {
+            fixed: answer.fixed,
+            cause: text(&answer.cause),
+            changes: answer
+                .changes
+                .iter()
+                .take(MAX_CHANGES)
+                .map(|c| AnswerChange {
+                    location: note(&c.location),
+                    note: note(&c.note),
+                })
+                .collect(),
+            repro_test: answer.repro_test.as_deref().map(note),
+            stop_reason: answer.stop_reason.as_deref().map(text),
+            review_replies: answer
+                .review_replies
+                .iter()
+                .take(MAX_CHANGES)
+                .map(|r| AnswerReply {
+                    note: r.note,
+                    done: r.done,
+                    reply: note(&r.reply),
+                })
+                .collect(),
+        };
+        self.push(LedgerEvent::Answered(answer)).await
     }
 
     pub async fn hidden_tests(&mut self, passed: bool, duration_s: f64) -> Result<(), LedgerError> {
@@ -334,6 +395,66 @@ mod tests {
             untargeted,
             LedgerEvent::ToolCalls { calls, .. } if calls[0].target.is_none()
         ));
+    }
+
+    /// #316: what the job works on and what the agent answered, kept on
+    /// the record and capped, so a page can show them.
+    #[tokio::test]
+    async fn the_issue_and_the_last_answer_are_kept_capped() {
+        let store = MemoryLedger::new();
+        let prices = PriceTable::from_toml(PRICES).unwrap();
+        let mut ledger = IssueLedger::open(&store, &prices, false, issue())
+            .await
+            .unwrap();
+        let title = "é".repeat(MAX_TITLE_CHARS + 10);
+        ledger
+            .issue_read(&title, "https://github.com/x/y/issues/9")
+            .await
+            .unwrap();
+        let change = |i: usize| AnswerChange {
+            location: format!("src/lib.rs:{i}"),
+            note: "n".repeat(MAX_NOTE_CHARS + 1),
+        };
+        let first = AnswerSummary {
+            fixed: false,
+            cause: "first try".into(),
+            changes: vec![],
+            repro_test: None,
+            stop_reason: Some("gave up".into()),
+            review_replies: vec![],
+        };
+        ledger.answered(first).await.unwrap();
+        let last = AnswerSummary {
+            fixed: true,
+            cause: "c".repeat(MAX_TEXT_CHARS + 5),
+            changes: (0..MAX_CHANGES + 3).map(change).collect(),
+            repro_test: Some("fourth_item_is_refused".into()),
+            stop_reason: None,
+            review_replies: vec![AnswerReply {
+                note: 1,
+                done: true,
+                reply: "done".into(),
+            }],
+        };
+        ledger.answered(last).await.unwrap();
+
+        let record = ledger.record();
+        let kept = record.issue_title.as_deref().unwrap();
+        assert_eq!(kept.chars().count(), MAX_TITLE_CHARS);
+        assert!(kept.ends_with('…'));
+        assert_eq!(
+            record.issue_url.as_deref(),
+            Some("https://github.com/x/y/issues/9")
+        );
+        let answer = record.answer.as_ref().unwrap();
+        assert!(answer.fixed, "the last answer is the one kept");
+        assert_eq!(answer.cause.chars().count(), MAX_TEXT_CHARS);
+        assert_eq!(answer.changes.len(), MAX_CHANGES);
+        assert_eq!(answer.changes[0].note.chars().count(), MAX_NOTE_CHARS);
+        assert_eq!(answer.review_replies.len(), 1);
+        // What is stored is what the record shows: the same capped event.
+        let replayed = IssueRecord::from_events(issue(), &store.events(&issue()).await.unwrap());
+        assert_eq!(&replayed, record);
     }
 
     #[tokio::test]

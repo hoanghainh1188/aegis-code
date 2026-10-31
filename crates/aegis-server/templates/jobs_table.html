@@ -13,7 +13,7 @@
     <tr>
       <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
       <td>{{ r.repo }}</td>
-      <td class="ref">{{ r.issue_ref }}</td>
+      <td><span class="ref">{{ r.issue_ref }}</span>{% if !r.title.is_empty() %}<span class="job-title" title="{{ r.title }}">{{ r.title }}</span>{% endif %}</td>
       <td><span class="status s-{{ r.status }}">{{ r.status }}</span></td>
       <td>{{ r.outcome }}</td>
       <td>{{ r.tiers }}</td>

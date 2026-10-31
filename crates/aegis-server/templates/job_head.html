@@ -1,8 +1,11 @@
 {#- The top of a job's page (#310); while the job is queued or running it reloads itself from /jobs/{id}/head. -#}
 <section aria-labelledby="job-heading" id="job-head"
   {%- if head.live %} hx-get="/jobs/{{ head.id }}/head?live=1" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
-  <p class="eyebrow">{{ head.repo }} · <span class="ref">{{ head.issue_ref }}</span></p>
+  <p class="eyebrow">{{ head.repo }} ·
+    {%- if let Some(url) = head.issue_url %} <a class="ref" href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ head.issue_ref }}</a>
+    {%- else %} <span class="ref">{{ head.issue_ref }}</span>{% endif %}</p>
   <h1 id="job-heading">Job #{{ head.id }} <span class="status s-{{ head.status }}">{{ head.status }}</span></h1>
+  {% if let Some(t) = head.title %}<p class="job-title">{{ t }}</p>{% endif %}
   <dl class="facts">
     <div><dt>Outcome</dt><dd>{{ head.outcome }}</dd></div>
     <div><dt>Model tiers</dt><dd>{{ head.tiers }}</dd></div>

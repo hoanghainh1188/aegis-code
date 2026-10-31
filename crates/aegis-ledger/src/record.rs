@@ -162,6 +162,43 @@ impl TokenCounts {
     }
 }
 
+/// What the agent's final answer said (#316): the PR's explanation, or why
+/// it stopped. Redacted and capped before it is written
+/// ([`crate::IssueLedger::answered`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerSummary {
+    /// `status: fixed`; false when the agent stopped.
+    pub fixed: bool,
+    #[serde(default)]
+    pub cause: String,
+    #[serde(default)]
+    pub changes: Vec<AnswerChange>,
+    /// The reproduction test's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repro_test: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    /// A review round's answer to each note (#245).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_replies: Vec<AnswerReply>,
+}
+
+/// One change the answer lists: `file:line` and what it does there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerChange {
+    pub location: String,
+    pub note: String,
+}
+
+/// A review round's answer to note `note`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerReply {
+    pub note: u32,
+    pub done: bool,
+    #[serde(default)]
+    pub reply: String,
+}
+
 /// One entry in the append-only ledger of an issue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -219,6 +256,14 @@ pub enum LedgerEvent {
         wall_time_s: f64,
     },
     Reviewed(Review),
+    /// The issue the job works on, as its tracker gave it (#316): its
+    /// title, redacted and capped, and where it is. Never its body.
+    IssueRead {
+        title: String,
+        url: String,
+    },
+    /// The agent's final answer (#316), each time it gives one.
+    Answered(AnswerSummary),
 }
 
 impl LedgerEvent {
@@ -231,7 +276,9 @@ impl LedgerEvent {
             | Self::ToolCalls { .. }
             | Self::TestReminded { .. }
             | Self::ImpactChecked { .. }
-            | Self::Escalated { .. } => &[],
+            | Self::Escalated { .. }
+            | Self::IssueRead { .. }
+            | Self::Answered(_) => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
@@ -290,6 +337,14 @@ pub struct IssueRecord {
     /// `None` when they did not run (no eval, or no gated patch).
     #[serde(default)]
     pub hidden_tests_passed: Option<bool>,
+    /// The issue's title and URL, once the run read the issue (#316).
+    #[serde(default)]
+    pub issue_title: Option<String>,
+    #[serde(default)]
+    pub issue_url: Option<String>,
+    /// The agent's last final answer.
+    #[serde(default)]
+    pub answer: Option<AnswerSummary>,
 }
 
 impl IssueRecord {
@@ -325,6 +380,9 @@ impl IssueRecord {
             review: None,
             secrets_redacted: 0,
             hidden_tests_passed: None,
+            issue_title: None,
+            issue_url: None,
+            answer: None,
         }
     }
 
@@ -371,6 +429,11 @@ impl IssueRecord {
                 self.wall_time_s = Some(*wall_time_s);
             }
             LedgerEvent::Reviewed(review) => self.review = Some(*review),
+            LedgerEvent::IssueRead { title, url } => {
+                self.issue_title = Some(title.clone());
+                self.issue_url = Some(url.clone());
+            }
+            LedgerEvent::Answered(answer) => self.answer = Some(answer.clone()),
         }
         self
     }

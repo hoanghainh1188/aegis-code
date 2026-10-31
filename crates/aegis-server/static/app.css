@@ -206,3 +206,10 @@ details[open] > summary { margin-bottom: var(--space-3); }
 details.create form, details.confirm form { border-left: 4px solid var(--rule-strong); padding-left: var(--space-3); }
 button.danger { background: var(--fail); border-color: var(--fail); }
 button.danger:hover { background: var(--ink); border-color: var(--ink); }
+
+/* What a job works on and what the agent did (#316). */
+.job-title { font-size: 1.1rem; margin: 0 0 var(--space-3); max-width: 70ch; }
+td .job-title { display: block; font-size: var(--text-small); color: var(--ink-soft); margin: var(--space-1) 0 0; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer .cause { max-width: 70ch; }
+.answer .changes { padding-left: 1.2rem; max-width: 70ch; }
+.answer .changes li { margin-bottom: var(--space-2); }
