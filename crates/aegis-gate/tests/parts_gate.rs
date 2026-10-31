@@ -61,25 +61,9 @@ fn git(dir: &Path, args: &[&str]) {
     );
 }
 
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name();
-        if ["target", "__pycache__", ".pytest_cache", ".venv"]
-            .iter()
-            .any(|s| name == *s)
-        {
-            continue;
-        }
-        let target = to.join(&name);
-        if entry.file_type().unwrap().is_dir() {
-            copy_dir(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).unwrap();
-        }
-    }
-}
+#[path = "../../../tests/fixture_copy.rs"]
+mod fixture_copy;
+use fixture_copy::copy_fixture as copy_dir;
 
 struct Repo(PathBuf);
 
