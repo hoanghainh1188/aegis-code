@@ -1,0 +1,38 @@
+{#- The top of a job's page (#310); while the job is queued or running it reloads itself from /jobs/{id}/head. -#}
+<section aria-labelledby="job-heading" id="job-head"
+  {%- if head.live %} hx-get="/jobs/{{ head.id }}/head?live=1" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+  <p class="eyebrow">{{ head.repo }} · <span class="ref">{{ head.issue_ref }}</span></p>
+  <h1 id="job-heading">Job #{{ head.id }} <span class="status s-{{ head.status }}">{{ head.status }}</span></h1>
+  <dl class="facts">
+    <div><dt>Outcome</dt><dd>{{ head.outcome }}</dd></div>
+    <div><dt>Model tiers</dt><dd>{{ head.tiers }}</dd></div>
+    <div><dt>Model calls</dt><dd>{{ head.model_calls }}</dd></div>
+    <div><dt>Cost</dt><dd>{{ head.cost }}</dd></div>
+    <div><dt>Wall time</dt><dd>{{ head.wall_time }}</dd></div>
+    <div><dt>Ledger</dt><dd><code>{{ head.ledger_key }}</code></dd></div>
+  </dl>
+  {% if !head.reason.is_empty() %}<p class="note">Termination reason: {{ head.reason }}</p>{% endif %}
+  {% if let Some(old) = head.retry_of %}<p class="note">Runs <a href="/jobs/{{ old }}">job #{{ old }}</a> again.</p>{% endif %}
+  {% if let Some(root) = head.review_of %}<p class="note">Review fix round for PR opened by <a href="/jobs/{{ root }}">job #{{ root }}</a>; PR is reviewed there.</p>{% endif %}
+  <p class="actions">
+    {%- if let Some(url) = head.pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Open PR</a>{% endif %}
+    {%- if head.can_review %} <a class="button" href="/jobs/{{ head.id }}/review">Review PR</a>{% endif -%}
+  </p>
+  {% if head.can_retry %}
+  <form method="post" action="/jobs/{{ head.id }}/retry" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">Retry as a new job</button>
+  </form>
+  {% endif %}
+  {% if head.can_cancel %}
+  {#- Two steps without script: the summary opens the real button. hx-preserve keeps it open across polls. -#}
+  <details class="confirm" id="cancel-confirm" hx-preserve="true">
+    <summary class="button ghost">Cancel job…</summary>
+    <form method="post" action="/jobs/{{ head.id }}/cancel" class="inline">
+      {% include "form_guard.html" %}
+      <p class="note">A queued job is cancelled at once; a running one stops when its worker next checks in.</p>
+      <button type="submit" class="danger">Yes, cancel job #{{ head.id }}</button>
+    </form>
+  </details>
+  {% endif %}
+</section>

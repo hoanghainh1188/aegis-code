@@ -40,6 +40,7 @@ pub fn router(auth: Auth) -> Router<Store> {
         .route("/", get(dashboard::page))
         .route("/jobs", get(jobs::list).post(actions::create))
         .route("/jobs/{id}", get(jobs::detail))
+        .route("/jobs/{id}/head", get(jobs::head))
         .route("/jobs/{id}/cancel", post(actions::cancel))
         .route("/jobs/{id}/retry", post(actions::retry))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
