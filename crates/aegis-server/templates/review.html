@@ -8,6 +8,7 @@
   <p class="note">Review time is calculated automatically from opening this page until submission.</p>
   {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
   {% if let Some(r) = existing %}<p class="notice">Existing review: {{ r }}</p>{% endif %}
+  {% include "patch.html" %}
   <form method="post" action="/jobs/{{ id }}/review">
     {% include "form_guard.html" %}
     <input type="hidden" name="opened_at" value="{{ opened_at }}">

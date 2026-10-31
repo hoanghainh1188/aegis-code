@@ -11,7 +11,7 @@ use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::worker::{WorkerConfig, run_worker};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Claim, Job, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, RepoId, RepoMode,
+    Claim, Job, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, Patch, RepoId, RepoMode,
     RunStatus, Store,
 };
 use tokio_util::sync::CancellationToken;
@@ -29,6 +29,10 @@ fn pr() -> Attempt {
         outcome: Outcome::PrOpened,
         reason: None,
         pr_url: Some("https://github.com/example/fork/pull/1".into()),
+        patch: Some(Patch {
+            diff: "diff --git a/src/lib.rs b/src/lib.rs\n-a\n+b\n".into(),
+            truncated: false,
+        }),
     }
 }
 
@@ -132,6 +136,7 @@ fn stopped() -> Attempt {
         outcome: Outcome::StoppedSteps,
         reason: Some("cancelled".into()),
         pr_url: None,
+        patch: None,
     }
 }
 
@@ -252,6 +257,7 @@ async fn ten_jobs_at_once_all_end_with_a_reason_within_the_limits() {
                         outcome: Outcome::StoppedExpertFail,
                         reason: Some("Expert could not pass the gate".into()),
                         pr_url: None,
+                        patch: None,
                     },
                 )],
             )
@@ -295,6 +301,10 @@ async fn ten_jobs_at_once_all_end_with_a_reason_within_the_limits() {
         runs_of(s, a0).await,
         [RunStatus::Failed, RunStatus::Finished]
     );
+    // The PR's patch is kept with the job; a stop keeps none (#312).
+    let kept = s.patch(a0.id).await.unwrap().unwrap();
+    assert!(kept.diff.starts_with("diff --git a/src/lib.rs"), "{kept:?}");
+    assert_eq!(s.patch(by_ref["x/a#2"].id).await.unwrap(), None);
     let a1 = by_ref["x/a#1"];
     assert_eq!(
         (a1.status, a1.retries, a1.attempts),

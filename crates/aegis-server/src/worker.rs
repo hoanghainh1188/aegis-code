@@ -256,6 +256,7 @@ async fn run_attempt<R: JobRunner>(
                 claim.run.attempt - 1
             )),
             pr_url: None,
+            patch: None,
         });
     }
     let cancel = CancellationToken::new();
@@ -300,10 +301,12 @@ fn end_of(config: &WorkerConfig, claim: &Claim, attempt: Attempt, cancelled: boo
             outcome,
             reason,
             pr_url,
+            patch,
         } => AttemptEnd::Done {
             outcome,
             reason,
             pr_url,
+            patch,
         },
         Attempt::Infra(error) => infra(config, claim, error),
         Attempt::Rejected(error) => AttemptEnd::Failed { error },

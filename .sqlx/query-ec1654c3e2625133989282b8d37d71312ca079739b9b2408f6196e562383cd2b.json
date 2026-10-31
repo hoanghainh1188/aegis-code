@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT diff, truncated FROM job_patches WHERE job_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "diff",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_patches",
+            "name": "diff"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "truncated",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "job_patches",
+            "name": "truncated"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ec1654c3e2625133989282b8d37d71312ca079739b9b2408f6196e562383cd2b"
+}

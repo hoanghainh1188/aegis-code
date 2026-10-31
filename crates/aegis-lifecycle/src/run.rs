@@ -77,6 +77,8 @@ pub struct IssueReport {
     pub model_calls: u32,
     /// Eval runs: whether the fix's own tests pass on the agent's patch.
     pub hidden_tests_passed: Option<bool>,
+    /// What the PR holds, when one was opened or updated (#312).
+    pub patch: Option<aegis_store::Patch>,
 }
 
 /// How the work on an issue ended, before the ledger closes it.
@@ -86,6 +88,8 @@ pub(crate) struct Ending {
     pub pr_url: Option<String>,
     /// [`Finish::Keep`]: the commit of the tree the gate passed.
     pub kept: Option<Kept>,
+    /// The patch of the PR opened or updated.
+    pub patch: Option<aegis_store::Patch>,
 }
 
 impl Ending {
@@ -95,6 +99,7 @@ impl Ending {
             reason: Some(reason.into()),
             pr_url: None,
             kept: None,
+            patch: None,
         }
     }
 }
@@ -193,6 +198,7 @@ where
         outcome: ending.outcome,
         reason: ending.reason,
         pr_url: ending.pr_url,
+        patch: ending.patch,
         cost_usd: record.cost_usd,
         model_calls: record.model_calls,
         hidden_tests_passed: record.hidden_tests_passed,
@@ -1290,8 +1296,11 @@ where
                     reason: None,
                     pr_url: None,
                     kept: Some(Kept { commit, answer }),
+                    patch: None,
                 });
             }
+            // The PR as the gate passed it, for the job's page (#312).
+            let patch = Some(job::patch(&cfg.repo.path, &report.base, &report.tree)?);
             if let Finish::Update(round) = finish {
                 let published =
                     publish_round(platform, ledger, tree, issue, round, &answer, &report).await?;
@@ -1300,6 +1309,7 @@ where
                     reason: published.note,
                     pr_url: Some(published.url),
                     kept: None,
+                    patch,
                 });
             }
             let pr_url = if cfg.run.open_prs {
@@ -1329,6 +1339,7 @@ where
                 reason: pr_url.is_none().then(|| "no PR opened".to_owned()),
                 pr_url,
                 kept: None,
+                patch,
             });
         }
 

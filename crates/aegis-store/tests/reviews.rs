@@ -46,6 +46,7 @@ fn pr_opened() -> AttemptEnd {
         outcome: Outcome::PrOpened,
         reason: None,
         pr_url: Some(PR.into()),
+        patch: None,
     }
 }
 

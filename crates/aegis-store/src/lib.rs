@@ -41,7 +41,7 @@ pub use error::StoreError;
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use page::{Page, PageOf};
-pub use queue::{AttemptEnd, Claim, Lease};
+pub use queue::{AttemptEnd, Claim, Lease, MAX_PATCH_BYTES, Patch};
 pub use reviews::{DEFAULT_MAX_REVIEW_ROUNDS, pr_issue_ref};
 pub use sonar::MAX_BATCH_WARNINGS;
 pub use stats::QueueStats;

@@ -213,3 +213,16 @@ td .job-title { display: block; font-size: var(--text-small); color: var(--ink-s
 .answer .cause { max-width: 70ch; }
 .answer .changes { padding-left: 1.2rem; max-width: 70ch; }
 .answer .changes li { margin-bottom: var(--space-2); }
+
+/* The PR's patch (#312): one disclosure per file, lines coloured by kind. */
+.patch details.file { border: 1px solid var(--rule); background: var(--surface); margin: var(--space-2) 0; }
+.patch details.file > summary { cursor: pointer; padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; gap: var(--space-3); }
+.patch .counts { font-family: var(--font-num); font-size: var(--text-small); }
+.patch .plus { color: var(--pass); }
+.patch .minus { color: var(--fail); }
+pre.diff { margin: 0; padding: var(--space-2) 0; overflow-x: auto; font: 0.8rem/1.45 var(--font-num); border-top: 1px solid var(--rule); }
+pre.diff > span { display: block; padding: 0 var(--space-3); white-space: pre; }
+pre.diff .add { background: var(--pass-wash); }
+pre.diff .del { background: var(--fail-wash); }
+pre.diff .hunk { color: var(--accent); }
+pre.diff .meta { color: var(--ink-soft); }

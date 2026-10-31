@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use super::actions::{Done, SOURCES};
 use super::dashboard::all_repos;
+use super::patch::PatchView;
 use super::view::{dollars, seconds, tiers};
 use super::{Me, Nonce, WebError, WebResult, job_for, render};
 use crate::auth::Access;
@@ -463,6 +464,8 @@ struct JobPage<'a> {
     notice: Option<&'static str>,
     /// The agent's last final answer (#316).
     answer: Option<AnswerSummary>,
+    /// The patch its PR holds (#312).
+    patch: Option<PatchView>,
 }
 
 #[derive(Template)]
@@ -514,6 +517,7 @@ pub async fn detail(
         rounds_cost,
         notice: Done::parse(&q.done).map(Done::message),
         answer: record.answer.clone(),
+        patch: super::patch::of(&store, job.id).await?,
     })
 }
 

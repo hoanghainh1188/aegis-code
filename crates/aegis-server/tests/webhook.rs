@@ -496,6 +496,7 @@ impl JobRunner for OpensPr {
             outcome: Outcome::PrOpened,
             reason: None,
             pr_url: Some("https://github.com/aegis-bot/typst/pull/5".into()),
+            patch: None,
         }
     }
 }
@@ -630,6 +631,7 @@ async fn a_review_on_the_agents_pr_queues_a_round_for_writers_only() {
         outcome: Outcome::PrOpened,
         reason: None,
         pr_url: Some(pr.into()),
+        patch: None,
     };
     let root = store
         .finish_attempt(&claim.run, "w", &opened)
@@ -738,6 +740,7 @@ async fn a_fix_note_on_the_agents_gitlab_mr_queues_a_round_for_developers() {
         outcome: Outcome::PrOpened,
         reason: None,
         pr_url: Some(mr.into()),
+        patch: None,
     };
     let root = store
         .finish_attempt(&claim.run, "w", &opened)
