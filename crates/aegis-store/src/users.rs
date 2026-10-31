@@ -53,6 +53,15 @@ impl TryFrom<UserRow> for User {
 }
 
 /// Lower case and trimmed; an e-mail for a person.
+/// Someone with a role in a repo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoMember {
+    pub kind: UserKind,
+    pub name: String,
+    pub role: RepoRole,
+    pub granted_at: chrono::DateTime<chrono::Utc>,
+}
+
 fn user_name(kind: UserKind, name: &str) -> Result<String, StoreError> {
     let name = name.trim().to_lowercase();
     let ok = !name.is_empty()
@@ -347,6 +356,29 @@ impl Store {
         .await?
         .map(User::try_from)
         .transpose()
+    }
+
+    /// Who has a role in `repo` (#329), people before services, by name.
+    pub async fn repo_members(&self, repo: RepoId) -> Result<Vec<RepoMember>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT u.kind, u.name, r.role, r.granted_at
+             FROM repo_roles r JOIN users u ON u.id = r.user_id
+             WHERE r.repo_id = $1
+             ORDER BY u.kind, u.name",
+            repo.0,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(RepoMember {
+                    kind: UserKind::decode("users.kind", &r.kind)?,
+                    name: r.name,
+                    role: RepoRole::decode("repo_roles.role", &r.role)?,
+                    granted_at: r.granted_at,
+                })
+            })
+            .collect()
     }
 
     /// The roles `user` has, repo by repo.

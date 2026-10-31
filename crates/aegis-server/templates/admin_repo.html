@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ repo.slug }} · roles{% endblock %}
+{% block content %}
+<section aria-labelledby="repo-heading">
+  <p class="eyebrow"><a href="/admin/repos">Repos</a> · <span class="ref">{{ repo.url }}</span></p>
+  <h1 id="repo-heading">{{ repo.slug }}</h1>
+  <dl class="facts">
+    <div><dt>Language</dt><dd>{{ repo.language }}</dd></div>
+    <div><dt>Mode</dt><dd>{{ repo.mode.as_str() }}</dd></div>
+    <div><dt>Default branch</dt><dd>{{ repo.default_branch }}</dd></div>
+    <div><dt>Jobs at once</dt><dd>{{ repo.max_concurrent_jobs }}</dd></div>
+  </dl>
+  {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
+</section>
+
+<section aria-labelledby="roles-heading" class="band">
+  <h2 id="roles-heading">Roles</h2>
+  <p class="note">Maintainers create, cancel and retry jobs; reviewers also review PRs; viewers read. A person is named by the e-mail the SSO gives, and may be given a role before signing in for the first time; a name without <code>@</code> is a service.</p>
+  <form method="post" action="/admin/repos/{{ repo.id.0 }}/roles" class="inline">
+    {% include "form_guard.html" %}
+    <label>E-mail or service
+      <input type="text" name="who" required maxlength="320" placeholder="name@example.com" autocomplete="off">
+    </label>
+    <label>Role
+      <select name="role" required>
+        {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Give role</button>
+  </form>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Who</th><th scope="col">Role</th><th scope="col">Since (UTC)</th><th scope="col"><span class="visually-hidden">Take away</span></th></tr></thead>
+    <tbody>
+    {% for m in members %}
+      <tr>
+        <td>{{ m.name }}{% if m.service %} <span class="note">(service)</span>{% endif %}</td>
+        <td>{{ m.role }}</td>
+        <td>{{ m.granted_at }}</td>
+        <td><form method="post" action="/admin/repos/{{ repo.id.0 }}/roles/revoke">{% include "form_guard.html" %}<input type="hidden" name="who" value="{{ m.name }}"><button type="submit" class="ghost">Take away</button></form></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="empty">No one has a role in this repo yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

@@ -7,6 +7,7 @@
 //! (#29) and shows only the repos its user has a role in; see [`guard`].
 
 mod actions;
+mod admin;
 mod dashboard;
 mod guard;
 mod jobs;
@@ -45,6 +46,10 @@ pub fn router(auth: Auth) -> Router<Store> {
         .route("/jobs/{id}/cancel", post(actions::cancel))
         .route("/jobs/{id}/retry", post(actions::retry))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
+        .route("/admin/repos", get(admin::repos))
+        .route("/admin/repos/{id}", get(admin::repo))
+        .route("/admin/repos/{id}/roles", post(admin::grant))
+        .route("/admin/repos/{id}/roles/revoke", post(admin::revoke))
         .route("/me/tokens", get(tokens::list).post(tokens::create))
         .route("/me/tokens/{id}/revoke", post(tokens::revoke))
         .route(

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Repos{% endblock %}
+{% block content %}
+<section aria-labelledby="repos-heading">
+  <p class="eyebrow">Admin</p>
+  <h1 id="repos-heading">Repos</h1>
+  <p class="note">Every registered repo. Open one to see and change who has which role in it. Registering a repo is still <code>aegis-server repo add</code> on the server.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Repo</th><th scope="col">URL</th><th scope="col">Language</th><th scope="col">Mode</th><th scope="col" class="num">Jobs at once</th></tr></thead>
+    <tbody>
+    {% for r in repos %}
+      <tr>
+        <td><a href="/admin/repos/{{ r.id.0 }}">{{ r.slug }}</a></td>
+        <td class="ref">{{ r.url }}</td>
+        <td>{{ r.language }}</td>
+        <td>{{ r.mode.as_str() }}</td>
+        <td class="num">{{ r.max_concurrent_jobs }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">No repo registered yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}
