@@ -73,17 +73,23 @@ conventions = """
 # folder have to be told which one.
 #
 # Without a Redis server about 90 of the suite's tests fail at the base
-# already, and the gate cannot yet tell them from the patch's: no profile
-# reads .NET test output (#291). Until then StackExchange.Redis-2689 cannot
-# pass the gate whatever the patch.
+# already; the gate reads them and compares with the base (#291, #303).
+# The test step leaves out the classes whose results change from run to run
+# under the suite's 7-10 minute load (timeouts, TTLs, retries against the
+# in-process server): in three runs of StackExchange.Redis-2689 their
+# failures differed each time, and the gate's single rerun cannot tell them
+# from the patch's (#259). Other tests still time out now and then against
+# the in-process server (RedisValueStorageKindUnitTests did in the next
+# run); rerunning only the suspects is #306. The filter is VSTest's, which
+# 2689's base uses.
 [repo.overrides]
 fetch = ["dotnet", "restore", "StackExchange.Redis.slnx", "-p:NuGetAudit=false"]
 
 [repo.overrides.gate]
 format = ["dotnet", "format", "StackExchange.Redis.slnx", "--verify-no-changes", "--no-restore"]
 lint = ["dotnet", "build", "StackExchange.Redis.slnx", "--no-restore", "-warnaserror"]
-repro_test = ["sh", "-c", "p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 --filter \"$1\" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled", "sh", "{test}"]
-test = ["sh", "-c", "p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled"]
+repro_test = ["sh", "-c", "FLAKY='FullyQualifiedName!~IncrexIntegrationTests&FullyQualifiedName!~IncrexUnitTests&FullyQualifiedName!~RetryPolicyUnitTests&FullyQualifiedName!~InProcessDatabaseUnitTests&FullyQualifiedName!~Resp3HandshakeTests&FullyQualifiedName!~RedisValueSequenceServerTests'; p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 --filter \"$1\" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled", "sh", "{test}"]
+test = ["sh", "-c", "FLAKY='FullyQualifiedName!~IncrexIntegrationTests&FullyQualifiedName!~IncrexUnitTests&FullyQualifiedName!~RetryPolicyUnitTests&FullyQualifiedName!~InProcessDatabaseUnitTests&FullyQualifiedName!~Resp3HandshakeTests&FullyQualifiedName!~RedisValueSequenceServerTests'; p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 --filter \"$FLAKY\" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled"]
 # A test command of the repo's own drops the profile's test_output.
 test_output = "dotnet"
 
