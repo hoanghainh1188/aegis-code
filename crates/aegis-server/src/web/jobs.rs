@@ -77,6 +77,9 @@ struct JobsPage<'a> {
     statuses: Vec<Choice>,
     rows: Vec<JobRow>,
     next: Option<String>,
+    /// This list's own URL, which its poll asks for while a job in it is
+    /// queued or running (#310).
+    live: Option<String>,
     /// The repos they maintain, where they may create a job (#309).
     creatable: Vec<Choice>,
     sources: Vec<Choice>,
@@ -87,6 +90,7 @@ struct JobsPage<'a> {
 struct JobsTable {
     rows: Vec<JobRow>,
     next: Option<String>,
+    live: Option<String>,
 }
 
 /// An empty select means "any"; anything else must parse.
@@ -130,6 +134,14 @@ pub async fn list(
             status.map_or("", JobStatus::as_str),
         )
     });
+    let live = jobs.items.iter().any(is_live).then(|| {
+        format!(
+            "/jobs?repo_id={}&status={}&cursor={}",
+            repo_id.map_or(String::new(), |r| r.0.to_string()),
+            status.map_or("", JobStatus::as_str),
+            cursor.map_or(String::new(), |c| c.to_string()),
+        )
+    });
     let mut rows = Vec::with_capacity(jobs.items.len());
     for job in &jobs.items {
         let record = record(&store, job).await?;
@@ -152,7 +164,7 @@ pub async fn list(
     }
     // A history restore wants the whole page, not the table.
     if headers.contains_key("hx-request") && !headers.contains_key("hx-history-restore-request") {
-        let mut response = render(&JobsTable { rows, next })?;
+        let mut response = render(&JobsTable { rows, next, live })?;
         response
             .headers_mut()
             .insert(header::VARY, HeaderValue::from_static("HX-Request"));
@@ -198,6 +210,7 @@ pub async fn list(
         statuses,
         rows,
         next,
+        live,
         creatable,
         sources,
     })
@@ -345,11 +358,10 @@ struct RunRow {
     ended_at: String,
 }
 
-#[derive(Template)]
-#[template(path = "job.html")]
-struct JobPage<'a> {
-    nonce: &'a str,
-    me: &'a Me,
+/// The top of a job's page (#310): what changes while it runs. The page
+/// includes it, and while the job is queued or running it reloads itself
+/// from `/jobs/{id}/head`.
+struct JobHead {
     id: i64,
     repo: String,
     issue_ref: String,
@@ -363,20 +375,75 @@ struct JobPage<'a> {
     model_calls: u32,
     cost: String,
     wall_time: String,
-    runs: Vec<RunRow>,
-    events: Vec<EventRow>,
-    rounds: Vec<RoundRow>,
-    rounds_cost: String,
     /// A review round: the job whose PR it works on, where it is reviewed.
     review_of: Option<i64>,
     /// The job this one runs again.
     retry_of: Option<i64>,
-    /// What the form that led here did (#309).
-    notice: Option<&'static str>,
     /// A maintainer may cancel a queued or running job not yet asked to
     /// stop, and run a failed or cancelled one again.
     can_cancel: bool,
     can_retry: bool,
+    /// Queued or running: the head asks for itself again.
+    live: bool,
+}
+
+/// A job that may still change.
+fn is_live(job: &Job) -> bool {
+    matches!(job.status, JobStatus::Queued | JobStatus::Running)
+}
+
+async fn head_of(
+    store: &Store,
+    access: &Access,
+    job: &Job,
+    record: &IssueRecord,
+) -> Result<JobHead, WebError> {
+    let repo = store.repo(job.repo_id).await?;
+    let maintains = access.can(job.repo_id, RepoRole::Maintainer);
+    Ok(JobHead {
+        id: job.id.0,
+        repo: repo.map_or(format!("repo {}", job.repo_id.0), |r| r.slug),
+        issue_ref: job.issue_ref.clone(),
+        ledger_key: job.ledger_key.as_str().to_owned(),
+        status: job.status.as_str(),
+        outcome: outcome(job),
+        reason: job.reason.clone().unwrap_or_default(),
+        pr_url: pr_link(job),
+        // A round's PR is reviewed on the job that opened it.
+        can_review: job.outcome == Some(Outcome::PrOpened)
+            && job.review_of.is_none()
+            && access.can(job.repo_id, RepoRole::Reviewer),
+        tiers: tiers(record),
+        model_calls: record.model_calls,
+        cost: dollars(record.cost_usd),
+        wall_time: seconds(record.wall_time_s),
+        review_of: job.review_of.map(|r| r.0),
+        retry_of: job.retry_of.map(|r| r.0),
+        can_cancel: maintains && is_live(job) && !job.cancel_requested,
+        can_retry: maintains && matches!(job.status, JobStatus::Failed | JobStatus::Cancelled),
+        live: is_live(job),
+    })
+}
+
+#[derive(Template)]
+#[template(path = "job.html")]
+struct JobPage<'a> {
+    nonce: &'a str,
+    me: &'a Me,
+    head: JobHead,
+    runs: Vec<RunRow>,
+    events: Vec<EventRow>,
+    rounds: Vec<RoundRow>,
+    rounds_cost: String,
+    /// What the form that led here did (#309).
+    notice: Option<&'static str>,
+}
+
+#[derive(Template)]
+#[template(path = "job_head_fragment.html")]
+struct JobHeadFragment<'a> {
+    me: &'a Me,
+    head: JobHead,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -394,8 +461,6 @@ pub async fn detail(
     Query(q): Query<DetailQuery>,
 ) -> WebResult {
     let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
-    let repo = store.repo(job.repo_id).await?;
-    let maintains = access.can(job.repo_id, RepoRole::Maintainer);
     let events = store.ledger().events(&job.ledger_key).await?;
     let record = IssueRecord::from_events(job.ledger_key.clone(), &events);
     let time = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -416,34 +481,43 @@ pub async fn detail(
     render(&JobPage {
         nonce: nonce.as_str(),
         me: &me,
-        id,
-        repo: repo.map_or(format!("repo {}", job.repo_id.0), |r| r.slug),
-        issue_ref: job.issue_ref.clone(),
-        ledger_key: job.ledger_key.as_str().to_owned(),
-        status: job.status.as_str(),
-        outcome: outcome(&job),
-        reason: job.reason.clone().unwrap_or_default(),
-        pr_url: pr_link(&job),
-        // A round's PR is reviewed on the job that opened it.
-        can_review: job.outcome == Some(Outcome::PrOpened)
-            && job.review_of.is_none()
-            && access.can(job.repo_id, RepoRole::Reviewer),
-        tiers: tiers(&record),
-        model_calls: record.model_calls,
-        cost: dollars(record.cost_usd),
-        wall_time: seconds(record.wall_time_s),
+        head: head_of(&store, &access, &job, &record).await?,
         runs,
         events: events.iter().filter_map(event_row).collect(),
         rounds,
         rounds_cost,
-        review_of: job.review_of.map(|r| r.0),
-        retry_of: job.retry_of.map(|r| r.0),
         notice: Done::parse(&q.done).map(Done::message),
-        can_cancel: maintains
-            && matches!(job.status, JobStatus::Queued | JobStatus::Running)
-            && !job.cancel_requested,
-        can_retry: maintains && matches!(job.status, JobStatus::Failed | JobStatus::Cancelled),
     })
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct HeadQuery {
+    /// Asked by a page that showed the job live.
+    #[serde(default)]
+    live: String,
+}
+
+/// `/jobs/{id}/head`: the page's head, for its poll (#310). A job that
+/// ended since the page showed it live makes the page load once more,
+/// with its final runs and history and no poll.
+pub async fn head(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Extension(me): Extension<Me>,
+    Path(id): Path<i64>,
+    Query(q): Query<HeadQuery>,
+) -> WebResult {
+    let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
+    let record = record(&store, &job).await?;
+    let head = head_of(&store, &access, &job, &record).await?;
+    let ended = !head.live && q.live == "1";
+    let mut response = render(&JobHeadFragment { me: &me, head })?;
+    if ended {
+        response
+            .headers_mut()
+            .insert("hx-refresh", HeaderValue::from_static("true"));
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

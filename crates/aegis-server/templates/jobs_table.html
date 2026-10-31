@@ -31,6 +31,10 @@
   </tbody>
 </table>
 </div>
+{% if let Some(url) = live -%}
+{#- A job here is queued or running: reload the table, filters and page kept (#310). Gone once none is. -#}
+<div hidden hx-get="{{ url }}" hx-trigger="every 5s" hx-target="#jobs-table" hx-swap="innerHTML"></div>
+{%- endif %}
 {% if let Some(next) = next %}
 <p class="pager"><a href="{{ next }}" hx-get="{{ next }}" hx-target="#jobs-table" hx-push-url="true">Next page →</a></p>
 {% endif %}

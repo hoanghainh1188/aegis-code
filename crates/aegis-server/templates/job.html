@@ -1,43 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Job #{{ id }}{% endblock %}
+{% block title %}Job #{{ head.id }}{% endblock %}
 {% block content %}
-<section aria-labelledby="job-heading">
-  <p class="eyebrow">{{ repo }} · <span class="ref">{{ issue_ref }}</span></p>
-  <h1 id="job-heading">Job #{{ id }} <span class="status s-{{ status }}">{{ status }}</span></h1>
-  <dl class="facts">
-    <div><dt>Outcome</dt><dd>{{ outcome }}</dd></div>
-    <div><dt>Model tiers</dt><dd>{{ tiers }}</dd></div>
-    <div><dt>Model calls</dt><dd>{{ model_calls }}</dd></div>
-    <div><dt>Cost</dt><dd>{{ cost }}</dd></div>
-    <div><dt>Wall time</dt><dd>{{ wall_time }}</dd></div>
-    <div><dt>Ledger</dt><dd><code>{{ ledger_key }}</code></dd></div>
-  </dl>
-  {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
-  {% if !reason.is_empty() %}<p class="note">Termination reason: {{ reason }}</p>{% endif %}
-  {% if let Some(old) = retry_of %}<p class="note">Runs <a href="/jobs/{{ old }}">job #{{ old }}</a> again.</p>{% endif %}
-  {% if let Some(root) = review_of %}<p class="note">Review fix round for PR opened by <a href="/jobs/{{ root }}">job #{{ root }}</a>; PR is reviewed there.</p>{% endif %}
-  <p class="actions">
-    {%- if let Some(url) = pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Open PR</a>{% endif %}
-    {%- if can_review %} <a class="button" href="/jobs/{{ id }}/review">Review PR</a>{% endif -%}
-  </p>
-  {% if can_retry %}
-  <form method="post" action="/jobs/{{ id }}/retry" class="inline">
-    {% include "form_guard.html" %}
-    <button type="submit">Retry as a new job</button>
-  </form>
-  {% endif %}
-  {% if can_cancel %}
-  {#- Two steps without script: the summary opens the real button. -#}
-  <details class="confirm">
-    <summary class="button ghost">Cancel job…</summary>
-    <form method="post" action="/jobs/{{ id }}/cancel" class="inline">
-      {% include "form_guard.html" %}
-      <p class="note">A queued job is cancelled at once; a running one stops when its worker next checks in.</p>
-      <button type="submit" class="danger">Yes, cancel job #{{ id }}</button>
-    </form>
-  </details>
-  {% endif %}
-</section>
+{% include "job_head.html" %}
+{% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
 
 {% if !rounds.is_empty() %}
 <section aria-labelledby="rounds-heading" class="band">
