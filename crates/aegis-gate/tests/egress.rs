@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, Egress, Exit, Runner, Sandbox};
+use aegis_gate::{CancelToken, Egress, Exit, Hardening, Limits, Runner, Sandbox};
 
 const RUST_IMAGE: &str = "aegis-sandbox-rust";
 const PYTHON_IMAGE: &str = "aegis-sandbox-python";
@@ -46,7 +46,14 @@ fn egress(allow: &[&str]) -> Egress {
     }
 }
 
+/// The image's container, locked down as its profile's are (#320).
 fn sandbox(image: &str, mounts: Vec<(PathBuf, String)>) -> Sandbox {
+    let language = match image {
+        RUST_IMAGE => aegis_lang::Language::Rust,
+        _ => aegis_lang::Language::Python,
+    };
+    let profile = aegis_lang::Profiles::builtin().unwrap();
+    let profile = &profile.get(language).unwrap().sandbox;
     Sandbox {
         docker: "docker".into(),
         image: image.into(),
@@ -54,6 +61,7 @@ fn sandbox(image: &str, mounts: Vec<(PathBuf, String)>) -> Sandbox {
         env: vec![],
         network: None,
         read_only_mounts: true,
+        hardening: Hardening::new(Limits::default(), profile),
     }
 }
 

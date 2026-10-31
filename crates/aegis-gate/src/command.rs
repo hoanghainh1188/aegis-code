@@ -55,6 +55,11 @@ pub enum Exit {
     Signal,
     TimedOut,
     Cancelled,
+    /// A process of the container went over its memory and the kernel
+    /// killed it (#320); the limit, in MB.
+    OutOfMemory {
+        limit_mb: u64,
+    },
 }
 
 impl Exit {
@@ -135,6 +140,16 @@ fn kill(child: &mut Child) {
     kill_group(child);
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// What the agent and the log are told when the kernel killed a process
+/// of the container for going over its memory, so the agent can tell the
+/// limit from a bug of its patch.
+pub fn out_of_memory(limit_mb: u64) -> String {
+    format!(
+        "out of memory: a process went over the container's limit of {limit_mb} MB and \
+         was killed"
+    )
 }
 
 fn exit_of(status: ExitStatus) -> Exit {
@@ -244,12 +259,24 @@ impl Runner {
         // Nothing the command started may outlive it and touch the repo
         // during later steps; a container lives outside the process group.
         kill_group(&child);
-        if let Some((sandbox, name)) = &container
-            && matches!(exit, Exit::TimedOut | Exit::Cancelled)
-            && let Err(why) = sandbox.kill(name)
-            && let Ok(mut f) = file.lock()
-        {
-            let _ = writeln!(f, "[aegis] could not stop container {name}: {why}");
+        let mut exit = exit;
+        if let Some((sandbox, name)) = &container {
+            // A step that succeeded stays a success: what it ran may have
+            // let a child go (a test of memory limits). Timed out and
+            // cancelled say why already.
+            let failed = matches!(exit, Exit::Code(c) if c != 0) || exit == Exit::Signal;
+            if failed && sandbox.oom_killed(name) {
+                let limit_mb = sandbox.hardening.limits.memory_mb;
+                exit = Exit::OutOfMemory { limit_mb };
+                if let Ok(mut f) = file.lock() {
+                    let _ = writeln!(f, "[aegis] {}", out_of_memory(limit_mb));
+                }
+            }
+            if let Err(why) = sandbox.remove(name)
+                && let Ok(mut f) = file.lock()
+            {
+                let _ = writeln!(f, "[aegis] could not remove container {name}: {why}");
+            }
         }
         let deadline = Instant::now() + PIPE_GRACE;
         for pipe in pipes {

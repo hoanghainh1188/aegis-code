@@ -13,8 +13,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use aegis_gate::{
-    CancelToken, Egress, FetchStep, GateReport, GateRequest, Sandbox, StepName, StepStatus,
-    run_gate,
+    CancelToken, Egress, FetchStep, GateReport, GateRequest, Hardening, Sandbox, StepName,
+    StepStatus, run_gate,
 };
 use aegis_lang::Language;
 use common::{Repo, profile};
@@ -93,6 +93,8 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
             env: vec![("HOME".into(), "/tmp".into())],
             network: None,
             read_only_mounts: true,
+            // Not our image: HOME is in /tmp, the rest read-only.
+            hardening: Hardening::default(),
         }),
         fetch: Some(FetchStep {
             egress: Egress {

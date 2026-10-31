@@ -10,11 +10,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::command::{CancelToken, Ran, Runner};
+use crate::sandbox::{Hardening, Limits};
 use crate::{GateError, Sandbox};
 
 const PROXY_SCRIPT: &str = include_str!("../../../docker/egress/egress.py");
 const PROXY_PORT: u16 = 3128;
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
+/// The proxy relays bytes and keeps nothing (#320).
+const PROXY_LIMITS: Limits = Limits {
+    memory_mb: 256,
+    cpus: 1,
+    pids: 256,
+    tmp_mb: 16,
+};
 
 /// Where the fetch step may go.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,27 +77,23 @@ impl Egress {
         )?;
         let allow = format!("AEGIS_ALLOW={}", self.allow.join(","));
         // The proxy reaches the outside on the default network and the
-        // fetch container on the internal one.
-        docker(
-            &self.docker,
-            &[
-                "run",
-                "-d",
-                "--rm",
-                "--name",
-                &session.proxy,
-                "--cap-drop",
-                "ALL",
-                "--security-opt",
-                "no-new-privileges",
-                "--env",
-                &allow,
-                &self.proxy_image,
-                "python",
-                "-c",
-                PROXY_SCRIPT,
-            ],
-        )?;
+        // fetch container on the internal one. It only relays bytes.
+        let hardening = Hardening {
+            limits: PROXY_LIMITS,
+            ..Hardening::default()
+        };
+        let mut args = vec!["run", "-d", "--rm", "--name", &session.proxy];
+        let confined = hardening.args("bridge");
+        args.extend(confined.iter().map(String::as_str));
+        args.extend([
+            "--env",
+            &allow,
+            &self.proxy_image,
+            "python",
+            "-c",
+            PROXY_SCRIPT,
+        ]);
+        docker(&self.docker, &args)?;
         docker(
             &self.docker,
             &["network", "connect", &session.network, &session.proxy],

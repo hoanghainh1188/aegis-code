@@ -30,6 +30,18 @@ sandbox = true
 [run.sandbox_env]
 TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS = ""
 
+# What each sandbox container may use (#320); the image is read-only but
+# for /tmp and the profile's `sandbox.writable`. /tmp is memory and counts
+# against memory_mb. A profile's `sandbox.memory_mb` and `sandbox.cpus` go
+# in place of these. These are the defaults. Each one is a cap, not a
+# reservation: a job may run its language server and a test container at
+# once, and the server runs [worker] max_workers jobs.
+[run.sandbox_limits]
+memory_mb = 8192
+cpus = 4
+pids = 4096
+tmp_mb = 1024
+
 [budget]
 max_cost_usd = 4.0
 max_model_calls = 40

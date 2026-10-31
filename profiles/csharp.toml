@@ -85,6 +85,8 @@ image = "aegis-sandbox-dotnet"
 # `artifacts`: MSBuild's artifacts output (`UseArtifactsOutput`, .NET 8) puts
 # every project's bin and obj there (#290).
 cache_dirs = ["bin", "obj", "artifacts", "/home/aegis/.nuget/packages"]
+# Ngoài các thư mục trên, image chỉ đọc (#320); DOTNET_CLI_HOME là HOME.
+writable = ["/home/aegis"]
 
 # Gate gộp Sonar vào build: `dotnet sonarscanner begin` → lệnh này → `end`.
 # Build chạy trong sandbox không mạng như các bước khác; chỉ begin/end có

@@ -14,7 +14,7 @@ use aegis_lang::{Profile, SonarScanner, join_dir};
 
 use crate::GateError;
 use crate::command::{Ran, Runner};
-use crate::sandbox::Sandbox;
+use crate::sandbox::{Hardening, Sandbox};
 
 use super::SonarStep;
 
@@ -215,8 +215,14 @@ fn scanner_runner(step: &SonarStep, runner: &Runner) -> (Runner, Option<String>)
         image: step.image.clone().unwrap_or_else(|| sandbox.image.clone()),
         mounts,
         network: Some(step.network.clone()),
-        // The scanner runs no code of the patch; it writes its cache.
+        // The scanner runs no code of the patch; it writes its cache, and
+        // its image (not one of ours) where it likes.
         read_only_mounts: false,
+        hardening: Hardening {
+            writable: Vec::new(),
+            read_only_rootfs: false,
+            ..sandbox.hardening.clone()
+        },
         ..sandbox.clone()
     };
     (

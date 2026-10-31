@@ -64,6 +64,8 @@ protected = [
 [sandbox]
 image = "aegis-sandbox-node"
 cache_dirs = ["node_modules", "/home/aegis/.npm"]
+# Ngoài các thư mục trên, image chỉ đọc (#320); npm ghi log vào HOME.
+writable = ["/home/aegis"]
 
 [sonar.properties]
 "sonar.javascript.lcov.reportPaths" = "coverage/lcov.info"

@@ -52,6 +52,8 @@ protected = [
 [sandbox]
 image = "aegis-sandbox-python"
 cache_dirs = [".venv", "/home/aegis/.cache/uv"]
+# Ngoài các thư mục trên, image chỉ đọc (#320); các tool ghi vào HOME.
+writable = ["/home/aegis"]
 
 [sonar.properties]
 "sonar.python.coverage.reportPaths" = "coverage.xml"

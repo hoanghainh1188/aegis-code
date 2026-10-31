@@ -8,14 +8,16 @@
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, Runner, Sandbox};
+use aegis_gate::{CancelToken, Hardening, Runner, Sandbox};
 use aegis_secrets::{EnvSource, MemorySource, Secrets};
 use aegis_server::secrets::DATABASE_URL;
 use aegis_server::webhook::{
     COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
 };
 
+// Only `docker run` is the container; `inspect` and `rm` follow it.
 const FAKE_DOCKER: &str = r#"#!/bin/sh
+[ "$1" = run ] || exit 0
 printf '%s\n' "$@" > "$(dirname "$0")/argv"
 env > "$(dirname "$0")/env"
 "#;
@@ -69,6 +71,7 @@ async fn a_sandbox_container_gets_no_secret_from_either_source() {
             env: vec![("CARGO_TERM_COLOR".into(), "never".into())],
             network: None,
             read_only_mounts: true,
+            hardening: Hardening::default(),
         }),
     };
     let ran = runner

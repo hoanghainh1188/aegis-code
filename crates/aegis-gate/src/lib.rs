@@ -23,12 +23,12 @@ mod sandbox;
 mod sonar;
 
 pub use build_cache::BuildCache;
-pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner};
+pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner, out_of_memory};
 pub use egress::{Egress, EgressSession};
 pub use error::GateError;
 pub use failures::{DID_NOT_FINISH, failing_tests, failing_tests_with};
 pub use gate::{AuditPolicy, FetchStep, GateRequest, ReferenceGroup, Repro, run_gate};
 pub use parts::GatePart;
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
-pub use sandbox::{CLIENT_ENV, Sandbox, WORKDIR};
+pub use sandbox::{CLIENT_ENV, Hardening, Limits, Sandbox, WORKDIR};
 pub use sonar::{Flow, FlowLocation, SonarIssue, SonarStep, TextRange, open_issues};

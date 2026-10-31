@@ -184,13 +184,60 @@ async fn in_the_sandbox_the_test_runs_like_a_gate_step() {
     // The root part's directory is `""`: the tree is mounted as `<root>/`.
     // No language server ran before (#268), so this is the test's own run.
     let root = repo.repo().canonicalize().unwrap();
+    // Removed with its volumes; a test that passed is not asked about its
+    // memory.
+    assert!(!calls.contains("\ninspect "), "{calls}");
+    assert!(
+        calls.contains("\nrm --force --volumes aegis-gate-"),
+        "{calls}"
+    );
     for expected in [
-        "run --rm --name aegis-gate-",
+        "run --name aegis-gate-",
         "--network none --cap-drop ALL --security-opt no-new-privileges",
+        // The run's limits (the defaults here) and the Rust profile's
+        // writable dirs over a read-only image (#320).
+        "--memory 8192m --memory-swap 8192m --cpus 4",
+        "--read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=1024m",
+        "--mount type=volume,destination=/home/aegis \
+         --mount type=volume,destination=/usr/local/cargo",
         &format!("--volume {}/:/work --workdir /work", root.display()),
         "/deps:/usr/local/cargo/registry:ro",
         "--env CARGO_BUILD_JOBS=2 aegis-sandbox-rust cargo test --workspace -- --exact \
          tests::adds_up_prices",
+    ] {
+        assert!(calls.contains(expected), "{expected}\n{calls}");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_runs_limits_bound_the_test_container() {
+    let repo = Scratch::fixture("rust");
+    let docker = fake_docker(&repo.outside().join("bin"));
+    let mut spec = sandboxed(&repo, &docker, 60);
+    spec.args.extend(
+        [
+            "--sandbox-memory-mb",
+            "3072",
+            "--sandbox-cpus",
+            "2",
+            "--sandbox-pids",
+            "512",
+            "--sandbox-tmp-mb",
+            "128",
+        ]
+        .map(str::to_owned),
+    );
+    let tools = McpTools::connect(&[spec]).await.unwrap();
+    let out = tools
+        .call("run_tests", &json!({"test": "tests::adds_up_prices"}))
+        .await;
+    tools.shutdown().await;
+    assert!(!out.is_error, "{}", out.content);
+    let calls = std::fs::read_to_string(repo.outside().join("bin/calls.log")).unwrap();
+    for expected in [
+        "--pids-limit 512 --memory 3072m --memory-swap 3072m --cpus 2",
+        "/tmp:rw,exec,nosuid,nodev,size=128m",
     ] {
         assert!(calls.contains(expected), "{expected}\n{calls}");
     }
@@ -214,7 +261,11 @@ async fn a_test_over_the_time_limit_is_stopped_with_its_container() {
         out.content
     );
     let calls = std::fs::read_to_string(repo.outside().join("bin/calls.log")).unwrap();
-    assert!(calls.contains("\nkill aegis-gate-"), "{calls}");
+    // Stopped and removed, volumes and all.
+    assert!(
+        calls.contains("\nrm --force --volumes aegis-gate-"),
+        "{calls}"
+    );
 }
 
 #[cfg(unix)]
@@ -252,7 +303,7 @@ async fn a_test_of_a_part_runs_in_its_image_with_its_dependency_dirs() {
     let calls = std::fs::read_to_string(repo.outside().join("bin/calls.log")).unwrap();
     let test = calls
         .lines()
-        .find(|l| l.starts_with("run --rm --name aegis-gate-"))
+        .find(|l| l.starts_with("run --name aegis-gate-"))
         .unwrap_or_else(|| panic!("{calls}"));
     let root = repo.repo().canonicalize().unwrap();
     for expected in [
@@ -260,9 +311,12 @@ async fn a_test_of_a_part_runs_in_its_image_with_its_dependency_dirs() {
         format!("--volume {}:/work/.venv:ro", venv.display()),
         format!("--volume {}:/home/aegis/.cache/uv:ro", uv.display()),
         "aegis-sandbox-python python -m pytest".to_owned(),
+        // The part's profile's writable dirs, not the root's (#320).
+        "--mount type=volume,destination=/home/aegis --volume".to_owned(),
     ] {
         assert!(test.contains(&expected), "{expected}\n{test}");
     }
     // The root's mounts are the root's own.
     assert!(!test.contains("/usr/local/cargo/registry"), "{test}");
+    assert!(!test.contains("destination=/usr/local/cargo"), "{test}");
 }

@@ -69,6 +69,9 @@ audit_hosts = ["github.com", "index.crates.io", "static.crates.io"]
 [sandbox]
 image = "aegis-sandbox-rust"
 cache_dirs = ["target", "/usr/local/cargo/registry", "/usr/local/cargo/git"]
+# Ngoài các thư mục trên, image chỉ đọc (#320). `cargo` ghi file khoá
+# `.package-cache` vào CARGO_HOME, các tool ghi vào HOME.
+writable = ["/home/aegis", "/usr/local/cargo"]
 
 # SonarQube tự chạy `cargo clippy` (tắt bằng sonar.rust.clippy.enabled = false);
 # chỉ cần trỏ tới report coverage. Nguồn: docs SonarQube Server 2026.4,

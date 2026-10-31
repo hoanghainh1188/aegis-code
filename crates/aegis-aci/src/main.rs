@@ -1,5 +1,6 @@
 //! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>] [--parts <file.toml>]
-//! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]
+//! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...
+//!  [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]]
 //! [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]`:
 //! serves the ACI tools for
 //! one repo over MCP on stdin/stdout. The overrides file holds the language
@@ -10,21 +11,24 @@
 //! containers, as the root's `--format-mount`s are in the root's. With
 //! `--format-image` the formatter of `edit` and the test of `run_tests` run
 //! in that image, as the gate's steps do: no network, the mounts read-only,
-//! the `--test-env` variables set. `--test-dir` holds `run_tests`' logs.
+//! the `--test-env` variables set, and within the `--sandbox-*` limits (the
+//! run's `[run.sandbox_limits]`, #320; a profile's own memory and CPUs in
+//! their place). `--test-dir` holds `run_tests`' logs.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use aegis_aci::{Aci, AciServer, FormatContainer, RUN_TESTS_TIMEOUT, TestSettings};
-use aegis_gate::Sandbox;
+use aegis_gate::{Limits, Sandbox};
 use aegis_lang::{Language, ProfileOverrides, Profiles, RepoProfiles};
 use rmcp::ServiceExt;
 use serde::Deserialize;
 
 const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
        [--parts <file.toml>]
-       [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...]
+       [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...
+        [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]]
        [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]";
 
 /// How long `run_tests` waits for a test still running to stop when the
@@ -40,6 +44,7 @@ struct Args {
     format_image: Option<String>,
     docker: Option<String>,
     format_mounts: Vec<(String, String)>,
+    limits: Limits,
     test_env: Vec<(String, String)>,
     test_timeout: Option<Duration>,
     test_dir: Option<PathBuf>,
@@ -81,10 +86,22 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                 parsed.test_timeout = Some(Duration::from_secs(secs));
             }
             "--test-dir" => parsed.test_dir = Some(value()?.into()),
+            "--sandbox-memory-mb" => parsed.limits.memory_mb = number(&flag, &value()?)?,
+            "--sandbox-cpus" => parsed.limits.cpus = number(&flag, &value()?)?,
+            "--sandbox-pids" => parsed.limits.pids = number(&flag, &value()?)?,
+            "--sandbox-tmp-mb" => parsed.limits.tmp_mb = number(&flag, &value()?)?,
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
     Ok(parsed)
+}
+
+/// A count above 0.
+fn number<T: std::str::FromStr + Default + PartialEq>(flag: &str, text: &str) -> Result<T, String> {
+    text.parse()
+        .ok()
+        .filter(|n| *n != T::default())
+        .ok_or_else(|| format!("{flag} `{text}` is not a number above 0"))
 }
 
 /// One `[[part]]` of the parts file.
@@ -169,11 +186,12 @@ fn build(args: Args) -> Result<Aci, String> {
     };
     let aci = match (args.format_image, args.docker) {
         (Some(image), docker) => {
-            let container = FormatContainer {
-                docker: docker.unwrap_or_else(|| "docker".into()),
+            let container = FormatContainer::new(
+                docker.unwrap_or_else(|| "docker".into()),
                 image,
-                mounts: args.format_mounts,
-            };
+                args.format_mounts,
+                args.limits,
+            );
             tests.sandbox = Some(test_sandbox(&container));
             aci.with_format_container(container)
         }
@@ -198,6 +216,8 @@ fn test_sandbox(container: &FormatContainer) -> Sandbox {
         env: Vec::new(),
         network: None,
         read_only_mounts: true,
+        // `run_tests` takes the part's (#320).
+        hardening: container.hardening().clone(),
     }
 }
 

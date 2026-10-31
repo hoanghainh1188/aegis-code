@@ -202,6 +202,7 @@ pub(crate) fn run(step: &SonarStep, cx: &Context<'_>) -> Result<StepReport, Gate
                     match e {
                         Exit::Code(c) => format!("exit code {c}"),
                         Exit::Signal => "killed by a signal".into(),
+                        Exit::OutOfMemory { limit_mb } => crate::out_of_memory(limit_mb),
                         _ => "timed out".into(),
                     },
                     tail(&failed.log)

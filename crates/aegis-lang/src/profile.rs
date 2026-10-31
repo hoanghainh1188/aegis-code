@@ -274,6 +274,16 @@ pub struct DependencyTree {
 pub struct Sandbox {
     pub image: String,
     pub cache_dirs: Vec<String>,
+    /// Absolute directories of the image its tools write to (`HOME`, a
+    /// toolchain's lock file): the rest of the image is read-only (#320).
+    #[serde(default)]
+    pub writable: Vec<String>,
+    /// In place of the run's `[run.sandbox_limits]`, where the toolchain
+    /// needs more (or less) than the run gives every container.
+    #[serde(default)]
+    pub memory_mb: Option<u64>,
+    #[serde(default)]
+    pub cpus: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
@@ -429,6 +439,12 @@ impl Profile {
         if let Some(bad) = self.sandbox.cache_dirs.iter().find(|p| escapes(p)) {
             return Err(format!("cache dir `{bad}` must not contain `..`"));
         }
+        for dir in &self.sandbox.writable {
+            check_writable(dir).map_err(|e| format!("sandbox.writable `{dir}`: {e}"))?;
+        }
+        if self.sandbox.memory_mb == Some(0) || self.sandbox.cpus == Some(0) {
+            return Err("sandbox.memory_mb and sandbox.cpus must be above 0".into());
+        }
         if let Some(c) = &self.coverage {
             check_repo_path(&c.path).map_err(|e| format!("coverage.path: {e}"))?;
         }
@@ -476,6 +492,31 @@ impl Profile {
     fn matches_marker(&self, file_name: &str) -> bool {
         self.detect.markers.iter().any(|m| glob_match(m, file_name))
     }
+}
+
+/// A directory of the image a sandbox may write to: absolute, and neither
+/// the root, the tree (`/work`) nor `/tmp`, which have mounts of their own.
+/// It becomes `--mount type=volume,destination=<dir>`: a `,` or `=` would
+/// add options of the mount (`type=bind,source=/`).
+fn check_writable(dir: &str) -> Result<(), String> {
+    if dir.contains([',', '=']) || dir.contains(char::is_whitespace) {
+        return Err("must have no `,`, `=` or whitespace".into());
+    }
+    let path = Path::new(dir);
+    if !path.is_absolute() {
+        return Err("must be absolute".into());
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("must not contain `..`".into());
+    }
+    let mounted = ["/", "/work", "/tmp"];
+    if mounted.iter().any(|m| path == Path::new(m)) || path.starts_with("/work") {
+        return Err("is mounted already (the image root, the tree or /tmp)".into());
+    }
+    Ok(())
 }
 
 /// Image names become a `docker` argument: no option-like or split values.
@@ -1082,6 +1123,58 @@ mod tests {
             ),
             "missing field `test`",
         );
+    }
+
+    #[test]
+    fn rejects_writable_dirs_that_are_not_plain_image_dirs() {
+        // #320: each becomes a volume mount of the sandbox container.
+        let t = rust_text();
+        let writable = "writable = [\"/home/aegis\", \"/usr/local/cargo\"]";
+        assert!(t.contains(writable));
+        for (dir, needle) in [
+            ("home/aegis", "must be absolute"),
+            ("/home/../etc", "must not contain `..`"),
+            ("/", "is mounted already"),
+            ("/work", "is mounted already"),
+            ("/work/target", "is mounted already"),
+            ("/tmp", "is mounted already"),
+            ("/x,type=bind,source=/", "no `,`, `=` or whitespace"),
+            ("/home/aegis readonly", "no `,`, `=` or whitespace"),
+        ] {
+            rejects(
+                &t.replace(writable, &format!("writable = [\"{dir}\"]")),
+                needle,
+            );
+        }
+        rejects(
+            &t.replace(writable, &format!("{writable}\nmemory_mb = 0")),
+            "above 0",
+        );
+        // A profile's own limits, read as given.
+        let p = Profile::from_toml(
+            "test.toml",
+            &t.replace(
+                writable,
+                &format!("{writable}\nmemory_mb = 12288\ncpus = 2"),
+            ),
+        )
+        .unwrap();
+        assert_eq!(p.sandbox.memory_mb, Some(12_288));
+        assert_eq!(p.sandbox.cpus, Some(2));
+    }
+
+    #[test]
+    fn every_builtin_profile_names_where_its_image_is_written() {
+        // The images write to HOME (#320); a profile without it would fail
+        // in its read-only container.
+        let profiles = builtin();
+        for language in profiles.languages() {
+            let writable = &profiles.get(language).unwrap().sandbox.writable;
+            assert!(
+                writable.iter().any(|d| d == "/home/aegis"),
+                "{language:?}: {writable:?}"
+            );
+        }
     }
 
     #[test]

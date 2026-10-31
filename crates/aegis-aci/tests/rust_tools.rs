@@ -6,6 +6,7 @@ mod common;
 use std::process::Command;
 
 use aegis_aci::{EditOutcome, EditRequest, FormatContainer, Hits, LookupAt, Rejection};
+use aegis_gate::Limits;
 use aegis_lang::{Language, ProfileOverrides, StepOverride};
 use common::{Scratch, profile, tool_available};
 
@@ -255,11 +256,12 @@ fn the_sandbox_formatter_reads_the_file_on_stdin_too() {
     let repo = Scratch::fixture("rust");
     repo.write("src/shop.rs", "mod till;\npub fn open() {}\n");
     repo.write("src/shop/till.rs", "pub fn   ring( ){}\n");
-    let mut aci = repo.aci(rust()).with_format_container(FormatContainer {
-        docker: "docker".into(),
-        image: "aegis-sandbox-rust".into(),
-        mounts: vec![],
-    });
+    let mut aci = repo.aci(rust()).with_format_container(FormatContainer::new(
+        "docker".into(),
+        "aegis-sandbox-rust".into(),
+        vec![],
+        Limits::default(),
+    ));
 
     let outcome = aci
         .edit(EditRequest {
@@ -289,11 +291,12 @@ fn sandbox_image_ready() -> bool {
 }
 
 fn sandboxed(repo: &Scratch) -> aegis_aci::Aci {
-    let mut aci = repo.aci(rust()).with_format_container(FormatContainer {
-        docker: "docker".into(),
-        image: "aegis-sandbox-rust".into(),
-        mounts: vec![],
-    });
+    let mut aci = repo.aci(rust()).with_format_container(FormatContainer::new(
+        "docker".into(),
+        "aegis-sandbox-rust".into(),
+        vec![],
+        Limits::default(),
+    ));
     aci.start_language_server().unwrap();
     aci
 }

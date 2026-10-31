@@ -61,6 +61,8 @@ image = "aegis-sandbox-go"
 # phải ghi vào build cache (GOCACHE), nên mỗi container có build cache riêng
 # của nó (#210).
 cache_dirs = ["/go/pkg/mod"]
+# Ngoài các thư mục trên, image chỉ đọc (#320). GOCACHE nằm trong HOME.
+writable = ["/home/aegis"]
 
 [sonar.properties]
 "sonar.go.coverage.reportPaths" = "coverage.out"

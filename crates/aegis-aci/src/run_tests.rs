@@ -9,7 +9,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, Exit, Runner, Sandbox, failing_tests_with, tail};
+use aegis_gate::{CancelToken, Exit, Runner, Sandbox, failing_tests_with, out_of_memory, tail};
 use aegis_lang::{Placeholder, ResolvedProfile};
 
 use crate::AciError;
@@ -107,12 +107,13 @@ impl TestRunner {
             env: self.settings.env.clone(),
             timeout: self.settings.timeout.min(RUN_TESTS_TIMEOUT),
             cancel: self.cancel.clone(),
-            sandbox: self
-                .settings
-                .sandbox
-                .clone()
-                .map(|s| match part.dir.is_empty() {
-                    true => s,
+            sandbox: self.settings.sandbox.clone().map(|s| {
+                // Locked down as the part's formatter is (#320).
+                let hardening = workspace
+                    .format_container_of(part)
+                    .map_or_else(|| s.hardening.clone(), |c| c.hardening().clone());
+                match part.dir.is_empty() {
+                    true => Sandbox { hardening, ..s },
                     // The part's image and dependency dirs (#198).
                     false => Sandbox {
                         image: part.profile.image.clone(),
@@ -121,9 +122,11 @@ impl TestRunner {
                             .iter()
                             .map(|(host, inside)| (host.into(), inside.clone()))
                             .collect(),
+                        hardening,
                         ..s
                     },
-                }),
+                }
+            }),
         };
         let tmp = tmp.display().to_string();
         let ran = runner
@@ -172,6 +175,12 @@ impl fmt::Display for TestRun {
                 self.test
             )?,
             Exit::Cancelled => write!(f, "CANCELLED `{}`", self.test)?,
+            Exit::OutOfMemory { limit_mb } => write!(
+                f,
+                "FAILED `{}` ({}, {secs}s)",
+                self.test,
+                out_of_memory(limit_mb)
+            )?,
         }
         if !self.failing.is_empty() {
             f.write_str("\nfailing tests:")?;
