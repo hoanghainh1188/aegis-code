@@ -15,6 +15,9 @@
     <a href="/">KPIs</a>
     <a href="/jobs">Jobs</a>
     <a href="/me/tokens">Tokens</a>
+    {%- if me.is_admin %}
+    <a href="/admin/repos">Admin</a>
+    {%- endif %}
   </nav>
   <form class="session" method="post" action="/auth/logout">
     {% include "form_guard.html" %}

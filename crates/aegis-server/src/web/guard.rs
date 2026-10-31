@@ -42,6 +42,8 @@ impl Nonce {
 pub struct Me {
     pub name: String,
     pub csrf: String,
+    /// The masthead offers the admin pages (#329).
+    pub is_admin: bool,
 }
 
 /// The hash of the request's session token, for signing out.
@@ -161,6 +163,7 @@ async fn signed_in(auth: &Auth, request: Request, form: bool) -> Result<Request,
     extensions.insert(Me {
         name: session.user.name.clone(),
         csrf: session.csrf_token,
+        is_admin: session.user.is_admin,
     });
     if let Some(hash) = token {
         extensions.insert(SessionToken(hash));

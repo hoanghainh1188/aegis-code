@@ -226,3 +226,6 @@ pre.diff .add { background: var(--pass-wash); }
 pre.diff .del { background: var(--fail-wash); }
 pre.diff .hunk { color: var(--accent); }
 pre.diff .meta { color: var(--ink-soft); }
+
+/* Admin pages (#329). */
+.band form.inline { margin-bottom: var(--space-3); }

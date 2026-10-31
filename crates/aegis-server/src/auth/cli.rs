@@ -37,7 +37,9 @@ pub fn is_command(first: &str) -> bool {
     )
 }
 
-fn kind_of(who: &str) -> UserKind {
+/// A person when `who` is an e-mail, else a service; the pages give roles
+/// the same way (#329).
+pub(crate) fn kind_of(who: &str) -> UserKind {
     if who.contains('@') {
         UserKind::Person
     } else {
