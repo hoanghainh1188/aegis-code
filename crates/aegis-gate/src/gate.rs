@@ -15,14 +15,14 @@ use std::time::Duration;
 
 use aegis_lang::{
     DependencyTree, Placeholder, Profile, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
-    check_advisory, check_license, default_licenses, deny_config, in_dir, join_dir,
+    TestOutput, check_advisory, check_license, default_licenses, deny_config, in_dir, join_dir,
     new_dependency_violations, osv_config, part_label, read_lockfile,
 };
 
 use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner};
 use crate::egress::{Egress, EgressSession};
-use crate::failures::{failing_tests_with, names_test, ran_tests};
+use crate::failures::{failing_tests_with, missed, names_test, ran_tests, selector};
 use crate::findings::new_findings;
 use crate::git::{self, BaseTree, Change};
 use crate::integrity::Snapshot;
@@ -214,6 +214,10 @@ struct Run<'a> {
     /// Build caches to refresh from the base copy, with their part's dir.
     seeded: Vec<(BuildCache, String)>,
 }
+
+/// The reruns of suspected new failures, and those that failed in every
+/// one (#306).
+type Reruns = (Vec<Ran>, BTreeSet<String>);
 
 /// `^(a|b)$` matching exactly `names`, regex characters escaped.
 fn exact_regex(names: &[&str]) -> String {
@@ -1004,20 +1008,18 @@ impl<'a> Run<'a> {
             );
             return Ok(report(name, StepStatus::Passed, &[&patched, &base], detail));
         }
-        // A test that fails once and passes on the next run is flaky, not
-        // broken by the patch (#104): only failures of both runs count.
-        let again = self.run_in(&argv, false, "test-rerun")?;
-        if again.exit == Exit::Cancelled {
+        // A test that fails once and passes on a later run is flaky, not
+        // broken by the patch (#104): the new failures run again, on their
+        // own when the runner can select them (#306), and only those that
+        // fail every time count.
+        let Some((again, failing_again)) = self.rerun(&new, format, &argv)? else {
             return Ok(StepReport::skipped(name, Skip::Cancelled));
-        }
-        let failing_again = if again.exit.success() {
-            BTreeSet::new()
-        } else {
-            read(&again)
         };
         let (broken, flaky): (BTreeSet<String>, BTreeSet<String>) =
             new.into_iter().partition(|t| failing_again.contains(t));
-        let ran = [&patched, &base, &again];
+        let last = again.last().expect("at least one rerun");
+        let mut ran: Vec<&Ran> = vec![&patched, &base];
+        ran.extend(again.iter());
         if broken.is_empty() {
             let detail = format!(
                 "{} tests failed once and passed when run again (flaky):\n{}",
@@ -1033,7 +1035,7 @@ impl<'a> Run<'a> {
                     "{} tests fail that pass on the base revision:\n{}\n\n{}",
                     broken.len(),
                     list(&broken),
-                    tail(&again.log)
+                    tail(&last.log)
                 ),
             );
         };
@@ -1092,9 +1094,68 @@ impl<'a> Run<'a> {
                 "{} tests fail that pass on the base revision:\n{}\n\n{hint}\n\n{}",
                 broken.len(),
                 list(&broken),
-                tail(&again.log)
+                tail(&last.log)
             ),
         )
+    }
+
+    /// Runs `suspects` again: alone through the profile's `repro_test` and
+    /// the runner's own selector, up to `reruns` times while any still
+    /// fails; otherwise, or when such a run shows it did not run them all
+    /// or read no failing test, the whole suite once. The runs, and the
+    /// suspects that failed in every one; `None` when cancelled.
+    fn rerun(
+        &self,
+        suspects: &BTreeSet<String>,
+        format: TestOutput,
+        test_argv: &[String],
+    ) -> Result<Option<Reruns>, GateError> {
+        let harness = self.part.profile.gate.harness.as_ref();
+        let read = |ran: &Ran| failing_tests_with(format, harness, &read_log(&ran.log));
+        let gate = &self.part.profile.gate;
+        let selected = match (selector(format, suspects), gate.repro_test.command()) {
+            (Some(test), Some(repro)) => Some(repro.render(&[(Placeholder::Test, &test)])?),
+            _ => None,
+        };
+        let mut runs = Vec::new();
+        let mut still = suspects.clone();
+        if let Some(argv) = selected {
+            for i in 1..=gate.reruns {
+                let ran = self.run_in(&argv, false, &format!("test-rerun-{i}"))?;
+                if ran.exit == Exit::Cancelled {
+                    return Ok(None);
+                }
+                let (failing, unclear) = if ran.exit.success() {
+                    let output = read_log(&ran.log);
+                    (BTreeSet::new(), missed(format, &output, suspects))
+                } else {
+                    let failing = read(&ran);
+                    let unclear = failing.is_empty();
+                    (failing, unclear)
+                };
+                runs.push(ran);
+                if unclear {
+                    still = suspects.clone();
+                    break;
+                }
+                still.retain(|t| failing.contains(t));
+                if still.is_empty() || i == gate.reruns {
+                    return Ok(Some((runs, still)));
+                }
+            }
+        }
+        let again = self.run_in(test_argv, false, "test-rerun")?;
+        if again.exit == Exit::Cancelled {
+            return Ok(None);
+        }
+        let failing = if again.exit.success() {
+            BTreeSet::new()
+        } else {
+            read(&again)
+        };
+        still.retain(|t| failing.contains(t));
+        runs.push(again);
+        Ok(Some((runs, still)))
     }
 
     /// Rewrites the reference output of `names` with the profile's command,

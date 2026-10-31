@@ -51,6 +51,8 @@ pub struct GateOverrides {
     /// The only directories `update_references` may write.
     #[serde(default)]
     pub reference_dirs: Vec<String>,
+    /// How many times a suspected new failure runs again (#306).
+    pub reruns: Option<u32>,
 }
 
 /// How the gate updates the reference outputs of declared tests (#105).
@@ -130,7 +132,15 @@ pub struct GatePlan {
     pub test_output: Option<TestOutput>,
     pub harness: Option<CustomHarness>,
     pub update_references: Option<ReferenceUpdate>,
+    /// Runs of a suspected new failure on its own, each through
+    /// `repro_test`; it is broken only when it fails in all (#306).
+    pub reruns: u32,
 }
+
+/// Reruns of a suspected new failure when neither profile nor repo says.
+pub const DEFAULT_RERUNS: u32 = 3;
+/// The most a profile or repo may ask for: each is a run of the tests.
+pub const MAX_RERUNS: u32 = 10;
 
 impl GatePlan {
     /// Whether `output` of `repro_test` shows it ran no test: the id
@@ -194,7 +204,13 @@ impl Profile {
             },
             harness: harness(o).map_err(invalid)?,
             update_references: reference_update(o).map_err(invalid)?,
+            reruns: o.reruns.or(self.gate.reruns).unwrap_or(DEFAULT_RERUNS),
         };
+        if !(1..=MAX_RERUNS).contains(&gate.reruns) {
+            return Err(invalid(format!(
+                "gate.reruns must be between 1 and {MAX_RERUNS}"
+            )));
+        }
         if gate.harness.is_some() && gate.test_output.is_none() {
             return Err(invalid(
                 "gate.test_failure reads on top of a test_output".into(),
@@ -210,6 +226,7 @@ impl Profile {
             coverage: gate.coverage.command().cloned(),
             coverage_skip: Vec::new(),
             test_output: gate.test_output,
+            reruns: Some(gate.reruns),
         })
         .map_err(invalid)?;
 

@@ -77,15 +77,19 @@ conventions = """
 # The test step leaves out the classes whose results change from run to run
 # under the suite's 7-10 minute load (timeouts, TTLs, retries against the
 # in-process server): in three runs of StackExchange.Redis-2689 their
-# failures differed each time, and the gate's single rerun cannot tell them
-# from the patch's (#259). Other tests still time out now and then against
-# the in-process server (RedisValueStorageKindUnitTests did in the next
-# run); rerunning only the suspects is #306. The filter is VSTest's, which
-# 2689's base uses.
+# failures differed each time (#259). Other tests still time out now and
+# then against the in-process server (RedisValueStorageKindUnitTests did);
+# the gate runs such suspects again on their own until they pass (#306).
+# The filter is VSTest's, which 2689's base uses.
 [repo.overrides]
 fetch = ["dotnet", "restore", "StackExchange.Redis.slnx", "-p:NuGetAudit=false"]
 
 [repo.overrides.gate]
+# Off as for Polly: 2689's base still runs VSTest, where the profile's
+# coverage runs at the root, which holds Build.csproj next to the solution
+# (MSB1011), and would run frameworks the image lacks. The replay first got
+# that far once the test step compared with the base (#306).
+coverage = false
 format = ["dotnet", "format", "StackExchange.Redis.slnx", "--verify-no-changes", "--no-restore"]
 lint = ["dotnet", "build", "StackExchange.Redis.slnx", "--no-restore", "-warnaserror"]
 repro_test = ["sh", "-c", "FLAKY='FullyQualifiedName!~IncrexIntegrationTests&FullyQualifiedName!~IncrexUnitTests&FullyQualifiedName!~RetryPolicyUnitTests&FullyQualifiedName!~InProcessDatabaseUnitTests&FullyQualifiedName!~Resp3HandshakeTests&FullyQualifiedName!~RedisValueSequenceServerTests'; p=tests/StackExchange.Redis.Tests/StackExchange.Redis.Tests.csproj; grep -qs Microsoft.Testing.Platform global.json && p=\"--project $p\"; exec dotnet test --no-restore $p --framework net10.0 --filter \"$1\" -p:CollectCoverage=false -p:NuGetAudit=false -p:NBGV_GitEngine=Disabled", "sh", "{test}"]

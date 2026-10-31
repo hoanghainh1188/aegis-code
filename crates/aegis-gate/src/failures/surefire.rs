@@ -2,7 +2,7 @@
 //! elapsed: … <<< FAILURE!` (`<<< ERROR!` for an exception), whatever the
 //! JUnit or TestNG provider.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{DID_NOT_FINISH, plain};
 use crate::gate::glob;
@@ -76,6 +76,43 @@ fn is_class(name: &str, pattern: &str) -> bool {
     glob(pattern, name) || (!pattern.contains('.') && glob(pattern, simple))
 }
 
+/// `-Dtest=pkg.Class#m1+m2,pkg.Other`: a parameterized case by its
+/// method, a class that failed as a whole by itself.
+pub(super) fn selector(ids: &BTreeSet<String>) -> Option<String> {
+    // Each class with its methods; `None` for a class that failed whole.
+    let mut classes: BTreeMap<&str, Option<BTreeSet<&str>>> = BTreeMap::new();
+    for id in ids {
+        let name = id.split_once('(').map_or(id.as_str(), |(name, _)| name);
+        let (class, method) = match name.rsplit_once('.') {
+            Some((class, method)) if method.starts_with(|c: char| !c.is_ascii_uppercase()) => {
+                (class, Some(method))
+            }
+            _ => (name, None),
+        };
+        let entry = classes
+            .entry(class)
+            .or_insert_with(|| Some(BTreeSet::new()));
+        match (method, entry.as_mut()) {
+            (Some(method), Some(methods)) => {
+                methods.insert(method);
+            }
+            _ => *entry = None,
+        }
+    }
+    // `Class*`: Surefire reports a nested class's tests under the outer
+    // one, and `Class` alone would not run them.
+    let patterns: Vec<String> = classes
+        .into_iter()
+        .map(|(class, methods)| match methods {
+            Some(m) if !m.is_empty() => {
+                format!("{class}*#{}", m.into_iter().collect::<Vec<_>>().join("+"))
+            }
+            _ => format!("{class}*"),
+        })
+        .collect();
+    (!patterns.is_empty()).then(|| patterns.join(","))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,6 +155,17 @@ failsAssert(ex.OldTest)  Time elapsed: 0.01 sec  <<< FAILURE!
         assert_eq!(
             failing(out).into_iter().collect::<Vec<_>>(),
             ["surefire::<did not finish>"]
+        );
+    }
+
+    #[test]
+    fn selects_methods_by_class() {
+        assert_eq!(
+            selector(&failing(LOG)).as_deref(),
+            Some(
+                "ex.CartTest*#failsAssert+innerFails+param+throwsError,ex.OldSetupTest*,\
+                 ex.OldTest*#failsAssert+throwsError,ex.SetupTest*"
+            )
         );
     }
 

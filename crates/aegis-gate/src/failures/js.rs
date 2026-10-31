@@ -55,6 +55,19 @@ pub(super) fn names(id: &str, test: &str) -> bool {
     file.contains(test) || name == test || name.ends_with(&format!(" > {test}"))
 }
 
+/// The one file every failing test is in: both runners take a file filter,
+/// not test names.
+pub(super) fn selector(ids: &BTreeSet<String>) -> Option<String> {
+    let files: BTreeSet<&str> = ids
+        .iter()
+        .map(|id| id.split_once(" > ").map_or(id.as_str(), |(file, _)| file))
+        .collect();
+    match files.len() {
+        1 => files.first().map(|f| (*f).to_owned()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +144,23 @@ PASS src/fine.test.js
         assert_eq!(
             failing(out).into_iter().collect::<Vec<_>>(),
             ["<unhandled errors>"]
+        );
+    }
+
+    #[test]
+    fn selects_the_one_file() {
+        let ids = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect();
+        assert_eq!(
+            selector(&ids(&["src/a.test.ts > x > y", "src/a.test.ts > z"])).as_deref(),
+            Some("src/a.test.ts")
+        );
+        assert_eq!(
+            selector(&ids(&["src/a.test.ts"])).as_deref(),
+            Some("src/a.test.ts")
+        );
+        assert_eq!(
+            selector(&ids(&["src/a.test.ts > x", "src/b.test.ts > y"])),
+            None
         );
     }
 
