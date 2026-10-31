@@ -1,0 +1,259 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 760" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070b12" />
+      <stop offset="50%" stop-color="#0a0f1a" />
+      <stop offset="100%" stop-color="#05080f" />
+    </linearGradient>
+
+    <linearGradient id="borderGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.55" />
+      <stop offset="50%" stop-color="#00BBF9" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#4361EE" stop-opacity="0.55" />
+    </linearGradient>
+
+    <linearGradient id="crateCard" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111a29" />
+      <stop offset="100%" stop-color="#0a101b" />
+    </linearGradient>
+
+    <linearGradient id="lifecycleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#042f2e" />
+      <stop offset="50%" stop-color="#0c2d48" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#1e293b" stroke-width="0.6" stroke-opacity="0.45" />
+    </pattern>
+
+    <marker id="arrCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#00F5D4" />
+    </marker>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#38BDF8" />
+    </marker>
+    <marker id="arrPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#A855F7" />
+    </marker>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#F59E0B" />
+    </marker>
+  </defs>
+
+  <style>
+    .font-sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace; }
+    .title { font-size: 16px; font-weight: 700; fill: #F8FAFC; letter-spacing: 1.2px; }
+    .subtitle { font-size: 11.5px; font-weight: 500; fill: #94A3B8; }
+    .layer-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; }
+    .crate-name { font-size: 13px; font-weight: 700; fill: #00F5D4; }
+    .crate-role { font-size: 11px; font-weight: 600; fill: #E2E8F0; }
+    .crate-desc { font-size: 10px; font-weight: 400; fill: #94A3B8; }
+    .badge { font-size: 9.5px; font-weight: 700; }
+  </style>
+
+  <!-- Canvas -->
+  <rect x="2" y="2" width="1116" height="756" rx="14" fill="url(#bgGrad)" stroke="url(#borderGlow)" stroke-width="1.5" />
+  <rect x="4" y="4" width="1112" height="752" rx="12" fill="url(#grid)" />
+
+  <!-- Header -->
+  <rect x="20" y="16" width="1080" height="46" rx="8" fill="#0d1522" stroke="#1e293b" stroke-width="1" />
+  <circle cx="42" cy="39" r="6" fill="#00BBF9" />
+  <text x="58" y="36" class="font-sans title">INTERNAL COMPONENT &amp; CRATE TOPOLOGY (16 RUST CRATES)</text>
+  <text x="58" y="52" class="font-sans subtitle">Layered architecture inside the Cargo workspace: from CLI/HTTP entrypoints down to MCP tool servers and sandboxed verification</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 1: ENTRYPOINTS & DEVELOPER CLIENTS                                -->
+  <!-- ======================================================================= -->
+  <rect x="20" y="74" width="1080" height="86" rx="10" fill="#090e17" stroke="#38BDF8" stroke-opacity="0.35" stroke-width="1.2" />
+  <text x="34" y="92" class="font-mono layer-tag" fill="#38BDF8">LAYER 1 · ENTRYPOINTS &amp; CLIENTS</text>
+
+  <!-- Crate: aegis-client -->
+  <rect x="34" y="100" width="335" height="50" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="34" y="100" width="4" height="50" rx="2" fill="#38BDF8" />
+  <text x="48" y="118" class="font-mono crate-name" fill="#38BDF8">crates/aegis-client</text>
+  <rect x="255" y="105" width="104" height="15" rx="3" fill="#0c2d48" />
+  <text x="307" y="116" text-anchor="middle" class="font-mono badge" fill="#38BDF8">bin: aegis-job</text>
+  <text x="48" y="133" class="font-sans crate-role">Developer Terminal Client (npm &amp; Cargo)</text>
+  <text x="48" y="145" class="font-sans crate-desc">login · submit · watch · list · cancel · logs via REST</text>
+
+  <!-- Crate: aegis-cli -->
+  <rect x="386" y="100" width="335" height="50" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="386" y="100" width="4" height="50" rx="2" fill="#38BDF8" />
+  <text x="400" y="118" class="font-mono crate-name" fill="#38BDF8">crates/aegis-cli</text>
+  <rect x="625" y="105" width="84" height="15" rx="3" fill="#0c2d48" />
+  <text x="667" y="116" text-anchor="middle" class="font-mono badge" fill="#38BDF8">bin: aegis</text>
+  <text x="400" y="133" class="font-sans crate-role">Direct Local &amp; Evaluation Runner</text>
+  <text x="400" y="145" class="font-sans crate-desc">Runs single issues or KPI benchmark suites without server</text>
+
+  <!-- Web Browser / Webhook Trigger -->
+  <rect x="738" y="100" width="348" height="50" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="738" y="100" width="4" height="50" rx="2" fill="#00F5D4" />
+  <text x="752" y="118" class="font-mono crate-name">Webhooks &amp; Browser Clients</text>
+  <rect x="975" y="105" width="100" height="15" rx="3" fill="#042f2e" />
+  <text x="1025" y="116" text-anchor="middle" class="font-mono badge" fill="#00F5D4">HTTPS / OIDC</text>
+  <text x="752" y="133" class="font-sans crate-role">GitHub/GitLab Events &amp; Reviewer Portal</text>
+  <text x="752" y="145" class="font-sans crate-desc">HMAC-verified webhooks &amp; interactive htmx dashboard</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 2: PLATFORM SERVICE, PERSISTENCE & SECRETS                        -->
+  <!-- ======================================================================= -->
+  <rect x="20" y="176" width="1080" height="132" rx="10" fill="#090e17" stroke="#00F5D4" stroke-opacity="0.4" stroke-width="1.2" />
+  <text x="34" y="194" class="font-mono layer-tag" fill="#00F5D4">LAYER 2 · PLATFORM SERVICE, TRANSACTIONAL QUEUE &amp; FINANCIAL LEDGER</text>
+
+  <!-- Crate: aegis-server -->
+  <rect x="34" y="204" width="430" height="92" rx="7" fill="url(#crateCard)" stroke="#00F5D4" stroke-opacity="0.5" />
+  <rect x="34" y="204" width="4" height="92" rx="2" fill="#00F5D4" />
+  <text x="48" y="222" class="font-mono crate-name">crates/aegis-server</text>
+  <rect x="316" y="209" width="136" height="16" rx="3" fill="#042f2e" />
+  <text x="384" y="220" text-anchor="middle" class="font-mono badge" fill="#00F5D4">--role api|worker|all</text>
+  <text x="48" y="239" class="font-sans crate-role">Unified Service Binary (Axum + Askama + htmx + Prometheus)</text>
+  <text x="48" y="255" class="font-sans crate-desc">• HTTP REST API (/api/v1/*) with token-bucket rate limiting</text>
+  <text x="48" y="269" class="font-sans crate-desc">• Webhook receiver (GitHub/GitLab) &amp; Poller scheduler (Jira/Backlog/Sonar)</text>
+  <text x="48" y="283" class="font-sans crate-desc">• Worker pool leasing jobs &amp; SSR Dashboard with OIDC SSO</text>
+
+  <!-- Crate: aegis-store -->
+  <rect x="478" y="204" width="230" height="92" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="478" y="204" width="4" height="92" rx="2" fill="#10B981" />
+  <text x="492" y="222" class="font-mono crate-name" fill="#34D399">crates/aegis-store</text>
+  <text x="492" y="239" class="font-sans crate-role">PostgreSQL Data &amp; Queue</text>
+  <text x="492" y="255" class="font-sans crate-desc">• Compile-time checked sqlx</text>
+  <text x="492" y="269" class="font-sans crate-desc">• FOR UPDATE SKIP LOCKED</text>
+  <text x="492" y="283" class="font-sans crate-desc">• Leases, repos, tokens, audit</text>
+
+  <!-- Crate: aegis-secrets -->
+  <rect x="722" y="204" width="175" height="92" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="722" y="204" width="4" height="92" rx="2" fill="#F59E0B" />
+  <text x="736" y="222" class="font-mono crate-name" fill="#FBBF24">crates/aegis-secrets</text>
+  <text x="736" y="239" class="font-sans crate-role">Credential Manager</text>
+  <text x="736" y="255" class="font-sans crate-desc">• AWS Secrets Manager</text>
+  <text x="736" y="269" class="font-sans crate-desc">• On-prem file secrets</text>
+  <text x="736" y="283" class="font-sans crate-desc">• Live runtime rotation</text>
+
+  <!-- Crate: aegis-ledger -->
+  <rect x="911" y="204" width="175" height="92" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="911" y="204" width="4" height="92" rx="2" fill="#EC4899" />
+  <text x="925" y="222" class="font-mono crate-name" fill="#F472B6">crates/aegis-ledger</text>
+  <text x="925" y="239" class="font-sans crate-role">Cost &amp; Token Ledger</text>
+  <text x="925" y="255" class="font-sans crate-desc">• Per-call token records</text>
+  <text x="925" y="269" class="font-sans crate-desc">• Cache hit/write math</text>
+  <text x="925" y="283" class="font-sans crate-desc">• Exact USD cost tracking</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 3: CENTRAL COORDINATOR (aegis-lifecycle)                          -->
+  <!-- ======================================================================= -->
+  <rect x="20" y="324" width="1080" height="72" rx="10" fill="url(#lifecycleGrad)" stroke="#00F5D4" stroke-opacity="0.7" stroke-width="1.5" />
+  <text x="36" y="345" class="font-mono crate-name" font-size="14">crates/aegis-lifecycle · CENTRAL ISSUE WORKFLOW COORDINATOR</text>
+  <rect x="860" y="331" width="224" height="18" rx="4" fill="#091320" stroke="#00F5D4" stroke-width="0.8" />
+  <text x="972" y="343" text-anchor="middle" class="font-mono badge" fill="#00F5D4">Orchestrates all core crates below</text>
+  <text x="36" y="364" class="font-sans crate-role">Executes one complete job attempt: Git worktree setup → Light Triage → Call-Graph Indexing → Agent Loop → 6-Step Gate → Escalation → PR or Stop</text>
+  <text x="36" y="381" class="font-mono crate-desc" fill="#CBD5E1">Depends on: aegis-orchestrator · aegis-router · aegis-provider · aegis-aci · aegis-lang · aegis-gate · aegis-pr · aegis-ledger · aegis-store · aegis-tracker · aegis-sonar-batch</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 4: AGENT EXECUTION ENGINE & CODE INTELLIGENCE                     -->
+  <!-- ======================================================================= -->
+
+  <!-- Left Half: Core Agent Loop -->
+  <rect x="20" y="414" width="530" height="178" rx="10" fill="#090e17" stroke="#A855F7" stroke-opacity="0.45" stroke-width="1.2" />
+  <text x="34" y="432" class="font-mono layer-tag" fill="#C084FC">LAYER 4A · AGENT LOOP, ROUTING &amp; LLM PROVIDERS</text>
+
+  <!-- aegis-orchestrator -->
+  <rect x="34" y="442" width="244" height="136" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="34" y="442" width="4" height="136" rx="2" fill="#A855F7" />
+  <text x="48" y="460" class="font-mono crate-name" fill="#C084FC">crates/aegis-orchestrator</text>
+  <text x="48" y="477" class="font-sans crate-role">Session Loop &amp; Context Compaction</text>
+  <text x="48" y="494" class="font-sans crate-desc">• Multi-turn state machine</text>
+  <text x="48" y="509" class="font-sans crate-desc">• MCP client (rmcp child-process)</text>
+  <text x="48" y="524" class="font-sans crate-desc">• Collapses old tool outputs at</text>
+  <text x="48" y="538" class="font-sans crate-desc">  60% context window threshold</text>
+  <text x="48" y="553" class="font-sans crate-desc">• Prompt nudge after 8 turns</text>
+  <text x="48" y="567" class="font-sans crate-desc">  without running tests</text>
+
+  <!-- aegis-router -->
+  <rect x="292" y="442" width="244" height="64" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="292" y="442" width="4" height="64" rx="2" fill="#EC4899" />
+  <text x="306" y="460" class="font-mono crate-name" fill="#F472B6">crates/aegis-router</text>
+  <text x="306" y="476" class="font-sans crate-role">Tier Escalation &amp; Circuit Breaker</text>
+  <text x="306" y="491" class="font-sans crate-desc">Light → Core → Expert · Stops at $4 / 40 calls</text>
+
+  <!-- aegis-provider -->
+  <rect x="292" y="514" width="244" height="64" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="292" y="514" width="4" height="64" rx="2" fill="#818CF8" />
+  <text x="306" y="532" class="font-mono crate-name" fill="#818CF8">crates/aegis-provider</text>
+  <text x="306" y="548" class="font-sans crate-role">LLM Clients &amp; Prompt Caching</text>
+  <text x="306" y="563" class="font-sans crate-desc">Claude · Bedrock (jp.* guard) · BP1–BP4</text>
+
+  <!-- Right Half: Code Intelligence & Sandboxed Gate -->
+  <rect x="570" y="414" width="530" height="178" rx="10" fill="#090e17" stroke="#F59E0B" stroke-opacity="0.45" stroke-width="1.2" />
+  <text x="584" y="432" class="font-mono layer-tag" fill="#FBBF24">LAYER 4B · MCP CODE INTELLIGENCE &amp; DOCKER GATE</text>
+
+  <!-- aegis-aci -->
+  <rect x="584" y="442" width="244" height="84" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="584" y="442" width="4" height="84" rx="2" fill="#00F5D4" />
+  <text x="598" y="460" class="font-mono crate-name">crates/aegis-aci</text>
+  <text x="598" y="476" class="font-sans crate-role">Bounded Agent-Computer Interface</text>
+  <text x="598" y="491" class="font-sans crate-desc">• MCP stdio server (open 100 lines)</text>
+  <text x="598" y="505" class="font-sans crate-desc">• search_symbol, LSP find_definition</text>
+  <text x="598" y="519" class="font-sans crate-desc">• Syntax-guarded edit &amp; run_tests</text>
+
+  <!-- codebase-memory-mcp -->
+  <rect x="584" y="534" width="244" height="44" rx="7" fill="#0d1826" stroke="#00BBF9" stroke-opacity="0.4" stroke-dasharray="4 2" />
+  <text x="598" y="552" class="font-mono crate-name" fill="#38BDF8">codebase-memory-mcp (External MCP)</text>
+  <text x="598" y="568" class="font-sans crate-desc">SQLite Call Graph: CALLS, IMPORTS, TESTS</text>
+
+  <!-- aegis-lang -->
+  <rect x="842" y="442" width="244" height="64" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="842" y="442" width="4" height="64" rx="2" fill="#38BDF8" />
+  <text x="856" y="460" class="font-mono crate-name" fill="#38BDF8">crates/aegis-lang</text>
+  <text x="856" y="476" class="font-sans crate-role">6 Language Profiles &amp; Tree-sitter</text>
+  <text x="856" y="491" class="font-sans crate-desc">Rust · Python · TS/JS · Java · Go · C#</text>
+
+  <!-- aegis-gate -->
+  <rect x="842" y="514" width="244" height="64" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="842" y="514" width="4" height="64" rx="2" fill="#F59E0B" />
+  <text x="856" y="532" class="font-mono crate-name" fill="#FBBF24">crates/aegis-gate</text>
+  <text x="856" y="548" class="font-sans crate-role">6-Step Docker Verification Runner</text>
+  <text x="856" y="563" class="font-sans crate-desc">--network none · Flaky test re-runner</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 5: EXTERNAL DELIVERY, TRACKERS & SONAR CLUSTERING                 -->
+  <!-- ======================================================================= -->
+  <rect x="20" y="608" width="1080" height="134" rx="10" fill="#090e17" stroke="#10B981" stroke-opacity="0.4" stroke-width="1.2" />
+  <text x="34" y="626" class="font-mono layer-tag" fill="#34D399">LAYER 5 · PR SYNTHESIS, ISSUE TRACKER SYNC &amp; SONARQUBE BATCHING</text>
+
+  <!-- aegis-pr -->
+  <rect x="34" y="636" width="340" height="92" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="34" y="636" width="4" height="92" rx="2" fill="#00F5D4" />
+  <text x="48" y="654" class="font-mono crate-name">crates/aegis-pr</text>
+  <text x="48" y="671" class="font-sans crate-role">Git Branching &amp; Pull Request Synthesizer</text>
+  <text x="48" y="687" class="font-sans crate-desc">• Pushes branch agent/&lt;issue-id&gt; to fork or upstream</text>
+  <text x="48" y="701" class="font-sans crate-desc">• Formats structured RCA, diff rationale &amp; Golden Master list</text>
+  <text x="48" y="715" class="font-sans crate-desc">• Appends review-round commits without force-pushing</text>
+
+  <!-- aegis-tracker -->
+  <rect x="390" y="636" width="340" height="92" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="390" y="636" width="4" height="92" rx="2" fill="#38BDF8" />
+  <text x="404" y="654" class="font-mono crate-name" fill="#38BDF8">crates/aegis-tracker</text>
+  <text x="404" y="671" class="font-sans crate-role">Enterprise Issue Tracker Connectors</text>
+  <text x="404" y="687" class="font-sans crate-desc">• Queries Jira (JQL) and Backlog filters on schedule</text>
+  <text x="404" y="701" class="font-sans crate-desc">• Sanitizes untrusted ticket descriptions &amp; logs</text>
+  <text x="404" y="715" class="font-sans crate-desc">• Writes final PR link and job outcome back to ticket</text>
+
+  <!-- aegis-sonar-batch -->
+  <rect x="746" y="636" width="340" height="92" rx="7" fill="url(#crateCard)" stroke="#1e293b" />
+  <rect x="746" y="636" width="4" height="92" rx="2" fill="#818CF8" />
+  <text x="760" y="654" class="font-mono crate-name" fill="#818CF8">crates/aegis-sonar-batch</text>
+  <text x="760" y="671" class="font-sans crate-role">Static Analysis Alert Clustering</text>
+  <text x="760" y="687" class="font-sans crate-desc">• Clusters single-location warnings by enclosing AST node</text>
+  <text x="760" y="701" class="font-sans crate-desc">• Clusters security/taint warnings by dataflow trace</text>
+  <text x="760" y="715" class="font-sans crate-desc">• Merges verified fixes into an integration branch</text>
+
+  <!-- Inter-layer Flow Arrows -->
+  <line x1="200" y1="150" x2="200" y2="200" stroke="#38BDF8" stroke-width="1.6" marker-end="url(#arrBlue)" />
+  <line x1="550" y1="150" x2="550" y2="320" stroke="#38BDF8" stroke-width="1.6" stroke-dasharray="4 2" marker-end="url(#arrBlue)" />
+  <line x1="300" y1="296" x2="300" y2="320" stroke="#00F5D4" stroke-width="1.8" marker-end="url(#arrCyan)" />
+  <line x1="280" y1="396" x2="280" y2="412" stroke="#A855F7" stroke-width="1.8" marker-end="url(#arrPurple)" />
+  <line x1="820" y1="396" x2="820" y2="412" stroke="#F59E0B" stroke-width="1.8" marker-end="url(#arrAmber)" />
+  <path d="M 278 490 L 580 490" fill="none" stroke="#00F5D4" stroke-width="1.5" stroke-dasharray="3 2" marker-end="url(#arrCyan)" />
+</svg>

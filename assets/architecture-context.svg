@@ -1,0 +1,316 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 680" width="100%" height="100%">
+  <defs>
+    <!-- Background & Surface Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070b12" />
+      <stop offset="50%" stop-color="#0a0f1a" />
+      <stop offset="100%" stop-color="#05080f" />
+    </linearGradient>
+
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F5D4" />
+      <stop offset="50%" stop-color="#00BBF9" />
+      <stop offset="100%" stop-color="#4361EE" />
+    </linearGradient>
+
+    <linearGradient id="borderGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.55" />
+      <stop offset="50%" stop-color="#00BBF9" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#4361EE" stop-opacity="0.55" />
+    </linearGradient>
+
+    <linearGradient id="aegisCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1b2a" />
+      <stop offset="100%" stop-color="#09131f" />
+    </linearGradient>
+
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111927" />
+      <stop offset="100%" stop-color="#0b111c" />
+    </linearGradient>
+
+    <!-- Subtle Grid Pattern -->
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#1e293b" stroke-width="0.6" stroke-opacity="0.45" />
+    </pattern>
+
+    <!-- Arrowhead Markers -->
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#00F5D4" />
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#38BDF8" />
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#A855F7" />
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#F59E0B" />
+    </marker>
+    <marker id="arrowEmerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#10B981" />
+    </marker>
+  </defs>
+
+  <style>
+    .font-sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace; }
+    .title { font-size: 16px; font-weight: 700; fill: #F8FAFC; letter-spacing: 1.2px; }
+    .subtitle { font-size: 11.5px; font-weight: 500; fill: #94A3B8; }
+    .zone-title { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
+    .node-title { font-size: 13px; font-weight: 700; fill: #F1F5F9; }
+    .node-sub { font-size: 10.5px; font-weight: 400; fill: #94A3B8; }
+    .node-badge { font-size: 9.5px; font-weight: 600; }
+    .edge-label { font-size: 9.5px; font-weight: 600; fill: #CBD5E1; }
+  </style>
+
+  <!-- Main Canvas Background -->
+  <rect x="2" y="2" width="1116" height="676" rx="14" fill="url(#bgGrad)" stroke="url(#borderGlow)" stroke-width="1.5" />
+  <rect x="4" y="4" width="1112" height="672" rx="12" fill="url(#grid)" />
+
+  <!-- Top Header Banner -->
+  <rect x="20" y="16" width="1080" height="46" rx="8" fill="#0d1522" stroke="#1e293b" stroke-width="1" />
+  <circle cx="42" cy="39" r="6" fill="#00F5D4" />
+  <text x="58" y="36" class="font-sans title">SYSTEM CONTEXT &amp; EXTERNAL ECOSYSTEM</text>
+  <text x="58" y="52" class="font-sans subtitle">How Aegis Platform interacts with human actors, DevOps forges, AI inference backends, and infrastructure boundaries</text>
+
+  <!-- Legend in Header -->
+  <g transform="translate(720, 24)" class="font-mono">
+    <line x1="0" y1="10" x2="22" y2="10" stroke="#38BDF8" stroke-width="2" marker-end="url(#arrowBlue)" />
+    <text x="27" y="13" class="node-sub" fill="#E2E8F0">Webhook / REST</text>
+
+    <line x1="125" y1="10" x2="147" y2="10" stroke="#A855F7" stroke-width="2" marker-end="url(#arrowPurple)" />
+    <text x="152" y="13" class="node-sub" fill="#E2E8F0">LLM Inference</text>
+
+    <line x1="245" y1="10" x2="267" y2="10" stroke="#10B981" stroke-width="2" marker-end="url(#arrowEmerald)" />
+    <text x="272" y="13" class="node-sub" fill="#E2E8F0">ACID / Infra</text>
+  </g>
+
+  <!-- ======================================================================= -->
+  <!-- LEFT COLUMN: HUMAN ACTORS & EXTERNAL DEVOPS / TRACKERS                  -->
+  <!-- ======================================================================= -->
+
+  <!-- Zone 1: Human Actors -->
+  <rect x="20" y="76" width="255" height="190" rx="10" fill="#090e17" stroke="#00BBF9" stroke-opacity="0.35" stroke-width="1.2" />
+  <text x="34" y="96" class="font-mono zone-title" fill="#38BDF8">01 · HUMAN ACTORS</text>
+
+  <!-- Card: Developer / Reviewer -->
+  <rect x="32" y="106" width="231" height="70" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="32" y="106" width="4" height="70" rx="2" fill="#38BDF8" />
+  <text x="46" y="126" class="font-sans node-title">Developer / Reviewer</text>
+  <text x="46" y="143" class="font-sans node-sub">Labels issues, reviews PRs ('/aegis fix'),</text>
+  <text x="46" y="157" class="font-sans node-sub">submits &amp; watches jobs via CLI or Web UI</text>
+  <rect x="184" y="111" width="70" height="16" rx="4" fill="#0c2d48" />
+  <text x="219" y="122" text-anchor="middle" class="font-mono node-badge" fill="#38BDF8">HITL Gate</text>
+
+  <!-- Card: Platform Operator -->
+  <rect x="32" y="186" width="231" height="68" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="32" y="186" width="4" height="68" rx="2" fill="#00F5D4" />
+  <text x="46" y="206" class="font-sans node-title">Platform Operator / SRE</text>
+  <text x="46" y="223" class="font-sans node-sub">Manages modes (poc / customer-jp),</text>
+  <text x="46" y="237" class="font-sans node-sub">monitors Grafana, rotates secrets</text>
+
+  <!-- Zone 2: External DevOps & Issue Systems -->
+  <rect x="20" y="280" width="255" height="260" rx="10" fill="#090e17" stroke="#38BDF8" stroke-opacity="0.35" stroke-width="1.2" />
+  <text x="34" y="300" class="font-mono zone-title" fill="#38BDF8">02 · DEVOPS &amp; ISSUE FORGES</text>
+
+  <!-- Card: GitHub / GitLab -->
+  <rect x="32" y="310" width="231" height="72" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="32" y="310" width="4" height="72" rx="2" fill="#38BDF8" />
+  <text x="46" y="330" class="font-sans node-title">GitHub / GitLab</text>
+  <text x="46" y="346" class="font-sans node-sub">Issues, Broken CI on main, PR reviews</text>
+  <text x="46" y="360" class="font-mono node-sub" fill="#38BDF8">aegis-pr · branch agent/&lt;id&gt;</text>
+  <rect x="180" y="315" width="74" height="16" rx="4" fill="#0c2d48" />
+  <text x="217" y="326" text-anchor="middle" class="font-mono node-badge" fill="#38BDF8">HMAC-SHA256</text>
+
+  <!-- Card: Jira / Backlog -->
+  <rect x="32" y="390" width="231" height="66" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="32" y="390" width="4" height="66" rx="2" fill="#60A5FA" />
+  <text x="46" y="410" class="font-sans node-title">Jira / Backlog</text>
+  <text x="46" y="426" class="font-sans node-sub">Polls JQL / filters &amp; writes PR outcomes</text>
+  <text x="46" y="440" class="font-mono node-sub" fill="#60A5FA">aegis-tracker · REST Polling</text>
+
+  <!-- Card: SonarQube -->
+  <rect x="32" y="464" width="231" height="66" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="32" y="464" width="4" height="66" rx="2" fill="#818CF8" />
+  <text x="46" y="484" class="font-sans node-title">SonarQube Server / Cloud</text>
+  <text x="46" y="500" class="font-sans node-sub">Static analysis alerts &amp; Quality Gate</text>
+  <text x="46" y="514" class="font-mono node-sub" fill="#818CF8">aegis-sonar-batch · AST clustering</text>
+
+  <!-- ======================================================================= -->
+  <!-- CENTER COLUMN: AEGIS PLATFORM BOUNDARY                                  -->
+  <!-- ======================================================================= -->
+
+  <rect x="335" y="76" width="450" height="464" rx="12" fill="url(#aegisCoreGrad)" stroke="#00F5D4" stroke-opacity="0.7" stroke-width="1.8" />
+  <rect x="347" y="88" width="195" height="22" rx="5" fill="#042f2e" stroke="#00F5D4" stroke-width="0.8" />
+  <text x="444" y="103" text-anchor="middle" class="font-mono zone-title" fill="#00F5D4">🛡️ AEGIS PLATFORM BOUNDARY</text>
+  <text x="772" y="103" text-anchor="end" class="font-mono node-sub" fill="#00F5D4">100% Rust Workspace</text>
+
+  <!-- Top Bar inside Aegis: Developer Client CLI & Dashboard -->
+  <rect x="352" y="120" width="202" height="58" rx="8" fill="#0f1d2e" stroke="#00BBF9" stroke-opacity="0.5" stroke-width="1" />
+  <text x="364" y="140" class="font-mono node-title" fill="#00F5D4">aegis-job (aegis-client)</text>
+  <text x="364" y="156" class="font-sans node-sub">Developer Terminal CLI</text>
+  <text x="364" y="170" class="font-mono node-sub" fill="#38BDF8">submit · watch · cancel · logs</text>
+
+  <rect x="568" y="120" width="202" height="58" rx="8" fill="#0f1d2e" stroke="#00BBF9" stroke-opacity="0.5" stroke-width="1" />
+  <text x="580" y="140" class="font-mono node-title" fill="#00F5D4">SSR Web Dashboard</text>
+  <text x="580" y="156" class="font-sans node-sub">Askama + htmx Portal</text>
+  <text x="580" y="170" class="font-mono node-sub" fill="#38BDF8">OIDC SSO · Token Ledger · CSRF</text>
+
+  <!-- Central Block: aegis-server -->
+  <rect x="352" y="194" width="418" height="196" rx="10" fill="#091320" stroke="#00F5D4" stroke-opacity="0.5" stroke-width="1.4" />
+  <text x="366" y="215" class="font-mono node-title" fill="#00F5D4">aegis-server · Unified Platform Service</text>
+  <rect x="646" y="201" width="114" height="18" rx="4" fill="#042f2e" />
+  <text x="703" y="213" text-anchor="middle" class="font-mono node-badge" fill="#00F5D4">--role api|worker|all</text>
+
+  <!-- Sub-boxes inside aegis-server -->
+  <rect x="364" y="226" width="192" height="68" rx="6" fill="#111c2d" stroke="#1e293b" />
+  <text x="374" y="244" class="font-sans node-title" font-size="12">Ingress &amp; Poller Scheduler</text>
+  <text x="374" y="260" class="font-sans node-sub">• Axum REST API (/api/v1/*)</text>
+  <text x="374" y="274" class="font-sans node-sub">• Webhook Receiver &amp; Rate Limiter</text>
+  <text x="374" y="288" class="font-sans node-sub">• Atomic Jira/Backlog/Sonar Polls</text>
+
+  <rect x="566" y="226" width="192" height="68" rx="6" fill="#111c2d" stroke="#1e293b" />
+  <text x="576" y="244" class="font-sans node-title" font-size="12">Worker Pool &amp; Lifecycle</text>
+  <text x="576" y="260" class="font-sans node-sub">• Leases via SKIP LOCKED</text>
+  <text x="576" y="274" class="font-sans node-sub">• Isolated Git Worktree per Job</text>
+  <text x="576" y="288" class="font-sans node-sub">• Graceful SIGTERM &amp; Cancellation</text>
+
+  <rect x="364" y="304" width="394" height="74" rx="6" fill="#111c2d" stroke="#00BBF9" stroke-opacity="0.4" />
+  <text x="374" y="322" class="font-sans node-title" font-size="12" fill="#38BDF8">4-Layer Agent Engine (aegis-lifecycle · orchestrator · router · aci)</text>
+  <text x="374" y="339" class="font-sans node-sub">• L1 Context: Tree-sitter AST + LSP + codebase-memory-mcp (SQLite Call Graph)</text>
+  <text x="374" y="354" class="font-sans node-sub">• L2 Cache: Deterministic 4-Breakpoint Prompt Caching (BP1–BP4, ≥70% cache hit)</text>
+  <text x="374" y="369" class="font-sans node-sub">• L3 Routing: Light → Core → Expert tiers · Circuit Breaker ($4 or 40 calls)</text>
+
+  <!-- Bottom Block inside Aegis: Docker Sandbox & Egress Proxy -->
+  <rect x="352" y="404" width="268" height="122" rx="8" fill="#0d1624" stroke="#F59E0B" stroke-opacity="0.6" stroke-width="1.3" />
+  <text x="364" y="424" class="font-mono node-title" fill="#FBBF24">aegis-gate · Docker Sandbox</text>
+  <text x="364" y="441" class="font-sans node-sub">• 6-Step Gate: Fmt → Lint → Repro Test</text>
+  <text x="364" y="456" class="font-sans node-sub">  (FAIL→PASS) → Suite → Coverage → Sonar</text>
+  <text x="364" y="472" class="font-mono node-sub" fill="#F59E0B">• --network none · --cap-drop ALL</text>
+  <text x="364" y="487" class="font-mono node-sub" fill="#F59E0B">• Non-root uid 10001 · Zero secrets</text>
+  <text x="364" y="502" class="font-sans node-sub">• 6 Profiles: Rust, Python, TS, Java, Go, C#</text>
+
+  <rect x="630" y="404" width="140" height="122" rx="8" fill="#0d1624" stroke="#64748B" stroke-opacity="0.5" stroke-width="1" />
+  <text x="640" y="424" class="font-sans node-title" font-size="12">Egress Proxy</text>
+  <text x="640" y="442" class="font-sans node-sub">Pre-gate dependency</text>
+  <text x="640" y="456" class="font-sans node-sub">fetch only:</text>
+  <text x="640" y="474" class="font-mono node-sub" fill="#94A3B8">• crates.io / PyPI</text>
+  <text x="640" y="488" class="font-mono node-sub" fill="#94A3B8">• npm / Maven</text>
+  <text x="640" y="502" class="font-mono node-sub" fill="#94A3B8">• Go Proxy / NuGet</text>
+
+  <!-- ======================================================================= -->
+  <!-- RIGHT COLUMN: AI / LLM PROVIDERS                                        -->
+  <!-- ======================================================================= -->
+
+  <rect x="845" y="76" width="255" height="464" rx="10" fill="#090e17" stroke="#A855F7" stroke-opacity="0.4" stroke-width="1.2" />
+  <text x="859" y="96" class="font-mono zone-title" fill="#C084FC">03 · AI / LLM PROVIDERS</text>
+  <text x="859" y="112" class="font-mono node-sub" fill="#A855F7">via aegis-provider &amp; aegis-router</text>
+
+  <!-- Card: Anthropic Claude API -->
+  <rect x="857" y="126" width="231" height="114" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="857" y="126" width="4" height="114" rx="2" fill="#A855F7" />
+  <text x="871" y="146" class="font-sans node-title">Anthropic Claude API</text>
+  <rect x="1014" y="131" width="66" height="16" rx="4" fill="#2e1065" />
+  <text x="1047" y="142" text-anchor="middle" class="font-mono node-badge" fill="#C084FC">poc.toml</text>
+  <text x="871" y="165" class="font-sans node-sub">Direct HTTPS inference with</text>
+  <text x="871" y="179" class="font-sans node-sub">cache_control breakpoints BP1–BP4:</text>
+  <text x="871" y="197" class="font-mono node-sub" fill="#E9D5FF">• Light:  claude-haiku-5-5</text>
+  <text x="871" y="212" class="font-mono node-sub" fill="#E9D5FF">• Core:   claude-sonnet-5-5</text>
+  <text x="871" y="227" class="font-mono node-sub" fill="#E9D5FF">• Expert: claude-opus-5-5</text>
+
+  <!-- Card: AWS Bedrock Tokyo -->
+  <rect x="857" y="256" width="231" height="128" rx="8" fill="url(#cardGrad)" stroke="#A855F7" stroke-opacity="0.45" stroke-width="1" />
+  <rect x="857" y="256" width="4" height="128" rx="2" fill="#EC4899" />
+  <text x="871" y="276" class="font-sans node-title">AWS Bedrock (Tokyo)</text>
+  <rect x="980" y="261" width="100" height="16" rx="4" fill="#4a044e" />
+  <text x="1030" y="272" text-anchor="middle" class="font-mono node-badge" fill="#F472B6">customer-jp.toml</text>
+  <text x="871" y="295" class="font-sans node-sub">Strict Japan Data Residency in</text>
+  <text x="871" y="309" class="font-mono node-sub" fill="#F472B6">ap-northeast-1 (ModelPolicy::JapanOnly)</text>
+  <text x="871" y="328" class="font-mono node-sub" fill="#FBCFE8">• jp.anthropic.claude-haiku-5-5</text>
+  <text x="871" y="343" class="font-mono node-sub" fill="#FBCFE8">• jp.anthropic.claude-opus-5-5</text>
+  <text x="871" y="362" class="font-sans node-sub">Zero cross-region data egress</text>
+
+  <!-- Card: Local Ollama -->
+  <rect x="857" y="400" width="231" height="124" rx="8" fill="url(#cardGrad)" stroke="#1e293b" stroke-width="1" />
+  <rect x="857" y="400" width="4" height="124" rx="2" fill="#10B981" />
+  <text x="871" y="420" class="font-sans node-title">Local Ollama / OpenAI-Compat</text>
+  <rect x="1008" y="405" width="72" height="16" rx="4" fill="#064e3b" />
+  <text x="1044" y="416" text-anchor="middle" class="font-mono node-badge" fill="#34D399">local.toml</text>
+  <text x="871" y="440" class="font-sans node-sub">100% free local trial &amp; air-gapped</text>
+  <text x="871" y="454" class="font-sans node-sub">on-premise evaluation environments:</text>
+  <text x="871" y="474" class="font-mono node-sub" fill="#A7F3D0">• gpt-oss:20b / qwen2.5-coder</text>
+  <text x="871" y="490" class="font-mono node-sub" fill="#A7F3D0">• Zero external cloud API keys</text>
+
+  <!-- ======================================================================= -->
+  <!-- BOTTOM ROW: STATE, SECURITY & OBSERVABILITY INFRASTRUCTURE              -->
+  <!-- ======================================================================= -->
+
+  <rect x="20" y="556" width="1080" height="106" rx="10" fill="#090e17" stroke="#10B981" stroke-opacity="0.4" stroke-width="1.2" />
+  <text x="34" y="576" class="font-mono zone-title" fill="#34D399">04 · STATE PERSISTENCE, SECURITY &amp; OBSERVABILITY INFRASTRUCTURE</text>
+
+  <!-- Infra 1: PostgreSQL -->
+  <rect x="32" y="586" width="255" height="64" rx="8" fill="url(#cardGrad)" stroke="#1e293b" />
+  <rect x="32" y="586" width="4" height="64" rx="2" fill="#10B981" />
+  <text x="46" y="605" class="font-sans node-title">PostgreSQL (aegis-store)</text>
+  <text x="46" y="621" class="font-sans node-sub">Transactional Queue (FOR UPDATE SKIP LOCKED)</text>
+  <text x="46" y="636" class="font-mono node-sub" fill="#34D399">Jobs · Leases · Repos · Ledger · Sessions</text>
+
+  <!-- Infra 2: OIDC Identity Provider -->
+  <rect x="301" y="586" width="250" height="64" rx="8" fill="url(#cardGrad)" stroke="#1e293b" />
+  <rect x="301" y="586" width="4" height="64" rx="2" fill="#38BDF8" />
+  <text x="315" y="605" class="font-sans node-title">OIDC Identity Provider</text>
+  <text x="315" y="621" class="font-sans node-sub">Enterprise SSO login for Web Dashboard</text>
+  <text x="315" y="636" class="font-mono node-sub" fill="#38BDF8">RBAC Roles · Personal Access Tokens</text>
+
+  <!-- Infra 3: Secrets Store -->
+  <rect x="565" y="586" width="255" height="64" rx="8" fill="url(#cardGrad)" stroke="#1e293b" />
+  <rect x="565" y="586" width="4" height="64" rx="2" fill="#F59E0B" />
+  <text x="579" y="605" class="font-sans node-title">Secrets Manager (aegis-secrets)</text>
+  <text x="579" y="621" class="font-sans node-sub">AWS Secrets Manager or On-Premise Files</text>
+  <text x="579" y="636" class="font-mono node-sub" fill="#FBBF24">Boot verification &amp; live runtime rotation</text>
+
+  <!-- Infra 4: Prometheus & Grafana -->
+  <rect x="834" y="586" width="254" height="64" rx="8" fill="url(#cardGrad)" stroke="#1e293b" />
+  <rect x="834" y="586" width="4" height="64" rx="2" fill="#EC4899" />
+  <text x="848" y="605" class="font-sans node-title">Prometheus &amp; Grafana</text>
+  <text x="848" y="621" class="font-sans node-sub">Scrapes :9464/metrics &amp; Alertmanager</text>
+  <text x="848" y="636" class="font-mono node-sub" fill="#F472B6">Gate pass rate · Queue lag · USD spend</text>
+
+  <!-- ======================================================================= -->
+  <!-- CONNECTORS & ARROWS                                                     -->
+  <!-- ======================================================================= -->
+
+  <!-- Dev -> CLI & Dashboard -->
+  <path d="M 263 130 L 348 142" fill="none" stroke="#00F5D4" stroke-width="1.8" marker-end="url(#arrowCyan)" />
+  <path d="M 147 176 L 147 306" fill="none" stroke="#38BDF8" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrowBlue)" />
+  <text x="153" y="274" class="font-mono edge-label" fill="#38BDF8">Label / Review</text>
+
+  <!-- CLI & Dashboard -> aegis-server -->
+  <line x1="453" y1="178" x2="453" y2="192" stroke="#00F5D4" stroke-width="1.6" marker-end="url(#arrowCyan)" />
+  <line x1="669" y1="178" x2="669" y2="192" stroke="#00F5D4" stroke-width="1.6" marker-end="url(#arrowCyan)" />
+
+  <!-- Forges <-> aegis-server -->
+  <line x1="263" y1="336" x2="348" y2="265" stroke="#38BDF8" stroke-width="1.8" marker-end="url(#arrowBlue)" />
+  <line x1="350" y1="280" x2="265" y2="352" stroke="#00F5D4" stroke-width="1.6" stroke-dasharray="4 2" marker-end="url(#arrowCyan)" />
+
+  <!-- Jira <-> aegis-server -->
+  <line x1="263" y1="420" x2="348" y2="288" stroke="#60A5FA" stroke-width="1.5" marker-start="url(#arrowBlue)" marker-end="url(#arrowBlue)" />
+
+  <!-- Sonar <-> aegis-server / gate -->
+  <line x1="263" y1="495" x2="348" y2="465" stroke="#818CF8" stroke-width="1.5" marker-start="url(#arrowBlue)" marker-end="url(#arrowBlue)" />
+
+  <!-- aegis-server -> Docker Sandbox -->
+  <line x1="486" y1="390" x2="486" y2="402" stroke="#F59E0B" stroke-width="1.8" marker-end="url(#arrowAmber)" />
+
+  <!-- aegis-server -> AI Providers -->
+  <path d="M 770 325 L 853 185" fill="none" stroke="#A855F7" stroke-width="1.8" marker-end="url(#arrowPurple)" />
+  <path d="M 770 340 L 853 320" fill="none" stroke="#A855F7" stroke-width="1.8" marker-end="url(#arrowPurple)" />
+  <path d="M 770 355 L 853 455" fill="none" stroke="#10B981" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrowEmerald)" />
+
+  <!-- aegis-server <-> Bottom Infra -->
+  <path d="M 410 540 L 210 584" fill="none" stroke="#10B981" stroke-width="1.6" marker-end="url(#arrowEmerald)" />
+  <path d="M 465 540 L 430 584" fill="none" stroke="#38BDF8" stroke-width="1.5" marker-end="url(#arrowBlue)" />
+  <path d="M 620 540 L 660 584" fill="none" stroke="#F59E0B" stroke-width="1.5" marker-end="url(#arrowAmber)" />
+  <path d="M 710 540 L 910 584" fill="none" stroke="#EC4899" stroke-width="1.5" marker-end="url(#arrowPurple)" />
+</svg>

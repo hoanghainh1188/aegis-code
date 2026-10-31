@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 420" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070b12" />
+      <stop offset="50%" stop-color="#0a0f1a" />
+      <stop offset="100%" stop-color="#05080f" />
+    </linearGradient>
+
+    <linearGradient id="borderGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.55" />
+      <stop offset="50%" stop-color="#00BBF9" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#4361EE" stop-opacity="0.55" />
+    </linearGradient>
+
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111a29" />
+      <stop offset="100%" stop-color="#0a101b" />
+    </linearGradient>
+
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#1e293b" stroke-width="0.6" stroke-opacity="0.45" />
+    </pattern>
+
+    <marker id="arrCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#00F5D4" />
+    </marker>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#F59E0B" />
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#EF4444" />
+    </marker>
+    <marker id="arrGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#10B981" />
+    </marker>
+  </defs>
+
+  <style>
+    .font-sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace; }
+    .title { font-size: 16px; font-weight: 700; fill: #F8FAFC; letter-spacing: 1.2px; }
+    .subtitle { font-size: 11.5px; font-weight: 500; fill: #94A3B8; }
+    .step-num { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; }
+    .box-title { font-size: 13px; font-weight: 700; fill: #F1F5F9; }
+    .box-sub { font-size: 10.5px; font-weight: 400; fill: #94A3B8; }
+    .box-code { font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Canvas -->
+  <rect x="2" y="2" width="1116" height="416" rx="14" fill="url(#bgGrad)" stroke="url(#borderGlow)" stroke-width="1.5" />
+  <rect x="4" y="4" width="1112" height="412" rx="12" fill="url(#grid)" />
+
+  <!-- Header -->
+  <rect x="20" y="16" width="1080" height="46" rx="8" fill="#0d1522" stroke="#1e293b" stroke-width="1" />
+  <circle cx="42" cy="39" r="6" fill="#A855F7" />
+  <text x="58" y="36" class="font-sans title">4-LAYER AGENT EXECUTION &amp; VERIFICATION PIPELINE</text>
+  <text x="58" y="52" class="font-sans subtitle">Inside each leased job: bounded AST context, deterministic prompt caching, tiered model routing, and air-gapped verification</text>
+
+  <!-- ======================================================================= -->
+  <!-- 4 HORIZONTAL PIPELINE STAGES                                            -->
+  <!-- ======================================================================= -->
+
+  <!-- Stage 1: Layer 1 Context Engine -->
+  <rect x="20" y="80" width="215" height="225" rx="10" fill="url(#cardGrad)" stroke="#38BDF8" stroke-opacity="0.55" stroke-width="1.3" />
+  <rect x="20" y="80" width="215" height="6" rx="3" fill="#38BDF8" />
+  <text x="34" y="104" class="font-mono step-num" fill="#38BDF8">LAYER 1 · CONTEXT ENGINE</text>
+  <text x="34" y="124" class="font-sans box-title">AST &amp; Bounded ACI</text>
+  <text x="34" y="144" class="font-sans box-sub">• Tree-sitter AST module maps</text>
+  <text x="34" y="160" class="font-sans box-sub">• SQLite Call Graph (CALLS,</text>
+  <text x="34" y="175" class="font-sans box-sub">  IMPORTS, TESTS) + LSP</text>
+  <text x="34" y="191" class="font-sans box-sub">• 100-line open windows &amp;</text>
+  <text x="34" y="206" class="font-sans box-sub">  50-item search bounds</text>
+  <text x="34" y="222" class="font-sans box-sub">• Syntax-checked edits</text>
+  <text x="34" y="238" class="font-sans box-sub">• Collapse history at 60%</text>
+  <rect x="34" y="268" width="187" height="22" rx="4" fill="#0c2d48" />
+  <text x="127" y="283" text-anchor="middle" class="font-mono box-code" fill="#38BDF8">aegis-aci · aegis-lang</text>
+
+  <!-- Stage 2: Layer 2 Prompt Caching -->
+  <rect x="255" y="80" width="215" height="225" rx="10" fill="url(#cardGrad)" stroke="#00F5D4" stroke-opacity="0.55" stroke-width="1.3" />
+  <rect x="255" y="80" width="215" height="6" rx="3" fill="#00F5D4" />
+  <text x="269" y="104" class="font-mono step-num" fill="#00F5D4">LAYER 2 · PROMPT CACHING</text>
+  <text x="269" y="124" class="font-sans box-title">4-Breakpoint Hierarchy</text>
+  <text x="269" y="144" class="font-mono box-sub" fill="#E2E8F0">BP1: Tool &amp; MCP schemas</text>
+  <text x="269" y="160" class="font-mono box-sub" fill="#E2E8F0">BP2: System prompt &amp; repo</text>
+  <text x="269" y="176" class="font-mono box-sub" fill="#E2E8F0">BP3: Issue &amp; repro test</text>
+  <text x="269" y="192" class="font-mono box-sub" fill="#E2E8F0">BP4: Dynamic turn history</text>
+  <text x="269" y="214" class="font-sans box-sub">• Byte-stable serialization</text>
+  <text x="269" y="230" class="font-sans box-sub">• ≥70% cache hit target</text>
+  <text x="269" y="246" class="font-sans box-sub">  (92% measured in Phase 1)</text>
+  <rect x="269" y="268" width="187" height="22" rx="4" fill="#042f2e" />
+  <text x="362" y="283" text-anchor="middle" class="font-mono box-code" fill="#00F5D4">aegis-provider</text>
+
+  <!-- Stage 3: Layer 3 Model Routing -->
+  <rect x="490" y="80" width="225" height="225" rx="10" fill="url(#cardGrad)" stroke="#A855F7" stroke-opacity="0.55" stroke-width="1.3" />
+  <rect x="490" y="80" width="225" height="6" rx="3" fill="#A855F7" />
+  <text x="504" y="104" class="font-mono step-num" fill="#C084FC">LAYER 3 · MODEL ROUTING</text>
+  <text x="504" y="124" class="font-sans box-title">Tiered Escalation</text>
+  <text x="504" y="144" class="font-mono box-sub" fill="#E9D5FF">• Light (Haiku 5.5):</text>
+  <text x="504" y="159" class="font-sans box-sub">  Triage &amp; stack trace pruning</text>
+  <text x="504" y="177" class="font-mono box-sub" fill="#E9D5FF">• Core (Sonnet 5.5):</text>
+  <text x="504" y="192" class="font-sans box-sub">  Repro test &amp; patch synthesis</text>
+  <text x="504" y="210" class="font-mono box-sub" fill="#E9D5FF">• Expert (Opus 5.5):</text>
+  <text x="504" y="225" class="font-sans box-sub">  Escalated on ≥2 Core fails</text>
+  <text x="504" y="244" class="font-mono box-sub" fill="#F472B6">• Cap: $4.00 or 40 calls</text>
+  <rect x="504" y="268" width="197" height="22" rx="4" fill="#2e1065" />
+  <text x="602" y="283" text-anchor="middle" class="font-mono box-code" fill="#C084FC">aegis-router · aegis-ledger</text>
+
+  <!-- Stage 4: Layer 4 Verification Gate -->
+  <rect x="735" y="80" width="225" height="225" rx="10" fill="url(#cardGrad)" stroke="#F59E0B" stroke-opacity="0.55" stroke-width="1.3" />
+  <rect x="735" y="80" width="225" height="6" rx="3" fill="#F59E0B" />
+  <text x="749" y="104" class="font-mono step-num" fill="#FBBF24">LAYER 4 · DOCKER GATE</text>
+  <text x="749" y="124" class="font-sans box-title">6-Step Air-Gapped Gate</text>
+  <text x="749" y="144" class="font-sans box-sub">0. Lockfile &amp; CVE allow-list</text>
+  <text x="749" y="160" class="font-sans box-sub">1. Format check (zero diff)</text>
+  <text x="749" y="176" class="font-sans box-sub">2. Linter / compiler warnings</text>
+  <text x="749" y="192" class="font-mono box-sub" fill="#34D399">3. Repro Test (FAIL → PASS)</text>
+  <text x="749" y="208" class="font-sans box-sub">4. Full Regression Suite</text>
+  <text x="749" y="224" class="font-sans box-sub">5. Coverage + 6. Sonar Gate</text>
+  <text x="749" y="242" class="font-mono box-sub" fill="#FBBF24">• --network none · non-root</text>
+  <rect x="749" y="268" width="197" height="22" rx="4" fill="#451a03" />
+  <text x="847" y="283" text-anchor="middle" class="font-mono box-code" fill="#FBBF24">aegis-gate</text>
+
+  <!-- Outcomes on Right -->
+  <!-- Pass Outcome: Open PR -->
+  <rect x="980" y="80" width="120" height="105" rx="10" fill="#064e3b" stroke="#10B981" stroke-width="1.5" />
+  <text x="1040" y="106" text-anchor="middle" class="font-mono step-num" fill="#34D399">GATE PASS ✔</text>
+  <text x="1040" y="126" text-anchor="middle" class="font-sans box-title" font-size="12">Open PR</text>
+  <text x="1040" y="144" text-anchor="middle" class="font-sans box-sub" fill="#A7F3D0">RCA + Proof +</text>
+  <text x="1040" y="158" text-anchor="middle" class="font-sans box-sub" fill="#A7F3D0">Golden Master +</text>
+  <text x="1040" y="172" text-anchor="middle" class="font-mono box-code" fill="#34D399">aegis-pr</text>
+
+  <!-- Stop Outcome: Circuit Breaker -->
+  <rect x="980" y="200" width="120" height="105" rx="10" fill="#450a0a" stroke="#EF4444" stroke-width="1.5" />
+  <text x="1040" y="226" text-anchor="middle" class="font-mono step-num" fill="#F87171">BREAKER HIT ✖</text>
+  <text x="1040" y="246" text-anchor="middle" class="font-sans box-title" font-size="12">Safe Handoff</text>
+  <text x="1040" y="264" text-anchor="middle" class="font-sans box-sub" fill="#FECACA">&gt;$4 / &gt;40 calls</text>
+  <text x="1040" y="278" text-anchor="middle" class="font-sans box-sub" fill="#FECACA">or Expert 2x fail</text>
+  <text x="1040" y="292" text-anchor="middle" class="font-mono box-code" fill="#F87171">Zero Bad PRs</text>
+
+  <!-- Stage Connectors -->
+  <line x1="235" y1="192" x2="253" y2="192" stroke="#00F5D4" stroke-width="2" marker-end="url(#arrCyan)" />
+  <line x1="470" y1="192" x2="488" y2="192" stroke="#00F5D4" stroke-width="2" marker-end="url(#arrCyan)" />
+  <line x1="715" y1="192" x2="733" y2="192" stroke="#00F5D4" stroke-width="2" marker-end="url(#arrCyan)" />
+  <line x1="960" y1="132" x2="978" y2="132" stroke="#10B981" stroke-width="2" marker-end="url(#arrGreen)" />
+  <line x1="960" y1="252" x2="978" y2="252" stroke="#EF4444" stroke-width="2" marker-end="url(#arrRed)" />
+
+  <!-- Bottom Feedback Loop Bar -->
+  <path d="M 847 305 L 847 355 L 602 355 L 602 307" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arrAmber)" />
+  <rect x="635" y="341" width="185" height="24" rx="5" fill="#1e1b4b" stroke="#F59E0B" stroke-width="1" />
+  <text x="727" y="357" text-anchor="middle" class="font-mono box-code" fill="#FBBF24">Gate Fail → Prune Log &amp; Retry</text>
+
+  <!-- Bottom Metrics Strip -->
+  <rect x="20" y="330" width="555" height="68" rx="8" fill="#0d1522" stroke="#1e293b" />
+  <text x="36" y="352" class="font-mono step-num" fill="#00F5D4">PHASE 1 MEASURED GUARANTEES (32 REAL ISSUES · SCRAPY &amp; TYPST)</text>
+  <text x="36" y="376" class="font-mono box-sub" fill="#E2E8F0">Acceptance: <tspan fill="#00F5D4" font-weight="700">50%</tspan>   |   Regressions: <tspan fill="#34D399" font-weight="700">0</tspan>   |   Avg Cost: <tspan fill="#38BDF8" font-weight="700">$0.55</tspan>   |   Cache Hit: <tspan fill="#C084FC" font-weight="700">92%</tspan>   |   Review: <tspan fill="#FBBF24" font-weight="700">1.8 min</tspan></text>
+</svg>
