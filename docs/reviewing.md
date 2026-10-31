@@ -31,7 +31,7 @@ When the PR is close but not right, let the agent revise it instead of editing i
 
 - Submit a **Request changes** review on the PR, with inline comments where needed, **or**
 - Comment `/aegis fix` on its own line (GitLab: on the merge request; you need Developer role or higher), **or**
-- Run `aegis-job review <job>` ([client.md](client.md)).
+- Run `aegis review <job>` ([client.md](client.md)).
 
 The agent returns to the same branch, applies your comments, runs the gate again, pushes an additional commit (never a force-push), and replies to your comments on the PR. Only people with write access to the repo can trigger a round. A PR gets at most 3 rounds by default (`[reviews] max_rounds`), each with its own budget.
 

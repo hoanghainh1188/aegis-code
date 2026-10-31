@@ -5,7 +5,7 @@
 #   X.Y, ký bằng cosign keyless (OIDC của GitHub, không có khóa);
 # - gói offline: mỗi image một file `docker save`, kèm SHA-256,
 #   versions.txt (digest, migration cuối) và load-images.sh, gắn vào Release;
-# - client aegis-job cho bốn nền tảng, gắn vào Release, và một gói npm
+# - client aegis cho bốn nền tảng, gắn vào Release, và một gói npm
 #   chứa cả bốn binary, publish bằng OIDC trusted publishing (không có
 #   token npm), như komainu.
 #
@@ -48,7 +48,7 @@ jobs:
         run: |
           version=${TAG#v}
           cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
-          npm=$(python3 -c 'import json; print(json.load(open("npm/aegis-job/package.json"))["version"])')
+          npm=$(python3 -c 'import json; print(json.load(open("npm/aegis/package.json"))["version"])')
           file=$(cat version.txt)
           echo "tag $version, Cargo.toml $cargo, package.json $npm, version.txt $file"
           for v in "$cargo" "$npm" "$file"; do
@@ -156,17 +156,17 @@ jobs:
       - name: Pack
         shell: bash
         run: |
-          name="aegis-job-${{ needs.version.outputs.version }}-${{ matrix.target }}"
+          name="aegis-${{ needs.version.outputs.version }}-${{ matrix.target }}"
           mkdir -p "$name" "npm/${{ matrix.npm }}"
-          cp "target/${{ matrix.target }}/release/aegis-job" docs/client.md "$name/"
-          cp "target/${{ matrix.target }}/release/aegis-job" "npm/${{ matrix.npm }}/"
+          cp "target/${{ matrix.target }}/release/aegis" docs/client.md "$name/"
+          cp "target/${{ matrix.target }}/release/aegis" "npm/${{ matrix.npm }}/"
           tar -czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: client-${{ matrix.npm }}
           path: |
-            aegis-job-*.tar.gz*
+            aegis-*.tar.gz*
             npm/
 
   publish-client:
@@ -189,10 +189,10 @@ jobs:
       - name: Gói npm với bốn binary
         run: |
           for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
-            install -D -m 0755 "dist/npm/$platform/aegis-job" "npm/aegis-job/vendor/$platform/aegis-job"
+            install -D -m 0755 "dist/npm/$platform/aegis" "npm/aegis/vendor/$platform/aegis"
           done
-          cp LICENSE npm/aegis-job/
-          node npm/aegis-job/bin/aegis-job.js --help > /dev/null
+          cp LICENSE npm/aegis/
+          node npm/aegis/bin/aegis.js --help > /dev/null
       - uses: actions/setup-node@v4
         with:
           node-version: '22.x'
@@ -202,8 +202,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          (cd npm/aegis-job && npm pack --pack-destination ../../dist)
-          gh release upload "$TAG" dist/aegis-job-*.tar.gz* dist/*.tgz --clobber --repo "$GITHUB_REPOSITORY"
+          (cd npm/aegis && npm pack --pack-destination ../../dist)
+          gh release upload "$TAG" dist/aegis-*.tar.gz* dist/*.tgz --clobber --repo "$GITHUB_REPOSITORY"
       - name: Publish lên npmjs bằng OIDC
-        working-directory: npm/aegis-job
+        working-directory: npm/aegis
         run: npm publish --access public

@@ -17,7 +17,7 @@ use super::{WebError, WebResult, job_for};
 use crate::api::new_job;
 use crate::auth::Access;
 
-/// The trackers a job may be read from, as `aegis-job --source` takes
+/// The trackers a job may be read from, as `aegis --source` takes
 /// them; the label shown for each.
 pub(super) const SOURCES: [(&str, &str); 4] = [
     ("github", "GitHub issue (owner/repo#12)"),

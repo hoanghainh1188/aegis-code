@@ -148,7 +148,7 @@
 
   <!-- Top Bar inside Aegis: Developer Client CLI & Dashboard -->
   <rect x="352" y="120" width="202" height="58" rx="8" fill="#0f1d2e" stroke="#00BBF9" stroke-opacity="0.5" stroke-width="1" />
-  <text x="364" y="140" class="font-mono node-title" fill="#00F5D4">aegis-job (aegis-client)</text>
+  <text x="364" y="140" class="font-mono node-title" fill="#00F5D4">aegis (aegis-client)</text>
   <text x="364" y="156" class="font-sans node-sub">Developer Terminal CLI</text>
   <text x="364" y="170" class="font-mono node-sub" fill="#38BDF8">submit · watch · cancel · logs</text>
 

@@ -9,7 +9,7 @@
 [![Rust 2024](https://img.shields.io/badge/rust-2024-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
 [![Status: Phase 2 Platform](https://img.shields.io/badge/status-Phase%202%20Platform-00F5D4.svg?style=flat-square)]()
-[![npm: @hoanghainh1188/aegis-job](https://img.shields.io/npm/v/@hoanghainh1188/aegis-job?style=flat-square&color=crimson&label=aegis-job&logo=npm)](https://www.npmjs.com/package/@hoanghainh1188/aegis-job)
+[![npm: @hoanghainh1188/aegis](https://img.shields.io/npm/v/@hoanghainh1188/aegis?style=flat-square&color=crimson&label=aegis&logo=npm)](https://www.npmjs.com/package/@hoanghainh1188/aegis)
 [![PostgreSQL Queue](https://img.shields.io/badge/queue-PostgreSQL%20SKIP%20LOCKED-336791.svg?style=flat-square&logo=postgresql)]()
 [![Sandbox: Air-Gapped Docker](https://img.shields.io/badge/sandbox-Docker%20--network%20none-2496ED.svg?style=flat-square&logo=docker)]()
 
@@ -76,7 +76,7 @@ sequenceDiagram
     Forge->>Server: Trigger automated review round on same branch
 ```
 
-1. **Ingest:** Triggered automatically via GitHub/GitLab webhook (labels like `aegis`), polled tickets (Jira, Backlog), failed CI runs on `main`, or manually via `aegis-job submit`.
+1. **Ingest:** Triggered automatically via GitHub/GitLab webhook (labels like `aegis`), polled tickets (Jira, Backlog), failed CI runs on `main`, or manually via `aegis submit`.
 2. **Reproduce & Isolate:** The agent navigates the codebase using bounded AST tools, generates a minimal reproducing test, and confirms that it **FAILS** before making changes.
 3. **Patch & Verify:** The agent edits code with syntax-safe linters and executes the 6-step gate inside an isolated Docker sandbox container (`--network none`).
 4. **Human Review & Review Rounds:** The agent opens a PR detailing the root cause, verification evidence, and cost breakdown. If a reviewer requests changes or comments `/aegis fix`, the agent triggers a review round on the same branch without force-pushing.
@@ -99,7 +99,7 @@ The reviewer's side of this, step by step, is in the [Reviewer Guide](docs/revie
 
 | Term | Meaning |
 | :--- | :--- |
-| **Job** | One attempt to resolve one issue (or one CI failure, or one review round). Visible on the dashboard and through `aegis-job`. |
+| **Job** | One attempt to resolve one issue (or one CI failure, or one review round). Visible on the dashboard and through `aegis`. |
 | **Gate** | The verification run in a network-isolated Docker sandbox: format, lint, reproducing test (FAIL → PASS), full test suite, coverage, Sonar, integrity. A PR is opened only when it passes. |
 | **Reproducing test** | A test the agent writes that fails on the current code and passes after the fix — the proof that the bug is real and fixed. |
 | **Language profile** | Per-language settings: sandbox image, build/test/lint commands, test conventions (`profiles/*.toml`, [ADR 0004](docs/adr/0004-multi-language-profiles.md)). |
@@ -117,27 +117,27 @@ The reviewer's side of this, step by step, is in the [Reviewer Guide](docs/revie
 Choose the path that fits your role.
 
 > [!IMPORTANT]
-> **No release has been published yet.** There is no `vX.Y.Z` tag, so the npm package `@hoanghainh1188/aegis-job`, the GHCR images and the offline bundles do not exist yet; they appear with the first release ([docs/release.md](docs/release.md)). Until then:
-> * **Developers** install `aegis-job` from source (the `cargo install` line below).
+> **No release has been published yet.** There is no `vX.Y.Z` tag, so the npm package `@hoanghainh1188/aegis`, the GHCR images and the offline bundles do not exist yet; they appear with the first release ([docs/release.md](docs/release.md)). Until then:
+> * **Developers** install `aegis` from source (the `cargo install` line below).
 > * **Operators** build the images locally and deploy them with `--offline` ([On-Premise Runbook, "Before the First Release"](docs/runbook/on-premise.md#before-the-first-release-local-images)).
 > * The **local trial** and **building from source** work as written.
 
 ### 3.1 For Developers (Submit & Follow Jobs)
-Interact with an Aegis instance your team already runs, from your terminal, using `aegis-job` ([ADR 0006](docs/adr/0006-developer-client.md), [docs/client.md](docs/client.md)). You need its URL and a role on your repo from its administrator; to try it without one, use the local trial (3.2). Most jobs do not need the CLI at all: adding the `aegis` label to an issue starts one.
+Interact with an Aegis instance your team already runs, from your terminal, using `aegis` ([ADR 0006](docs/adr/0006-developer-client.md), [docs/client.md](docs/client.md)). You need its URL and a role on your repo from its administrator; to try it without one, use the local trial (3.2). Most jobs do not need the CLI at all: adding the `aegis` label to an issue starts one.
 
 ```bash
 # Install from source via Cargo (until the first release)
 cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client
 
 # After the first release: install via npm (macOS, Linux - prebuilt binaries bundled)
-npm install -g @hoanghainh1188/aegis-job
+npm install -g @hoanghainh1188/aegis
 
 # Log in with your personal token (from https://<aegis-server>/me/tokens)
-aegis-job login https://aegis.internal.example.com
+aegis login https://aegis.internal.example.com
 
 # Submit an issue and watch progress live
-aegis-job submit my-repo owner/repo#42
-aegis-job watch <job-id>
+aegis submit my-repo owner/repo#42
+aegis watch <job-id>
 ```
 
 ### 3.2 For Quick Trial (30-Minute Local Sandbox)
@@ -230,7 +230,7 @@ flowchart LR
     end
 
     subgraph AegisBoundary["🛡️ Aegis Platform Boundary"]
-        CLI["aegis-job CLI<br/>(Developer Client)"]:::aegis
+        CLI["aegis CLI<br/>(Developer Client)"]:::aegis
         Server["aegis-server<br/>(API · Webhooks · Pollers · Dashboard · Workers)"]:::aegis
         Sandbox["Isolated Docker Sandboxes<br/>(--network none · non-root · cap-drop ALL)"]:::sandbox
         Proxy["Allow-listed Egress Proxy<br/>(Pre-gate dependency fetch)"]:::sandbox
@@ -277,7 +277,7 @@ flowchart LR
 
 | External System | Direction | Protocol / Mechanism | Purpose & Security Boundary | Handled By |
 | :--- | :---: | :--- | :--- | :--- |
-| **Developers & Reviewers** | $\leftrightarrow$ | HTTPS (Browser / `htmx`), REST API (`/api/v1/*`) | View job ledgers on the dashboard, submit/watch jobs via `aegis-job`, or review PRs on GitHub/GitLab. | `aegis-server`, `aegis-client` |
+| **Developers & Reviewers** | $\leftrightarrow$ | HTTPS (Browser / `htmx`), REST API (`/api/v1/*`) | View job ledgers on the dashboard, submit/watch jobs via `aegis`, or review PRs on GitHub/GitLab. | `aegis-server`, `aegis-client` |
 | **GitHub / GitLab** | $\leftrightarrow$ | Webhooks (`X-Hub-Signature-256` / `X-Gitlab-Token`), Git / HTTPS API | Ingests labeled issues, `main` CI breakages, and PR review comments; pushes `agent/<id>` branches and opens structured PRs. | `aegis-server`, `aegis-pr` |
 | **Jira / Backlog** | $\leftrightarrow$ | REST API Polling (atomic `polls` schedule) | Polls issues matching configured JQL/filters and writes resolution status/PR links back to the ticket. | `aegis-tracker`, `aegis-server` |
 | **SonarQube** | $\leftrightarrow$ | Web API + `sonar-scanner` CLI | Ingests static analysis warnings (clustered by AST/dataflow) and verifies patches against the Sonar Quality Gate. | `aegis-sonar-batch`, `aegis-gate` |
@@ -308,7 +308,7 @@ flowchart TB
     classDef tools fill:#451a03,stroke:#F59E0B,stroke-width:1.5px,color:#FEF3C7;
 
     subgraph Entrypoints["1. Entrypoints & Clients"]
-        Client["aegis-client<br/>(aegis-job CLI)"]:::entry
+        Client["aegis-client<br/>(aegis CLI)"]:::entry
         LocalCLI["aegis-cli<br/>(aegis local & eval runner)"]:::entry
     end
 
@@ -419,7 +419,7 @@ flowchart TD
     classDef pass fill:#064e3b,stroke:#10B981,stroke-width:2px,color:#ECFDF5;
     classDef stop fill:#450a0a,stroke:#EF4444,stroke-width:2px,color:#FEF2F2;
 
-    Issue["Input: Webhook / Poller / aegis-job submit"]:::input --> L1["LAYER 1: CONTEXT ENGINE (Tree-sitter AST + Bounded ACI)"]:::layer
+    Issue["Input: Webhook / Poller / aegis submit"]:::input --> L1["LAYER 1: CONTEXT ENGINE (Tree-sitter AST + Bounded ACI)"]:::layer
     L1 --> L2["LAYER 2: PROMPT CACHING (4 Breakpoints BP1 → BP4)"]:::layer
     L2 --> L3["LAYER 3: MODEL ROUTING (Light → Core → Expert)"]:::layer
     L3 --> L4["LAYER 4: REGRESSION VERIFICATION GATE (Docker Sandbox --network none)"]:::layer
@@ -492,7 +492,7 @@ The Cargo workspace (`crates/`) is organized into 5 architectural layers matchin
 aegis-code/
 ├── crates/
 │   ├── # 1. Entrypoints & Developer Clients
-│   ├── aegis-client/         # Developer CLI binary `aegis-job`: submit, watch, cancel jobs via REST API (ADR 0006)
+│   ├── aegis-client/         # Developer CLI binary `aegis`: submit, watch, cancel jobs via REST API (ADR 0006)
 │   ├── aegis-cli/            # Local CLI binary `aegis`: single-issue runner and evaluation benchmark harness
 │   │
 │   ├── # 2. Platform Service, State & Secrets
@@ -525,7 +525,7 @@ aegis-code/
 ├── docker/                   # Dockerfiles for `aegis-server` and per-language verification sandboxes
 ├── docs/                     # Architectural Decision Records (ADRs), design specs, measurements, and operator runbooks
 ├── eval/                     # Empirical benchmark datasets and harnesses across all 6 supported languages
-├── npm/                      # Pre-bundled npm package wrapper for `@hoanghainh1188/aegis-job`
+├── npm/                      # Pre-bundled npm package wrapper for `@hoanghainh1188/aegis`
 ├── scripts/                  # Operational scripts (30-minute local trial, release bundling, benchmarks)
 └── tests/                    # Workspace-level end-to-end and integration test suites
 ```
@@ -539,7 +539,7 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * ✅ **Phase 0 – Setup** (Completed): CI/CD pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
 * ✅ **Phase 1 – MVP / PoC** (Completed): Core agent loop, Rust and Python language profiles, empirical validation against 3 Core KPIs ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md), [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md)).
 * 🚧 **Phase 2 – Platform Service** (~90% Completed – Final Stage):
-  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles; unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis-job` on npm; on-premise Docker Compose and systemd bundles; Kubernetes dind documentation ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md)).
+  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles; unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes dind documentation ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md)).
   - **In Progress / Remaining:** Staging cloud deployment via OpenTofu (#33), KPI evaluations on the 4 new language profiles (52 issues, [eval/README.md](eval/README.md), #259), and real-world team pilot (#158).
 * ⏳ **Phase 3 – Advanced Scaling** (Planned): Spectrum-Based Fault Localization (SBFL), deep context compression (SWEzze/SaraCoder), and expansion to additional language ecosystems.
 
@@ -553,13 +553,13 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [ADR 0003: Platform Service Architecture](docs/adr/0003-platform-service-architecture.md)
 * [ADR 0004: Multi-Language Profiles](docs/adr/0004-multi-language-profiles.md)
 * [ADR 0005: KPI Thresholds After Phase 1](docs/adr/0005-kpi-thresholds-after-phase-1.md)
-* [ADR 0006: Developer Client (`aegis-job`)](docs/adr/0006-developer-client.md)
+* [ADR 0006: Developer Client (`aegis`)](docs/adr/0006-developer-client.md)
 * [ADR 0007: On-Premise Deployment](docs/adr/0007-on-premise-deployment.md)
 * [ADR 0008: Gate Sandbox on Kubernetes](docs/adr/0008-gate-sandbox-on-kubernetes.md)
 
 ### Detailed Guides & Runbooks
 * [Reviewer Guide](docs/reviewing.md) – Reading an Aegis PR, asking for review rounds, recording the verdict
-* [Developer Client Guide (`aegis-job`)](docs/client.md) – Submitting and monitoring jobs from terminal
+* [Developer Client Guide (`aegis`)](docs/client.md) – Submitting and monitoring jobs from terminal
 * [Local End-to-End Trial Guide](docs/local-trial.md) – Step-by-step local platform walkthrough
 * [Production AWS Runbook](docs/runbook/README.md) – Deployment, secret rotation, and incident triage
 * [On-Premise Operations Runbook](docs/runbook/on-premise.md) – Single-machine Docker Compose and systemd management

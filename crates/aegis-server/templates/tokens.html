@@ -4,13 +4,13 @@
 <section aria-labelledby="tokens-heading">
   <p class="eyebrow">{{ me.name }}</p>
   <h1 id="tokens-heading">My tokens</h1>
-  <p class="note">Tokens for the <code>aegis-job</code> client on your machine: acts as you, with your exact permissions on each repo, recorded under your name in audit logs. Up to {{ max_tokens }} active tokens, valid for up to {{ max_days }} days each.</p>
+  <p class="note">Tokens for the <code>aegis</code> client on your machine: acts as you, with your exact permissions on each repo, recorded under your name in audit logs. Up to {{ max_tokens }} active tokens, valid for up to {{ max_days }} days each.</p>
   {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
   {% if let Some(t) = made %}
   <div class="notice" role="status">
     <p>New token, <strong>shown only once</strong>: copy it now.</p>
     <pre class="token"><code>{{ t }}</code></pre>
-    <p>Sign in: <code>aegis-job login {{ public_url }}</code>, then paste the token when prompted.</p>
+    <p>Sign in: <code>aegis login {{ public_url }}</code>, then paste the token when prompted.</p>
   </div>
   {% endif %}
   <form method="post" action="/me/tokens" class="inline">

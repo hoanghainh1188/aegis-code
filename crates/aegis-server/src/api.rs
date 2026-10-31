@@ -317,7 +317,7 @@ impl From<Run> for RunView {
     }
 }
 
-/// Who the token is (#231): what `aegis-job whoami` shows.
+/// Who the token is (#231): what `aegis whoami` shows.
 async fn me(Extension(access): Extension<Access>) -> ApiResult {
     Ok(ok(
         StatusCode::OK,
@@ -340,7 +340,7 @@ struct RepoView {
 }
 
 /// The repos the caller has a role in, with that role (#231), oldest
-/// first: what `aegis-job repos` lists and `submit` resolves a slug with.
+/// first: what `aegis repos` lists and `submit` resolves a slug with.
 async fn repos(State(store): State<Store>, Extension(access): Extension<Access>) -> ApiResult {
     let mut out = Vec::new();
     let mut page = Some(Page::first(Page::MAX_LIMIT));

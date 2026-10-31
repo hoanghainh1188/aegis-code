@@ -1,13 +1,13 @@
 [package]
 name = "aegis-client"
-description = "aegis-job: the developer's client of aegis-server's API (#231)."
+description = "aegis: the developer's client of aegis-server's API (#231)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [[bin]]
-name = "aegis-job"
+name = "aegis"
 path = "src/main.rs"
 
 # HTTP and JSON only: no agent, gate, Docker or model provider.

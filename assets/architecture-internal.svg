@@ -74,7 +74,7 @@
   <rect x="34" y="100" width="4" height="50" rx="2" fill="#38BDF8" />
   <text x="48" y="118" class="font-mono crate-name" fill="#38BDF8">crates/aegis-client</text>
   <rect x="255" y="105" width="104" height="15" rx="3" fill="#0c2d48" />
-  <text x="307" y="116" text-anchor="middle" class="font-mono badge" fill="#38BDF8">bin: aegis-job</text>
+  <text x="307" y="116" text-anchor="middle" class="font-mono badge" fill="#38BDF8">bin: aegis</text>
   <text x="48" y="133" class="font-sans crate-role">Developer Terminal Client (npm &amp; Cargo)</text>
   <text x="48" y="145" class="font-sans crate-desc">login · submit · watch · list · cancel · logs via REST</text>
 
