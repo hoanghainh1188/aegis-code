@@ -22,6 +22,7 @@ use aegis_store::{
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use chrono::Datelike;
 use hmac::{Hmac, KeyInit, Mac};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -233,17 +234,29 @@ async fn the_month_begins_in_the_configured_time_zone() {
     let a = repo(&s, "a").await;
     let j = job(&s, a, "acme/a#1").await.unwrap();
     spend(&s, &j, 1.0).await;
-    // 08:00 on the 1st in Tokyo is still last month in UTC (23:00).
+    // Tokyo is nine hours ahead and has no daylight saving: from 15:00 UTC
+    // on a month's last day it is already in the next month (#339).
+    let now = chrono::Utc::now();
+    let tokyo_ahead = (now + chrono::Duration::hours(9)).month() != now.month();
+    // Most of the month, 08:00 on the 1st in Tokyo is still last month in
+    // UTC (23:00). In the last hours, 23:00 on the last day in Tokyo is
+    // UTC's month (14:00) but not Tokyo's.
     db.raw(
-        "UPDATE ledger_events SET recorded_at =
-             (date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo') + interval '8 hours')
-             AT TIME ZONE 'Asia/Tokyo'",
+        "UPDATE ledger_events SET recorded_at = CASE
+             WHEN date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo')
+                  = date_trunc('month', now() AT TIME ZONE 'UTC')
+             THEN (date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo') + interval '8 hours')
+                  AT TIME ZONE 'Asia/Tokyo'
+             ELSE (date_trunc('month', now() AT TIME ZONE 'Asia/Tokyo') - interval '1 hour')
+                  AT TIME ZONE 'Asia/Tokyo'
+         END",
     )
     .await
     .unwrap();
-    assert_eq!(s.repo_budget(a).await.unwrap().unwrap().spent_usd, 1.0);
+    let (in_tokyo, in_utc) = if tokyo_ahead { (0.0, 1.0) } else { (1.0, 0.0) };
+    assert_eq!(s.repo_budget(a).await.unwrap().unwrap().spent_usd, in_tokyo);
     let utc = db.store.clone().with_budget(rules("UTC")).await.unwrap();
-    assert_eq!(utc.repo_budget(a).await.unwrap().unwrap().spent_usd, 0.0);
+    assert_eq!(utc.repo_budget(a).await.unwrap().unwrap().spent_usd, in_utc);
     db.drop().await;
 }
 
