@@ -1,6 +1,6 @@
 {
   "name": "@hoanghainh1188/aegis",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "aegis: send an issue to aegis-code and follow the job until its pull request (ADR 0006).",
   "bin": {
     "aegis": "bin/aegis.js"

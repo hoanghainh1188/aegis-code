@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.0...v0.2.1) (2026-10-31)
+
+
+### Code Refactoring
+
+* rename the client CLI from aegis-job to aegis ([#337](https://github.com/hoanghainh1188/aegis-code/issues/337)) ([957d95b](https://github.com/hoanghainh1188/aegis-code/commit/957d95b245ae93f4d9c47c85037359ae659bd14a))
+
 ## [0.2.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.1.0...v0.2.0) (2026-10-31)
 
 
