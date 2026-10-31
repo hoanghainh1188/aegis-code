@@ -84,22 +84,9 @@ impl Drop for Scratch {
     }
 }
 
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name();
-        let target = to.join(&name);
-        if entry.file_type().unwrap().is_dir() {
-            let skip = ["target", "__pycache__", ".pytest_cache", ".venv"];
-            if !skip.iter().any(|s| name == *s) {
-                copy_dir(&entry.path(), &target);
-            }
-        } else {
-            std::fs::copy(entry.path(), target).unwrap();
-        }
-    }
-}
+#[path = "../../../../tests/fixture_copy.rs"]
+mod fixture_copy;
+use fixture_copy::copy_fixture as copy_dir;
 
 /// Whether the program can be started. When it is missing the test is
 /// skipped locally, but fails when `AEGIS_REQUIRE_PROFILE_TOOLS=1` (CI).
