@@ -3,6 +3,29 @@
 {% block content %}
 {% include "job_head.html" %}
 {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
+{% if let Some(a) = answer %}
+<section aria-labelledby="answer-heading" class="band answer">
+  <h2 id="answer-heading">What the agent did</h2>
+  {% if a.fixed %}
+    {% if !a.cause.is_empty() %}<p class="cause">{{ a.cause }}</p>{% endif %}
+    {% if !a.changes.is_empty() %}
+    <ul class="changes">
+      {% for c in a.changes %}<li><code>{{ c.location }}</code> {{ c.note }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if let Some(t) = a.repro_test %}<p class="note">Reproduction test: <code>{{ t }}</code></p>{% endif %}
+  {% else %}
+    <p class="cause">Stopped{% if let Some(why) = a.stop_reason %}: {{ why }}{% endif %}</p>
+  {% endif %}
+  {% if !a.review_replies.is_empty() %}
+  <h3>Replies to the review</h3>
+  <ul class="changes">
+    {% for r in a.review_replies %}<li>Note {{ r.note }} · {% if r.done %}done{% else %}not done{% endif %}{% if !r.reply.is_empty() %} · {{ r.reply }}{% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p class="note">As the agent wrote it in its final answer; the gate checked the patch, not this text.</p>
+</section>
+{% endif %}
 
 {% if !rounds.is_empty() %}
 <section aria-labelledby="rounds-heading" class="band">

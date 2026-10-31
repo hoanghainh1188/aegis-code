@@ -20,7 +20,8 @@ use aegis_gate::{
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
-    GateRun, IssueId, IssueKind, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, GateRun, IssueId, IssueKind, IssueLedger,
+    LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
     INHERITED_ENV, LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session,
@@ -198,6 +199,40 @@ where
     })
 }
 
+/// The ledger's summary of a final answer (#316), every text redacted as
+/// anything else the platform writes from the model; the values hidden.
+fn summary_of(answer: &FinalAnswer) -> (AnswerSummary, u32) {
+    let mut hidden = 0;
+    let mut clean = |text: &str| {
+        let r = redact(text);
+        hidden += r.count();
+        r.text
+    };
+    let summary = AnswerSummary {
+        fixed: answer.status == Status::Fixed,
+        cause: clean(&answer.cause),
+        changes: answer
+            .changes
+            .iter()
+            .map(|c| AnswerChange {
+                location: clean(&c.location),
+                note: clean(&c.note),
+            })
+            .collect(),
+        repro_test: answer.repro.as_ref().map(|r| clean(&r.test)),
+        stop_reason: answer.stop_reason.as_deref().map(&mut clean),
+        review_replies: answer
+            .review_replies
+            .iter()
+            .map(|r| AnswerReply {
+                note: r.note,
+                done: r.done,
+                reply: clean(&r.reply),
+            })
+            .collect(),
+    };
+    (summary, count(hidden))
+}
 async fn prepare_and_work<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
@@ -217,6 +252,8 @@ where
     ledger
         .secrets_redacted(count(title.count() + body.count()))
         .await?;
+    // What the job works on, for its page (#316).
+    ledger.issue_read(&title.text, &issue.url).await?;
     let issue = &IssueInput {
         title: title.text,
         body: body.text,
@@ -280,6 +317,7 @@ where
     ledger
         .secrets_redacted(count(title.count() + body.count() + in_notes))
         .await?;
+    ledger.issue_read(&title.text, &issue.url).await?;
     let issue = &IssueInput {
         title: title.text,
         body: body.text,
@@ -1163,7 +1201,13 @@ where
         };
 
         let answer = match parse_answer(&reply) {
-            Ok(answer) => answer,
+            Ok(answer) => {
+                // What the agent said it did, for the job's page (#316).
+                let (summary, hidden) = summary_of(&answer);
+                ledger.secrets_redacted(hidden).await?;
+                ledger.answered(summary).await?;
+                answer
+            }
             Err(why) if answer_retries < MAX_ANSWER_RETRIES => {
                 answer_retries += 1;
                 session = session.with_message(Message::user_text(format!(

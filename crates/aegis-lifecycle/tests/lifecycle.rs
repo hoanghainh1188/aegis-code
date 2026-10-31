@@ -238,6 +238,20 @@ async fn a_bug_goes_from_issue_to_pr() {
     assert_eq!(record.gate_runs.len(), 1);
     assert!(record.gate_runs[0].passed);
     assert!(record.cost_usd > 0.0);
+    // What the job works on and what the agent said it did (#316).
+    assert_eq!(
+        record.issue_title.as_deref(),
+        Some("Cart accepts a fourth item")
+    );
+    assert_eq!(
+        record.issue_url.as_deref(),
+        Some("https://github.com/me/fixture/issues/7")
+    );
+    let answer = record.answer.as_ref().unwrap();
+    assert!(answer.fixed);
+    assert!(answer.cause.contains("compared with `>`"), "{answer:?}");
+    assert_eq!(answer.changes[0].location, "src/lib.rs:24");
+    assert_eq!(answer.repro_test.as_deref(), Some("fourth_item_is_refused"));
     // The job's worktree is gone; the clone is untouched.
     assert!(!scratch.0.join("state/jobs/fixture-7/repo").exists());
     let clone_lib = std::fs::read_to_string(scratch.0.join("clone/src/lib.rs")).unwrap();
@@ -935,6 +949,17 @@ async fn two_rejected_edits_escalate_to_expert_with_the_history() {
     assert_eq!(
         report.reason.as_deref(),
         Some("agent stopped: needs a design decision")
+    );
+    // A stopped answer is kept too, with its reason (#316).
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    let answer = record.answer.as_ref().unwrap();
+    assert!(!answer.fixed);
+    assert_eq!(
+        answer.stop_reason.as_deref(),
+        Some("needs a design decision")
     );
     let core = p.provider.requests_for("core");
     let expert = p.provider.requests_for("expert");
