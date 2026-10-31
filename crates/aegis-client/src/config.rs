@@ -1,15 +1,15 @@
-//! Where `aegis-job` keeps its login: the server and the person's token,
-//! in a file only its owner can read. `AEGIS_JOB_SERVER` and
-//! `AEGIS_JOB_TOKEN` stand in for it (CI, scripts).
+//! Where `aegis` keeps its login: the server and the person's token,
+//! in a file only its owner can read. `AEGIS_SERVER` and
+//! `AEGIS_TOKEN` stand in for it (CI, scripts).
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const SERVER_ENV: &str = "AEGIS_JOB_SERVER";
-pub const TOKEN_ENV: &str = "AEGIS_JOB_TOKEN";
+pub const SERVER_ENV: &str = "AEGIS_SERVER";
+pub const TOKEN_ENV: &str = "AEGIS_TOKEN";
 /// Another file than the default.
-pub const CONFIG_ENV: &str = "AEGIS_JOB_CONFIG";
+pub const CONFIG_ENV: &str = "AEGIS_CONFIG";
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Login {
@@ -27,7 +27,7 @@ impl std::fmt::Debug for Login {
     }
 }
 
-/// `$AEGIS_JOB_CONFIG`, or `job.toml` under `$XDG_CONFIG_HOME/aegis` or
+/// `$AEGIS_CONFIG`, or `cli.toml` under `$XDG_CONFIG_HOME/aegis` or
 /// `~/.config/aegis`.
 pub fn path() -> Result<PathBuf, String> {
     if let Some(p) = std::env::var_os(CONFIG_ENV) {
@@ -36,8 +36,8 @@ pub fn path() -> Result<PathBuf, String> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .ok_or("no HOME to keep the login in; set AEGIS_JOB_CONFIG")?;
-    Ok(base.join("aegis").join("job.toml"))
+        .ok_or("no HOME to keep the login in; set AEGIS_CONFIG")?;
+    Ok(base.join("aegis").join("cli.toml"))
 }
 
 /// A server URL the token may go to: `https://`, or `http://` to this
@@ -68,7 +68,7 @@ pub fn load() -> Result<Login, String> {
     }
     let path = path()?;
     let text = std::fs::read_to_string(&path).map_err(|_| {
-        format!("not logged in: `aegis-job login <server>` (or {SERVER_ENV} and {TOKEN_ENV})")
+        format!("not logged in: `aegis login <server>` (or {SERVER_ENV} and {TOKEN_ENV})")
     })?;
     let login: Login = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(Login {
@@ -126,8 +126,8 @@ mod tests {
 
     #[test]
     fn the_login_file_is_its_owners_only_and_hides_the_token_when_shown() {
-        let dir = std::env::temp_dir().join(format!("aegis-job-config-{}", std::process::id()));
-        let path = dir.join("job.toml");
+        let dir = std::env::temp_dir().join(format!("aegis-config-{}", std::process::id()));
+        let path = dir.join("cli.toml");
         let login = Login {
             server: "https://aegis.example.com".into(),
             token: "s3cret".into(),

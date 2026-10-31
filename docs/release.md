@@ -1,6 +1,6 @@
 # Release Operations
 
-A release `vX.Y.Z` bundles the server and sandbox container images on GHCR, offline bundles, and the developer client `aegis-job` (binaries and npm package) under a synchronized version (#263). The process follows modern GitOps standards: `release-please` manages versioning and changelogs, GitHub Releases trigger downstream pipelines, and npm packages are published via OIDC without storing long-lived npm tokens.
+A release `vX.Y.Z` bundles the server and sandbox container images on GHCR, offline bundles, and the developer client `aegis` (binaries and npm package) under a synchronized version (#263). The process follows modern GitOps standards: `release-please` manages versioning and changelogs, GitHub Releases trigger downstream pipelines, and npm packages are published via OIDC without storing long-lived npm tokens.
 
 ```mermaid
 flowchart LR
@@ -9,14 +9,14 @@ flowchart LR
     C --> D[release.yml]
     D --> E[GHCR: aegis-server, aegis-sandbox-* X.Y.Z, cosign keyless sign]
     D --> F[Release Assets: offline bundle, versions.txt]
-    D --> G[Release Assets: aegis-job tar.gz] --> H[npmjs: @hoanghainh1188/aegis-job]
+    D --> G[Release Assets: aegis tar.gz] --> H[npmjs: @hoanghainh1188/aegis]
 ```
 
 ---
 
 ## Publishing a Release
 
-1. **Merge Release PR:** When Conventional Commits land on `main`, `release-please` opens or updates a pull request titled `chore(release): aegis-code X.Y.Z`. `feat` increments minor version, `fix` increments patch; during `0.x`, breaking changes (`!`) also increment minor version. The PR updates versions across `Cargo.toml`, `Cargo.lock`, `npm/aegis-job/package.json`, `version.txt`, and generates `CHANGELOG.md`.
+1. **Merge Release PR:** When Conventional Commits land on `main`, `release-please` opens or updates a pull request titled `chore(release): aegis-code X.Y.Z`. `feat` increments minor version, `fix` increments patch; during `0.x`, breaking changes (`!`) also increment minor version. The PR updates versions across `Cargo.toml`, `Cargo.lock`, `npm/aegis/package.json`, `version.txt`, and generates `CHANGELOG.md`.
 2. **Approve and Squash-Merge:** `release-please` automatically tags the repository and publishes a GitHub Release, triggering [.github/workflows/release.yml](../.github/workflows/release.yml):
    - `version`: Validates that tag matches versions across all manifests;
    - `images`: Builds and pushes 7 container images tagged `X.Y.Z` and `X.Y`, signed via Cosign keyless signing;
@@ -32,7 +32,7 @@ flowchart LR
 | --- | --- |
 | Secret `RELEASE_PLEASE_TOKEN`: Fine-grained PAT scoped strictly to this repo with Contents, Pull requests, and Issues Read/Write. Releases triggered by default `GITHUB_TOKEN` do not cascade to `release.yml` | Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions |
 | Environment `npm-release` (optional required reviewers) | Settings $\rightarrow$ Environments |
-| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh1188-aegis-job-X.Y.Z.tgz` from Release, run `npm login`, then `npm publish hoanghainh1188-aegis-job-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured | Operator workstation |
+| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh1188-aegis-X.Y.Z.tgz` from Release, run `npm login`, then `npm publish hoanghainh1188-aegis-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured | Operator workstation |
 | Configure Trusted Publisher for package: Repository `hoanghainh1188/aegis-code`, workflow `release.yml`, environment `npm-release` | npmjs.com $\rightarrow$ package $\rightarrow$ Settings |
 | Make GHCR Packages **Public** so users can pull without authentication | GitHub $\rightarrow$ Packages $\rightarrow$ each `aegis-*` $\rightarrow$ Package settings |
 
@@ -46,7 +46,7 @@ All components of a release share an identical version:
 | --- | --- |
 | Server | `ghcr.io/hoanghainh1188/aegis-server:X.Y.Z` |
 | Gate Sandboxes | `ghcr.io/hoanghainh1188/aegis-sandbox-<python\|rust\|node\|java\|go\|dotnet>:X.Y.Z`; server calls these locally by bare names `aegis-sandbox-<profile>` |
-| Client | `aegis-job-X.Y.Z-<target>.tar.gz`, npm `@hoanghainh1188/aegis-job@X.Y.Z` |
+| Client | `aegis-X.Y.Z-<target>.tar.gz`, npm `@hoanghainh1188/aegis@X.Y.Z` |
 | Database | Final migration included in the release, documented in `versions.txt`; server runs migrations automatically on boot |
 
 Server and sandboxes must run identical versions. The client supports backward compatibility, as `/api/v1` APIs are additive and non-breaking.

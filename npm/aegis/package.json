@@ -1,9 +1,9 @@
 {
-  "name": "@hoanghainh1188/aegis-job",
+  "name": "@hoanghainh1188/aegis",
   "version": "0.2.0",
-  "description": "aegis-job: send an issue to aegis-code and follow the job until its pull request (ADR 0006).",
+  "description": "aegis: send an issue to aegis-code and follow the job until its pull request (ADR 0006).",
   "bin": {
-    "aegis-job": "bin/aegis-job.js"
+    "aegis": "bin/aegis.js"
   },
   "files": [
     "bin/",
@@ -24,7 +24,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hoanghainh1188/aegis-code.git",
-    "directory": "npm/aegis-job"
+    "directory": "npm/aegis"
   },
   "homepage": "https://github.com/hoanghainh1188/aegis-code/blob/main/docs/client.md",
   "keywords": [

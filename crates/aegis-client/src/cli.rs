@@ -1,4 +1,4 @@
-//! The commands of `aegis-job`. Each prints to `out` and says how the
+//! The commands of `aegis`. Each prints to `out` and says how the
 //! process ends; `--json` prints the server's data as it came.
 
 use std::io::{BufRead, Write};
@@ -8,25 +8,25 @@ use crate::api::{Client, Job};
 use crate::config::{self, Login};
 
 pub const USAGE: &str = "\
-aegis-job: give aegis-code jobs and follow them, from your terminal.
+aegis: give aegis-code jobs and follow them, from your terminal.
 
-  aegis-job login <server>          log in with a token from <server>/me/tokens
-  aegis-job logout
-  aegis-job whoami
-  aegis-job repos                   the repos you have a role in
-  aegis-job submit <repo> <issue>   a job for an issue: owner/repo#12 (GitHub),
-                                    group/project#12 (--source gitlab), PROJ-7
-                                    (--source jira), …
-  aegis-job list [--repo <repo>] [--status <status>] [--limit <n>]
-  aegis-job show <job>              the job and its runs
-  aegis-job watch <job> [--every <seconds>]
-                                    until it ends; exit 0 when it opened a PR
-  aegis-job cancel <job>
-  aegis-job retry <job>
-  aegis-job review <job>            a review round of the PR the job opened
-  aegis-job open <job>              its PR, or its page on the dashboard
+  aegis login <server>          log in with a token from <server>/me/tokens
+  aegis logout
+  aegis whoami
+  aegis repos                   the repos you have a role in
+  aegis submit <repo> <issue>   a job for an issue: owner/repo#12 (GitHub),
+                                group/project#12 (--source gitlab), PROJ-7
+                                (--source jira), …
+  aegis list [--repo <repo>] [--status <status>] [--limit <n>]
+  aegis show <job>              the job and its runs
+  aegis watch <job> [--every <seconds>]
+                                until it ends; exit 0 when it opened a PR
+  aegis cancel <job>
+  aegis retry <job>
+  aegis review <job>            a review round of the PR the job opened
+  aegis open <job>              its PR, or its page on the dashboard
 
-  --json                            print the server's answer as JSON
+  --json                        print the server's answer as JSON
 ";
 
 /// How the process ends.
@@ -183,7 +183,7 @@ pub fn run(
         }
         "login" => {
             let [server] = rest.as_slice() else {
-                return Err("usage: aegis-job login <server>".into());
+                return Err("usage: aegis login <server>".into());
             };
             let server = config::checked_server(server)?;
             let token = read_token(input, out, interactive)?;
@@ -229,7 +229,7 @@ pub fn run_with(
     let one_job = |rest: &[String]| -> Result<i64, String> {
         match rest {
             [id] => job_id(id),
-            _ => Err(format!("usage: aegis-job {command} <job>")),
+            _ => Err(format!("usage: aegis {command} <job>")),
         }
     };
     match command {
@@ -262,7 +262,7 @@ pub fn run_with(
         "submit" => {
             let source = take_opt(&mut rest, "--source")?;
             let [repo, issue_ref] = rest.as_slice() else {
-                return Err("usage: aegis-job submit <repo> <issue> [--source <tracker>]".into());
+                return Err("usage: aegis submit <repo> <issue> [--source <tracker>]".into());
             };
             let source = match source {
                 Some(s) => s,
@@ -280,7 +280,7 @@ pub fn run_with(
                     job.id, job.issue_ref, repo.slug
                 ),
             )?;
-            w(out, format!("follow it: aegis-job watch {}", job.id))?;
+            w(out, format!("follow it: aegis watch {}", job.id))?;
         }
         "list" => {
             let repo = take_opt(&mut rest, "--repo")?;

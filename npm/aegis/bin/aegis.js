@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Runs the aegis-job binary of this machine's platform, shipped in the
-// package (vendor/<platform>-<arch>/aegis-job): no download at install,
+// Runs the aegis binary of this machine's platform, shipped in the
+// package (vendor/<platform>-<arch>/aegis): no download at install,
 // no package per platform. Arguments, stdio and exit code pass through.
 
 "use strict";
@@ -10,11 +10,11 @@ const { existsSync } = require("node:fs");
 const path = require("node:path");
 
 const target = `${process.platform}-${process.arch}`;
-const binary = path.join(__dirname, "..", "vendor", target, "aegis-job");
+const binary = path.join(__dirname, "..", "vendor", target, "aegis");
 
 if (!existsSync(binary)) {
   console.error(
-    `aegis-job: no binary for ${target} in this package; built for darwin-arm64, ` +
+    `aegis: no binary for ${target} in this package; built for darwin-arm64, ` +
       "darwin-x64, linux-arm64, linux-x64. Other platforms: cargo install --locked " +
       "--git https://github.com/hoanghainh1188/aegis-code aegis-client"
   );
@@ -23,7 +23,7 @@ if (!existsSync(binary)) {
 
 const run = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
 if (run.error) {
-  console.error(`aegis-job: ${run.error.message}`);
+  console.error(`aegis: ${run.error.message}`);
   process.exit(1);
 }
 if (run.signal) {

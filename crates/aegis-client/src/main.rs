@@ -1,4 +1,4 @@
-//! `aegis-job`: see [`aegis_client::cli::USAGE`].
+//! `aegis`: see [`aegis_client::cli::USAGE`].
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     match run(args, &mut input, &mut out, interactive) {
         Ok(exit) => ExitCode::from(exit as u8),
         Err(e) => {
-            eprintln!("aegis-job: {e}");
+            eprintln!("aegis: {e}");
             ExitCode::from(Exit::Error as u8)
         }
     }

@@ -1,4 +1,4 @@
-//! `aegis-job` against a fake `/api/v1` (#231): the token goes as a
+//! `aegis` against a fake `/api/v1` (#231): the token goes as a
 //! bearer, a slug is resolved among the caller's repos, `watch` ends with
 //! the job and says whether it opened a PR, and the server's errors are
 //! shown with a hint.
@@ -26,8 +26,8 @@ fn job(id: i64, status: &str, pr_url: Option<&str>) -> serde_json::Value {
     })
 }
 
-/// Runs `args` as a logged-in `aegis-job`, off the async runtime.
-async fn aegis_job(server: &MockServer, args: &[&str]) -> (Result<Exit, String>, String) {
+/// Runs `args` as a logged-in `aegis`, off the async runtime.
+async fn aegis(server: &MockServer, args: &[&str]) -> (Result<Exit, String>, String) {
     let login = Login {
         server: server.uri(),
         token: "tok-lan".into(),
@@ -70,7 +70,7 @@ async fn a_developer_submits_an_issue_and_watches_it_to_its_pr() {
         .expect(1)
         .mount(&server)
         .await;
-    let (exit, out) = aegis_job(&server, &["submit", "demo", "demo-org/demo#1"]).await;
+    let (exit, out) = aegis(&server, &["submit", "demo", "demo-org/demo#1"]).await;
     assert_eq!(exit, Ok(Exit::Ok), "{out}");
     assert!(
         out.contains("job #7 queued for demo-org/demo#1 in demo"),
@@ -86,14 +86,14 @@ async fn a_developer_submits_an_issue_and_watches_it_to_its_pr() {
         )))
         .mount(&server)
         .await;
-    let (exit, out) = aegis_job(&server, &["watch", "7", "--every", "1"]).await;
+    let (exit, out) = aegis(&server, &["watch", "7", "--every", "1"]).await;
     assert_eq!(exit, Ok(Exit::Ok));
     assert!(
         out.contains("#7      done      demo-org/demo#1  PR https://github.com/bot/demo/pull/3"),
         "{out}"
     );
 
-    let (exit, _) = aegis_job(&server, &["submit", "nope", "demo-org/demo#1"]).await;
+    let (exit, _) = aegis(&server, &["submit", "nope", "demo-org/demo#1"]).await;
     assert!(exit.unwrap_err().contains("no repo `nope`"));
 }
 
@@ -105,7 +105,7 @@ async fn a_job_without_a_pr_ends_watch_with_1_and_errors_say_why() {
         .respond_with(ok(job(8, "failed", None)))
         .mount(&server)
         .await;
-    let (exit, _) = aegis_job(&server, &["watch", "8"]).await;
+    let (exit, _) = aegis(&server, &["watch", "8"]).await;
     assert_eq!(exit, Ok(Exit::NoPr));
 
     Mock::given(method("GET"))
@@ -114,7 +114,7 @@ async fn a_job_without_a_pr_ends_watch_with_1_and_errors_say_why() {
         .respond_with(ok(json!([job(9, "running", None)])))
         .mount(&server)
         .await;
-    let (exit, out) = aegis_job(&server, &["list", "--status", "running", "--json"]).await;
+    let (exit, out) = aegis(&server, &["list", "--status", "running", "--json"]).await;
     assert_eq!(exit, Ok(Exit::Ok));
     let listed: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(listed[0]["id"], 9);
@@ -126,12 +126,12 @@ async fn a_job_without_a_pr_ends_watch_with_1_and_errors_say_why() {
         })))
         .mount(&server)
         .await;
-    let (exit, _) = aegis_job(&server, &["whoami"]).await;
+    let (exit, _) = aegis(&server, &["whoami"]).await;
     let err = exit.unwrap_err();
     assert!(
-        err.contains("unauthorized") && err.contains("aegis-job login"),
+        err.contains("unauthorized") && err.contains("aegis login"),
         "{err}"
     );
-    let (exit, _) = aegis_job(&server, &["frobnicate"]).await;
+    let (exit, _) = aegis(&server, &["frobnicate"]).await;
     assert!(exit.unwrap_err().contains("unknown command"));
 }

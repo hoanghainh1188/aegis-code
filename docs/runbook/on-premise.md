@@ -155,7 +155,7 @@ From `deploy/compose/`, with the server healthy. `aegis` below stands for `docke
 4. **Roles:** `aegis grant <email> myrepo maintainer` for the people who start jobs, `reviewer` for those who only review.
 5. **Webhooks:** on the upstream repo, payload URL `https://<public_url>/webhooks/github`, content type `application/json`, secret from `sudo cat secrets/AEGIS_GITHUB_WEBHOOK_SECRET`, events **Issues** and **Workflow runs**. For review rounds, on the fork: **Pull request reviews**, **Pull request review comments**, **Issue comments**. GitLab: [AWS Runbook §6](README.md#webhook-configuration), step 10.
 6. **First job:** put the label `aegis` on a small, well-described bug. In the webhook's *Recent Deliveries* the response is `202`; the job appears on the dashboard within seconds, and a comment appears on the issue when it ends.
-7. **Hand over:** point reviewers to the [Reviewer Guide](../reviewing.md) and developers to [aegis-job](../client.md).
+7. **Hand over:** point reviewers to the [Reviewer Guide](../reviewing.md) and developers to [aegis](../client.md).
 
 ### Reference
 
@@ -239,6 +239,6 @@ sudo deploy/systemd/install.sh   # Sets up /etc/aegis, /srv/aegis/.workspace, un
 | `permission denied ... docker.sock` in job logs | Verify `DOCKER_GID` in `.env` (or `/etc/aegis/aegis.env` for systemd) matches host group of `/var/run/docker.sock` |
 | Gate fails with `No such image: aegis-sandbox-...` | Required language sandbox image is missing from `AEGIS_SANDBOXES` or not loaded. Note: the `fetch` step always requires `aegis-sandbox-python` (egress proxy) |
 | Job halted with `API root ... must use https` | Forge API roots (`fork.api`, `AEGIS_GITHUB_API`) must utilize `https://`. Insecure `http://` is allowed strictly for loopback test environments |
-| `aegis-job` CLI reports `not_found` with service token | Service tokens require RBAC roles: `... grant <token-name> maintainer` |
+| `aegis` CLI reports `not_found` with service token | Service tokens require RBAC roles: `... grant <token-name> maintainer` |
 | `repo add` fails with `could not read Username for 'https://github.com'` | GitHub rejected the fork token (wrong value, expired, or no *Contents* read on the repo); the token is sent on every clone, public repos included. Fix the file `./secrets/<token_env>` and run `repo add` again |
 | Job mount error on `/work` | `/srv/aegis/.workspace` must exist on host matching container path, owned by uid 10001 |

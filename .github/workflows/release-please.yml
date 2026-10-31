@@ -2,7 +2,7 @@
 #
 # - Mỗi lần push lên main: release-please mở (hoặc cập nhật) PR
 #   "chore(release): aegis-code X.Y.Z". PR đổi version trong Cargo.toml,
-#   Cargo.lock, npm/aegis-job/package.json, version.txt và CHANGELOG.md theo
+#   Cargo.lock, npm/aegis/package.json, version.txt và CHANGELOG.md theo
 #   các commit Conventional Commits từ bản trước.
 # - Squash-merge PR đó: release-please tạo tag vX.Y.Z và GitHub Release;
 #   release.yml chạy từ Release (image GHCR, gói offline, client, npm).

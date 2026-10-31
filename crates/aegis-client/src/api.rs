@@ -91,7 +91,7 @@ pub struct Client {
 impl Client {
     pub fn new(login: Login) -> Result<Self, String> {
         let http = reqwest::blocking::Client::builder()
-            .user_agent(concat!("aegis-job/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("aegis/", env!("CARGO_PKG_VERSION")))
             .timeout(TIMEOUT)
             .build()
             .map_err(|e| e.to_string())?;
@@ -129,7 +129,7 @@ impl Client {
         })?;
         if let Some(e) = envelope.error {
             let hint = match status.as_u16() {
-                401 => " (log in again: `aegis-job login`)",
+                401 => " (log in again: `aegis login`)",
                 _ => "",
             };
             return Err(format!("{}: {}{hint}", e.code, e.message));
@@ -150,7 +150,7 @@ impl Client {
         self.repos()?
             .into_iter()
             .find(|r| r.slug.eq_ignore_ascii_case(slug))
-            .ok_or_else(|| format!("no repo `{slug}` you have a role in (`aegis-job repos`)"))
+            .ok_or_else(|| format!("no repo `{slug}` you have a role in (`aegis repos`)"))
     }
 
     pub fn submit(&self, repo_id: i64, issue_ref: &str, source: &str) -> Result<Job, String> {
