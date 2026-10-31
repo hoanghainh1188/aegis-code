@@ -20,7 +20,7 @@ use aegis_lang::{
 };
 
 use crate::build_cache::BuildCache;
-use crate::command::{CancelToken, Exit, Ran, Runner};
+use crate::command::{CancelToken, Exit, Ran, Runner, out_of_memory};
 use crate::egress::{Egress, EgressSession};
 use crate::failures::{failing_tests_with, missed, names_test, ran_tests, selector};
 use crate::findings::new_findings;
@@ -306,6 +306,7 @@ fn exit_text(exit: Exit) -> String {
         Exit::Signal => "killed by a signal".into(),
         Exit::TimedOut => "timed out".into(),
         Exit::Cancelled => "cancelled".into(),
+        Exit::OutOfMemory { limit_mb } => out_of_memory(limit_mb),
     }
 }
 
@@ -954,6 +955,10 @@ impl<'a> Run<'a> {
                 let why = format!("the tests were killed by a signal:\n{}", tail(&patched.log));
                 return fail(&[&patched], why);
             }
+            e @ Exit::OutOfMemory { .. } => {
+                let why = format!("the tests: {}:\n{}", exit_text(e), tail(&patched.log));
+                return fail(&[&patched], why);
+            }
             _ => {}
         }
         let Some(format) = self.part.profile.gate.test_output else {
@@ -1177,7 +1182,7 @@ impl<'a> Run<'a> {
         let updated = self.run_in(&argv, false, "update-references")?;
         match updated.exit {
             Exit::Cancelled => return Ok(StepReport::skipped(name, Skip::Cancelled)),
-            Exit::TimedOut | Exit::Signal => {
+            Exit::TimedOut | Exit::Signal | Exit::OutOfMemory { .. } => {
                 let why = format!(
                     "updating the reference outputs {}:\n{}",
                     exit_text(updated.exit),
@@ -1291,7 +1296,7 @@ impl<'a> Run<'a> {
         let reports = pattern.map(|pat| (pat, aegis_lang::find_reports(&self.part.repo, pat)));
         Ok(match (ran.exit, &reports) {
             (Exit::Cancelled, _) => StepReport::skipped(name, Skip::Cancelled),
-            (e @ (Exit::TimedOut | Exit::Signal), _) => {
+            (e @ (Exit::TimedOut | Exit::Signal | Exit::OutOfMemory { .. }), _) => {
                 failed(format!("{}:\n{}", exit_text(e), tail(&ran.log)))
             }
             (e, Some((pat, found))) if found.is_empty() => {

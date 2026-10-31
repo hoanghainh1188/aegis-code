@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use aegis_aci::{Aci, EditOutcome, EditRequest, FormatContainer, LookupAt, Rejection};
+use aegis_gate::Limits;
 use aegis_lang::{Language, ProfileOverrides, RepoProfiles, ResolvedProfile};
 use common::{Scratch, profile};
 
@@ -97,11 +98,12 @@ fn a_part_s_formatter_runs_in_its_image_with_its_dependency_dirs() {
         "/work/.venv".to_owned(),
     );
     let aci = aci(&repo, ProfileOverrides::default())
-        .with_format_container(FormatContainer {
-            docker: "docker".into(),
-            image: "aegis-sandbox-rust".into(),
-            mounts: vec![("/cache/registry".into(), "/usr/local/cargo/registry".into())],
-        })
+        .with_format_container(FormatContainer::new(
+            "docker".into(),
+            "aegis-sandbox-rust".into(),
+            vec![("/cache/registry".into(), "/usr/local/cargo/registry".into())],
+            Limits::default(),
+        ))
         .with_part_mounts([("py".to_owned(), vec![venv.clone()])].into());
     let ws = aci.workspace();
     let py = ws.format_container_of(&ws.profiles().parts()[1]).unwrap();

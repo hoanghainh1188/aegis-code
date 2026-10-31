@@ -219,18 +219,6 @@ fn decode_path(uri_path: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-#[cfg(unix)]
-fn host_user() -> String {
-    // SAFETY: getuid and getgid cannot fail and touch no memory.
-    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
-    format!("{uid}:{gid}")
-}
-
-#[cfg(not(unix))]
-fn host_user() -> String {
-    "1000:1000".to_owned()
-}
-
 impl Lsp {
     /// Starts `argv` on the part of `repo` in `dir` and asks it to
     /// initialize; indexing goes on in the background.
@@ -256,28 +244,17 @@ impl Lsp {
                     std::process::id(),
                     NEXT.fetch_add(1, Ordering::Relaxed)
                 );
-                let mut out: Vec<String> = [
-                    c.docker.as_str(),
-                    "run",
-                    "-i",
-                    "--rm",
-                    "--name",
-                    &name,
-                    "--network",
-                    "none",
-                    "--cap-drop",
-                    "ALL",
-                    "--security-opt",
-                    "no-new-privileges",
-                    "--user",
-                    &host_user(),
-                    "--volume",
-                    &format!("{}:{WORKDIR}", root.display()),
-                    "--workdir",
-                    WORKDIR,
-                ]
-                .map(str::to_owned)
-                .to_vec();
+                let mut out: Vec<String> =
+                    [c.docker.as_str(), "run", "-i", "--rm", "--name", &name]
+                        .map(str::to_owned)
+                        .to_vec();
+                out.extend(c.hardening().args("none"));
+                out.extend([
+                    "--volume".to_owned(),
+                    format!("{}:{WORKDIR}", root.display()),
+                    "--workdir".to_owned(),
+                    WORKDIR.to_owned(),
+                ]);
                 for (host, inside) in &c.mounts {
                     out.extend(["--volume".to_owned(), format!("{host}:{inside}:ro")]);
                 }

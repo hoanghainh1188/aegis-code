@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
+use aegis_gate::{Hardening, Limits};
 use aegis_lang::{MAX_SOURCE_BYTES, ProfilePart, RepoProfiles, ResolvedProfile};
 
 use crate::AciError;
@@ -33,6 +34,41 @@ pub struct FormatContainer {
     /// dependency dirs, so the formatter is the version the gate checks
     /// with (a repo's pinned one in its `.venv`).
     pub mounts: Vec<(String, String)>,
+    /// The run's `[run.sandbox_limits]` (#320).
+    pub limits: Limits,
+    /// `limits` with what the profile of `image` sets, and where its tools
+    /// write ([`Self::for_profile`]).
+    hardening: Hardening,
+}
+
+impl FormatContainer {
+    pub fn new(
+        docker: String,
+        image: String,
+        mounts: Vec<(String, String)>,
+        limits: Limits,
+    ) -> Self {
+        Self {
+            docker,
+            image,
+            mounts,
+            limits,
+            hardening: Hardening {
+                limits,
+                ..Hardening::default()
+            },
+        }
+    }
+
+    /// Locked down as the gate's containers of `profile` are.
+    fn for_profile(mut self, profile: &ResolvedProfile) -> Self {
+        self.hardening = Hardening::new(self.limits, &profile.profile.sandbox);
+        self
+    }
+
+    pub fn hardening(&self) -> &Hardening {
+        &self.hardening
+    }
 }
 
 #[derive(Debug)]
@@ -81,7 +117,7 @@ impl Workspace {
     /// Runs `edit.format` in `container` instead of on the machine.
     pub fn with_format_container(self, container: FormatContainer) -> Self {
         Self {
-            container: Some(container),
+            container: Some(container.for_profile(self.profiles.root())),
             ..self
         }
     }
@@ -110,11 +146,13 @@ impl Workspace {
         let root = self.container.as_ref()?;
         Some(match part.dir.is_empty() {
             true => root.clone(),
-            false => FormatContainer {
-                docker: root.docker.clone(),
-                image: part.profile.image.clone(),
-                mounts: self.part_mounts(&part.dir).to_vec(),
-            },
+            false => FormatContainer::new(
+                root.docker.clone(),
+                part.profile.image.clone(),
+                self.part_mounts(&part.dir).to_vec(),
+                root.limits,
+            )
+            .for_profile(&part.profile),
         })
     }
 

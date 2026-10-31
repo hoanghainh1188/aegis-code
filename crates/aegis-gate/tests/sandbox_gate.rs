@@ -8,7 +8,7 @@ mod common;
 use std::process::Command;
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, Sandbox, Skip, StepName, StepStatus};
+use aegis_gate::{CancelToken, Hardening, Limits, Sandbox, Skip, StepName, StepStatus};
 use aegis_lang::Language;
 use common::{Repo, profile, statuses};
 
@@ -39,6 +39,10 @@ fn sandbox(repo: &Repo) -> Sandbox {
         env: vec![],
         network: None,
         read_only_mounts: true,
+        hardening: Hardening::new(
+            Limits::default(),
+            &profile(Language::Rust, "").profile.sandbox,
+        ),
     }
 }
 
@@ -161,19 +165,118 @@ fn a_timed_out_step_stops_its_container() {
             .starts_with("timed out"),
         "{report}"
     );
-    let running = Command::new("docker")
+    // Its container is the only one running `sleep 300`; the other tests'
+    // may be there meanwhile.
+    let left: Vec<String> = containers()
+        .into_iter()
+        .filter(|c| c.contains("sleep 300"))
+        .collect();
+    assert_eq!(left, Vec::<String>::new(), "a container was left behind");
+}
+
+/// Name and command of this process's containers still there, running or
+/// not: without `--rm` each is removed once it ends (#320).
+fn containers() -> Vec<String> {
+    let out = Command::new("docker")
         .args([
             "ps",
+            "--all",
+            "--no-trunc",
             "--filter",
             &format!("name=aegis-gate-{}-", std::process::id()),
             "--format",
-            "{{.Names}}",
+            "{{.Names}} {{.Command}}",
         ])
         .output()
         .unwrap();
-    assert_eq!(
-        String::from_utf8_lossy(&running.stdout).trim(),
-        "",
-        "a container was left running"
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_step_over_its_memory_says_so_even_when_a_child_was_killed() {
+    // #320: `tail` is killed, the shell exits 3. The exit code alone would
+    // read as a plain failure, as `cargo` exits 101 when `rustc` is killed.
+    if !docker_ready() {
+        return;
+    }
+    let hungry = profile(
+        Language::Rust,
+        "[gate]\nformat = [\"sh\", \"-c\", \"head -c 512m /dev/zero | tail > /dev/null; exit 3\"]\n",
     );
+    let repo = Repo::new("rust", &[]);
+    let mut sandbox = sandbox(&repo);
+    sandbox.hardening.limits = Limits {
+        memory_mb: 64,
+        ..Limits::default()
+    };
+    let report = repo.gate_in(
+        &hungry,
+        None,
+        Duration::from_secs(120),
+        CancelToken::new(),
+        vec![],
+        Some(sandbox),
+    );
+    let format = report.step(StepName::Format).unwrap();
+    assert_eq!(format.status, StepStatus::Failed, "{report}");
+    assert!(
+        format.detail.contains("out of memory") && format.detail.contains("limit of 64 MB"),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_step_that_succeeds_stays_a_success_if_a_child_ran_out_of_memory() {
+    // What a step runs may let a child go over the limit on purpose.
+    if !docker_ready() {
+        return;
+    }
+    let tolerant = profile(
+        Language::Rust,
+        "[gate]\nformat = [\"sh\", \"-c\", \"head -c 512m /dev/zero | tail > /dev/null; exit 0\"]\n",
+    );
+    let repo = Repo::new("rust", &[]);
+    let mut sandbox = sandbox(&repo);
+    sandbox.hardening.limits = Limits {
+        memory_mb: 64,
+        ..Limits::default()
+    };
+    let report = repo.gate_in(
+        &tolerant,
+        None,
+        Duration::from_secs(120),
+        CancelToken::new(),
+        vec![],
+        Some(sandbox),
+    );
+    let format = report.step(StepName::Format).unwrap();
+    assert_eq!(format.status, StepStatus::Passed, "{report}");
+}
+
+#[test]
+fn the_image_is_written_only_where_the_profile_says() {
+    if !docker_ready() {
+        return;
+    }
+    // HOME and CARGO_HOME (the profile's `writable`) and /tmp take writes,
+    // /usr/bin does not.
+    let check = profile(
+        Language::Rust,
+        "[gate]\nformat = [\"sh\", \"-c\", \"touch /home/aegis/x /usr/local/cargo/x /tmp/x \
+         && ! touch /usr/bin/x 2>/dev/null\"]\n",
+    );
+    let repo = Repo::new("rust", &[]);
+    let report = repo.gate_in(
+        &check,
+        None,
+        Duration::from_secs(120),
+        CancelToken::new(),
+        vec![],
+        Some(sandbox(&repo)),
+    );
+    let format = report.step(StepName::Format).unwrap();
+    assert_eq!(format.status, StepStatus::Passed, "{report}");
 }

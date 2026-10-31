@@ -62,6 +62,10 @@ pub struct RunSection {
     /// Docker VM is small (typst needs 2 jobs on 8 GB, #5).
     #[serde(default)]
     pub sandbox_env: std::collections::BTreeMap<String, String>,
+    /// Memory, CPUs, processes and `/tmp` of each sandbox container (#320);
+    /// a profile's `sandbox.memory_mb` and `sandbox.cpus` go in their place.
+    #[serde(default)]
+    pub sandbox_limits: aegis_gate::Limits,
     /// Image the egress proxy of the fetch step runs in; any with Python 3.
     #[serde(default = "default_egress_image")]
     pub egress_image: String,

@@ -18,22 +18,11 @@ use crate::{AciError, FormatContainer};
 /// Where the tree is mounted in the format container, as in the gate's.
 const WORKDIR: &str = "/work";
 
-#[cfg(unix)]
-fn host_user() -> String {
-    // SAFETY: getuid and getgid cannot fail and touch no memory.
-    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
-    format!("{uid}:{gid}")
-}
-
-#[cfg(not(unix))]
-fn host_user() -> String {
-    "1000:1000".to_owned()
-}
-
 /// `argv` in a fresh container of the profile's image with `root` as
-/// `/work`: no network, no capabilities, as the host user (so the file
-/// keeps its owner); `-i` when the formatter reads stdin. Returns the
-/// command and the container's name.
+/// `/work`, locked down as the gate's ([`aegis_gate::Hardening`]): no
+/// network, no capabilities, bounded, as the host user (so the file keeps
+/// its owner); `-i` when the formatter reads stdin. Returns the command and
+/// the container's name.
 fn in_container(
     c: &FormatContainer,
     root: &Path,
@@ -46,30 +35,19 @@ fn in_container(
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     );
-    let mut out: Vec<String> = [
-        c.docker.as_str(),
-        "run",
-        "--rm",
-        "--name",
-        &name,
-        "--network",
-        "none",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--user",
-        &host_user(),
-        "--volume",
-        &format!("{}:{WORKDIR}", root.display()),
-        "--workdir",
-        WORKDIR,
-    ]
-    .map(str::to_owned)
-    .to_vec();
+    let mut out: Vec<String> = [c.docker.as_str(), "run", "--rm", "--name", &name]
+        .map(str::to_owned)
+        .to_vec();
     if interactive {
         out.insert(2, "-i".to_owned());
     }
+    out.extend(c.hardening().args("none"));
+    out.extend([
+        "--volume".to_owned(),
+        format!("{}:{WORKDIR}", root.display()),
+        "--workdir".to_owned(),
+        WORKDIR.to_owned(),
+    ]);
     for (host, inside) in &c.mounts {
         out.extend(["--volume".to_owned(), format!("{host}:{inside}:ro")]);
     }

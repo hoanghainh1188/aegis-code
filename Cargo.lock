@@ -10,7 +10,6 @@ dependencies = [
  "aegis-lang",
  "aegis-orchestrator",
  "aegis-provider",
- "libc",
  "regex",
  "rmcp",
  "serde",

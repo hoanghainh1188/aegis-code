@@ -20,8 +20,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use aegis_gate::{
-    CancelToken, Egress, FetchStep, GateReport, GateRequest, Repro, Sandbox, Skip, StepName,
-    StepStatus, run_gate,
+    CancelToken, Egress, FetchStep, GateReport, GateRequest, Hardening, Limits, Repro, Sandbox,
+    Skip, StepName, StepStatus, run_gate,
 };
 use aegis_lang::{Language, Placeholder, ResolvedProfile};
 use common::{Repo, profile, statuses};
@@ -139,6 +139,7 @@ fn gate_in_container(
             env: vec![],
             network: None,
             read_only_mounts: true,
+            hardening: Hardening::new(Limits::default(), &profile.profile.sandbox),
         }),
         fetch: Some(FetchStep {
             egress: Egress {

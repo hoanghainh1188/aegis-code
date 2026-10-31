@@ -118,6 +118,8 @@ on_change = ["pom.xml", "extensions.xml"]
 [sandbox]
 image = "aegis-sandbox-java"
 cache_dirs = ["target", "/home/aegis/.m2/repository", "/home/aegis/.gradle/caches"]
+# Ngoài các thư mục trên, image chỉ đọc (#320); Maven và Gradle ghi vào HOME.
+writable = ["/home/aegis"]
 
 [sonar.properties]
 "sonar.coverage.jacoco.xmlReportPaths" = "target/site/jacoco/jacoco.xml"

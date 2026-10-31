@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use aegis_aci::{MAP_FORMAT, REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
     BuildCache, CLIENT_ENV, CancelToken, Egress, FetchStep, GatePart, GateReport, GateRequest,
-    ReferenceGroup, Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR, failing_tests_with,
-    run_gate,
+    Hardening, ReferenceGroup, Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR,
+    failing_tests_with, run_gate,
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
@@ -428,6 +428,16 @@ fn tool_specs(
         for (key, value) in &sandbox.env {
             args.extend(["--test-env".into(), format!("{key}={value}")]);
         }
+        // The run's limits: the ACI puts each part's profile's own in place.
+        let limits = cfg.run.sandbox_limits;
+        for (flag, n) in [
+            ("--sandbox-memory-mb", limits.memory_mb),
+            ("--sandbox-cpus", limits.cpus.into()),
+            ("--sandbox-pids", limits.pids.into()),
+            ("--sandbox-tmp-mb", limits.tmp_mb),
+        ] {
+            args.extend([flag.into(), n.to_string()]);
+        }
     }
     let mut specs = vec![McpServerSpec {
         name: "aci".into(),
@@ -771,6 +781,7 @@ fn sandbox(cfg: &RunConfig, part: &ProfilePart) -> Result<Option<Sandbox>, Lifec
         env: cfg.run.sandbox_env.clone().into_iter().collect(),
         network: None,
         read_only_mounts: true,
+        hardening: Hardening::new(cfg.run.sandbox_limits, &profile.profile.sandbox),
     }))
 }
 
@@ -1438,6 +1449,42 @@ mod tests {
                 .iter()
                 .any(|(host, inside)| inside == "/work/.venv" && host.contains("parts/py/deps")),
             "{mounts:?}"
+        );
+    }
+
+    #[test]
+    fn the_runs_sandbox_limits_reach_the_gate_and_the_aci() {
+        // #320: the gate's containers and the ACI's are bounded alike.
+        let mut cfg = monorepo(true);
+        cfg.run.sandbox_limits = aegis_gate::Limits {
+            memory_mb: 3072,
+            cpus: 2,
+            pids: 512,
+            tmp_mb: 128,
+        };
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let root = &profiles.parts()[0];
+        let gate = sandbox(&cfg, root).unwrap().unwrap().hardening;
+        assert_eq!(gate.limits, cfg.run.sandbox_limits);
+        assert!(gate.read_only_rootfs);
+        assert_eq!(gate.writable, root.profile.profile.sandbox.writable);
+        assert!(!gate.writable.is_empty());
+
+        let job_dir = cfg.run.state_dir.join("jobs/limits");
+        std::fs::create_dir_all(&job_dir).unwrap();
+        let specs = tool_specs(&cfg, &profiles, &job_dir.join("repo"), &job_dir).unwrap();
+        let args = specs
+            .iter()
+            .find(|s| s.name == "aci")
+            .unwrap()
+            .args
+            .join(" ");
+        assert!(
+            args.contains(
+                "--sandbox-memory-mb 3072 --sandbox-cpus 2 --sandbox-pids 512 \
+                 --sandbox-tmp-mb 128"
+            ),
+            "{args}"
         );
     }
 
