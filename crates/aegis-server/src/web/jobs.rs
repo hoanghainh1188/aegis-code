@@ -13,6 +13,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use serde::Deserialize;
 
+use super::actions::{Done, SOURCES};
 use super::dashboard::all_repos;
 use super::view::{dollars, seconds, tiers};
 use super::{Me, Nonce, WebError, WebResult, job_for, render};
@@ -76,6 +77,9 @@ struct JobsPage<'a> {
     statuses: Vec<Choice>,
     rows: Vec<JobRow>,
     next: Option<String>,
+    /// The repos they maintain, where they may create a job (#309).
+    creatable: Vec<Choice>,
+    sources: Vec<Choice>,
 }
 
 #[derive(Template)]
@@ -154,6 +158,23 @@ pub async fn list(
             .insert(header::VARY, HeaderValue::from_static("HX-Request"));
         return Ok(response);
     }
+    let creatable = repos
+        .values()
+        .filter(|r| access.can(r.id, RepoRole::Maintainer))
+        .map(|r| Choice {
+            value: r.id.0.to_string(),
+            label: r.slug.clone(),
+            selected: repo_id == Some(r.id),
+        })
+        .collect();
+    let sources = SOURCES
+        .into_iter()
+        .map(|(value, label)| Choice {
+            value: value.into(),
+            label: label.into(),
+            selected: value == "github",
+        })
+        .collect();
     let repos = repos
         .values()
         .map(|r| Choice {
@@ -177,6 +198,8 @@ pub async fn list(
         statuses,
         rows,
         next,
+        creatable,
+        sources,
     })
 }
 
@@ -346,6 +369,20 @@ struct JobPage<'a> {
     rounds_cost: String,
     /// A review round: the job whose PR it works on, where it is reviewed.
     review_of: Option<i64>,
+    /// The job this one runs again.
+    retry_of: Option<i64>,
+    /// What the form that led here did (#309).
+    notice: Option<&'static str>,
+    /// A maintainer may cancel a queued or running job not yet asked to
+    /// stop, and run a failed or cancelled one again.
+    can_cancel: bool,
+    can_retry: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct DetailQuery {
+    #[serde(default)]
+    done: String,
 }
 
 pub async fn detail(
@@ -354,9 +391,11 @@ pub async fn detail(
     Extension(access): Extension<Access>,
     Extension(me): Extension<Me>,
     Path(id): Path<i64>,
+    Query(q): Query<DetailQuery>,
 ) -> WebResult {
     let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
     let repo = store.repo(job.repo_id).await?;
+    let maintains = access.can(job.repo_id, RepoRole::Maintainer);
     let events = store.ledger().events(&job.ledger_key).await?;
     let record = IssueRecord::from_events(job.ledger_key.clone(), &events);
     let time = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -398,6 +437,12 @@ pub async fn detail(
         rounds,
         rounds_cost,
         review_of: job.review_of.map(|r| r.0),
+        retry_of: job.retry_of.map(|r| r.0),
+        notice: Done::parse(&q.done).map(Done::message),
+        can_cancel: maintains
+            && matches!(job.status, JobStatus::Queued | JobStatus::Running)
+            && !job.cancel_requested,
+        can_retry: maintains && matches!(job.status, JobStatus::Failed | JobStatus::Cancelled),
     })
 }
 
