@@ -18,7 +18,7 @@
 {% if can_edit %}
 <section aria-labelledby="change-heading" class="band">
   <h2 id="change-heading">Change the cap</h2>
-  <p class="note">US dollars a month. Lower than what is spent already ({{ row.spent }}), and new jobs wait for next month. Leave empty for no cap of the repo's own: only each job's cap and the mode's budget apply.</p>
+  <p class="note">In US dollars a month; {{ row.spent }} is spent so far. Leave it empty for no cap of the repo's own, so that only each job's cap and the mode's budget apply.</p>
   <form method="post" action="/repos/{{ id }}/budget" class="inline">
     {% include "form_guard.html" %}
     <label>Cap (USD / month)

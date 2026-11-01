@@ -1,15 +1,15 @@
 <div class="scroll">
 <table class="webhooks">
-  <thead><tr><th scope="col">Received (UTC)</th><th scope="col">From</th><th scope="col">Event</th><th scope="col">Delivery</th><th scope="col">Outcome</th><th scope="col">Why, and what to do</th></tr></thead>
+  <thead><tr><th scope="col" class="when">Received (UTC)</th><th scope="col">From</th><th scope="col">Event</th><th scope="col">Delivery</th><th scope="col">Outcome</th><th scope="col" class="why">Why, and what to do</th></tr></thead>
   <tbody>
   {% for w in webhooks %}
     <tr>
-      <td>{{ w.received_at }}</td>
+      <td class="when">{{ w.received_at }}</td>
       <td>{{ w.source }}</td>
       <td><code>{{ w.event }}</code></td>
       <td><span class="ref">{{ w.delivery_id }}</span></td>
-      <td>{% if w.good %}<span class="check pass">{{ w.outcome }}</span>{% else %}<span class="check fail">{{ w.outcome }}</span>{% endif %}{% if let Some(j) = w.job_id %} <a href="/jobs/{{ j }}">job {{ j }}</a>{% endif %}</td>
-      <td>{{ w.reason }}{% if let Some(h) = w.hint %}<span class="hint">{{ h }}</span>{% endif %}</td>
+      <td class="outcome">{% if w.good %}<span class="check pass">{{ w.outcome }}</span>{% else %}<span class="check fail">{{ w.outcome }}</span>{% endif %}{% if let Some(j) = w.job_id %} <a href="/jobs/{{ j }}">job {{ j }}</a>{% endif %}</td>
+      <td class="why">{{ w.reason }}{% if let Some(h) = w.hint %}<span class="hint">{{ h }}</span>{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="6" class="empty">No webhook from this repo yet. GitHub sends a ping when the webhook is made; GitLab's "Test" sends a sample event.</td></tr>

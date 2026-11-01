@@ -129,7 +129,7 @@ dd.ok, strong.ok { color: var(--pass); }
 dd.bad, strong.bad { color: var(--fail); }
 dd.warn { color: var(--warn); }
 /* The link to change a repo's cap, beside its name (#372). */
-.budget a.change { font-size: var(--text-small); font-weight: 400; margin-left: var(--space-2); }
+.budget a.change { display: block; font-size: var(--text-small); font-weight: 400; }
 .empty { color: var(--ink-soft); font-style: italic; }
 
 .bars { width: min(100%, 26rem); height: auto; }
@@ -261,7 +261,11 @@ h3 { font-size: var(--text-base); margin: var(--space-3) 0 var(--space-2); }
 .check.fail { color: var(--fail); }
 .check.skip { color: var(--ink-soft); }
 /* What to do about a webhook that made no job (#373). */
-.webhooks .hint { display: block; color: var(--ink-soft); font-size: var(--text-small); }
+.webhooks .hint { display: block; margin-top: var(--space-1); color: var(--ink-soft); font-size: var(--text-small); }
+/* #388: a row reads across: times, IDs and the outcome keep to one line,
+   and the reason keeps a readable width, the table scrolling instead. */
+.webhooks .when, .webhooks .ref, .webhooks .outcome { white-space: nowrap; }
+.webhooks .why { min-width: 22rem; }
 ul.checks { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
 ul.checks li { border-left: 4px solid var(--rule-strong); padding: var(--space-2) var(--space-3); background: var(--surface); overflow-wrap: anywhere; }
 ul.checks li.pass { border-color: var(--pass); }
