@@ -116,21 +116,18 @@ The reviewer's side of this, step by step, is in the [Reviewer Guide](docs/revie
 
 Choose the path that fits your role.
 
-> [!IMPORTANT]
-> **No release has been published yet.** There is no `vX.Y.Z` tag, so the npm package `@hoanghainh/aegis`, the GHCR images and the offline bundles do not exist yet; they appear with the first release ([docs/release.md](docs/release.md)). Until then:
-> * **Developers** install `aegis` from source (the `cargo install` line below).
-> * **Operators** build the images locally and deploy them with `--offline` ([On-Premise Runbook, "Before the First Release"](docs/runbook/on-premise.md#before-the-first-release-local-images)).
-> * The **local trial** and **building from source** work as written.
+> [!NOTE]
+> Every release `vX.Y.Z` ships the CLI on npm ([`@hoanghainh/aegis`](https://www.npmjs.com/package/@hoanghainh/aegis)) and as binaries on the [Releases page](https://github.com/hoanghainh1188/aegis-code/releases), public images on GHCR (`ghcr.io/hoanghainh1188/aegis-server`, `aegis-sandbox-*`) and an offline bundle per image ([docs/release.md](docs/release.md)).
 
 ### 3.1 For Developers (Submit & Follow Jobs)
 Interact with an Aegis instance your team already runs, from your terminal, using `aegis` ([ADR 0006](docs/adr/0006-developer-client.md), [docs/client.md](docs/client.md)). You need its URL and a role on your repo from its administrator; to try it without one, use the local trial (3.2). Most jobs do not need the CLI at all: adding the `aegis` label to an issue starts one.
 
 ```bash
-# Install from source via Cargo (until the first release)
-cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client
-
-# After the first release: install via npm (macOS, Linux - prebuilt binaries bundled)
+# Install via npm (macOS, Linux - prebuilt binaries bundled)
 npm install -g @hoanghainh/aegis
+
+# Or from source via Cargo
+cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client
 
 # Log in with your personal token (from https://<aegis-server>/me/tokens)
 aegis login https://aegis.internal.example.com
@@ -165,7 +162,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
   cd deploy/compose
   sudo ./install.sh                     # Prepares /srv/aegis/.workspace and ./secrets
   # Configure ./server.toml and secrets in ./secrets/
-  sudo ./aegis-deploy.sh 0.1.0          # Release version without "v" (images are tagged 0.1.0)
+  sudo ./aegis-deploy.sh 0.2.2          # Release version without "v" (images are tagged 0.2.2)
   ```
   Before starting, collect what the [Preparation Checklist](docs/runbook/on-premise.md#preparation-checklist) lists (SSO client, bot account, tokens, domain with TLS, model API key).
 * **Cloud Infrastructure (AWS):** Production-grade deployment with OpenTofu (EC2, RDS PostgreSQL, Secrets Manager, ALB with TLS, CloudWatch) in [deploy/tofu/](deploy/tofu/) and [docs/runbook/README.md](docs/runbook/README.md).
