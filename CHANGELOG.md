@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.4...v0.3.0) (2026-11-01)
+
+
+### Features
+
+* **web:** admin adds and changes repos, the clone made in the background ([#364](https://github.com/hoanghainh1188/aegis-code/issues/364)) ([4cac150](https://github.com/hoanghainh1188/aegis-code/commit/4cac1502ec9a21907f333b312c6b58979a876f3c))
+* **web:** admin adds services and makes and revokes their API tokens ([#381](https://github.com/hoanghainh1188/aegis-code/issues/381)) ([b0adf36](https://github.com/hoanghainh1188/aegis-code/commit/b0adf36e9a52ee8dc1365f5e9fb7d0cc0405d4c6))
+* **web:** admin manages users and the admin right ([#379](https://github.com/hoanghainh1188/aegis-code/issues/379)) ([27f6725](https://github.com/hoanghainh1188/aegis-code/commit/27f6725c143e342c1e729d2eb5c7f3fc70f5d457))
+* **web:** admin reads the audit log, filtered by repo, who and action ([#378](https://github.com/hoanghainh1188/aegis-code/issues/378)) ([2a04c57](https://github.com/hoanghainh1188/aegis-code/commit/2a04c579dd1d301a5fd98cdb9a9d664d55ee71ab))
+* **web:** admin sees and checks a repo's connection to its forge ([#377](https://github.com/hoanghainh1188/aegis-code/issues/377)) ([d0cad57](https://github.com/hoanghainh1188/aegis-code/commit/d0cad5721ec3ed5eea85b05462f0191d0746f000))
+* **web:** admin sees each mode's AI and checks its connection ([#382](https://github.com/hoanghainh1188/aegis-code/issues/382)) ([3d0bd60](https://github.com/hoanghainh1188/aegis-code/commit/3d0bd60fd5bf87b7610952a7529377c1f8847a68))
+* **web:** admin signs a person out everywhere ([#380](https://github.com/hoanghainh1188/aegis-code/issues/380)) ([fee16c9](https://github.com/hoanghainh1188/aegis-code/commit/fee16c9059ef5017c918a684ddb6a5c2132da82a))
+
+
+### Bug Fixes
+
+* **gate:** CI, CODEOWNERS and check configuration are protected files ([#352](https://github.com/hoanghainh1188/aegis-code/issues/352)) ([#354](https://github.com/hoanghainh1188/aegis-code/issues/354)) ([bffb13b](https://github.com/hoanghainh1188/aegis-code/commit/bffb13ba5b7377e363efa2743a79c378410a8210))
+* **lifecycle:** untrusted text cannot write the platform's prompt tags ([#351](https://github.com/hoanghainh1188/aegis-code/issues/351)) ([#353](https://github.com/hoanghainh1188/aegis-code/issues/353)) ([56c21b5](https://github.com/hoanghainh1188/aegis-code/commit/56c21b5d59fe93c9bed57c09702608a51db6e9d1))
+* **pr:** model text in a PR cannot make the reader fetch a URL ([#357](https://github.com/hoanghainh1188/aegis-code/issues/357)) ([#362](https://github.com/hoanghainh1188/aegis-code/issues/362)) ([5201b17](https://github.com/hoanghainh1188/aegis-code/commit/5201b179c3dbc96c1edbe68c7e2222503297a3ff))
+
+
+### Documentation
+
+* ADR 0009 prompt injection threat model ([#356](https://github.com/hoanghainh1188/aegis-code/issues/356)) ([#363](https://github.com/hoanghainh1188/aegis-code/issues/363)) ([59889e1](https://github.com/hoanghainh1188/aegis-code/commit/59889e140a530b163cbc957beb3311f97f013e9f))
+* **npm:** enrich @hoanghainh/aegis package metadata, README, and idempotent publish ([#366](https://github.com/hoanghainh1188/aegis-code/issues/366)) ([afe1685](https://github.com/hoanghainh1188/aegis-code/commit/afe16853ac01eb6687b82ca69fd53104fd063c89))
+
 ## [0.2.4](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.3...v0.2.4) (2026-11-01)
 
 

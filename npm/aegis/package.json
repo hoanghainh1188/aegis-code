@@ -1,6 +1,6 @@
 {
   "name": "@hoanghainh/aegis",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Developer CLI for the Aegis autonomous code maintenance platform — dispatch issues, stream verification progress, and manage AI-generated Pull Requests.",
   "author": "Hoang Hai <https://github.com/hoanghainh1188>",
   "license": "Apache-2.0",
