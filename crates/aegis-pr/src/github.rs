@@ -133,9 +133,19 @@ impl GitHub {
 
     pub(crate) async fn get(&self, path: &str) -> Result<serde_json::Value, PrError> {
         let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
+        self.get_json(&url).await
+    }
+
+    /// The repo itself, `GET /repos/{owner}/{repo}` (#331).
+    pub(crate) async fn get_root<T: serde::de::DeserializeOwned>(&self) -> Result<T, PrError> {
+        let url = format!("{}/repos/{}/{}", self.api, self.owner, self.repo);
+        self.get_json(&url).await
+    }
+
+    async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, PrError> {
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .bearer_auth(&self.token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION)

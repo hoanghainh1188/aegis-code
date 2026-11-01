@@ -29,14 +29,37 @@ use crate::repo_cli::{RepoFile, fork_token};
 #[derive(Clone)]
 pub struct RepoAdmin {
     modes: Arc<Modes>,
-    secrets: Secrets,
+    pub(super) secrets: Secrets,
+    /// The API roots a repo's connection is checked against (#331):
+    /// `AEGIS_GITHUB_API`, `AEGIS_GITLAB_API`, as the webhooks use them.
+    pub(super) github_api: String,
+    pub(super) gitlab_api: String,
 }
 
 impl RepoAdmin {
     pub fn new(modes: Modes, secrets: Secrets) -> Self {
+        let api =
+            |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
         Self {
             modes: Arc::new(modes),
             secrets,
+            github_api: api(
+                crate::webhook::GITHUB_API_ENV,
+                crate::webhook::DEFAULT_GITHUB_API,
+            ),
+            gitlab_api: api(
+                crate::webhook::GITLAB_API_ENV,
+                crate::webhook::DEFAULT_GITLAB_API,
+            ),
+        }
+    }
+
+    /// With these API roots for the repos' own projects (tests).
+    pub fn with_apis(self, github: &str, gitlab: &str) -> Self {
+        Self {
+            github_api: github.into(),
+            gitlab_api: gitlab.into(),
+            ..self
         }
     }
 }
@@ -47,7 +70,7 @@ pub type RepoAdminExt = Extension<Option<RepoAdmin>>;
 const MODES: [&str; 2] = ["poc", "customer-jp"];
 const PLATFORMS: [&str; 2] = ["github", "gitlab"];
 
-fn editing(admin: Option<RepoAdmin>) -> Result<RepoAdmin, WebError> {
+pub(super) fn editing(admin: Option<RepoAdmin>) -> Result<RepoAdmin, WebError> {
     admin.ok_or_else(|| {
         WebError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -168,7 +191,7 @@ pub async fn create(
     Ok(Redirect::to(&format!("/admin/repos/{}?done=added", repo.id.0)).into_response())
 }
 
-async fn repo_of(store: &Store, id: i64) -> Result<Repo, WebError> {
+pub(super) async fn repo_of(store: &Store, id: i64) -> Result<Repo, WebError> {
     store
         .repo(RepoId(id))
         .await?

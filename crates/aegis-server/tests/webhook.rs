@@ -774,3 +774,57 @@ async fn a_fix_note_on_the_agents_gitlab_mr_queues_a_round_for_developers() {
     );
     db.drop().await;
 }
+
+/// #331: what became of each delivery is recorded for its repo's
+/// connection page, the ignored ones and GitHub's `ping` too; a delivery
+/// with a bad signature names no repo and is only counted.
+#[tokio::test]
+async fn every_delivery_is_recorded_for_its_repo() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    repo(s, "app", "https://github.com/acme/app").await;
+    let app = router(s.clone(), config());
+
+    let ping = json!({ "zen": "Keep it simple.",
+                       "repository": { "full_name": "acme/app", "html_url": "https://github.com/acme/app" } });
+    let (status, body) = github(&app, "ping", "d-ping", &ping).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "pong");
+    let (_, body) = github(&app, "issues", "d-1", &labeled("acme/app", 1, "bug")).await;
+    assert_eq!(body["data"]["status"], "ignored", "{body}");
+    let (status, _) = github(&app, "issues", "d-2", &labeled("acme/app", 2, "aegis")).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let bad = [
+        ("x-github-event", "issues"),
+        ("x-github-delivery", "d-3"),
+        ("x-hub-signature-256", "sha256=00"),
+    ];
+    let (status, _) = send(&app, "/github", &bad, &labeled("acme/app", 3, "aegis")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let id = s.repo_by_slug("app").await.unwrap().unwrap().id;
+    let seen = s.repo_webhooks(id, 10).await.unwrap();
+    let outcomes: Vec<(&str, Option<&str>)> = seen
+        .iter()
+        .map(|e| (e.outcome.as_str(), e.delivery_id.as_deref()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("queued", Some("d-2")),
+            ("ignored", Some("d-1")),
+            ("ping", Some("d-ping"))
+        ]
+    );
+    let ignored = &seen[1];
+    assert!(
+        ignored.reason.as_deref().is_some_and(|r| !r.is_empty()),
+        "{ignored:?}"
+    );
+    // Nothing of an issue's content is kept.
+    assert!(seen.iter().all(|e| !format!("{e:?}").contains("rm -rf")));
+    let bad = s.bad_signatures(24).await.unwrap();
+    assert_eq!(bad.len(), 1);
+    assert_eq!((bad[0].source.as_str(), bad[0].count), ("github", 1));
+    db.drop().await;
+}

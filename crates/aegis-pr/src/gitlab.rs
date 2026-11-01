@@ -154,6 +154,16 @@ impl GitLab {
         })
     }
 
+    /// The project itself, `GET /projects/:id` (#331).
+    pub(crate) async fn get_root<T: serde::de::DeserializeOwned>(&self) -> Result<T, PrError> {
+        let url = format!("{}/projects/{}", self.api, self.project);
+        let (status, text) = self.send(reqwest::Method::GET, &url, None).await?;
+        serde_json::from_str(&text).map_err(|e| PrError::GitLab {
+            status,
+            message: format!("unexpected reply: {e}"),
+        })
+    }
+
     /// [`GitLab::call`]'s request, the reply as text (a job's log, #253).
     pub(crate) async fn text(
         &self,
@@ -162,13 +172,22 @@ impl GitLab {
         body: Option<&serde_json::Value>,
     ) -> Result<(u16, String), PrError> {
         let url = format!("{}/projects/{}/{path}", self.api, self.project);
+        self.send(method, &url, body).await
+    }
+
+    async fn send(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(u16, String), PrError> {
         let unreached = |e: reqwest::Error| PrError::GitLab {
             status: 0,
             message: e.to_string(),
         };
         let mut request = self
             .client
-            .request(method, &url)
+            .request(method, url)
             .header("PRIVATE-TOKEN", &self.token);
         if let Some(body) = body {
             request = request.json(body);

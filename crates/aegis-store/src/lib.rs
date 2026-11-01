@@ -27,6 +27,7 @@ mod tokens;
 mod tx;
 mod types;
 mod users;
+mod webhook_log;
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -52,9 +53,10 @@ pub use tokens::{MAX_PERSONAL_TOKENS, MAX_TOKEN_DAYS, PersonalToken};
 pub use types::{
     ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,
     NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
-    UserKind, WebhookSource,
+    UserKind, WebhookOutcome, WebhookSource,
 };
 pub use users::{PendingLogin, RepoMember, Session, TokenHash};
+pub use webhook_log::{BadSignatures, NewWebhookEvent, WebhookEvent};
 
 /// The schema's migrations, expand/contract (`docs/runbook`): an older
 /// binary must start on a schema a newer one expanded, as a rollback does

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ repo.slug }} · connection{% endblock %}
+{% block content %}
+<section aria-labelledby="conn-heading">
+  <p class="eyebrow"><a href="/admin/repos">Repos</a> · <a href="/admin/repos/{{ repo.id.0 }}">{{ repo.slug }}</a></p>
+  <h1 id="conn-heading">Connection to {{ forge.name }}</h1>
+  <p class="note">Whether the forge can reach this server and the tokens can do their part, without labelling a real issue to try.</p>
+</section>
+
+<section aria-labelledby="hook-heading" class="band">
+  <h2 id="hook-heading">Webhooks to make</h2>
+  <dl class="facts">
+    <div><dt>Payload URL</dt><dd class="ref">{{ payload_url }}</dd></div>
+    <div><dt>Content type</dt><dd>application/json</dd></div>
+    <div><dt>Secret</dt><dd>the value of <code>{{ forge.webhook_secret }}</code></dd></div>
+  </dl>
+  {% if no_public_url %}<p class="notice bad">The server's <code>[auth] public_url</code> is not set: put the address people reach this server at in place of <code>&lt;public_url&gt;</code>, and set it in the configuration.</p>{% endif %}
+  <div class="row-2">
+    <div>
+      <h3>On <span class="ref">{{ repo.url }}</span></h3>
+      <ul>{% for e in forge.repo_events %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+    <div>
+      <h3>On the fork <span class="ref">{{ fork }}</span></h3>
+      <ul>{% for e in forge.fork_events %}<li>{{ e }}</li>{% endfor %}</ul>
+      <p class="note">For review rounds on the agent's pull requests.</p>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="secrets-heading" class="band">
+  <h2 id="secrets-heading">Secrets</h2>
+  <p class="note">Whether the secret store has each one; their values are never shown.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Name</th><th scope="col">For</th><th scope="col">In the store</th></tr></thead>
+    <tbody>
+    {% for s in secrets %}
+      <tr><td><code>{{ s.name }}</code></td><td>{{ s.purpose }}</td><td>{% if s.set %}<span class="check pass">set</span>{% else %}<span class="check fail">missing</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section aria-labelledby="check-heading" class="band">
+  <h2 id="check-heading">Check against {{ forge.name }}</h2>
+  <p class="note">Asks the forge's API, from the server, what each token may do and what the repo is called now.</p>
+  <form method="post" action="/admin/repos/{{ repo.id.0 }}/connection" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">Check now</button>
+  </form>
+  {% if let Some(rows) = checks %}
+  <ul class="checks" role="status">
+    {% for c in rows %}
+    <li class="{{ c.state }}"><span class="check {{ c.state }}">{{ c.state }}</span> <strong>{{ c.name }}</strong>: {{ c.detail }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section aria-labelledby="recent-heading" class="band">
+  <h2 id="recent-heading">Last webhooks</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Received (UTC)</th><th scope="col">From</th><th scope="col">Event</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
+    <tbody>
+    {% for w in webhooks %}
+      <tr><td>{{ w.received_at }}</td><td>{{ w.source }}</td><td><code>{{ w.event }}</code></td><td>{% if w.good %}<span class="check pass">{{ w.outcome }}</span>{% else %}<span class="check fail">{{ w.outcome }}</span>{% endif %}</td><td>{{ w.reason }}</td></tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">No webhook from this repo yet. GitHub sends a ping when the webhook is made; GitLab's "Test" sends a sample event.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% for b in bad_signatures %}
+  <p class="notice bad">{{ b.count }} {{ b.source }} webhook(s) with a bad signature in the last {{ bad_hours }} hours, the last at {{ b.last }} UTC. They name no repo; if they are yours, the webhook's secret is not the value of <code>{{ forge.webhook_secret }}</code>.</p>
+  {% endfor %}
+</section>
+{% endblock %}
