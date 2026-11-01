@@ -144,6 +144,13 @@ struct UserPage<'a> {
     is_self: bool,
     audit_link: String,
     notice: Option<&'static str>,
+    /// A person's sessions that have not expired (#370).
+    sessions: Vec<SessionRow>,
+}
+
+struct SessionRow {
+    created_at: String,
+    expires_at: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -187,8 +194,19 @@ pub async fn detail(
     let notice = match q.done.as_str() {
         "granted" => Some("Now an admin; it applies from their next request."),
         "revoked" => Some("No longer an admin; it applies from their next request."),
+        "signed_out" => Some("Signed out everywhere: their sessions are ended."),
         _ => None,
     };
+    let at = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M").to_string();
+    let sessions = store
+        .live_sessions(user.user.id)
+        .await?
+        .into_iter()
+        .map(|s| SessionRow {
+            created_at: at(s.created_at),
+            expires_at: at(s.expires_at),
+        })
+        .collect();
     render(&UserPage {
         nonce: nonce.as_str(),
         me: &me,
@@ -198,6 +216,7 @@ pub async fn detail(
         user: UserRow::from(&user),
         roles,
         notice,
+        sessions,
     })
 }
 
@@ -256,4 +275,34 @@ pub async fn add_admin(
         .set_admin(kind_of(who), who, true, &access.actor)
         .await?;
     Ok(Redirect::to(&format!("/admin/users/{}?done=granted", user.id.0)).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SignOutForm {
+    /// A checkbox: present when their personal tokens go too.
+    #[serde(default)]
+    tokens: String,
+}
+
+/// Signs user `id` out everywhere (#370), as `aegis-server
+/// revoke-sessions` does, their personal tokens revoked too when asked.
+/// An admin who signs themself out lands on the signed-out page.
+pub async fn sign_out(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path(id): Path<i64>,
+    Form(form): Form<SignOutForm>,
+) -> WebResult {
+    admin_only(&access)?;
+    let user = summary_of(&store, id).await?.user;
+    let tokens = !form.tokens.is_empty();
+    store
+        .sign_out_everywhere(user.id, tokens, &access.actor)
+        .await?;
+    let to = if access.actor.user == Some(user.id) {
+        "/auth/signed-out".to_owned()
+    } else {
+        format!("/admin/users/{id}?done=signed_out")
+    };
+    Ok(Redirect::to(&to).into_response())
 }

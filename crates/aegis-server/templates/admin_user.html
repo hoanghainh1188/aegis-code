@@ -43,6 +43,34 @@
   {% endif %}
 </section>
 
+{% if !user.service %}
+<section aria-labelledby="sessions-heading" class="band">
+  <h2 id="sessions-heading">Sessions</h2>
+  {% if sessions.is_empty() %}
+  <p class="note">No live session: they are signed out everywhere.</p>
+  {% else %}
+  <p class="note">{{ sessions.len() }} live session{% if sessions.len() != 1 %}s{% endif %}, one per browser they signed in with.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Began (UTC)</th><th scope="col">Ends (UTC)</th></tr></thead>
+    <tbody>
+    {% for s in sessions %}<tr><td>{{ s.created_at }}</td><td>{{ s.expires_at }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  <details class="confirm">
+    <summary class="button ghost">Sign out everywhere…</summary>
+    <form method="post" action="/admin/users/{{ user.id }}/sign-out" class="stack">
+      {% include "form_guard.html" %}
+      <label class="choice"><input type="checkbox" name="tokens"> Also revoke their personal tokens, so the <code>aegis</code> CLI stops working for them</label>
+      <p class="note">For a lost device, an account at risk, or someone leaving. They can sign in again unless the SSO stops them{% if is_self %}; this signs you out too{% endif %}.</p>
+      <button type="submit" class="danger">Yes, sign {% if is_self %}me{% else %}{{ user.name }}{% endif %} out everywhere</button>
+    </form>
+  </details>
+</section>
+{% endif %}
+
 <section aria-labelledby="roles-heading" class="band">
   <h2 id="roles-heading">Roles</h2>
   {% if user.admin %}<p class="note">As an admin they may do everything in every repo, whatever their roles.</p>{% endif %}

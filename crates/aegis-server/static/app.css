@@ -257,3 +257,7 @@ ul.checks li.fail { border-color: var(--fail); background: var(--fail-wash); }
 /* The audit log (#368). */
 table.audit td.detail { font: 0.8rem/1.4 var(--font-num); color: var(--ink-soft); overflow-wrap: anywhere; min-width: 16rem; max-width: 32rem; }
 table.audit td.num { white-space: nowrap; }
+
+/* Signing a person out everywhere (#370). */
+form.stack { display: grid; gap: var(--space-3); justify-items: start; max-width: 40rem; }
+details.confirm form.stack .note { margin: 0; }
