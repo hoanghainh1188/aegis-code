@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ repo.slug }} · roles{% endblock %}
+{% block title %}{{ repo.slug }}{% endblock %}
 {% block content %}
 <section aria-labelledby="repo-heading">
   <p class="eyebrow"><a href="/admin/repos">Repos</a> · <span class="ref">{{ repo.url }}</span></p>
@@ -11,6 +11,18 @@
     <div><dt>Jobs at once</dt><dd>{{ repo.max_concurrent_jobs }}</dd></div>
   </dl>
   {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
+  {% if can_edit %}<p><a class="button ghost" href="/admin/repos/{{ repo.id.0 }}/edit">Change this repo</a></p>{% endif %}
+</section>
+
+<section aria-labelledby="clone-heading" class="band">
+  <h2 id="clone-heading">Clone</h2>
+  {{ clone|safe }}
+</section>
+
+<section aria-labelledby="settings-heading" class="band">
+  <h2 id="settings-heading">Settings</h2>
+  <p class="note">As a repo file: what <code>aegis-server repo show</code> prints, in TOML.</p>
+  <pre class="log">{{ settings }}</pre>
 </section>
 
 <section aria-labelledby="roles-heading" class="band">

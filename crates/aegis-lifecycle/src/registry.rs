@@ -330,8 +330,47 @@ impl Modes {
     /// Registers a repo, refused unless its configuration can be built
     /// now ([`Modes::check_spec`]). Its clone is not touched: [`Modes::add`].
     pub async fn register(&self, store: &Store, spec: &RepoSpec) -> Result<Repo, LifecycleError> {
+        self.register_by(store, spec, &Actor::cli()).await
+    }
+
+    /// [`Modes::register`], audited as `actor`: the pages register a repo
+    /// first and make its clone after, with [`Modes::clone_repo`] (#330).
+    pub async fn register_by(
+        &self,
+        store: &Store,
+        spec: &RepoSpec,
+        actor: &Actor,
+    ) -> Result<Repo, LifecycleError> {
         let (new, _) = self.check_spec(spec)?;
-        Ok(store.create_repo_by(&new, &Actor::cli()).await?)
+        Ok(store.create_repo_by(&new, actor).await?)
+    }
+
+    /// [`Modes::update`] without touching the clone, audited as `actor`;
+    /// [`Modes::clone_repo`] fetches it after (#330).
+    pub async fn update_by(
+        &self,
+        store: &Store,
+        spec: &RepoSpec,
+        actor: &Actor,
+    ) -> Result<Repo, LifecycleError> {
+        let (new, _) = self.check_spec(spec)?;
+        if store.repo_by_slug(&new.slug).await?.is_none() {
+            return Err(LifecycleError::Config(format!("no repo `{}`", new.slug)));
+        }
+        Ok(store.update_repo_by(&new, actor).await?)
+    }
+
+    /// Makes `repo`'s clone at `<state_dir>/repos/<slug>`, or fetches it if
+    /// one is there, `token` its fork's for a private repo.
+    pub async fn clone_repo(&self, repo: &Repo, token: Option<&str>) -> Result<(), LifecycleError> {
+        let config = self.run_config(repo)?;
+        crate::clone::prepare_async(
+            &config.repo.path,
+            &repo.url,
+            &repo.default_branch,
+            auth(config.repo.fork.platform, token),
+        )
+        .await
     }
 
     /// Registers a repo as [`Modes::register`] does, with its clone made
@@ -348,8 +387,13 @@ impl Modes {
         let (new, config) = self.check_spec(spec)?;
         let path = config.repo.path;
         let made = !path.exists();
-        crate::clone::prepare_async(&path, &new.url, &new.default_branch, auth(spec, token))
-            .await?;
+        crate::clone::prepare_async(
+            &path,
+            &new.url,
+            &new.default_branch,
+            auth(spec.settings.fork.platform, token),
+        )
+        .await?;
         match store.create_repo_by(&new, actor).await {
             Ok(repo) => Ok(repo),
             Err(e) => {
@@ -379,16 +423,16 @@ impl Modes {
             &config.repo.path,
             &new.url,
             &new.default_branch,
-            auth(spec, token),
+            auth(spec.settings.fork.platform, token),
         )
         .await?;
         Ok(store.update_repo_by(&new, actor).await?)
     }
 }
 
-/// The user `token` is sent as for `spec`'s repo: its fork's platform's.
-fn auth<'a>(spec: &RepoSpec, token: Option<&'a str>) -> Option<(&'static str, &'a str)> {
-    let user = match spec.settings.fork.platform {
+/// The user `token` is sent as for a repo whose fork is on `platform`.
+fn auth(platform: crate::ForkPlatform, token: Option<&str>) -> Option<(&'static str, &str)> {
+    let user = match platform {
         crate::ForkPlatform::GitHub => aegis_pr::GITHUB_USER,
         crate::ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
     };

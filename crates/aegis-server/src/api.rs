@@ -42,6 +42,11 @@ const DEFAULT_LIMIT: u32 = 50;
 const MAX_ISSUE_REF_LEN: usize = 256;
 
 pub fn router(store: Store, auth: Auth) -> Router {
+    router_with(store, auth, None)
+}
+
+/// [`router`] whose admin pages add and change repos with `repos` (#330).
+pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::RepoAdmin>) -> Router {
     let api = Router::new()
         .route("/api/v1/jobs", post(create_job).get(list_jobs))
         .route("/api/v1/jobs/{id}", get(job))
@@ -62,7 +67,7 @@ pub fn router(store: Store, auth: Auth) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .merge(api)
-        .merge(crate::web::router(auth))
+        .merge(crate::web::router(auth, repo_admin))
         .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such route") })
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         // After the limit above: a delivery carries the whole issue and

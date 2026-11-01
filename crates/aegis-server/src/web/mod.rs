@@ -12,6 +12,8 @@ mod dashboard;
 mod guard;
 mod jobs;
 mod patch;
+mod repo_admin;
+mod repo_form;
 mod review;
 mod tokens;
 mod view;
@@ -27,13 +29,14 @@ use crate::auth::{Access, Auth, oidc};
 
 pub use dashboard::{Dashboard, Group, dashboard_kpis, dashboard_kpis_within};
 pub use guard::{Me, Nonce, SessionToken};
+pub use repo_admin::RepoAdmin;
 pub use review::{REVIEW_MAX_AGE_MS, opened_at_signature, review_minutes};
 
 const HTMX: &[u8] = include_bytes!("../../static/htmx-2.0.11.min.js");
 const CSS: &[u8] = include_bytes!("../../static/app.css");
 
 /// The pages, under the API's state; `api::router` merges them in.
-pub fn router(auth: Auth) -> Router<Store> {
+pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
     Router::new()
         .route("/auth/login", get(oidc::login))
         .route("/auth/callback", get(oidc::callback))
@@ -46,8 +49,14 @@ pub fn router(auth: Auth) -> Router<Store> {
         .route("/jobs/{id}/cancel", post(actions::cancel))
         .route("/jobs/{id}/retry", post(actions::retry))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
-        .route("/admin/repos", get(admin::repos))
+        .route("/admin/repos", get(admin::repos).post(repo_admin::create))
+        .route("/admin/repos/new", get(repo_admin::new_form))
         .route("/admin/repos/{id}", get(admin::repo))
+        .route(
+            "/admin/repos/{id}/edit",
+            get(repo_admin::edit_form).post(repo_admin::update),
+        )
+        .route("/admin/repos/{id}/clone", get(repo_admin::clone_part))
         .route("/admin/repos/{id}/roles", post(admin::grant))
         .route("/admin/repos/{id}/roles/revoke", post(admin::revoke))
         .route("/me/tokens", get(tokens::list).post(tokens::create))
@@ -59,6 +68,7 @@ pub fn router(auth: Auth) -> Router<Store> {
         .route("/static/app.css", get(|| asset(CSS, "text/css")))
         .layer(middleware::from_fn_with_state(auth.clone(), guard::guard))
         .layer(Extension(auth))
+        .layer(Extension(repos))
 }
 
 async fn asset(body: &'static [u8], content_type: &'static str) -> Response {

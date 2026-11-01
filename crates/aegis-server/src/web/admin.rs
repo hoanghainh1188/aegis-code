@@ -12,6 +12,7 @@ use axum::{Extension, Form};
 use serde::Deserialize;
 
 use super::dashboard::all_repos;
+use super::repo_admin::{RepoAdminExt, clone_part_of, settings_of};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::Access;
 use crate::auth::cli::kind_of;
@@ -20,7 +21,7 @@ use crate::auth::cli::kind_of;
 /// the form starts on it.
 const ROLES: [&str; 3] = ["viewer", "reviewer", "maintainer"];
 
-fn admin_only(access: &Access) -> Result<(), WebError> {
+pub(crate) fn admin_only(access: &Access) -> Result<(), WebError> {
     if access.is_admin() {
         Ok(())
     } else {
@@ -42,6 +43,8 @@ struct ReposPage<'a> {
     nonce: &'a str,
     me: &'a Me,
     repos: Vec<Repo>,
+    /// Whether repos can be added here (#330).
+    can_edit: bool,
 }
 
 pub async fn repos(
@@ -49,12 +52,14 @@ pub async fn repos(
     Extension(nonce): Extension<Nonce>,
     Extension(access): Extension<Access>,
     Extension(me): Extension<Me>,
+    Extension(admin): RepoAdminExt,
 ) -> WebResult {
     admin_only(&access)?;
     render(&ReposPage {
         nonce: nonce.as_str(),
         me: &me,
         repos: all_repos(&store).await?.into_values().collect(),
+        can_edit: admin.is_some(),
     })
 }
 
@@ -85,6 +90,11 @@ struct RepoPage<'a> {
     members: Vec<MemberRow>,
     roles: [&'static str; 3],
     notice: Option<&'static str>,
+    /// The repo as a repo file, in TOML (#330).
+    settings: String,
+    /// The clone part, rendered: it also answers alone while polled.
+    clone: String,
+    can_edit: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -98,6 +108,7 @@ pub async fn repo(
     Extension(nonce): Extension<Nonce>,
     Extension(access): Extension<Access>,
     Extension(me): Extension<Me>,
+    Extension(admin): RepoAdminExt,
     Path(id): Path<i64>,
     Query(q): Query<RepoQuery>,
 ) -> WebResult {
@@ -108,8 +119,18 @@ pub async fn repo(
     let notice = match q.done.as_str() {
         "granted" => Some("Role given; it applies from their next request."),
         "revoked" => Some("Role taken away; it applies from their next request."),
+        "added" => Some("Repo added; its clone is being made below."),
+        "updated" => Some("Repo changed; its clone is being fetched below."),
         _ => None,
     };
+    let settings = settings_of(&repo);
+    let clone = clone_part_of(&store, repo.id)
+        .await?
+        .render()
+        .map_err(|e| {
+            tracing::error!(error = %e, "web: clone part");
+            WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        })?;
     render(&RepoPage {
         nonce: nonce.as_str(),
         me: &me,
@@ -117,6 +138,9 @@ pub async fn repo(
         members: members.into_iter().map(MemberRow::from).collect(),
         roles: ROLES,
         notice,
+        settings,
+        clone,
+        can_edit: admin.is_some(),
     })
 }
 

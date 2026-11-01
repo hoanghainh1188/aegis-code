@@ -1,0 +1,13 @@
+{#- The clone part of a repo's page (#330); asks for itself again while the clone is made. -#}
+<div id="clone"{% if let Some(c) = clone %}{% if c.live %} hx-get="/admin/repos/{{ repo_id }}/clone" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}{% endif %} aria-live="polite">
+{% if let Some(c) = clone %}
+  <p class="clone-state {{ c.class }}"><strong>Clone {{ c.state }}</strong>
+    <span class="note">since {{ c.started_at }} UTC{% if let Some(f) = c.finished_at %}, done {{ f }} UTC{% endif %}</span></p>
+  {% if c.failed %}{% if let Some(log) = c.log_tail %}
+  <p class="note">The end of git's output:</p>
+  <pre class="log">{{ log }}</pre>
+  {% endif %}{% endif %}
+{% else %}
+  <p class="note">No clone made from these pages; one made with <code>aegis-server repo add</code> does not show here.</p>
+{% endif %}
+</div>
