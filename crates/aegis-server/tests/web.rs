@@ -394,6 +394,33 @@ async fn pages_stay_on_known_hosts_and_refuse_cross_site_forms() {
     let script = get(&app, "/static/htmx-2.0.11.min.js").await;
     assert_eq!(script.status, StatusCode::OK);
     assert_eq!(script.headers[header::CONTENT_TYPE], "text/javascript");
+    assert!(
+        script.headers[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .contains("immutable")
+    );
+    // #375: pages name the stylesheet by its hash, kept for good; the bare
+    // URL still answers but is asked for again.
+    let page = get(&app, "/").await;
+    let href = page
+        .body
+        .split(r#"rel="stylesheet" href=""#)
+        .nth(1)
+        .unwrap();
+    let href = &href[..href.find('"').unwrap()];
+    assert!(href.starts_with("/static/app.css?v="), "{href}");
+    let css = get(&app, href).await;
+    assert_eq!(css.status, StatusCode::OK);
+    assert!(
+        css.headers[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .contains("immutable")
+    );
+    let bare = get(&app, "/static/app.css").await;
+    assert_eq!(bare.status, StatusCode::OK);
+    assert_eq!(bare.headers[header::CACHE_CONTROL], "no-cache");
     let table = Request::get("/jobs?repo_id=&status=done")
         .header(header::HOST, "127.0.0.1:8080")
         .header(header::COOKIE, &app.browser.cookie)

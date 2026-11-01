@@ -25,10 +25,13 @@ mod view;
 
 use aegis_store::{Job, JobId, RepoRole, Store, StoreError};
 use askama::Template;
+use axum::extract::Query;
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Router, middleware};
+use serde::Deserialize;
+use std::sync::LazyLock;
 
 use crate::auth::{Access, Auth, oidc};
 
@@ -39,6 +42,52 @@ pub use review::{REVIEW_MAX_AGE_MS, opened_at_signature, review_minutes};
 
 const HTMX: &[u8] = include_bytes!("../../static/htmx-2.0.11.min.js");
 const CSS: &[u8] = include_bytes!("../../static/app.css");
+
+/// For a URL that names its content: htmx by its version in the file name,
+/// the stylesheet by its hash in `?v=`.
+const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+/// For the stylesheet asked for without the current hash: an old page or a
+/// bookmark gets today's CSS, and the browser asks again next time.
+const REVALIDATE: &str = "no-cache";
+
+/// Sixteen hex digits of FNV-1a over `bytes`: enough to tell one build's
+/// asset from the next, not a security hash.
+fn asset_version(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("{hash:016x}")
+}
+
+fn css_version() -> &'static str {
+    static VERSION: LazyLock<String> = LazyLock::new(|| asset_version(CSS));
+    &VERSION
+}
+
+/// The stylesheet's URL in every page: a new build's CSS is a new URL, so
+/// the browser never shows a new page with yesterday's styles (#375).
+pub(crate) fn css_href() -> &'static str {
+    static HREF: LazyLock<String> =
+        LazyLock::new(|| format!("/static/app.css?v={}", css_version()));
+    &HREF
+}
+
+fn css_cache(version: Option<&str>) -> &'static str {
+    if version == Some(css_version()) {
+        IMMUTABLE
+    } else {
+        REVALIDATE
+    }
+}
+
+#[derive(Deserialize)]
+struct AssetQuery {
+    v: Option<String>,
+}
+
+async fn css(Query(q): Query<AssetQuery>) -> Response {
+    asset(CSS, "text/css", css_cache(q.v.as_deref()))
+}
 
 /// The pages, under the API's state; `api::router` merges them in.
 pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
@@ -89,19 +138,19 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/me/tokens/{id}/revoke", post(tokens::revoke))
         .route(
             "/static/htmx-2.0.11.min.js",
-            get(|| asset(HTMX, "text/javascript")),
+            get(|| async { asset(HTMX, "text/javascript", IMMUTABLE) }),
         )
-        .route("/static/app.css", get(|| asset(CSS, "text/css")))
+        .route("/static/app.css", get(css))
         .layer(middleware::from_fn_with_state(auth.clone(), guard::guard))
         .layer(Extension(auth))
         .layer(Extension(repos))
 }
 
-async fn asset(body: &'static [u8], content_type: &'static str) -> Response {
+fn asset(body: &'static [u8], content_type: &'static str, cache: &'static str) -> Response {
     (
         [
             (header::CONTENT_TYPE, content_type),
-            (header::CACHE_CONTROL, "public, max-age=86400"),
+            (header::CACHE_CONTROL, cache),
         ],
         body,
     )
@@ -204,4 +253,33 @@ fn render(page: &impl Template) -> WebResult {
             tracing::error!(error = %e, "web: template");
             WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asset_version_follows_the_content() {
+        let v = asset_version(b"a { color: red }");
+        assert_eq!(v.len(), 16);
+        assert!(v.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(v, asset_version(b"a { color: red }"));
+        assert_ne!(v, asset_version(b"a { color: blue }"));
+    }
+
+    #[test]
+    fn pages_link_the_stylesheet_by_its_version() {
+        let href = format!("/static/app.css?v={}", asset_version(CSS));
+        assert_eq!(css_href(), href);
+        let page = ErrorPage { message: "nope" }.render().unwrap();
+        assert!(page.contains(&format!(r#"href="{href}""#)), "{page}");
+    }
+
+    #[test]
+    fn only_the_current_version_is_kept_for_good() {
+        assert_eq!(css_cache(Some(&asset_version(CSS))), IMMUTABLE);
+        assert_eq!(css_cache(Some("0000000000000000")), REVALIDATE);
+        assert_eq!(css_cache(None), REVALIDATE);
+    }
 }
