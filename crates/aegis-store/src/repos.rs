@@ -1,4 +1,5 @@
 use crate::audit::{self, Target};
+use crate::tx;
 use crate::types::{RepoMode, count};
 use crate::{Actor, NewRepo, Page, PageOf, Repo, RepoId, Store, StoreError};
 
@@ -109,26 +110,29 @@ impl Store {
         check_slug(&repo.slug)?;
         let max_jobs = max_jobs(repo.max_concurrent_jobs)?;
         let mut tx = self.pool.begin().await?;
-        let created: Repo = sqlx::query_as!(
-            RepoRow,
-            "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
-            repo.slug,
-            repo.url,
-            repo.default_branch,
-            repo.language,
-            repo.mode.as_str(),
-            max_jobs,
-            repo.config,
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?
-        .try_into()?;
-        audit_repo(&mut tx, actor, "repo.register", &created).await?;
-        tx.commit().await?;
-        Ok(created)
+        let work = async {
+            let created: Repo = sqlx::query_as!(
+                RepoRow,
+                "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+                repo.slug,
+                repo.url,
+                repo.default_branch,
+                repo.language,
+                repo.mode.as_str(),
+                max_jobs,
+                repo.config,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?
+            .try_into()?;
+            audit_repo(&mut tx, actor, "repo.register", &created).await?;
+            Ok::<_, StoreError>(created)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Replaces everything but the slug of the repo `repo.slug` names,
@@ -137,29 +141,32 @@ impl Store {
     pub async fn update_repo_by(&self, repo: &NewRepo, actor: &Actor) -> Result<Repo, StoreError> {
         let max_jobs = max_jobs(repo.max_concurrent_jobs)?;
         let mut tx = self.pool.begin().await?;
-        let updated: Repo = sqlx::query_as!(
-            RepoRow,
-            "UPDATE repos
-             SET url = $2, default_branch = $3, language = $4, mode = $5,
-                 max_concurrent_jobs = $6, config = $7
-             WHERE slug = $1
-             RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
-            repo.slug,
-            repo.url,
-            repo.default_branch,
-            repo.language,
-            repo.mode.as_str(),
-            max_jobs,
-            repo.config,
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?
-        .ok_or_else(|| StoreError::NotFound(format!("repo `{}`", repo.slug)))?
-        .try_into()?;
-        audit_repo(&mut tx, actor, "repo.update", &updated).await?;
-        tx.commit().await?;
-        Ok(updated)
+        let work = async {
+            let updated: Repo = sqlx::query_as!(
+                RepoRow,
+                "UPDATE repos
+                 SET url = $2, default_branch = $3, language = $4, mode = $5,
+                     max_concurrent_jobs = $6, config = $7
+                 WHERE slug = $1
+                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+                repo.slug,
+                repo.url,
+                repo.default_branch,
+                repo.language,
+                repo.mode.as_str(),
+                max_jobs,
+                repo.config,
+            )
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?
+            .ok_or_else(|| StoreError::NotFound(format!("repo `{}`", repo.slug)))?
+            .try_into()?;
+            audit_repo(&mut tx, actor, "repo.update", &updated).await?;
+            Ok::<_, StoreError>(updated)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     pub async fn repo(&self, id: RepoId) -> Result<Option<Repo>, StoreError> {

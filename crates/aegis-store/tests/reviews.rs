@@ -8,6 +8,7 @@ use aegis_store::testing::test_db;
 use aegis_store::{
     Actor, AttemptEnd, Job, JobSource, JobStatus, NewJob, NewRepo, RepoMode, Store, StoreError,
 };
+use sqlx::{Connection, PgConnection};
 
 const LEASE: Duration = Duration::from_secs(60);
 const PR: &str = "https://github.com/acme-bot/app/pull/7";
@@ -107,5 +108,44 @@ async fn a_pr_gets_its_rounds_one_at_a_time_then_no_more() {
         .filter(|a| a == "job.review")
         .collect();
     assert_eq!(actions.len(), 2);
+    db.drop().await;
+}
+
+/// #328: a review refused after the job's row was locked releases the
+/// lock before it returns. Dropping the transaction only queued its
+/// ROLLBACK, sent later by the pool's return task, so the worker's
+/// `claim_job` (`SKIP LOCKED`) right after skipped the job now and then.
+/// The test asks from another thread while holding this runtime, so that
+/// task cannot run first.
+#[tokio::test]
+async fn a_refused_review_leaves_the_job_free_to_claim() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let actor = Actor::cli();
+    let job = setup(s).await;
+    let err = s.review_job_by(job.id, &actor).await.unwrap_err();
+    assert!(matches!(err, StoreError::Conflict(_)), "{err}");
+    let (options, id) = (db.options(), job.id.0);
+    let free = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let mut conn = PgConnection::connect_with(&options).await.unwrap();
+            sqlx::query_scalar::<_, i64>("SELECT id FROM jobs WHERE id = $1 FOR UPDATE SKIP LOCKED")
+                .bind(id)
+                .fetch_optional(&mut conn)
+                .await
+                .unwrap()
+        })
+    })
+    .join()
+    .unwrap();
+    assert_eq!(
+        free,
+        Some(id),
+        "the refused review still held the job's lock"
+    );
     db.drop().await;
 }

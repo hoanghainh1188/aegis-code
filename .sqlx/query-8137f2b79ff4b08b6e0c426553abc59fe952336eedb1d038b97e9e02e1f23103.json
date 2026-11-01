@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE runs SET status = $3, error = $4, ended_at = now()\n                 WHERE id = $1 AND job_id = $2 AND status = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8137f2b79ff4b08b6e0c426553abc59fe952336eedb1d038b97e9e02e1f23103"
+}

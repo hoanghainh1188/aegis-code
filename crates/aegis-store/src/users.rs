@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 
 use crate::audit::{self, Target};
+use crate::tx;
 use crate::{Actor, ActorKind, RepoId, RepoRole, Store, StoreError, User, UserId, UserKind};
 
 const MAX_NAME_LEN: usize = 320;
@@ -131,62 +132,65 @@ impl Store {
     ) -> Result<User, StoreError> {
         let email = user_name(UserKind::Person, email)?;
         let mut tx = self.pool.begin().await?;
-        let known = sqlx::query_as!(
-            UserRow,
-            "SELECT id, kind, name, is_admin FROM users WHERE oidc_subject = $1",
-            subject,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        if let Some(row) = known {
-            return row.try_into();
-        }
-        let by_email = sqlx::query!(
-            "SELECT id, oidc_subject FROM users WHERE kind = 'person' AND name = $1 FOR UPDATE",
-            email,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        let linked = by_email.is_some();
-        let row = match by_email {
-            Some(row) if row.oidc_subject.is_some() => {
-                return Err(StoreError::Conflict(format!(
-                    "{email} is signed in with another SSO subject"
-                )));
-            }
-            Some(_) if !email_verified => {
-                return Err(StoreError::Conflict(format!(
-                    "{email} has roles and the SSO did not verify it"
-                )));
-            }
-            Some(row) => sqlx::query_as!(
+        let work = async {
+            let known = sqlx::query_as!(
                 UserRow,
-                "UPDATE users SET oidc_subject = $2 WHERE id = $1
-                 RETURNING id, kind, name, is_admin",
-                row.id,
+                "SELECT id, kind, name, is_admin FROM users WHERE oidc_subject = $1",
                 subject,
             )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(StoreError::from_db)?,
-            None => sqlx::query_as!(
-                UserRow,
-                "INSERT INTO users (kind, name, oidc_subject) VALUES ('person', $1, $2)
-                 RETURNING id, kind, name, is_admin",
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some(row) = known {
+                return row.try_into();
+            }
+            let by_email = sqlx::query!(
+                "SELECT id, oidc_subject FROM users WHERE kind = 'person' AND name = $1 FOR UPDATE",
                 email,
-                subject,
             )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(StoreError::from_db)?,
-        };
-        let user: User = row.try_into()?;
-        let action = if linked { "user.link" } else { "user.create" };
-        let detail = serde_json::json!({ "subject": subject });
-        let actor = Actor::user(&user, ActorKind::User);
-        audit::record(&mut tx, &actor, action, Target::default(), detail).await?;
-        tx.commit().await?;
-        Ok(user)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let linked = by_email.is_some();
+            let row = match by_email {
+                Some(row) if row.oidc_subject.is_some() => {
+                    return Err(StoreError::Conflict(format!(
+                        "{email} is signed in with another SSO subject"
+                    )));
+                }
+                Some(_) if !email_verified => {
+                    return Err(StoreError::Conflict(format!(
+                        "{email} has roles and the SSO did not verify it"
+                    )));
+                }
+                Some(row) => sqlx::query_as!(
+                    UserRow,
+                    "UPDATE users SET oidc_subject = $2 WHERE id = $1
+                     RETURNING id, kind, name, is_admin",
+                    row.id,
+                    subject,
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(StoreError::from_db)?,
+                None => sqlx::query_as!(
+                    UserRow,
+                    "INSERT INTO users (kind, name, oidc_subject) VALUES ('person', $1, $2)
+                     RETURNING id, kind, name, is_admin",
+                    email,
+                    subject,
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(StoreError::from_db)?,
+            };
+            let user: User = row.try_into()?;
+            let action = if linked { "user.link" } else { "user.create" };
+            let detail = serde_json::json!({ "subject": subject });
+            let actor = Actor::user(&user, ActorKind::User);
+            audit::record(&mut tx, &actor, action, Target::default(), detail).await?;
+            Ok::<_, StoreError>(user)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Keeps a sign-in on its way through the SSO under `id`; expired
@@ -198,24 +202,27 @@ impl Store {
         expires_at: DateTime<Utc>,
     ) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query!("DELETE FROM pending_logins WHERE expires_at < now()")
+        let work = async {
+            sqlx::query!("DELETE FROM pending_logins WHERE expires_at < now()")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT INTO pending_logins (id_hash, state, nonce, verifier, next, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+                id.as_slice(),
+                login.state,
+                login.nonce,
+                login.verifier,
+                login.next,
+                expires_at,
+            )
             .execute(&mut *tx)
-            .await?;
-        sqlx::query!(
-            "INSERT INTO pending_logins (id_hash, state, nonce, verifier, next, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-            id.as_slice(),
-            login.state,
-            login.nonce,
-            login.verifier,
-            login.next,
-            expires_at,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?;
-        tx.commit().await?;
-        Ok(())
+            .await
+            .map_err(StoreError::from_db)?;
+            Ok::<_, StoreError>(())
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// The sign-in kept under `id`, if it has not expired; taken, so a
@@ -245,31 +252,34 @@ impl Store {
         expires_at: DateTime<Utc>,
     ) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query!("DELETE FROM sessions WHERE expires_at < now()")
+        let work = async {
+            sqlx::query!("DELETE FROM sessions WHERE expires_at < now()")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+                 VALUES ($1, $2, $3, $4)",
+                token.as_slice(),
+                user.id.0,
+                csrf_token,
+                expires_at,
+            )
             .execute(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?;
+            let actor = Actor::user(user, ActorKind::User);
+            audit::record(
+                &mut tx,
+                &actor,
+                "session.login",
+                Target::default(),
+                serde_json::json!({}),
+            )
             .await?;
-        sqlx::query!(
-            "INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
-             VALUES ($1, $2, $3, $4)",
-            token.as_slice(),
-            user.id.0,
-            csrf_token,
-            expires_at,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?;
-        let actor = Actor::user(user, ActorKind::User);
-        audit::record(
-            &mut tx,
-            &actor,
-            "session.login",
-            Target::default(),
-            serde_json::json!({}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(())
+            Ok::<_, StoreError>(())
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// The live session of `token`.
@@ -301,24 +311,27 @@ impl Store {
     /// Signs the session out; nothing when it is already gone.
     pub async fn end_session(&self, token: &TokenHash, actor: &Actor) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await?;
-        let ended = sqlx::query!(
-            "DELETE FROM sessions WHERE token_hash = $1",
-            token.as_slice()
-        )
-        .execute(&mut *tx)
-        .await?;
-        if ended.rows_affected() > 0 {
-            audit::record(
-                &mut tx,
-                actor,
-                "session.logout",
-                Target::default(),
-                serde_json::json!({}),
+        let work = async {
+            let ended = sqlx::query!(
+                "DELETE FROM sessions WHERE token_hash = $1",
+                token.as_slice()
             )
+            .execute(&mut *tx)
             .await?;
+            if ended.rows_affected() > 0 {
+                audit::record(
+                    &mut tx,
+                    actor,
+                    "session.logout",
+                    Target::default(),
+                    serde_json::json!({}),
+                )
+                .await?;
+            }
+            Ok::<_, StoreError>(())
         }
-        tx.commit().await?;
-        Ok(())
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Ends every session of `kind`/`name`, as when someone leaves; how
@@ -330,15 +343,18 @@ impl Store {
         actor: &Actor,
     ) -> Result<u64, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let user = ensure_user(&mut tx, kind, name, false).await?;
-        let ended = sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user.id.0)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-        let detail = serde_json::json!({ "user": user.name, "ended": ended });
-        audit::record(&mut tx, actor, "session.revoke", Target::default(), detail).await?;
-        tx.commit().await?;
-        Ok(ended)
+        let work = async {
+            let user = ensure_user(&mut tx, kind, name, false).await?;
+            let ended = sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user.id.0)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            let detail = serde_json::json!({ "user": user.name, "ended": ended });
+            audit::record(&mut tx, actor, "session.revoke", Target::default(), detail).await?;
+            Ok::<_, StoreError>(ended)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// The user of a live API token: a service's, or a person's own token
@@ -411,44 +427,47 @@ impl Store {
         actor: &Actor,
     ) -> Result<User, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let user = ensure_user(&mut tx, kind, name, role.is_some()).await?;
-        let target = Target {
-            repo: Some(repo),
-            job: None,
-        };
-        match role {
-            Some(role) => {
-                sqlx::query!(
-                    "INSERT INTO repo_roles (user_id, repo_id, role) VALUES ($1, $2, $3)
-                     ON CONFLICT (user_id, repo_id)
-                     DO UPDATE SET role = EXCLUDED.role, granted_at = now()",
-                    user.id.0,
-                    repo.0,
-                    role.as_str(),
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| match StoreError::from_db(e) {
-                    StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", repo.0)),
-                    other => other,
-                })?;
-                let detail = serde_json::json!({ "user": user.name, "role": role.as_str() });
-                audit::record(&mut tx, actor, "role.grant", target, detail).await?;
+        let work = async {
+            let user = ensure_user(&mut tx, kind, name, role.is_some()).await?;
+            let target = Target {
+                repo: Some(repo),
+                job: None,
+            };
+            match role {
+                Some(role) => {
+                    sqlx::query!(
+                        "INSERT INTO repo_roles (user_id, repo_id, role) VALUES ($1, $2, $3)
+                         ON CONFLICT (user_id, repo_id)
+                         DO UPDATE SET role = EXCLUDED.role, granted_at = now()",
+                        user.id.0,
+                        repo.0,
+                        role.as_str(),
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| match StoreError::from_db(e) {
+                        StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", repo.0)),
+                        other => other,
+                    })?;
+                    let detail = serde_json::json!({ "user": user.name, "role": role.as_str() });
+                    audit::record(&mut tx, actor, "role.grant", target, detail).await?;
+                }
+                None => {
+                    sqlx::query!(
+                        "DELETE FROM repo_roles WHERE user_id = $1 AND repo_id = $2",
+                        user.id.0,
+                        repo.0,
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                    let detail = serde_json::json!({ "user": user.name });
+                    audit::record(&mut tx, actor, "role.revoke", target, detail).await?;
+                }
             }
-            None => {
-                sqlx::query!(
-                    "DELETE FROM repo_roles WHERE user_id = $1 AND repo_id = $2",
-                    user.id.0,
-                    repo.0,
-                )
-                .execute(&mut *tx)
-                .await?;
-                let detail = serde_json::json!({ "user": user.name });
-                audit::record(&mut tx, actor, "role.revoke", target, detail).await?;
-            }
+            Ok::<_, StoreError>(user)
         }
-        tx.commit().await?;
-        Ok(user)
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Makes `kind`/`name` an admin of every repo, or no longer one.
@@ -460,22 +479,25 @@ impl Store {
         actor: &Actor,
     ) -> Result<User, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let user = ensure_user(&mut tx, kind, name, admin).await?;
-        sqlx::query!(
-            "UPDATE users SET is_admin = $2 WHERE id = $1",
-            user.id.0,
-            admin
-        )
-        .execute(&mut *tx)
-        .await?;
-        let action = if admin { "role.grant" } else { "role.revoke" };
-        let detail = serde_json::json!({ "user": user.name, "role": "admin" });
-        audit::record(&mut tx, actor, action, Target::default(), detail).await?;
-        tx.commit().await?;
-        Ok(User {
-            is_admin: admin,
-            ..user
-        })
+        let work = async {
+            let user = ensure_user(&mut tx, kind, name, admin).await?;
+            sqlx::query!(
+                "UPDATE users SET is_admin = $2 WHERE id = $1",
+                user.id.0,
+                admin
+            )
+            .execute(&mut *tx)
+            .await?;
+            let action = if admin { "role.grant" } else { "role.revoke" };
+            let detail = serde_json::json!({ "user": user.name, "role": "admin" });
+            audit::record(&mut tx, actor, action, Target::default(), detail).await?;
+            Ok::<_, StoreError>(User {
+                is_admin: admin,
+                ..user
+            })
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Adds an API token, by its hash, to the service `service`, created
@@ -487,37 +509,43 @@ impl Store {
         actor: &Actor,
     ) -> Result<User, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let user = ensure_user(&mut tx, UserKind::Service, service, true).await?;
-        let id = sqlx::query_scalar!(
-            "INSERT INTO api_tokens (user_id, token_hash) VALUES ($1, $2) RETURNING id",
-            user.id.0,
-            token.as_slice(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?;
-        let detail = serde_json::json!({ "user": user.name, "token_id": id });
-        audit::record(&mut tx, actor, "token.create", Target::default(), detail).await?;
-        tx.commit().await?;
-        Ok(user)
+        let work = async {
+            let user = ensure_user(&mut tx, UserKind::Service, service, true).await?;
+            let id = sqlx::query_scalar!(
+                "INSERT INTO api_tokens (user_id, token_hash) VALUES ($1, $2) RETURNING id",
+                user.id.0,
+                token.as_slice(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?;
+            let detail = serde_json::json!({ "user": user.name, "token_id": id });
+            audit::record(&mut tx, actor, "token.create", Target::default(), detail).await?;
+            Ok::<_, StoreError>(user)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Revokes every token of the service `service`; how many were live.
     pub async fn revoke_tokens(&self, service: &str, actor: &Actor) -> Result<u64, StoreError> {
         let name = user_name(UserKind::Service, service)?;
         let mut tx = self.pool.begin().await?;
-        let revoked = sqlx::query!(
-            "UPDATE api_tokens SET revoked_at = now()
-             WHERE revoked_at IS NULL
-               AND user_id = (SELECT id FROM users WHERE kind = 'service' AND name = $1)",
-            name,
-        )
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        let detail = serde_json::json!({ "user": name, "revoked": revoked });
-        audit::record(&mut tx, actor, "token.revoke", Target::default(), detail).await?;
-        tx.commit().await?;
-        Ok(revoked)
+        let work = async {
+            let revoked = sqlx::query!(
+                "UPDATE api_tokens SET revoked_at = now()
+                 WHERE revoked_at IS NULL
+                   AND user_id = (SELECT id FROM users WHERE kind = 'service' AND name = $1)",
+                name,
+            )
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            let detail = serde_json::json!({ "user": name, "revoked": revoked });
+            audit::record(&mut tx, actor, "token.revoke", Target::default(), detail).await?;
+            Ok::<_, StoreError>(revoked)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 }

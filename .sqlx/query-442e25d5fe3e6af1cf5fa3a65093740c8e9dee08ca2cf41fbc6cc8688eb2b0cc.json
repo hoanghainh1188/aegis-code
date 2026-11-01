@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE repos SET monthly_budget_usd = $2 WHERE id = $1\n               RETURNING id, slug, monthly_budget_usd, repo_month_spent(id, $3) AS \"spent!\"",
+  "query": "UPDATE users SET oidc_subject = $2 WHERE id = $1\n                     RETURNING id, kind, name, is_admin",
   "describe": {
     "columns": [
       {
@@ -9,53 +9,57 @@
         "type_info": "Int8",
         "origin": {
           "Table": {
-            "table": "repos",
+            "table": "users",
             "name": "id"
           }
         }
       },
       {
         "ordinal": 1,
-        "name": "slug",
+        "name": "kind",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "repos",
-            "name": "slug"
+            "table": "users",
+            "name": "kind"
           }
         }
       },
       {
         "ordinal": 2,
-        "name": "monthly_budget_usd",
-        "type_info": "Float8",
+        "name": "name",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "repos",
-            "name": "monthly_budget_usd"
+            "table": "users",
+            "name": "name"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "spent!",
-        "type_info": "Float8",
-        "origin": "Expression"
+        "name": "is_admin",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "is_admin"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
-        "Float8",
         "Text"
       ]
     },
     "nullable": [
       false,
       false,
-      true,
-      null
+      false,
+      false
     ]
   },
-  "hash": "0a2d2116088e6eca70071cd539a3e696bfcd05510dae51620e58c858c9e354e5"
+  "hash": "442e25d5fe3e6af1cf5fa3a65093740c8e9dee08ca2cf41fbc6cc8688eb2b0cc"
 }

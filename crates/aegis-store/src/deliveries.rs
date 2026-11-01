@@ -5,6 +5,7 @@
 use crate::audit::{self, Target};
 use crate::budget;
 use crate::jobs::JobRow;
+use crate::tx;
 use crate::{Actor, BudgetRules, Delivered, JobId, NewDelivery, NewJob, Store, StoreError};
 
 const MAX_DELIVERY_ID_LEN: usize = 128;
@@ -26,37 +27,40 @@ impl Store {
             });
         }
         let mut tx = self.pool.begin().await?;
-        let recorded = sqlx::query_scalar!(
-            "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)
-             ON CONFLICT (source, delivery_id) DO NOTHING
-             RETURNING id",
-            delivery.source.as_str(),
-            delivery.delivery_id,
-            delivery.event,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(recorded) = recorded else {
-            return Ok(Delivered::Duplicate);
-        };
-        let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
-        let (job_id, delivered) = queue_in(
-            &mut tx,
-            &self.budget,
-            &Actor::webhook(delivery.source.as_str()),
-            detail,
-            job,
-        )
-        .await?;
-        sqlx::query!(
-            "UPDATE webhook_deliveries SET job_id = $2 WHERE id = $1",
-            recorded,
-            job_id.0,
-        )
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(delivered)
+        let work = async {
+            let recorded = sqlx::query_scalar!(
+                "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)
+                 ON CONFLICT (source, delivery_id) DO NOTHING
+                 RETURNING id",
+                delivery.source.as_str(),
+                delivery.delivery_id,
+                delivery.event,
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(recorded) = recorded else {
+                return Ok(Delivered::Duplicate);
+            };
+            let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
+            let (job_id, delivered) = queue_in(
+                &mut tx,
+                &self.budget,
+                &Actor::webhook(delivery.source.as_str()),
+                detail,
+                job,
+            )
+            .await?;
+            sqlx::query!(
+                "UPDATE webhook_deliveries SET job_id = $2 WHERE id = $1",
+                recorded,
+                job_id.0,
+            )
+            .execute(&mut *tx)
+            .await?;
+            Ok::<_, StoreError>(delivered)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 }
 
@@ -77,31 +81,34 @@ impl Store {
             });
         }
         let mut tx = self.pool.begin().await?;
-        let recorded = sqlx::query_scalar!(
-            "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)
-             ON CONFLICT (source, delivery_id) DO NOTHING
-             RETURNING id",
-            delivery.source.as_str(),
-            delivery.delivery_id,
-            delivery.event,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(recorded) = recorded else {
-            return Ok(Delivered::Duplicate);
-        };
-        let actor = Actor::webhook(delivery.source.as_str());
-        let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
-        let job = self.review_in(&mut tx, of, &actor, detail).await?;
-        sqlx::query!(
-            "UPDATE webhook_deliveries SET job_id = $2 WHERE id = $1",
-            recorded,
-            job.id.0,
-        )
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(Delivered::Queued(Box::new(job)))
+        let work = async {
+            let recorded = sqlx::query_scalar!(
+                "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)
+                 ON CONFLICT (source, delivery_id) DO NOTHING
+                 RETURNING id",
+                delivery.source.as_str(),
+                delivery.delivery_id,
+                delivery.event,
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(recorded) = recorded else {
+                return Ok(Delivered::Duplicate);
+            };
+            let actor = Actor::webhook(delivery.source.as_str());
+            let detail = serde_json::json!({ "delivery_id": delivery.delivery_id });
+            let job = self.review_in(&mut tx, of, &actor, detail).await?;
+            sqlx::query!(
+                "UPDATE webhook_deliveries SET job_id = $2 WHERE id = $1",
+                recorded,
+                job.id.0,
+            )
+            .execute(&mut *tx)
+            .await?;
+            Ok::<_, StoreError>(Delivered::Queued(Box::new(job)))
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 }
 

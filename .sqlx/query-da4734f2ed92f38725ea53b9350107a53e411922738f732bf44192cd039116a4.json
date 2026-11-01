@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO issue_records (ledger_key, record) VALUES ($1, $2)\n                 ON CONFLICT (ledger_key)\n                 DO UPDATE SET record = EXCLUDED.record, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da4734f2ed92f38725ea53b9350107a53e411922738f732bf44192cd039116a4"
+}

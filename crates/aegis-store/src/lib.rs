@@ -23,6 +23,7 @@ mod reviews;
 mod sonar;
 mod stats;
 mod tokens;
+mod tx;
 mod types;
 mod users;
 

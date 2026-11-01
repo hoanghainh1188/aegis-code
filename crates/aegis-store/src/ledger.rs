@@ -5,6 +5,7 @@ use aegis_ledger::{IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, 
 use sqlx::PgPool;
 
 use crate::audit::{self, Target};
+use crate::tx;
 use crate::{Actor, Job, RunId, Store, StoreError};
 
 /// Rows read per query; the trait returns everything, the queries do not.
@@ -174,55 +175,58 @@ impl Store {
         event.ensure_finite()?;
         let key = &job.ledger_key;
         let mut tx = self.pool.begin().await?;
-        // Two reviews of one job at once: the second waits, then sees the first.
-        sqlx::query!("SELECT id FROM jobs WHERE id = $1 FOR UPDATE", job.id.0)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("job {}", job.id.0)))?;
-        let rows = sqlx::query_scalar!(
-            "SELECT event FROM ledger_events WHERE ledger_key = $1 ORDER BY id",
-            key.as_str(),
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        let events = rows
-            .into_iter()
-            .map(serde_json::from_value)
-            .collect::<Result<Vec<LedgerEvent>, _>>()
-            .map_err(|e| StoreError::Decode {
-                column: "ledger_events.event",
+        let work = async {
+            // Two reviews of one job at once: the second waits, then sees the first.
+            sqlx::query!("SELECT id FROM jobs WHERE id = $1 FOR UPDATE", job.id.0)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(format!("job {}", job.id.0)))?;
+            let rows = sqlx::query_scalar!(
+                "SELECT event FROM ledger_events WHERE ledger_key = $1 ORDER BY id",
+                key.as_str(),
+            )
+            .fetch_all(&mut *tx)
+            .await?;
+            let events = rows
+                .into_iter()
+                .map(serde_json::from_value)
+                .collect::<Result<Vec<LedgerEvent>, _>>()
+                .map_err(|e| StoreError::Decode {
+                    column: "ledger_events.event",
+                    value: e.to_string(),
+                })?;
+            let before = IssueRecord::from_events(key.clone(), &events);
+            if before.review.is_some() && !replace {
+                return Err(StoreError::Conflict(format!(
+                    "job {} is already reviewed",
+                    job.id.0
+                )));
+            }
+            let record = before.apply(&event);
+            sqlx::query!(
+                "INSERT INTO ledger_events (ledger_key, event) VALUES ($1, $2)",
+                key.as_str(),
+                encode(&event)?,
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query!(
+                "INSERT INTO issue_records (ledger_key, record) VALUES ($1, $2)
+                 ON CONFLICT (ledger_key)
+                 DO UPDATE SET record = EXCLUDED.record, updated_at = now()",
+                key.as_str(),
+                encode(&record)?,
+            )
+            .execute(&mut *tx)
+            .await?;
+            let detail = serde_json::to_value(&event).map_err(|e| StoreError::Decode {
+                column: "audit_log.detail",
                 value: e.to_string(),
             })?;
-        let before = IssueRecord::from_events(key.clone(), &events);
-        if before.review.is_some() && !replace {
-            return Err(StoreError::Conflict(format!(
-                "job {} is already reviewed",
-                job.id.0
-            )));
+            audit::record(&mut tx, actor, "review.submit", Target::of_job(job), detail).await?;
+            Ok::<_, StoreError>(record)
         }
-        let record = before.apply(&event);
-        sqlx::query!(
-            "INSERT INTO ledger_events (ledger_key, event) VALUES ($1, $2)",
-            key.as_str(),
-            encode(&event)?,
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "INSERT INTO issue_records (ledger_key, record) VALUES ($1, $2)
-             ON CONFLICT (ledger_key)
-             DO UPDATE SET record = EXCLUDED.record, updated_at = now()",
-            key.as_str(),
-            encode(&record)?,
-        )
-        .execute(&mut *tx)
-        .await?;
-        let detail = serde_json::to_value(&event).map_err(|e| StoreError::Decode {
-            column: "audit_log.detail",
-            value: e.to_string(),
-        })?;
-        audit::record(&mut tx, actor, "review.submit", Target::of_job(job), detail).await?;
-        tx.commit().await?;
-        Ok(record)
+        .await;
+        tx::commit(tx, work).await
     }
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO runs (job_id, attempt) VALUES ($1, $2)\n             RETURNING id, job_id, attempt, status, error, started_at, ended_at",
+  "query": "INSERT INTO runs (job_id, attempt) VALUES ($1, $2)\n                 RETURNING id, job_id, attempt, status, error, started_at, ended_at",
   "describe": {
     "columns": [
       {
@@ -97,5 +97,5 @@
       true
     ]
   },
-  "hash": "bdcb04045f69336a8f01ef06c498e9d071c881171e4d976a5bb04a4421624a4a"
+  "hash": "3c89974b509e1f5b3e1dc5b830d5c50da00ea3ce98d5a066ff75aee458e8bda7"
 }

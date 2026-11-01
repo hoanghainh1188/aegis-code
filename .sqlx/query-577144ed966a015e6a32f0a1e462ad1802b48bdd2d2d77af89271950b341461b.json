@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, retry_of, review_of, review_round)\n             VALUES ($1, $2, $3, $4, $5, $6, $7)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+  "query": "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,\n                                 updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                           attempts, locked_by, locked_until, created_at, updated_at,\n                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -228,11 +228,7 @@
       "Left": [
         "Int8",
         "Text",
-        "Text",
-        "Text",
-        "Int8",
-        "Int8",
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -258,5 +254,5 @@
       false
     ]
   },
-  "hash": "133c00ba7054155b5d8bd6ac910ea36aca4dafaa5f9674729131ea11468daeec"
+  "hash": "577144ed966a015e6a32f0a1e462ad1802b48bdd2d2d77af89271950b341461b"
 }

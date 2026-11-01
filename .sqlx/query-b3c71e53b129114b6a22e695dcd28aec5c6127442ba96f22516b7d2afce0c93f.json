@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)\n             ON CONFLICT (source, delivery_id) DO NOTHING\n             RETURNING id",
+  "query": "INSERT INTO webhook_deliveries (source, delivery_id, event) VALUES ($1, $2, $3)\n                 ON CONFLICT (source, delivery_id) DO NOTHING\n                 RETURNING id",
   "describe": {
     "columns": [
       {
@@ -26,5 +26,5 @@
       false
     ]
   },
-  "hash": "edbf6499197bb1c3320bf766323bd86203540e84fbcdd4086e24e37866078590"
+  "hash": "b3c71e53b129114b6a22e695dcd28aec5c6127442ba96f22516b7d2afce0c93f"
 }

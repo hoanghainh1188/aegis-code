@@ -11,6 +11,7 @@ use aegis_ledger::{IssueId, Outcome};
 use crate::audit::{self, Target};
 use crate::budget;
 use crate::jobs::{JobRow, RunRow, live};
+use crate::tx;
 use crate::types::outcome_str;
 use crate::{Actor, Job, JobId, JobStatus, Run, RunStatus, Store, StoreError};
 
@@ -163,65 +164,70 @@ impl Store {
         max_workers: u32,
     ) -> Result<Option<Claim>, StoreError> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("SELECT pg_advisory_xact_lock($1)")
-            .bind(CLAIM_LOCK)
-            .execute(&mut *tx)
+        let work = async {
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(CLAIM_LOCK)
+                .execute(&mut *tx)
+                .await?;
+            let held = budget::hold_spent(&mut tx, &self.budget).await?;
+            let row = sqlx::query_as!(
+                JobRow,
+                "WITH busy AS (
+                     SELECT repo_id, count(*) AS n FROM jobs WHERE status = 'running'
+                     GROUP BY repo_id
+                 ),
+                 next AS (
+                     SELECT j.id FROM jobs j
+                     JOIN repos r ON r.id = j.repo_id
+                     LEFT JOIN busy b ON b.repo_id = j.repo_id
+                     WHERE j.status = 'queued' AND j.run_after <= now()
+                       AND NOT j.cancel_requested
+                       AND coalesce(b.n, 0) < r.max_concurrent_jobs
+                       AND j.repo_id <> ALL($4)
+                       AND (SELECT count(*) FROM jobs
+                            WHERE status = 'running' AND locked_by = $1) < $3
+                     ORDER BY j.id
+                     LIMIT 1
+                     FOR UPDATE OF j SKIP LOCKED
+                 )
+                 UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_by = $1,
+                                 locked_until = now() + make_interval(secs => $2),
+                                 reason = CASE WHEN starts_with(reason, $5) THEN NULL
+                                          ELSE reason END,
+                                 updated_at = now()
+                 FROM next WHERE jobs.id = next.id
+                 RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                           attempts, locked_by, locked_until, created_at, updated_at,
+                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                worker,
+                secs(lease),
+                i64::from(max_workers),
+                &held,
+                budget::waiting_prefix(),
+            )
+            .fetch_optional(&mut *tx)
             .await?;
-        let held = budget::hold_spent(&mut tx, &self.budget).await?;
-        let row = sqlx::query_as!(
-            JobRow,
-            "WITH busy AS (
-                 SELECT repo_id, count(*) AS n FROM jobs WHERE status = 'running'
-                 GROUP BY repo_id
-             ),
-             next AS (
-                 SELECT j.id FROM jobs j
-                 JOIN repos r ON r.id = j.repo_id
-                 LEFT JOIN busy b ON b.repo_id = j.repo_id
-                 WHERE j.status = 'queued' AND j.run_after <= now()
-                   AND NOT j.cancel_requested
-                   AND coalesce(b.n, 0) < r.max_concurrent_jobs
-                   AND j.repo_id <> ALL($4)
-                   AND (SELECT count(*) FROM jobs
-                        WHERE status = 'running' AND locked_by = $1) < $3
-                 ORDER BY j.id
-                 LIMIT 1
-                 FOR UPDATE OF j SKIP LOCKED
-             )
-             UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_by = $1,
-                             locked_until = now() + make_interval(secs => $2),
-                             reason = CASE WHEN starts_with(reason, $5) THEN NULL
-                                      ELSE reason END,
-                             updated_at = now()
-             FROM next WHERE jobs.id = next.id
-             RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
-            worker,
-            secs(lease),
-            i64::from(max_workers),
-            &held,
-            budget::waiting_prefix(),
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let run = sqlx::query_as!(
-            RunRow,
-            "INSERT INTO runs (job_id, attempt) VALUES ($1, $2)
-             RETURNING id, job_id, attempt, status, error, started_at, ended_at",
-            row.id,
-            row.attempts,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(Some(Claim {
-            job: row.try_into()?,
-            run: run.try_into()?,
-        }))
+            // Nothing to claim: the reasons `hold_spent` wrote go with it, as
+            // before #328.
+            let Some(row) = row else {
+                return Ok(tx::Done::Discard(None));
+            };
+            let run = sqlx::query_as!(
+                RunRow,
+                "INSERT INTO runs (job_id, attempt) VALUES ($1, $2)
+                 RETURNING id, job_id, attempt, status, error, started_at, ended_at",
+                row.id,
+                row.attempts,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            Ok::<_, StoreError>(tx::Done::Commit(Some(Claim {
+                job: row.try_into()?,
+                run: run.try_into()?,
+            })))
+        }
+        .await;
+        tx::end(tx, work).await
     }
 
     /// Extends the lease by `lease` from now, and says whether a cancel
@@ -257,86 +263,89 @@ impl Store {
         end: &AttemptEnd,
     ) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let held = sqlx::query_scalar!(
-            "SELECT id FROM jobs WHERE id = $1 AND locked_by = $2 AND status = 'running'
-             FOR UPDATE",
-            run.job_id.0,
-            worker,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        if held.is_none() {
-            return Err(StoreError::Conflict(format!(
-                "job {} is not leased to {worker}",
-                run.job_id.0
-            )));
-        }
-        let ended = sqlx::query!(
-            "UPDATE runs SET status = $3, error = $4, ended_at = now()
-             WHERE id = $1 AND job_id = $2 AND status = 'running'",
-            run.id.0,
-            run.job_id.0,
-            end.run_status().as_str(),
-            end.error(),
-        )
-        .execute(&mut *tx)
-        .await?;
-        if ended.rows_affected() == 0 {
-            return Err(StoreError::Conflict(format!(
-                "run {} is not running",
-                run.id.0
-            )));
-        }
-        let (outcome, pr_url) = match end {
-            AttemptEnd::Done {
-                outcome, pr_url, ..
-            } => (Some(outcome_str(*outcome)), pr_url.as_deref()),
-            _ => (None, None),
-        };
-        if let AttemptEnd::Done {
-            patch: Some(patch), ..
-        } = end
-        {
-            let diff = patch.capped();
-            sqlx::query!(
-                "INSERT INTO job_patches (job_id, diff, truncated) VALUES ($1, $2, $3)
-                 ON CONFLICT (job_id) DO UPDATE
-                 SET diff = EXCLUDED.diff, truncated = EXCLUDED.truncated, recorded_at = now()",
+        let work = async {
+            let held = sqlx::query_scalar!(
+                "SELECT id FROM jobs WHERE id = $1 AND locked_by = $2 AND status = 'running'
+                 FOR UPDATE",
                 run.job_id.0,
-                diff.diff,
-                diff.truncated,
+                worker,
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            if held.is_none() {
+                return Err(StoreError::Conflict(format!(
+                    "job {} is not leased to {worker}",
+                    run.job_id.0
+                )));
+            }
+            let ended = sqlx::query!(
+                "UPDATE runs SET status = $3, error = $4, ended_at = now()
+                 WHERE id = $1 AND job_id = $2 AND status = 'running'",
+                run.id.0,
+                run.job_id.0,
+                end.run_status().as_str(),
+                end.error(),
             )
             .execute(&mut *tx)
             .await?;
+            if ended.rows_affected() == 0 {
+                return Err(StoreError::Conflict(format!(
+                    "run {} is not running",
+                    run.id.0
+                )));
+            }
+            let (outcome, pr_url) = match end {
+                AttemptEnd::Done {
+                    outcome, pr_url, ..
+                } => (Some(outcome_str(*outcome)), pr_url.as_deref()),
+                _ => (None, None),
+            };
+            if let AttemptEnd::Done {
+                patch: Some(patch), ..
+            } = end
+            {
+                let diff = patch.capped();
+                sqlx::query!(
+                    "INSERT INTO job_patches (job_id, diff, truncated) VALUES ($1, $2, $3)
+                     ON CONFLICT (job_id) DO UPDATE
+                     SET diff = EXCLUDED.diff, truncated = EXCLUDED.truncated, recorded_at = now()",
+                    run.job_id.0,
+                    diff.diff,
+                    diff.truncated,
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            let (retried, delay) = match end {
+                AttemptEnd::Retry { after, .. } => (1, Some(secs(*after))),
+                AttemptEnd::Released => (0, Some(0.0)),
+                _ => (0, None),
+            };
+            let row = sqlx::query_as!(
+                JobRow,
+                "UPDATE jobs SET status = $2, outcome = $3, reason = $4, pr_url = $5,
+                                 retries = retries + $6,
+                                 run_after = CASE WHEN $7::float8 IS NULL THEN run_after
+                                             ELSE now() + make_interval(secs => $7) END,
+                                 locked_by = NULL, locked_until = NULL, updated_at = now()
+                 WHERE id = $1
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                           attempts, locked_by, locked_until, created_at, updated_at,
+                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                run.job_id.0,
+                end.job_status().as_str(),
+                outcome,
+                end.reason(),
+                pr_url,
+                retried,
+                delay,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            row.try_into()
         }
-        let (retried, delay) = match end {
-            AttemptEnd::Retry { after, .. } => (1, Some(secs(*after))),
-            AttemptEnd::Released => (0, Some(0.0)),
-            _ => (0, None),
-        };
-        let row = sqlx::query_as!(
-            JobRow,
-            "UPDATE jobs SET status = $2, outcome = $3, reason = $4, pr_url = $5,
-                             retries = retries + $6,
-                             run_after = CASE WHEN $7::float8 IS NULL THEN run_after
-                                         ELSE now() + make_interval(secs => $7) END,
-                             locked_by = NULL, locked_until = NULL, updated_at = now()
-             WHERE id = $1
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
-            run.job_id.0,
-            end.job_status().as_str(),
-            outcome,
-            end.reason(),
-            pr_url,
-            retried,
-            delay,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        row.try_into()
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Jobs whose lease ran out (their worker died or hung): the live run
@@ -385,36 +394,38 @@ impl Store {
     /// [`Store::request_cancel`], audited as done by `actor`.
     pub async fn request_cancel_by(&self, job: JobId, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query_as!(
-            JobRow,
-            "UPDATE jobs SET cancel_requested = true,
-                 status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,
-                 reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'
-                               ELSE reason END,
-                 updated_at = now()
-             WHERE id = $1 AND status IN ('queued', 'running')
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
-            job.0,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(row) = row else {
-            drop(tx);
-            return Err(self.ended_or_missing(job).await);
-        };
-        let cancelled: Job = row.try_into()?;
-        audit::record(
-            &mut tx,
-            actor,
-            "job.cancel",
-            Target::of_job(&cancelled),
-            serde_json::json!({}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(cancelled)
+        let work = async {
+            let row = sqlx::query_as!(
+                JobRow,
+                "UPDATE jobs SET cancel_requested = true,
+                     status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,
+                     reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'
+                                   ELSE reason END,
+                     updated_at = now()
+                 WHERE id = $1 AND status IN ('queued', 'running')
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                           attempts, locked_by, locked_until, created_at, updated_at,
+                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                job.0,
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(row) = row else {
+                return Err(self.ended_or_missing(job).await);
+            };
+            let cancelled: Job = row.try_into()?;
+            audit::record(
+                &mut tx,
+                actor,
+                "job.cancel",
+                Target::of_job(&cancelled),
+                serde_json::json!({}),
+            )
+            .await?;
+            Ok::<_, StoreError>(cancelled)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// A new job for the issue of a failed or cancelled one, with a ledger
@@ -428,62 +439,65 @@ impl Store {
     /// [`Store::retry_job`], audited as done by `actor`.
     pub async fn retry_job_by(&self, job: JobId, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let old = sqlx::query!(
-            "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round
-             FROM jobs WHERE id = $1 FOR UPDATE",
-            job.0,
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
-        let status = JobStatus::decode("jobs.status", &old.status)?;
-        if !matches!(status, JobStatus::Failed | JobStatus::Cancelled) {
-            return Err(StoreError::Conflict(format!(
-                "job {} is {}; only a failed or cancelled job is retried",
+        let work = async {
+            let old = sqlx::query!(
+                "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round
+                 FROM jobs WHERE id = $1 FOR UPDATE",
                 job.0,
-                status.as_str()
-            )));
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
+            let status = JobStatus::decode("jobs.status", &old.status)?;
+            if !matches!(status, JobStatus::Failed | JobStatus::Cancelled) {
+                return Err(StoreError::Conflict(format!(
+                    "job {} is {}; only a failed or cancelled job is retried",
+                    job.0,
+                    status.as_str()
+                )));
+            }
+            budget::check(&mut tx, &self.budget, crate::RepoId(old.repo_id)).await?;
+            let base = retry_base(&old.ledger_key);
+            let taken = sqlx::query_scalar!(
+                "SELECT ledger_key FROM jobs WHERE starts_with(ledger_key, $1)",
+                base,
+            )
+            .fetch_all(&mut *tx)
+            .await?;
+            let key = IssueId::parse(next_retry_key(base, &taken))?;
+            let row = sqlx::query_as!(
+                JobRow,
+                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, retry_of, review_of, review_round)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                           attempts, locked_by, locked_until, created_at, updated_at,
+                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                old.repo_id,
+                old.issue_ref,
+                key.as_str(),
+                old.source,
+                job.0,
+                // A review round run again is the same round of the same PR.
+                old.review_of,
+                old.review_round,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?;
+            let retried: Job = row.try_into()?;
+            let detail = serde_json::json!({ "retry_of": job.0 });
+            audit::record(
+                &mut tx,
+                actor,
+                "job.retry",
+                Target::of_job(&retried),
+                detail,
+            )
+            .await?;
+            Ok::<_, StoreError>(retried)
         }
-        budget::check(&mut tx, &self.budget, crate::RepoId(old.repo_id)).await?;
-        let base = retry_base(&old.ledger_key);
-        let taken = sqlx::query_scalar!(
-            "SELECT ledger_key FROM jobs WHERE starts_with(ledger_key, $1)",
-            base,
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        let key = IssueId::parse(next_retry_key(base, &taken))?;
-        let row = sqlx::query_as!(
-            JobRow,
-            "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, retry_of, review_of, review_round)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
-            old.repo_id,
-            old.issue_ref,
-            key.as_str(),
-            old.source,
-            job.0,
-            // A review round run again is the same round of the same PR.
-            old.review_of,
-            old.review_round,
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?;
-        let retried: Job = row.try_into()?;
-        let detail = serde_json::json!({ "retry_of": job.0 });
-        audit::record(
-            &mut tx,
-            actor,
-            "job.retry",
-            Target::of_job(&retried),
-            detail,
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(retried)
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// What the job's ledger has spent over all its runs, in $.

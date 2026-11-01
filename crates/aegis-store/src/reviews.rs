@@ -8,6 +8,7 @@ use aegis_ledger::{IssueId, Outcome};
 use crate::audit::{self, Target};
 use crate::budget;
 use crate::jobs::JobRow;
+use crate::tx;
 use crate::types::decode_outcome;
 use crate::{Actor, Job, JobId, JobSource, JobStatus, Store, StoreError};
 
@@ -65,11 +66,14 @@ impl Store {
     /// when the repo's monthly budget is (#31).
     pub async fn review_job_by(&self, of: JobId, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let job = self
-            .review_in(&mut tx, of, actor, serde_json::json!({}))
-            .await?;
-        tx.commit().await?;
-        Ok(job)
+        let work = async {
+            let job = self
+                .review_in(&mut tx, of, actor, serde_json::json!({}))
+                .await?;
+            Ok::<_, StoreError>(job)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// [`Store::review_job_by`] in `tx`, with `detail` added to its audit.

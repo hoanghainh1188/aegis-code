@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET attempts = attempts + 1, status = 'running', updated_at = now()\n             WHERE id = $1 RETURNING attempts",
+  "query": "UPDATE jobs SET attempts = attempts + 1, status = 'running', updated_at = now()\n                 WHERE id = $1 RETURNING attempts",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "598f91d43778dbcfb1b07fc79ef23676346f13fe4e5ba30a95aa59c50d5a070c"
+  "hash": "fc7ba1b710c97fe2e4e062a2b0a9c2d842a414d329c3cbf95aa7cf0b5626e6de"
 }
