@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE repos\n             SET url = $2, default_branch = $3, language = $4, mode = $5,\n                 max_concurrent_jobs = $6, config = $7\n             WHERE slug = $1\n             RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+  "query": "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)\n                 VALUES ($1, $2, $3, $4, $5, $6, $7)\n                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
   "describe": {
     "columns": [
       {
@@ -126,5 +126,5 @@
       false
     ]
   },
-  "hash": "2b438c1d7fe983c050e4c857bc8e84e2edd731adae2eff0a067147dd65a69217"
+  "hash": "ecf822ccc48e16898773985f35ebc2705027e02d1fcf3869bdd25c3763948f1d"
 }

@@ -3,6 +3,7 @@
 //! a warning is taken by one batch however often the poll finds it.
 
 use crate::deliveries::queue_in;
+use crate::tx;
 use crate::{Actor, Delivered, NewJob, RepoId, Store, StoreError};
 
 /// The most warnings one batch takes.
@@ -36,33 +37,37 @@ impl Store {
             });
         }
         let mut tx = self.pool.begin().await?;
-        let mut taken = sqlx::query_scalar!(
-            "INSERT INTO sonar_warnings (repo_id, warning_key, batch)
-             SELECT $1, k, $3 FROM unnest($2::text[]) AS k
-             ON CONFLICT (repo_id, warning_key) DO NOTHING
-             RETURNING warning_key",
-            job.repo_id.0,
-            keys,
-            job.issue_ref,
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| match StoreError::from_db(e) {
-            StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
-            other => other,
-        })?;
-        if taken.is_empty() {
-            return Ok(None);
+        let work = async {
+            let mut taken = sqlx::query_scalar!(
+                "INSERT INTO sonar_warnings (repo_id, warning_key, batch)
+                 SELECT $1, k, $3 FROM unnest($2::text[]) AS k
+                 ON CONFLICT (repo_id, warning_key) DO NOTHING
+                 RETURNING warning_key",
+                job.repo_id.0,
+                keys,
+                job.issue_ref,
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| match StoreError::from_db(e) {
+                StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
+                other => other,
+            })?;
+            if taken.is_empty() {
+                return Ok(tx::Done::Discard(None));
+            }
+            taken.sort();
+            let detail = serde_json::json!({ "batch": job.issue_ref, "warnings": taken.len() });
+            let (_, delivered) =
+                queue_in(&mut tx, &self.budget, &Actor::webhook("sonar"), detail, job).await?;
+            // Its warnings stay free for the batch after the live one.
+            if matches!(delivered, Delivered::AlreadyLive(_)) {
+                return Ok(tx::Done::Discard(None));
+            }
+            Ok::<_, StoreError>(tx::Done::Commit(Some((delivered, taken))))
         }
-        taken.sort();
-        let detail = serde_json::json!({ "batch": job.issue_ref, "warnings": taken.len() });
-        let (_, delivered) =
-            queue_in(&mut tx, &self.budget, &Actor::webhook("sonar"), detail, job).await?;
-        if matches!(delivered, Delivered::AlreadyLive(_)) {
-            return Ok(None);
-        }
-        tx.commit().await?;
-        Ok(Some((delivered, taken)))
+        .await;
+        tx::end(tx, work).await
     }
 
     /// The keys of the warnings batch `batch` of `repo` took, sorted.

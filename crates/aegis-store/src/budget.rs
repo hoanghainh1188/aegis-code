@@ -14,6 +14,7 @@ use aegis_ledger::COST_PER_ISSUE_MAX;
 use sqlx::PgConnection;
 
 use crate::audit::{self, Target};
+use crate::tx;
 use crate::{Actor, RepoId, Store, StoreError};
 
 /// How the reason of a job refused, or kept waiting, for its repo's
@@ -273,32 +274,35 @@ impl Store {
             });
         }
         let mut tx = self.pool.begin().await?;
-        let was = sqlx::query_scalar!(
-            "SELECT monthly_budget_usd FROM repos WHERE id = $1 FOR UPDATE",
-            repo.0,
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| StoreError::NotFound(format!("repo {}", repo.0)))?;
-        let budget: RepoBudget = sqlx::query_as!(
-            BudgetRow,
-            r#"UPDATE repos SET monthly_budget_usd = $2 WHERE id = $1
-               RETURNING id, slug, monthly_budget_usd, repo_month_spent(id, $3) AS "spent!""#,
-            repo.0,
-            monthly_usd,
-            self.budget.time_zone,
-        )
-        .fetch_one(&mut *tx)
-        .await?
-        .into();
-        let detail = serde_json::json!({ "monthly_usd": monthly_usd, "was": was });
-        let target = Target {
-            repo: Some(repo),
-            job: None,
-        };
-        audit::record(&mut tx, actor, "repo.budget", target, detail).await?;
-        tx.commit().await?;
-        Ok(budget)
+        let work = async {
+            let was = sqlx::query_scalar!(
+                "SELECT monthly_budget_usd FROM repos WHERE id = $1 FOR UPDATE",
+                repo.0,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("repo {}", repo.0)))?;
+            let budget: RepoBudget = sqlx::query_as!(
+                BudgetRow,
+                r#"UPDATE repos SET monthly_budget_usd = $2 WHERE id = $1
+                   RETURNING id, slug, monthly_budget_usd, repo_month_spent(id, $3) AS "spent!""#,
+                repo.0,
+                monthly_usd,
+                self.budget.time_zone,
+            )
+            .fetch_one(&mut *tx)
+            .await?
+            .into();
+            let detail = serde_json::json!({ "monthly_usd": monthly_usd, "was": was });
+            let target = Target {
+                repo: Some(repo),
+                job: None,
+            };
+            audit::record(&mut tx, actor, "repo.budget", target, detail).await?;
+            Ok::<_, StoreError>(budget)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 }
 

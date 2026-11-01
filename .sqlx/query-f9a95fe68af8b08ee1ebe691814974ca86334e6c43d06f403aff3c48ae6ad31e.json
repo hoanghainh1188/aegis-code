@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)\n             VALUES ($1, $2, $3, $4)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+  "query": "WITH busy AS (\n                     SELECT repo_id, count(*) AS n FROM jobs WHERE status = 'running'\n                     GROUP BY repo_id\n                 ),\n                 next AS (\n                     SELECT j.id FROM jobs j\n                     JOIN repos r ON r.id = j.repo_id\n                     LEFT JOIN busy b ON b.repo_id = j.repo_id\n                     WHERE j.status = 'queued' AND j.run_after <= now()\n                       AND NOT j.cancel_requested\n                       AND coalesce(b.n, 0) < r.max_concurrent_jobs\n                       AND j.repo_id <> ALL($4)\n                       AND (SELECT count(*) FROM jobs\n                            WHERE status = 'running' AND locked_by = $1) < $3\n                     ORDER BY j.id\n                     LIMIT 1\n                     FOR UPDATE OF j SKIP LOCKED\n                 )\n                 UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_by = $1,\n                                 locked_until = now() + make_interval(secs => $2),\n                                 reason = CASE WHEN starts_with(reason, $5) THEN NULL\n                                          ELSE reason END,\n                                 updated_at = now()\n                 FROM next WHERE jobs.id = next.id\n                 RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                           attempts, locked_by, locked_until, created_at, updated_at,\n                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -226,9 +226,10 @@
     ],
     "parameters": {
       "Left": [
+        "Text",
+        "Float8",
         "Int8",
-        "Text",
-        "Text",
+        "Int8Array",
         "Text"
       ]
     },
@@ -255,5 +256,5 @@
       false
     ]
   },
-  "hash": "9166a621ea53cdff47baf9f3a44d4deaa56a23ec2ddbc6c460f970583a95103b"
+  "hash": "f9a95fe68af8b08ee1ebe691814974ca86334e6c43d06f403aff3c48ae6ad31e"
 }

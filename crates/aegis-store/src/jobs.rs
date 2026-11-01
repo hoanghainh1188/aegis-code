@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 
 use crate::audit::{self, Target};
 use crate::budget;
+use crate::tx;
 use crate::types::{count, decode_outcome, outcome_str};
 use crate::{
     Actor, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, Run,
@@ -105,36 +106,39 @@ impl Store {
     /// [`Store::create_job`], audited as done by `actor`.
     pub async fn create_job_by(&self, job: &NewJob, actor: &Actor) -> Result<Job, StoreError> {
         let mut tx = self.pool.begin().await?;
-        budget::check(&mut tx, &self.budget, job.repo_id).await?;
-        let created: Job = sqlx::query_as!(
-            JobRow,
-            "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
-             VALUES ($1, $2, $3, $4)
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
-            job.repo_id.0,
-            job.issue_ref,
-            job.ledger_key.as_str(),
-            job.source.as_str(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| match StoreError::from_db(e) {
-            StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
-            other => other,
-        })?
-        .try_into()?;
-        audit::record(
-            &mut tx,
-            actor,
-            "job.create",
-            Target::of_job(&created),
-            serde_json::json!({}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(created)
+        let work = async {
+            budget::check(&mut tx, &self.budget, job.repo_id).await?;
+            let created: Job = sqlx::query_as!(
+                JobRow,
+                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                           attempts, locked_by, locked_until, created_at, updated_at,
+                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                job.repo_id.0,
+                job.issue_ref,
+                job.ledger_key.as_str(),
+                job.source.as_str(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| match StoreError::from_db(e) {
+                StoreError::NotFound(_) => StoreError::NotFound(format!("repo {}", job.repo_id.0)),
+                other => other,
+            })?
+            .try_into()?;
+            audit::record(
+                &mut tx,
+                actor,
+                "job.create",
+                Target::of_job(&created),
+                serde_json::json!({}),
+            )
+            .await?;
+            Ok::<_, StoreError>(created)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     pub async fn job(&self, id: JobId) -> Result<Option<Job>, StoreError> {
@@ -199,48 +203,51 @@ impl Store {
     /// a run of it is still live.
     pub async fn start_run(&self, job: JobId) -> Result<Run, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let status = sqlx::query_scalar!("SELECT status FROM jobs WHERE id = $1 FOR UPDATE", job.0)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
-        let status = JobStatus::decode("jobs.status", &status)?;
-        if !live(status) {
-            return Err(StoreError::Conflict(format!(
-                "job {} is {}",
+        let work = async {
+            let status = sqlx::query_scalar!("SELECT status FROM jobs WHERE id = $1 FOR UPDATE", job.0)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
+            let status = JobStatus::decode("jobs.status", &status)?;
+            if !live(status) {
+                return Err(StoreError::Conflict(format!(
+                    "job {} is {}",
+                    job.0,
+                    status.as_str()
+                )));
+            }
+            let open = sqlx::query_scalar!(
+                r#"SELECT EXISTS (SELECT 1 FROM runs WHERE job_id = $1 AND status = 'running') AS "open!""#,
                 job.0,
-                status.as_str()
-            )));
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if open {
+                return Err(StoreError::Conflict(format!(
+                    "job {} has a live run",
+                    job.0
+                )));
+            }
+            let attempt = sqlx::query_scalar!(
+                "UPDATE jobs SET attempts = attempts + 1, status = 'running', updated_at = now()
+                 WHERE id = $1 RETURNING attempts",
+                job.0,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            let run = sqlx::query_as!(
+                RunRow,
+                "INSERT INTO runs (job_id, attempt) VALUES ($1, $2)
+                 RETURNING id, job_id, attempt, status, error, started_at, ended_at",
+                job.0,
+                attempt,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            run.try_into()
         }
-        let open = sqlx::query_scalar!(
-            r#"SELECT EXISTS (SELECT 1 FROM runs WHERE job_id = $1 AND status = 'running') AS "open!""#,
-            job.0,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        if open {
-            return Err(StoreError::Conflict(format!(
-                "job {} has a live run",
-                job.0
-            )));
-        }
-        let attempt = sqlx::query_scalar!(
-            "UPDATE jobs SET attempts = attempts + 1, status = 'running', updated_at = now()
-             WHERE id = $1 RETURNING attempts",
-            job.0,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        let run = sqlx::query_as!(
-            RunRow,
-            "INSERT INTO runs (job_id, attempt) VALUES ($1, $2)
-             RETURNING id, job_id, attempt, status, error, started_at, ended_at",
-            job.0,
-            attempt,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        run.try_into()
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Ends a live run. `Conflict` when it has already ended.
@@ -311,46 +318,49 @@ impl Store {
             JobEnd::Cancelled => (JobStatus::Cancelled, None),
         };
         let mut tx = self.pool.begin().await?;
-        let current =
-            sqlx::query_scalar!("SELECT status FROM jobs WHERE id = $1 FOR UPDATE", job.0)
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
-        let current = JobStatus::decode("jobs.status", &current)?;
-        if !live(current) {
-            return Err(StoreError::Conflict(format!(
-                "job {} is already {}",
+        let work = async {
+            let current =
+                sqlx::query_scalar!("SELECT status FROM jobs WHERE id = $1 FOR UPDATE", job.0)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
+            let current = JobStatus::decode("jobs.status", &current)?;
+            if !live(current) {
+                return Err(StoreError::Conflict(format!(
+                    "job {} is already {}",
+                    job.0,
+                    current.as_str()
+                )));
+            }
+            let open = sqlx::query_scalar!(
+                r#"SELECT EXISTS (SELECT 1 FROM runs WHERE job_id = $1 AND status = 'running') AS "open!""#,
                 job.0,
-                current.as_str()
-            )));
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if open {
+                return Err(StoreError::Conflict(format!(
+                    "job {} has a live run",
+                    job.0
+                )));
+            }
+            let row = sqlx::query_as!(
+                JobRow,
+                "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,
+                                 updated_at = now()
+                 WHERE id = $1
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
+                           attempts, locked_by, locked_until, created_at, updated_at,
+                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                job.0,
+                status.as_str(),
+                outcome,
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            row.try_into()
         }
-        let open = sqlx::query_scalar!(
-            r#"SELECT EXISTS (SELECT 1 FROM runs WHERE job_id = $1 AND status = 'running') AS "open!""#,
-            job.0,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        if open {
-            return Err(StoreError::Conflict(format!(
-                "job {} has a live run",
-                job.0
-            )));
-        }
-        let row = sqlx::query_as!(
-            JobRow,
-            "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,
-                             updated_at = now()
-             WHERE id = $1
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
-            job.0,
-            status.as_str(),
-            outcome,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        row.try_into()
+        .await;
+        tx::commit(tx, work).await
     }
 }

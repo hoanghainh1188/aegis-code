@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round\n             FROM jobs WHERE id = $1 FOR UPDATE",
+  "query": "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round\n                 FROM jobs WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -96,5 +96,5 @@
       false
     ]
   },
-  "hash": "e3d7568cbcd7049d8849d2762df59c2c5cacc7bb7f356d8ad103cd6340119884"
+  "hash": "ca0aeb39e9b4ad807359c2032b5a078821fb332c21ce64096d3ec462dd302923"
 }

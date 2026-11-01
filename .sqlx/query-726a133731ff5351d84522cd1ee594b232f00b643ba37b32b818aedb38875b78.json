@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET status = $2, outcome = $3, reason = $4, pr_url = $5,\n                             retries = retries + $6,\n                             run_after = CASE WHEN $7::float8 IS NULL THEN run_after\n                                         ELSE now() + make_interval(secs => $7) END,\n                             locked_by = NULL, locked_until = NULL, updated_at = now()\n             WHERE id = $1\n             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                       attempts, locked_by, locked_until, created_at, updated_at,\n                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)\n                 VALUES ($1, $2, $3, $4)\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                           attempts, locked_by, locked_until, created_at, updated_at,\n                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -229,10 +229,7 @@
         "Int8",
         "Text",
         "Text",
-        "Text",
-        "Text",
-        "Int4",
-        "Float8"
+        "Text"
       ]
     },
     "nullable": [
@@ -258,5 +255,5 @@
       false
     ]
   },
-  "hash": "e1398cba06e81a8afd6f4ec012874a38b5af0f88fa8b006373b8f049387ae7d8"
+  "hash": "726a133731ff5351d84522cd1ee594b232f00b643ba37b32b818aedb38875b78"
 }

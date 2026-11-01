@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_tokens SET revoked_at = now()\n                 WHERE revoked_at IS NULL\n                   AND user_id = (SELECT id FROM users WHERE kind = 'service' AND name = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e6453e2d83d51b88ae03acfd00bf432295f807368bbe790d37e439069b447122"
+}
