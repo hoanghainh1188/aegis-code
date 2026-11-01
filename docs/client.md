@@ -4,10 +4,7 @@ The command-line interface for software engineers to dispatch and track maintena
 
 ## Installation
 
-> [!IMPORTANT]
-> No release has been published yet, so the npm package and the prebuilt binaries below do not exist until the first `vX.Y.Z` release ([release.md](release.md)). Until then, install [from source](#from-source).
-
-### Via npm (Recommended after the first release)
+### Via npm (Recommended)
 Supported on macOS (arm64/x86_64) and Linux (arm64/x86_64), requires Node 18+:
 
 ```bash
@@ -17,7 +14,7 @@ npm install -g @hoanghainh/aegis
 The package bundles native pre-compiled binaries for all four architectures with zero runtime downloads. Versioning mirrors `aegis-server` (`vX.Y.Z`, [docs/release.md](release.md)).
 
 ### Prebuilt Binary
-Download `aegis-<version>-<target>.tar.gz` from the repository Releases page, verify its SHA-256 checksum, and place it in your `PATH`:
+Download `aegis-<version>-<target>.tar.gz` from the [Releases page](https://github.com/hoanghainh1188/aegis-code/releases), verify its SHA-256 checksum, and place it in your `PATH`:
 
 ```bash
 shasum -a 256 -c aegis-<version>-<target>.tar.gz.sha256

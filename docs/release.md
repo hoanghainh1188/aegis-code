@@ -30,11 +30,11 @@ flowchart LR
 
 | Task | Configuration Surface |
 | --- | --- |
-| Secret `RELEASE_PLEASE_TOKEN`: Fine-grained PAT scoped strictly to this repo with Contents, Pull requests, and Issues Read/Write. Releases triggered by default `GITHUB_TOKEN` do not cascade to `release.yml` | Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions |
-| Environment `npm-release` (optional required reviewers) | Settings $\rightarrow$ Environments |
-| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh-aegis-X.Y.Z.tgz` from Release, run `npm login` as the npm user `hoanghainh` (the scope is the npm account, not the GitHub owner `hoanghainh1188`), then `npm publish hoanghainh-aegis-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured | Operator workstation |
-| Configure Trusted Publisher for package: Repository `hoanghainh1188/aegis-code`, workflow `release.yml`, environment `npm-release` | npmjs.com $\rightarrow$ package $\rightarrow$ Settings |
-| Make GHCR Packages **Public** so users can pull without authentication | GitHub $\rightarrow$ Packages $\rightarrow$ each `aegis-*` $\rightarrow$ Package settings |
+| Secret `RELEASE_PLEASE_TOKEN`: Fine-grained PAT scoped strictly to this repo with Contents, Pull requests, and Issues Read/Write. Releases triggered by default `GITHUB_TOKEN` do not cascade to `release.yml`. Done | Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions |
+| Environment `npm-release`, deployment refs limited to tags `v*` (a Release) and branch `main` (`workflow_dispatch` re-runs); optionally required reviewers. Done (#346) | Settings $\rightarrow$ Environments |
+| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh-aegis-X.Y.Z.tgz` from Release, run `npm login` as the npm user `hoanghainh` (the scope is the npm account, not the GitHub owner `hoanghainh1188`), then `npm publish hoanghainh-aegis-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured. Done with v0.2.2 | Operator workstation |
+| Configure Trusted Publisher for package: Repository `hoanghainh1188/aegis-code`, workflow `release.yml`, environment `npm-release`. Done | npmjs.com $\rightarrow$ package $\rightarrow$ Settings |
+| Make GHCR Packages **Public** so users can pull without authentication. Done | GitHub $\rightarrow$ Packages $\rightarrow$ each `aegis-*` $\rightarrow$ Package settings |
 
 ---
 
