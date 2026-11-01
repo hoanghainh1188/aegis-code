@@ -2,7 +2,7 @@
 {% block title %}Repos{% endblock %}
 {% block content %}
 <section aria-labelledby="repos-heading">
-  <p class="eyebrow">Admin</p>
+  <p class="eyebrow">Admin · <a href="/admin/audit">Audit log</a></p>
   <h1 id="repos-heading">Repos</h1>
   <p class="note">Every registered repo. Open one to see its settings and clone, change it, and change who has which role in it.</p>
   {% if can_edit %}<p><a class="button" href="/admin/repos/new">Add a repo</a></p>{% else %}<p class="note">This server has not loaded the modes' configuration: add repos with <code>aegis-server repo add</code>.</p>{% endif %}

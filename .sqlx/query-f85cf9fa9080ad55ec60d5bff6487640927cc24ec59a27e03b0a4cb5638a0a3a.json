@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, at, actor_kind, actor_id, actor_name, action, repo_id, job_id, detail\n             FROM audit_log\n             WHERE ($1::bigint IS NULL OR repo_id = $1)\n               AND ($2::bigint IS NULL OR id < $2)\n             ORDER BY id DESC LIMIT $3",
+  "query": "SELECT id, at, actor_kind, actor_id, actor_name, action, repo_id, job_id, detail\n             FROM audit_log\n             WHERE ($1::bigint IS NULL OR repo_id = $1)\n               AND ($2::bigint IS NULL OR id < $2)\n               AND ($4::text IS NULL OR lower(actor_name) = lower($4))\n               AND ($5::text IS NULL OR action = $5)\n               AND ($6::text IS NULL OR starts_with(action, $6))\n             ORDER BY id DESC LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -107,7 +107,10 @@
       "Left": [
         "Int8",
         "Int8",
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -122,5 +125,5 @@
       false
     ]
   },
-  "hash": "aa86a3d702b45ca2894b414491b67fd591f9043a9c9258294a4159f14125bb1b"
+  "hash": "f85cf9fa9080ad55ec60d5bff6487640927cc24ec59a27e03b0a4cb5638a0a3a"
 }
