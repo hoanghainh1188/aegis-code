@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.3...v0.2.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **store:** a store error rolls its transaction back before returning ([#349](https://github.com/hoanghainh1188/aegis-code/issues/349)) ([a4ac1f7](https://github.com/hoanghainh1188/aegis-code/commit/a4ac1f7648fc46b0a21ff9d170919beded67f1d2))
+
 ## [0.2.3](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.2...v0.2.3) (2026-11-01)
 
 
