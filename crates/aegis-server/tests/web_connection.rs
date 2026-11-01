@@ -144,6 +144,7 @@ async fn the_page_says_what_to_make_and_what_the_store_has_never_the_values() {
     // Its webhooks: the ignored with why, the ping, bad signatures counted.
     for (outcome, reason) in [
         (WebhookOutcome::Ping, None),
+        (WebhookOutcome::Duplicate, None),
         (
             WebhookOutcome::Ignored,
             Some("label `bug`, not `aegis`".to_owned()),
@@ -156,6 +157,7 @@ async fn the_page_says_what_to_make_and_what_the_store_has_never_the_values() {
             repo: Some(id),
             outcome,
             reason,
+            job: None,
         })
         .await
         .unwrap();
@@ -167,11 +169,17 @@ async fn the_page_says_what_to_make_and_what_the_store_has_never_the_values() {
         repo: None,
         outcome: WebhookOutcome::BadSignature,
         reason: None,
+        job: None,
     })
     .await
     .unwrap();
     let (_, page) = get(&app, &admin, &uri).await;
     assert!(page.contains("ping: connected"), "{page}");
+    // #373: the same rows as the repo's page, with what to do.
+    assert!(
+        page.contains("received before") && page.contains("only the first counts"),
+        "{page}"
+    );
     assert!(
         page.contains("ignored") && page.contains("label `bug`, not `aegis`"),
         "{page}"

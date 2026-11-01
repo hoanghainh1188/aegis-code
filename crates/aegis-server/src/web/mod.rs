@@ -22,6 +22,7 @@ mod service_tokens;
 mod tokens;
 mod users;
 mod view;
+mod webhooks;
 
 use aegis_store::{Job, JobId, RepoRole, Store, StoreError};
 use askama::Template;

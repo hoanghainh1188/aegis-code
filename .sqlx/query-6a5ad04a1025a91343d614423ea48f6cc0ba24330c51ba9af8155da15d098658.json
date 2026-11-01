@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH pruned AS (\n                 DELETE FROM webhook_events\n                 WHERE received_at < now() - make_interval(days => $7)\n             )\n             INSERT INTO webhook_events\n                 (source, delivery_id, event, repo_id, outcome, reason, job_id)\n             VALUES ($1, $2, $3, $4, $5, $6, $8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6a5ad04a1025a91343d614423ea48f6cc0ba24330c51ba9af8155da15d098658"
+}

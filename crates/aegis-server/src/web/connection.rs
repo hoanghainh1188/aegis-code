@@ -6,13 +6,14 @@
 
 use aegis_lifecycle::ForkPlatform;
 use aegis_pr::{GitHub, GitLab, PrError, RepoAccess};
-use aegis_store::{BadSignatures, Repo, Store, WebhookEvent, WebhookOutcome};
+use aegis_store::{BadSignatures, Repo, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::{Path, State};
 
 use super::admin::admin_only;
 use super::repo_admin::{RepoAdmin, RepoAdminExt, editing, repo_of};
+use super::webhooks::{self, WebhookRow};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::{Access, Auth};
 use crate::repo_cli::RepoFile;
@@ -101,44 +102,6 @@ fn skip(name: &'static str, detail: impl Into<String>) -> CheckRow {
         name,
         state: "skip",
         detail: detail.into(),
-    }
-}
-
-struct WebhookRow {
-    received_at: String,
-    source: &'static str,
-    event: String,
-    outcome: &'static str,
-    good: bool,
-    reason: String,
-}
-
-impl From<WebhookEvent> for WebhookRow {
-    fn from(e: WebhookEvent) -> Self {
-        let outcome = match e.outcome {
-            WebhookOutcome::Queued => "job queued",
-            WebhookOutcome::AlreadyLive => "already has a job",
-            WebhookOutcome::Refused => "refused",
-            WebhookOutcome::Duplicate => "received before",
-            WebhookOutcome::Ignored => "ignored",
-            WebhookOutcome::Ping => "ping: connected",
-            WebhookOutcome::Malformed => "not understood",
-            WebhookOutcome::BadSignature => "bad signature",
-        };
-        Self {
-            received_at: e.received_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-            source: e.source.as_str(),
-            event: e.event.unwrap_or_default(),
-            outcome,
-            good: matches!(
-                e.outcome,
-                WebhookOutcome::Queued
-                    | WebhookOutcome::AlreadyLive
-                    | WebhookOutcome::Duplicate
-                    | WebhookOutcome::Ping
-            ),
-            reason: e.reason.unwrap_or_default(),
-        }
     }
 }
 
@@ -247,12 +210,7 @@ async fn page(
         fork: fork.path(),
         secrets,
         checks,
-        webhooks: store
-            .repo_webhooks(repo.id, SHOWN_WEBHOOKS)
-            .await?
-            .into_iter()
-            .map(WebhookRow::from)
-            .collect(),
+        webhooks: webhooks::rows(store, repo.id, SHOWN_WEBHOOKS).await?,
         bad_signatures: store
             .bad_signatures(BAD_SIGNATURE_HOURS)
             .await?

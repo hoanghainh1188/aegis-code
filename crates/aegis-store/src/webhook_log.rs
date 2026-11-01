@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::{RepoId, Store, StoreError, WebhookOutcome, WebhookSource};
+use crate::{JobId, RepoId, Store, StoreError, WebhookOutcome, WebhookSource};
 
 /// How long a delivery's outcome is kept.
 const KEPT_DAYS: i32 = 30;
@@ -22,6 +22,8 @@ pub struct NewWebhookEvent {
     pub repo: Option<RepoId>,
     pub outcome: WebhookOutcome,
     pub reason: Option<String>,
+    /// The job it made or found (#373).
+    pub job: Option<JobId>,
 }
 
 /// A recorded delivery of a repo.
@@ -32,6 +34,7 @@ pub struct WebhookEvent {
     pub event: Option<String>,
     pub outcome: WebhookOutcome,
     pub reason: Option<String>,
+    pub job_id: Option<JobId>,
     pub received_at: DateTime<Utc>,
 }
 
@@ -55,8 +58,9 @@ impl Store {
                  DELETE FROM webhook_events
                  WHERE received_at < now() - make_interval(days => $7)
              )
-             INSERT INTO webhook_events (source, delivery_id, event, repo_id, outcome, reason)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+             INSERT INTO webhook_events
+                 (source, delivery_id, event, repo_id, outcome, reason, job_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $8)",
             event.source.as_str(),
             cut(event.delivery_id.as_deref(), MAX_NAME_CHARS),
             cut(event.event.as_deref(), MAX_NAME_CHARS),
@@ -64,6 +68,7 @@ impl Store {
             event.outcome.as_str(),
             cut(event.reason.as_deref(), MAX_REASON_CHARS),
             KEPT_DAYS,
+            event.job.map(|j| j.0),
         )
         .execute(&self.pool)
         .await
@@ -78,7 +83,7 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<WebhookEvent>, StoreError> {
         let rows = sqlx::query!(
-            "SELECT source, delivery_id, event, outcome, reason, received_at
+            "SELECT source, delivery_id, event, outcome, reason, job_id, received_at
              FROM webhook_events WHERE repo_id = $1
              ORDER BY received_at DESC, id DESC LIMIT $2",
             repo.0,
@@ -94,6 +99,7 @@ impl Store {
                     event: r.event,
                     outcome: WebhookOutcome::decode("webhook_events.outcome", &r.outcome)?,
                     reason: r.reason,
+                    job_id: r.job_id.map(JobId),
                     received_at: r.received_at,
                 })
             })
