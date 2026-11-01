@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use aegis_ledger::{ACCEPT_RATE_MIN, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN, accepted};
-use aegis_store::{KpiJob, KpiRecord, Page, Repo, RepoId, Store};
+use aegis_store::{KpiJob, KpiRecord, Page, Repo, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::State;
@@ -192,7 +192,7 @@ pub async fn page(
         .repo_budgets(within.as_deref())
         .await?
         .iter()
-        .map(|b| BudgetRow::new(b, rules))
+        .map(|b| BudgetRow::new(b, rules).editable(access.can(b.repo_id, RepoRole::Maintainer)))
         .collect();
     let rows = |groups: &[Group], min: f64| -> Vec<KpiRow> {
         groups

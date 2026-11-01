@@ -10,6 +10,7 @@ mod actions;
 mod admin;
 mod ai;
 mod audit;
+mod budget;
 mod connection;
 mod dashboard;
 mod guard;
@@ -134,6 +135,7 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         )
         .route("/admin/repos/{id}/roles", post(admin::grant))
         .route("/admin/repos/{id}/roles/revoke", post(admin::revoke))
+        .route("/repos/{id}/budget", get(budget::show).post(budget::set))
         .route("/me/tokens", get(tokens::list).post(tokens::create))
         .route("/me/tokens/{id}/revoke", post(tokens::revoke))
         .route(
