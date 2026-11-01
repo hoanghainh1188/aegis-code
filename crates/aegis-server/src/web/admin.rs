@@ -3,7 +3,7 @@
 //! ([`Store::set_repo_role`], which checks the name and audits). Only an
 //! admin: for anyone else `/admin/*` is not found, page or form.
 
-use aegis_store::{Repo, RepoId, RepoMember, RepoRole, Store, UserKind};
+use aegis_store::{Repo, RepoId, RepoMember, RepoPause, RepoRole, Store, UserKind};
 use askama::Template;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -48,6 +48,14 @@ struct ReposPage<'a> {
     repos: Vec<Repo>,
     /// Whether repos can be added here (#330).
     can_edit: bool,
+    /// The paused ones' ids (#374).
+    paused: Vec<i64>,
+}
+
+impl ReposPage<'_> {
+    fn is_paused(&self, id: &RepoId) -> bool {
+        self.paused.contains(&id.0)
+    }
 }
 
 pub async fn repos(
@@ -63,6 +71,12 @@ pub async fn repos(
         me: &me,
         repos: all_repos(&store).await?.into_values().collect(),
         can_edit: admin.is_some(),
+        paused: store
+            .paused_repos()
+            .await?
+            .into_iter()
+            .map(|p| p.repo_id.0)
+            .collect(),
     })
 }
 
@@ -100,6 +114,24 @@ struct RepoPage<'a> {
     can_edit: bool,
     /// What became of its recent webhooks (#373).
     webhooks: Vec<WebhookRow>,
+    /// Who paused it and why (#374); `None` while it runs.
+    pause: Option<PauseView>,
+}
+
+struct PauseView {
+    at: String,
+    by: String,
+    reason: Option<String>,
+}
+
+impl From<RepoPause> for PauseView {
+    fn from(p: RepoPause) -> Self {
+        Self {
+            at: p.at.format("%Y-%m-%d %H:%M").to_string(),
+            by: p.by,
+            reason: p.reason,
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -127,6 +159,8 @@ pub async fn repo(
         "revoked" => Some("Role taken away; it applies from their next request."),
         "added" => Some("Repo added; its clone is being made below."),
         "updated" => Some("Repo changed; its clone is being fetched below."),
+        "paused" => Some("Repo paused: its queued jobs wait until it is resumed."),
+        "resumed" => Some("Repo resumed: its queued jobs run again."),
         _ => None,
     };
     let settings = settings_of(&repo);
@@ -148,6 +182,7 @@ pub async fn repo(
         clone,
         can_edit: admin.is_some(),
         webhooks: webhooks::rows(&store, repo_id, SHOWN_WEBHOOKS).await?,
+        pause: store.repo_pause(repo_id).await?.map(PauseView::from),
     })
 }
 
@@ -196,4 +231,45 @@ pub async fn revoke(
         .set_repo_role(kind_of(who), who, repo.id, None, &access.actor)
         .await?;
     Ok(Redirect::to(&format!("/admin/repos/{id}?done=revoked")).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PauseForm {
+    #[serde(default)]
+    reason: String,
+    /// A checkbox: present when ticked.
+    #[serde(default)]
+    cancel_queued: Option<String>,
+}
+
+/// Pauses the repo (#374), as `aegis-server repo pause` does.
+pub async fn pause(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path(id): Path<i64>,
+    Form(form): Form<PauseForm>,
+) -> WebResult {
+    admin_only(&access)?;
+    let repo = repo_of(&store, id).await?;
+    store
+        .pause_repo_by(
+            repo.id,
+            Some(form.reason.as_str()),
+            form.cancel_queued.is_some(),
+            &access.actor,
+        )
+        .await?;
+    Ok(Redirect::to(&format!("/admin/repos/{id}?done=paused")).into_response())
+}
+
+/// Resumes the repo (#374), as `aegis-server repo resume` does.
+pub async fn resume(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path(id): Path<i64>,
+) -> WebResult {
+    admin_only(&access)?;
+    let repo = repo_of(&store, id).await?;
+    store.resume_repo_by(repo.id, &access.actor).await?;
+    Ok(Redirect::to(&format!("/admin/repos/{id}?done=resumed")).into_response())
 }

@@ -22,7 +22,7 @@ use crate::{Actor, RepoId, Store, StoreError};
 pub const BUDGET_SPENT: &str = "the repo's monthly budget is spent";
 /// How the reason of a queued job kept waiting begins; cleared once it
 /// is claimed.
-const WAITING: &str = "waiting: ";
+pub(crate) const WAITING: &str = "waiting: ";
 
 /// How the store applies the monthly budgets.
 #[derive(Debug, Clone, PartialEq)]
@@ -181,9 +181,10 @@ pub(crate) async fn hold_spent(
     Ok(held)
 }
 
-/// The start of a waiting job's reason, to clear when it is claimed.
-pub(crate) fn waiting_prefix() -> String {
-    format!("{WAITING}{BUDGET_SPENT}")
+/// The start of a waiting job's reason, for a spent budget or a paused
+/// repo (#374), to clear when it is claimed.
+pub(crate) fn waiting_prefix() -> &'static str {
+    WAITING
 }
 
 impl Store {

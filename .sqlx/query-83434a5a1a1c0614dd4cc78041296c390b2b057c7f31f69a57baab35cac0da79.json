@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE repos SET paused_at = now(), paused_by = $2, pause_reason = $3\n                 WHERE id = $1\n                 RETURNING id, paused_at, paused_by, pause_reason",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "paused_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "paused_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "paused_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "paused_by"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "pause_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "pause_reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "83434a5a1a1c0614dd4cc78041296c390b2b057c7f31f69a57baab35cac0da79"
+}

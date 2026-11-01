@@ -8,7 +8,7 @@
   {% if can_edit %}<p><a class="button" href="/admin/repos/new">Add a repo</a></p>{% else %}<p class="note">This server has not loaded the modes' configuration: add repos with <code>aegis-server repo add</code>.</p>{% endif %}
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Repo</th><th scope="col">URL</th><th scope="col">Language</th><th scope="col">Mode</th><th scope="col" class="num">Jobs at once</th></tr></thead>
+    <thead><tr><th scope="col">Repo</th><th scope="col">URL</th><th scope="col">Language</th><th scope="col">Mode</th><th scope="col" class="num">Jobs at once</th><th scope="col">State</th></tr></thead>
     <tbody>
     {% for r in repos %}
       <tr>
@@ -17,9 +17,10 @@
         <td>{{ r.language }}</td>
         <td>{{ r.mode.as_str() }}</td>
         <td class="num">{{ r.max_concurrent_jobs }}</td>
+        <td>{% if self.is_paused(r.id) %}<span class="check fail">Paused</span>{% else %}<span class="check pass">Running</span>{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="5" class="empty">No repo registered yet.</td></tr>
+      <tr><td colspan="6" class="empty">No repo registered yet.</td></tr>
     {% endfor %}
     </tbody>
   </table>
