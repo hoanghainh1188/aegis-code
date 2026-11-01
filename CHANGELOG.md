@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.3.0...v0.4.0) (2026-11-01)
+
+
+### Features
+
+* **gate:** patch scope check and reviewer flags ([#359](https://github.com/hoanghainh1188/aegis-code/issues/359)) ([#393](https://github.com/hoanghainh1188/aegis-code/issues/393)) ([43b03ef](https://github.com/hoanghainh1188/aegis-code/commit/43b03ef05342e7abe7146ba30783cd79bf092484))
+* pause a repo from its admin page or `repo pause`, its jobs kept ([#390](https://github.com/hoanghainh1188/aegis-code/issues/390)) ([cacacfd](https://github.com/hoanghainh1188/aegis-code/commit/cacacfdfd52f9a52a8ac97338be110d33ebfffef))
+* **server:** author trust policy for labeled issues ([#358](https://github.com/hoanghainh1188/aegis-code/issues/358)) ([#392](https://github.com/hoanghainh1188/aegis-code/issues/392)) ([34efa69](https://github.com/hoanghainh1188/aegis-code/commit/34efa699077911aeb73919884682aedd6e468a5c))
+* **web:** a repo's page shows what became of its recent webhooks ([#387](https://github.com/hoanghainh1188/aegis-code/issues/387)) ([fc67735](https://github.com/hoanghainh1188/aegis-code/commit/fc677359ffbca329993f09f36def35bd5e273843)), closes [#373](https://github.com/hoanghainh1188/aegis-code/issues/373)
+* **web:** an admin makes a repo's webhooks with a token given once ([#391](https://github.com/hoanghainh1188/aegis-code/issues/391)) ([5737900](https://github.com/hoanghainh1188/aegis-code/commit/573790068d24a82175cd88f028c4c623f46f37f8))
+* **web:** maintainers and admins change a repo's monthly cap from the pages ([#386](https://github.com/hoanghainh1188/aegis-code/issues/386)) ([615c553](https://github.com/hoanghainh1188/aegis-code/commit/615c553c77a8d307b3874e131c812ae14750b0da)), closes [#372](https://github.com/hoanghainh1188/aegis-code/issues/372)
+
+
+### Bug Fixes
+
+* **web:** masthead wraps on narrow screens so every link stays reachable ([#383](https://github.com/hoanghainh1188/aegis-code/issues/383)) ([827a36f](https://github.com/hoanghainh1188/aegis-code/commit/827a36fecaead04a6f584e276bd078194f170cc7)), closes [#365](https://github.com/hoanghainh1188/aegis-code/issues/365)
+* **web:** pages link the stylesheet by its hash so an upgrade shows new CSS ([#385](https://github.com/hoanghainh1188/aegis-code/issues/385)) ([11b0adf](https://github.com/hoanghainh1188/aegis-code/commit/11b0adf0d147213c5ba69d1137354184044e3ab8)), closes [#375](https://github.com/hoanghainh1188/aegis-code/issues/375)
+* **web:** the recent webhooks table reads across rows on a phone ([#389](https://github.com/hoanghainh1188/aegis-code/issues/389)) ([47f74b7](https://github.com/hoanghainh1188/aegis-code/commit/47f74b7bbad48f3b12c858e4db0626524141d81b)), closes [#388](https://github.com/hoanghainh1188/aegis-code/issues/388)
+
 ## [0.3.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.4...v0.3.0) (2026-11-01)
 
 
