@@ -22,7 +22,7 @@ flowchart LR
    - `images`: Builds and pushes 7 container images tagged `X.Y.Z` and `X.Y`, signed via Cosign keyless signing;
    - `offline`: Runs `docker save` for each image and attaches tarballs to the GitHub Release;
    - `client`, `publish-client`: Compiles binaries for four target architectures, builds npm package, and publishes to npmjs.
-3. **Re-running Failed Release Jobs:** Actions $\rightarrow$ Release $\rightarrow$ *Run workflow* targeting the release tag. Artifact publishing steps are idempotent (`--clobber` for release assets, identical image tags). Note: npm rejects republishing an existing version.
+3. **Re-running Failed Release Jobs:** Actions $\rightarrow$ Release $\rightarrow$ *Run workflow* targeting the release tag. Artifact publishing steps are idempotent (`--clobber` for release assets, identical image tags, and `npm view` check before `npm publish`).
 
 ---
 

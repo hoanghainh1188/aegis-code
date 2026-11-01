@@ -1,14 +1,17 @@
 {
   "name": "@hoanghainh/aegis",
   "version": "0.2.4",
-  "description": "aegis: send an issue to aegis-code and follow the job until its pull request (ADR 0006).",
+  "description": "Developer CLI for the Aegis autonomous code maintenance platform — dispatch issues, stream verification progress, and manage AI-generated Pull Requests.",
+  "author": "Hoang Hai <https://github.com/hoanghainh1188>",
+  "license": "Apache-2.0",
   "bin": {
     "aegis": "bin/aegis.js"
   },
   "files": [
     "bin/",
     "vendor/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "os": [
     "darwin",
@@ -27,11 +30,23 @@
     "directory": "npm/aegis"
   },
   "homepage": "https://github.com/hoanghainh1188/aegis-code/blob/main/docs/client.md",
+  "bugs": {
+    "url": "https://github.com/hoanghainh1188/aegis-code/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "keywords": [
+    "aegis",
     "aegis-code",
+    "ai-agent",
+    "autonomous-coding",
     "cli",
+    "code-maintenance",
+    "developer-tools",
+    "devops",
     "issue",
     "pull-request"
-  ],
-  "license": "Apache-2.0"
+  ]
 }
