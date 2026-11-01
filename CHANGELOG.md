@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.1...v0.2.2) (2026-11-01)
+
+
+### Bug Fixes
+
+* **npm:** publish the client as @hoanghainh/aegis ([#342](https://github.com/hoanghainh1188/aegis-code/issues/342)) ([ab67808](https://github.com/hoanghainh1188/aegis-code/commit/ab678082fe54842714081d6d2a9033a35c32ec79))
+
 ## [0.2.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.0...v0.2.1) (2026-10-31)
 
 
