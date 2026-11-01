@@ -290,6 +290,10 @@ fn dependency_changes_are_checked_before_anything_runs() {
     assert!(failed(&repo).contains("protected build configuration: .cargo/config.toml"));
 
     let repo = Repo::new("rust", &[]);
+    repo.write(".github/workflows/ci.yml", "on: push\n");
+    assert!(failed(&repo).contains("protected build configuration: .github/workflows/ci.yml"));
+
+    let repo = Repo::new("rust", &[]);
     repo.replace(
         "Cargo.toml",
         "[dependencies]\n",

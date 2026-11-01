@@ -461,8 +461,8 @@ impl Profile {
         Ok(())
     }
 
-    /// Changed paths that match a `dependencies.protected` pattern, ignoring
-    /// case (over-matching only blocks more). A
+    /// Changed paths that match a `dependencies.protected` pattern or one of
+    /// [`ALWAYS_PROTECTED`], ignoring case (over-matching only blocks more). A
     /// pattern without `/` matches a file name in any directory; one with
     /// `/` matches the whole path from the repo root, `**` standing for any
     /// number of directories.
@@ -471,9 +471,10 @@ impl Profile {
             .iter()
             .map(|p| p.as_ref().to_string_lossy().replace('\\', "/"))
             .filter(|path| {
-                self.dependencies.protected.iter().any(|pattern| {
-                    path_glob(&pattern.to_ascii_lowercase(), &path.to_ascii_lowercase())
-                })
+                let path = path.to_ascii_lowercase();
+                let own = self.dependencies.protected.iter().map(String::as_str);
+                own.chain(ALWAYS_PROTECTED.iter().copied())
+                    .any(|pattern| path_glob(&pattern.to_ascii_lowercase(), &path))
             })
             .collect()
     }
@@ -612,6 +613,53 @@ pub(crate) fn check_gate(gate: &GateSteps) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Files no patch of the agent may touch, whatever the language (#352): the
+/// CI that runs on the fork, the owners of the code, and the configuration
+/// of the checks (Sonar, linters, coverage). A patch that changes them
+/// could widen what CI does or loosen the checks it is judged by, so a
+/// person changes them. Patterns as [`Profile::protected_changes`] matches
+/// them; the `**/` ones match in any directory.
+pub const ALWAYS_PROTECTED: &[&str] = &[
+    // CI, and the ownership rules of review.
+    "**/.github/**",
+    "**/.gitlab/**",
+    "**/.circleci/**",
+    ".gitlab-ci.yml",
+    "azure-pipelines.yml",
+    "bitbucket-pipelines.yml",
+    "Jenkinsfile",
+    ".travis.yml",
+    ".drone.yml",
+    "CODEOWNERS",
+    ".gitmodules",
+    // Sonar and coverage services.
+    "sonar-project.properties",
+    ".sonarcloud.properties",
+    "codecov.yml",
+    ".codecov.yml",
+    ".coveragerc",
+    // Linters, formatters and test runners.
+    "clippy.toml",
+    ".clippy.toml",
+    "rustfmt.toml",
+    ".rustfmt.toml",
+    "deny.toml",
+    ".golangci.yml",
+    ".golangci.yaml",
+    ".golangci.toml",
+    ".eslintrc*",
+    "eslint.config.*",
+    ".prettierrc*",
+    "jest.config.*",
+    "vitest.config.*",
+    "pytest.ini",
+    "tox.ini",
+    ".flake8",
+    "ruff.toml",
+    ".ruff.toml",
+    "mypy.ini",
+];
 
 /// Path pattern for [`Profile::protected_changes`] and coverage report paths.
 pub fn path_glob(pattern: &str, path: &str) -> bool {
@@ -1051,6 +1099,36 @@ mod tests {
                 .unwrap()
                 .touches_dependencies(&["NuGet.Config", "src/App.FSPROJ"])
         );
+    }
+
+    #[test]
+    fn ci_owners_and_check_configuration_are_protected_in_every_profile() {
+        let p = Profiles::builtin().unwrap();
+        let blocked = [
+            ".github/workflows/ci.yml",
+            "svc/.github/actions/x/action.yml",
+            ".github/CODEOWNERS",
+            "docs/CODEOWNERS",
+            ".gitlab-ci.yml",
+            "Jenkinsfile",
+            "sonar-project.properties",
+            "clippy.toml",
+            ".ESLintRC.json",
+            "web/eslint.config.mjs",
+            "pytest.ini",
+            ".golangci.yml",
+        ];
+        let allowed = [
+            "src/github.rs",
+            "docs/github/readme.md",
+            "src/lib.rs",
+            "tests/ci_test.go",
+        ];
+        for language in Language::ALL {
+            let profile = p.get(language).unwrap();
+            assert_eq!(profile.protected_changes(&blocked).len(), blocked.len());
+            assert!(profile.protected_changes(&allowed).is_empty());
+        }
     }
 
     #[test]

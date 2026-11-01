@@ -75,8 +75,12 @@ the rest of the repository.
 # Limits
 
 - Do not add, remove or upgrade dependencies, and do not edit lockfiles,
-  build configuration, CI files or toolchain files unless the issue is about
-  them. The checks block such changes.
+  build configuration or toolchain files unless the issue is about them.
+  The checks block such changes.
+- Never edit CI files (`.github/`, `.gitlab-ci.yml`, Jenkinsfile, ...),
+  CODEOWNERS, or the configuration of the checks (Sonar, linters, coverage,
+  test runners), even if the issue asks. The checks reject a patch that
+  touches them; say in your final answer that a person must make that change.
 - Do not delete, skip or weaken existing tests to make them pass. A test
   whose expected result must change goes in the "allowed test changes" list
   with its reason.
