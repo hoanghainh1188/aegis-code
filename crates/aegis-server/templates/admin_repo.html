@@ -15,6 +15,28 @@
   <p><a href="/repos/{{ repo.id.0 }}/budget">Monthly budget</a> · <a href="/admin/audit?repo_id={{ repo.id.0 }}">This repo's audit log</a></p>
 </section>
 
+<section aria-labelledby="pause-heading" class="band">
+  <h2 id="pause-heading">Jobs</h2>
+  {% if let Some(p) = pause %}
+  <p class="notice bad"><span class="check fail">Paused</span> by {{ p.by }} at {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}. Queued jobs wait and new ones are recorded; none runs until the repo is resumed.</p>
+  <form method="post" action="/admin/repos/{{ repo.id.0 }}/resume" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">Resume the repo</button>
+  </form>
+  {% else %}
+  <p class="note"><span class="check pass">Running</span> Pause the repo when it runs wrong or spends too fast: its queued jobs wait, and new ones are still recorded, until it is resumed. Jobs already running finish; cancel one from its own page.</p>
+  <form method="post" action="/admin/repos/{{ repo.id.0 }}/pause" class="inline">
+    {% include "form_guard.html" %}
+    <label>Why (optional)
+      <input type="text" name="reason" maxlength="500" placeholder="too many PRs at once" autocomplete="off">
+    </label>
+    <label class="choice"><input type="checkbox" name="cancel_queued"> Cancel its queued jobs too</label>
+    <button type="submit" class="danger">Pause the repo</button>
+  </form>
+  {% endif %}
+  <p class="note">The same as <code>aegis-server repo pause|resume {{ repo.slug }}</code>.</p>
+</section>
+
 <section aria-labelledby="clone-heading" class="band">
   <h2 id="clone-heading">Clone</h2>
   {{ clone|safe }}

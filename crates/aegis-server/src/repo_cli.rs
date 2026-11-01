@@ -6,7 +6,9 @@
 //!   add <repo-file>      # registers it and clones it
 //!   update <repo-file>   # replaces all but its slug; fetches its clone
 //!   show <slug>          # prints it as a repo file (JSON)
-//!   list
+//!   list                 # a paused repo ends with `paused`
+//!   pause <slug> [--reason <text>] [--cancel-queued]
+//!   resume <slug>        # its queued jobs run again (#374)
 //! ```
 //!
 //! A repo file is TOML, or JSON when its name ends in `.json`:
@@ -42,7 +44,9 @@ aegis-server --config <file> repo <command>, the command one of:
   add <repo-file>
   update <repo-file>
   show <slug>
-  list";
+  list
+  pause <slug> [--reason <text>] [--cancel-queued]
+  resume <slug>";
 
 /// Whether `first`, the first argument, is this module's command.
 pub fn is_command(first: &str) -> bool {
@@ -136,6 +140,28 @@ pub async fn fork_token(secrets: &Secrets, name: &str) -> Result<Option<String>,
         .map(|t| t.expose().to_owned()))
 }
 
+async fn by_slug(store: &Store, slug: &str) -> Result<Repo, String> {
+    store
+        .repo_by_slug(slug)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no repo `{slug}`"))
+}
+
+/// `pause`'s options: `--reason <text>` and `--cancel-queued`.
+fn pause_options<'a>(args: &[&'a str]) -> Result<(Option<&'a str>, bool), String> {
+    let (mut reason, mut cancel) = (None, false);
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match *arg {
+            "--reason" => reason = Some(*rest.next().ok_or(USAGE)?),
+            "--cancel-queued" => cancel = true,
+            _ => return Err(USAGE.into()),
+        }
+    }
+    Ok((reason, cancel))
+}
+
 /// Runs one command (`args` after `repo`); what to print.
 pub async fn run(
     store: &Store,
@@ -172,21 +198,50 @@ pub async fn run(
             ))
         }
         ["show", slug] => {
-            let repo = store
-                .repo_by_slug(slug)
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("no repo `{slug}`"))?;
+            let repo = by_slug(store, slug).await?;
             serde_json::to_string_pretty(&RepoFile::of(&repo)?).map_err(|e| e.to_string())
         }
+        ["pause", slug, rest @ ..] => {
+            let (reason, cancel_queued) = pause_options(rest)?;
+            let repo = by_slug(store, slug).await?;
+            let paused = store
+                .pause_repo_by(repo.id, reason, cancel_queued, &actor)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(format!(
+                "repo `{slug}` paused; {} queued job(s) cancelled, the others wait \
+                 until `repo resume {slug}`",
+                paused.cancelled
+            ))
+        }
+        ["resume", slug] => {
+            let repo = by_slug(store, slug).await?;
+            store
+                .resume_repo_by(repo.id, &actor)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(format!("repo `{slug}` resumed; its queued jobs run again"))
+        }
         ["list"] => {
+            let paused: Vec<_> = store
+                .paused_repos()
+                .await
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|p| p.repo_id)
+                .collect();
             let mut lines = Vec::new();
             let mut page = Some(Page::first(Page::MAX_LIMIT));
             while let Some(p) = page {
                 let found = store.list_repos(p).await.map_err(|e| e.to_string())?;
                 lines.extend(found.items.iter().map(|r| {
+                    let state = if paused.contains(&r.id) {
+                        "\tpaused"
+                    } else {
+                        ""
+                    };
                     format!(
-                        "{}\t{}\t{}\t{}\t{}",
+                        "{}\t{}\t{}\t{}\t{}{state}",
                         r.slug,
                         r.mode.as_str(),
                         r.language,
