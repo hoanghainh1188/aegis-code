@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aegis-aci"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-gate",
  "aegis-lang",
@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-lang",
  "aegis-ledger",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-client"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-gate"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-lang",
  "libc",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-lang"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "regex",
  "roxmltree",
@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-ledger"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-provider",
  "serde",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-lifecycle"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-aci",
  "aegis-gate",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-orchestrator"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-provider",
  "rmcp",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-pr"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-gate",
  "aegis-lang",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-provider"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-secrets",
  "aws-config",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-router"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-ledger",
  "aegis-orchestrator",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-secrets"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aws-config",
  "aws-sdk-secretsmanager",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-gate",
  "aegis-lang",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-sonar-batch"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-gate",
  "aegis-lang",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-store"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aegis-ledger",
  "aegis-store",
@@ -259,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "aegis-tracker"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reqwest",
  "serde",
