@@ -206,4 +206,11 @@ jobs:
           gh release upload "$TAG" dist/aegis-*.tar.gz* dist/*.tgz --clobber --repo "$GITHUB_REPOSITORY"
       - name: Publish lên npmjs bằng OIDC
         working-directory: npm/aegis
-        run: npm publish --access public
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if npm view "@hoanghainh/aegis@${VERSION}" version >/dev/null 2>&1; then
+            echo "@hoanghainh/aegis@${VERSION} đã có trên npmjs, bỏ qua bước publish."
+          else
+            npm publish --access public
+          fi
