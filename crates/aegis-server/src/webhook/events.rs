@@ -3,6 +3,7 @@
 //! issue's title, body and comments are untrusted (design §7) and stay out
 //! of the job; the worker reads the issue itself.
 
+use aegis_store::WebhookSource;
 use serde::Deserialize;
 
 /// The longest `issue_ref` built, as the internal API allows.
@@ -236,6 +237,19 @@ fn agent_pull(pull: &GithubPull) -> Result<(), Skip> {
 }
 
 /// A delivery of GitHub event `event` (`X-GitHub-Event`).
+/// The repo a delivery names (`repository.html_url` on GitHub,
+/// `project.web_url` on GitLab), to match a delivery that made no job to
+/// its repo (#331). Read only from a delivery that verified.
+pub fn repo_url(source: WebhookSource, body: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let pointer = match source {
+        WebhookSource::Gitlab => "/project/web_url",
+        _ => "/repository/html_url",
+    };
+    let url = value.pointer(pointer)?.as_str()?;
+    (url.len() <= MAX_ISSUE_REF_LEN).then(|| url.to_owned())
+}
+
 pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     match event {
         "pull_request_review" => {

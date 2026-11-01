@@ -25,8 +25,8 @@ pub const GITLAB_API_ENV: &str = "AEGIS_GITLAB_API";
 /// GitLab projects; no comments while the store has none.
 pub const GITLAB_COMMENT_TOKEN_ENV: &str = "AEGIS_GITLAB_COMMENT_TOKEN";
 
-const DEFAULT_GITHUB_API: &str = "https://api.github.com";
-const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
+pub(crate) const DEFAULT_GITHUB_API: &str = "https://api.github.com";
+pub(crate) const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
 
 #[derive(Debug, Clone)]
 pub struct GitHubNotifier {

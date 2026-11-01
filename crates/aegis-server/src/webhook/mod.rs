@@ -41,7 +41,10 @@ use std::time::Instant;
 
 use aegis_ledger::IssueId;
 use aegis_secrets::Secrets;
-use aegis_store::{Delivered, JobSource, NewDelivery, NewJob, Store, StoreError, WebhookSource};
+use aegis_store::{
+    Delivered, JobSource, NewDelivery, NewJob, NewWebhookEvent, RepoId, Store, StoreError,
+    WebhookOutcome, WebhookSource,
+};
 use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -55,11 +58,11 @@ use crate::worker::JobNotifier;
 use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
-pub(crate) use notify::pr_url;
 pub use notify::{
     COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
     GitLabNotifier, plain_status_comment, status_comment,
 };
+pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
 pub const GITLAB_TOKEN_ENV: &str = "AEGIS_GITLAB_WEBHOOK_TOKEN";
@@ -227,6 +230,7 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 /// is checked again with the secret read now, if it changed (rotation).
 async fn admit<'a>(
     hooks: &Hooks,
+    source: WebhookSource,
     secret_name: &str,
     verified: impl Fn(&Secret) -> bool,
     headers: &'a HeaderMap,
@@ -252,6 +256,19 @@ async fn admit<'a>(
         let rotated = secrets.refresh_after_auth_failure(secret_name).await;
         if !rotated.as_ref().is_some_and(&verified) {
             tracing::warn!("webhook delivery with a bad signature");
+            // Nothing it says is trusted: not its ID, event or repo.
+            record(
+                hooks,
+                NewWebhookEvent {
+                    source,
+                    delivery_id: None,
+                    event: None,
+                    repo: None,
+                    outcome: WebhookOutcome::BadSignature,
+                    reason: None,
+                },
+            )
+            .await;
             return Err(refuse(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
@@ -297,6 +314,7 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
     let signature = header(&headers, "x-hub-signature-256");
     let admitted = admit(
         &hooks,
+        WebhookSource::Github,
         GITHUB_SECRET_ENV,
         |s| verify::github(s.expose().as_bytes(), &body, signature),
         &headers,
@@ -308,8 +326,21 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
         Ok(admitted) => admitted,
         Err(refusal) => return refusal.into_response(),
     };
-    let wanted = events::github(event, &body, &hooks.config.label);
-    deliver(&hooks, WebhookSource::Github, id, event, wanted).await
+    let handled = if event == "ping" {
+        // Sent by GitHub when the webhook is made (#331): the way is open.
+        Handled::new(
+            answer(StatusCode::OK, json!({ "status": "pong" })),
+            WebhookOutcome::Ping,
+            None,
+            None,
+        )
+    } else {
+        let wanted = events::github(event, &body, &hooks.config.label);
+        deliver(&hooks, WebhookSource::Github, id, event, wanted).await
+    };
+    handled
+        .log(&hooks, WebhookSource::Github, id, event, &body)
+        .await
 }
 
 async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> Response {
@@ -320,6 +351,7 @@ async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
     let token = header(&headers, "x-gitlab-token");
     let admitted = admit(
         &hooks,
+        WebhookSource::Gitlab,
         GITLAB_TOKEN_ENV,
         |s| verify::gitlab(s.expose().as_bytes(), token),
         &headers,
@@ -332,26 +364,124 @@ async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
         Err(refusal) => return refusal.into_response(),
     };
     let wanted = events::gitlab(event, &body, &hooks.config.label);
-    deliver(&hooks, WebhookSource::Gitlab, id, event, wanted).await
+    let handled = deliver(&hooks, WebhookSource::Gitlab, id, event, wanted).await;
+    handled
+        .log(&hooks, WebhookSource::Gitlab, id, event, &body)
+        .await
 }
 
-fn ignored(delivery: &str, why: &str) -> Response {
+/// The answer to a delivery and what to record of it (#331).
+struct Handled {
+    response: Response,
+    /// `None`: nothing recorded (an internal error, retried by the sender).
+    outcome: Option<WebhookOutcome>,
+    reason: Option<String>,
+    /// The repo it was matched to; found from the delivery when `None`.
+    repo: Option<RepoId>,
+}
+
+impl Handled {
+    fn new(
+        response: Response,
+        outcome: WebhookOutcome,
+        reason: Option<String>,
+        repo: Option<RepoId>,
+    ) -> Self {
+        Self {
+            response,
+            outcome: Some(outcome),
+            reason,
+            repo,
+        }
+    }
+
+    /// Records the delivery's outcome, then gives the answer. A delivery
+    /// matched to no repo yet is matched by the repo it names: its body
+    /// verified, and only that URL is read from it.
+    async fn log(
+        self,
+        hooks: &Hooks,
+        source: WebhookSource,
+        delivery: &str,
+        event: &str,
+        body: &[u8],
+    ) -> Response {
+        let Some(outcome) = self.outcome else {
+            return self.response;
+        };
+        let repo = match self.repo {
+            Some(repo) => Some(repo),
+            None => match events::repo_url(source, body) {
+                Some(url) => hooks
+                    .store
+                    .repo_by_remote(&url)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|r| r.id),
+                None => None,
+            },
+        };
+        let event = NewWebhookEvent {
+            source,
+            delivery_id: Some(delivery.to_owned()),
+            event: Some(event.to_owned()),
+            repo,
+            outcome,
+            reason: self.reason,
+        };
+        record(hooks, event).await;
+        self.response
+    }
+}
+
+/// Records `event`; a failure is logged, the delivery's answer stands.
+async fn record(hooks: &Hooks, event: NewWebhookEvent) {
+    if let Err(e) = hooks.store.record_webhook(&event).await {
+        tracing::warn!(error = %e, "recording a webhook delivery");
+    }
+}
+
+fn ignored(delivery: &str, why: &str) -> Handled {
+    ignored_in(delivery, why, None)
+}
+
+fn ignored_in(delivery: &str, why: &str, repo: Option<RepoId>) -> Handled {
     tracing::info!(delivery, why, "webhook delivery ignored");
-    answer(
-        StatusCode::OK,
-        json!({ "status": "ignored", "reason": why }),
+    Handled::new(
+        answer(
+            StatusCode::OK,
+            json!({ "status": "ignored", "reason": why }),
+        ),
+        WebhookOutcome::Ignored,
+        Some(why.to_owned()),
+        repo,
     )
 }
 
-fn internal(delivery: &str, e: &StoreError) -> Response {
+fn internal(delivery: &str, e: &StoreError) -> Handled {
     // Nothing was recorded: the sender's retry is taken as new.
     tracing::error!(delivery, error = %e, "webhook delivery");
-    refuse(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "internal",
-        "internal error",
+    Handled {
+        response: refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "internal error",
+        )
+        .into_response(),
+        outcome: None,
+        reason: None,
+        repo: None,
+    }
+}
+
+fn malformed(why: String) -> Handled {
+    Handled::new(
+        refuse(StatusCode::BAD_REQUEST, "bad_request", why.clone()).into_response(),
+        WebhookOutcome::Malformed,
+        Some(why),
+        None,
     )
-    .into_response()
 }
 
 async fn deliver(
@@ -360,13 +490,13 @@ async fn deliver(
     delivery: &str,
     event: &str,
     wanted: Result<Wanted, Skip>,
-) -> Response {
+) -> Handled {
     let wanted = match wanted {
         Ok(wanted) => wanted,
         Err(Skip::Ignored(why)) => return ignored(delivery, &why),
         Err(Skip::Malformed(why)) => {
             tracing::warn!(delivery, why, "webhook delivery not understood");
-            return refuse(StatusCode::BAD_REQUEST, "bad_request", why).into_response();
+            return malformed(why);
         }
     };
     if let Kind::ReviewRound { pr_url, sender } = &wanted.kind {
@@ -389,7 +519,11 @@ async fn deliver(
     };
     let job_source = match (&wanted.kind, source) {
         (Kind::CiFailure { branch }, _) if *branch != repo.default_branch => {
-            return ignored(delivery, "CI failed on another branch than the default one");
+            return ignored_in(
+                delivery,
+                "CI failed on another branch than the default one",
+                Some(repo.id),
+            );
         }
         (Kind::CiFailure { .. }, _) => JobSource::Ci,
         (Kind::Issue, WebhookSource::Github) => JobSource::Github,
@@ -401,9 +535,7 @@ async fn deliver(
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
         Ok(key) => key,
-        Err(e) => {
-            return refuse(StatusCode::BAD_REQUEST, "bad_request", e.to_string()).into_response();
-        }
+        Err(e) => return malformed(e.to_string()),
     };
     let delivered = hooks
         .store
@@ -425,9 +557,15 @@ async fn deliver(
     match delivered {
         Ok(Delivered::Queued(job)) => {
             tracing::info!(delivery, job = job.id.0, repo = %repo.slug, issue_ref, "job queued from a webhook");
-            answer(
-                StatusCode::ACCEPTED,
-                json!({ "status": "queued", "job_id": job.id.0 }),
+            let reason = format!("job {} for {issue_ref}", job.id.0);
+            Handled::new(
+                answer(
+                    StatusCode::ACCEPTED,
+                    json!({ "status": "queued", "job_id": job.id.0 }),
+                ),
+                WebhookOutcome::Queued,
+                Some(reason),
+                Some(repo.id),
             )
         }
         Ok(Delivered::AlreadyLive(job)) => {
@@ -437,9 +575,14 @@ async fn deliver(
                 issue_ref,
                 "the issue already has a live job"
             );
-            answer(
-                StatusCode::OK,
-                json!({ "status": "already_queued", "job_id": job.0 }),
+            Handled::new(
+                answer(
+                    StatusCode::OK,
+                    json!({ "status": "already_queued", "job_id": job.0 }),
+                ),
+                WebhookOutcome::AlreadyLive,
+                Some(format!("{issue_ref} already has job {}", job.0)),
+                Some(repo.id),
             )
         }
         Ok(Delivered::Refused(job)) => {
@@ -451,28 +594,36 @@ async fn deliver(
             );
             // The answer does not wait for GitHub or GitLab.
             tokio::spawn(async move { notifier.job_ended(&job).await });
-            answer(
-                StatusCode::OK,
-                json!({ "status": "refused", "job_id": job_id, "reason": reason }),
+            let why = reason
+                .clone()
+                .unwrap_or_else(|| "the repo's budget is spent".into());
+            Handled::new(
+                answer(
+                    StatusCode::OK,
+                    json!({ "status": "refused", "job_id": job_id, "reason": reason }),
+                ),
+                WebhookOutcome::Refused,
+                Some(why),
+                Some(repo.id),
             )
         }
         Ok(Delivered::Duplicate) => {
             tracing::info!(delivery, "webhook delivery received before");
-            answer(StatusCode::OK, json!({ "status": "duplicate" }))
+            Handled::new(
+                answer(StatusCode::OK, json!({ "status": "duplicate" })),
+                WebhookOutcome::Duplicate,
+                None,
+                Some(repo.id),
+            )
         }
-        Err(StoreError::Invalid { field, message }) => refuse(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            format!("{field}: {message}"),
-        )
-        .into_response(),
+        Err(StoreError::Invalid { field, message }) => malformed(format!("{field}: {message}")),
         Err(e) => internal(delivery, &e),
     }
 }
 
 /// The project path of a GitLab repo URL: what follows the host, without
 /// `.git` (`https://gitlab.com/group/sub/app` → `group/sub/app`).
-fn project_path(url: &str) -> Option<&str> {
+pub(crate) fn project_path(url: &str) -> Option<&str> {
     let path = url.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let after = path.split_once("://").map_or(path, |(_, r)| r);
@@ -482,7 +633,7 @@ fn project_path(url: &str) -> Option<&str> {
 
 /// `owner/name` of a repo URL (`https://github.com/owner/name`, with or
 /// without `.git`).
-fn owner_and_name(url: &str) -> Option<(&str, &str)> {
+pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
     let path = url.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let (rest, name) = path.rsplit_once('/')?;
@@ -502,7 +653,7 @@ async fn review_round(
     issue_ref: &str,
     pr_url: &str,
     sender: &str,
-) -> Response {
+) -> Handled {
     let root = match hooks.store.job_by_pr_url(pr_url).await {
         Ok(Some(job)) => job,
         Ok(None) => return ignored(delivery, "no job opened this pull request"),
@@ -513,6 +664,7 @@ async fn review_round(
         Ok(None) => return ignored(delivery, "repository not registered"),
         Err(e) => return internal(delivery, &e),
     };
+    let ignored = |delivery: &str, why: &str| ignored_in(delivery, why, Some(repo.id));
     let allowed = match source {
         WebhookSource::Gitlab => {
             let Some(notifier) = hooks.config.gitlab_notifier.as_ref() else {
@@ -579,31 +731,52 @@ async fn review_round(
                 }
             }
         }
-        answer(
-            StatusCode::OK,
-            json!({ "status": "refused", "job_id": root.id.0, "reason": why }),
+        Handled::new(
+            answer(
+                StatusCode::OK,
+                json!({ "status": "refused", "job_id": root.id.0, "reason": why }),
+            ),
+            WebhookOutcome::Refused,
+            Some(why),
+            Some(repo.id),
         )
     };
     match delivered {
         Ok(Delivered::Queued(job)) => {
             tracing::info!(delivery, job = job.id.0, repo = %repo.slug, round = job.review_round, "review round queued from a webhook");
-            answer(
-                StatusCode::ACCEPTED,
-                json!({ "status": "queued", "job_id": job.id.0 }),
+            let reason = format!("review round {} of job {}", job.review_round, root.id.0);
+            Handled::new(
+                answer(
+                    StatusCode::ACCEPTED,
+                    json!({ "status": "queued", "job_id": job.id.0 }),
+                ),
+                WebhookOutcome::Queued,
+                Some(reason),
+                Some(repo.id),
             )
         }
         Ok(Delivered::Duplicate) => {
             tracing::info!(delivery, "webhook delivery received before");
-            answer(StatusCode::OK, json!({ "status": "duplicate" }))
+            Handled::new(
+                answer(StatusCode::OK, json!({ "status": "duplicate" })),
+                WebhookOutcome::Duplicate,
+                None,
+                Some(repo.id),
+            )
         }
         Ok(other) => internal(
             delivery,
             &StoreError::Conflict(format!("unexpected delivery result {other:?}")),
         ),
         // A live round is not a refusal: the review is read when it runs.
-        Err(StoreError::Conflict(why)) if why.contains("live review round") => answer(
-            StatusCode::OK,
-            json!({ "status": "already_queued", "job_id": root.id.0, "reason": why }),
+        Err(StoreError::Conflict(why)) if why.contains("live review round") => Handled::new(
+            answer(
+                StatusCode::OK,
+                json!({ "status": "already_queued", "job_id": root.id.0, "reason": why }),
+            ),
+            WebhookOutcome::AlreadyLive,
+            Some(why),
+            Some(repo.id),
         ),
         Err(StoreError::Conflict(why) | StoreError::BudgetSpent(why)) => refused(why).await,
         Err(e) => internal(delivery, &e),

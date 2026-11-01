@@ -11,7 +11,7 @@
     <div><dt>Jobs at once</dt><dd>{{ repo.max_concurrent_jobs }}</dd></div>
   </dl>
   {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
-  {% if can_edit %}<p><a class="button ghost" href="/admin/repos/{{ repo.id.0 }}/edit">Change this repo</a></p>{% endif %}
+  {% if can_edit %}<p class="actions"><a class="button ghost" href="/admin/repos/{{ repo.id.0 }}/edit">Change this repo</a> <a class="button ghost" href="/admin/repos/{{ repo.id.0 }}/connection">Connection to the forge</a></p>{% endif %}
 </section>
 
 <section aria-labelledby="clone-heading" class="band">

@@ -8,6 +8,7 @@
 
 mod actions;
 mod admin;
+mod connection;
 mod dashboard;
 mod guard;
 mod jobs;
@@ -57,6 +58,10 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
             get(repo_admin::edit_form).post(repo_admin::update),
         )
         .route("/admin/repos/{id}/clone", get(repo_admin::clone_part))
+        .route(
+            "/admin/repos/{id}/connection",
+            get(connection::show).post(connection::check),
+        )
         .route("/admin/repos/{id}/roles", post(admin::grant))
         .route("/admin/repos/{id}/roles/revoke", post(admin::revoke))
         .route("/me/tokens", get(tokens::list).post(tokens::create))

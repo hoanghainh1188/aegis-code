@@ -241,3 +241,15 @@ pre.log { margin: 0; padding: var(--space-3); background: var(--surface); border
 .clone-state { margin: 0 0 var(--space-2); }
 .clone-state.failed strong { color: var(--fail); }
 .clone-state.cloning strong { color: var(--accent); }
+
+/* A repo's connection to its forge (#331). */
+.row-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-4); }
+h3 { font-size: var(--text-base); margin: var(--space-3) 0 var(--space-2); }
+.check { display: inline-block; font: 600 var(--text-small) var(--font-num); text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-1); }
+.check.pass { color: var(--pass); }
+.check.fail { color: var(--fail); }
+.check.skip { color: var(--ink-soft); }
+ul.checks { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
+ul.checks li { border-left: 4px solid var(--rule-strong); padding: var(--space-2) var(--space-3); background: var(--surface); overflow-wrap: anywhere; }
+ul.checks li.pass { border-color: var(--pass); }
+ul.checks li.fail { border-color: var(--fail); background: var(--fail-wash); }

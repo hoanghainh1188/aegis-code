@@ -69,6 +69,20 @@ text_enum! {
 }
 
 text_enum! {
+    /// What became of a webhook delivery (#331).
+    WebhookOutcome {
+        Queued = "queued",
+        AlreadyLive = "already_live",
+        Refused = "refused",
+        Duplicate = "duplicate",
+        Ignored = "ignored",
+        Ping = "ping",
+        Malformed = "malformed",
+        BadSignature = "bad_signature",
+    }
+}
+
+text_enum! {
     /// `failed` is an infrastructure failure after its retries; what the
     /// agent achieved is `done` with an [`Outcome`].
     JobStatus {

@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT source, count(*) AS \"count!\", max(received_at) AS \"last!\"\n               FROM webhook_events\n               WHERE outcome = 'bad_signature' AND received_at > now() - make_interval(hours => $1)\n               GROUP BY source ORDER BY source",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webhook_events",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "last!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "40745057d51e58f5e1c9f93d79b7b56c8f110612b00ffd83040cc35ea7d2aaed"
+}
