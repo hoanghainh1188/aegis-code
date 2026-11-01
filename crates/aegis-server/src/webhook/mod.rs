@@ -40,6 +40,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use aegis_ledger::IssueId;
+use aegis_lifecycle::{IssueTrustConfig, IssueTrustPolicy};
 use aegis_secrets::Secrets;
 use aegis_store::{
     Delivered, JobId, JobSource, NewDelivery, NewJob, NewWebhookEvent, RepoId, Store, StoreError,
@@ -497,6 +498,17 @@ fn malformed(why: String) -> Handled {
     )
 }
 
+fn issue_trust_policy(config: &serde_json::Value) -> IssueTrustPolicy {
+    #[derive(serde::Deserialize)]
+    struct Partial {
+        #[serde(default)]
+        issue_trust: IssueTrustConfig,
+    }
+    serde_json::from_value::<Partial>(config.clone())
+        .map(|p| p.issue_trust.policy())
+        .unwrap_or_default()
+}
+
 async fn deliver(
     hooks: &Hooks,
     source: WebhookSource,
@@ -530,6 +542,76 @@ async fn deliver(
         Err(StoreError::Conflict(why)) => return ignored(delivery, &why),
         Err(e) => return internal(delivery, &e),
     };
+    if let Kind::Issue { author } = &wanted.kind {
+        let policy = issue_trust_policy(&repo.config);
+        if policy == IssueTrustPolicy::Collaborators {
+            let allowed = match (source, author.as_deref()) {
+                (WebhookSource::Gitlab, Some(author_id)) => {
+                    let Some(notifier) = hooks.config.gitlab_notifier.as_ref() else {
+                        return ignored_in(
+                            delivery,
+                            "no GitLab client to check the author's rights",
+                            Some(repo.id),
+                        );
+                    };
+                    let (Some(project), Ok(user_id)) =
+                        (project_path(&repo.url), author_id.parse::<u64>())
+                    else {
+                        return ignored_in(
+                            delivery,
+                            "the repository's URL names no project",
+                            Some(repo.id),
+                        );
+                    };
+                    notifier.can_develop(project, user_id).await
+                }
+                (WebhookSource::Gitlab, None) => {
+                    tracing::info!(delivery, repo = %repo.slug, "issue labeled but author is unknown");
+                    return ignored_in(delivery, "the issue author is unknown", Some(repo.id));
+                }
+                (_, Some(login)) => {
+                    let Some(notifier) = hooks.config.notifier.as_ref() else {
+                        return ignored_in(
+                            delivery,
+                            "no GitHub client to check the author's rights",
+                            Some(repo.id),
+                        );
+                    };
+                    let Some((owner, name)) = owner_and_name(&repo.url) else {
+                        return ignored_in(
+                            delivery,
+                            "the repository's URL names no owner and name",
+                            Some(repo.id),
+                        );
+                    };
+                    notifier.can_write(owner, name, login).await
+                }
+                (_, None) => {
+                    tracing::info!(delivery, repo = %repo.slug, "issue labeled but author is unknown");
+                    return ignored_in(delivery, "the issue author is unknown", Some(repo.id));
+                }
+            };
+            match allowed {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::info!(delivery, ?author, repo = %repo.slug, "issue labeled but author cannot write");
+                    return ignored_in(
+                        delivery,
+                        "the issue author cannot write to the repository",
+                        Some(repo.id),
+                    );
+                }
+                Err(why) => {
+                    tracing::warn!(delivery, why, "checking the issue author's rights");
+                    return ignored_in(
+                        delivery,
+                        "the issue author's rights could not be checked",
+                        Some(repo.id),
+                    );
+                }
+            }
+        }
+    }
     let job_source = match (&wanted.kind, source) {
         (Kind::CiFailure { branch }, _) if *branch != repo.default_branch => {
             return ignored_in(
@@ -539,11 +621,11 @@ async fn deliver(
             );
         }
         (Kind::CiFailure { .. }, _) => JobSource::Ci,
-        (Kind::Issue, WebhookSource::Github) => JobSource::Github,
-        (Kind::Issue, WebhookSource::Gitlab) => JobSource::Gitlab,
+        (Kind::Issue { .. }, WebhookSource::Github) => JobSource::Github,
+        (Kind::Issue { .. }, WebhookSource::Gitlab) => JobSource::Gitlab,
         // Polled (`crate::tracker`), never posted here.
-        (Kind::Issue, WebhookSource::Jira) => JobSource::Jira,
-        (Kind::Issue, WebhookSource::Backlog) => JobSource::Backlog,
+        (Kind::Issue { .. }, WebhookSource::Jira) => JobSource::Jira,
+        (Kind::Issue { .. }, WebhookSource::Backlog) => JobSource::Backlog,
         (Kind::ReviewRound { .. }, _) => unreachable!("handled above"),
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {

@@ -836,3 +836,200 @@ async fn every_delivery_is_recorded_for_its_repo() {
     assert_eq!((bad[0].source.as_str(), bad[0].count), ("github", 1));
     db.drop().await;
 }
+
+/// #358: An issue labeled on a repo with `issue_trust = "collaborators"` queues
+/// a job only if the author can write to the repo. External authors are ignored.
+/// A repo with `issue_trust = "any"` (default) allows external authors.
+#[tokio::test]
+async fn an_issue_author_must_be_a_collaborator_when_the_repo_requires_it() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone();
+    // Repo with collaborators policy
+    store
+        .create_repo(&NewRepo {
+            slug: "trusted-repo".into(),
+            url: "https://github.com/org/trusted-repo".into(),
+            default_branch: "main".into(),
+            language: "rust".into(),
+            mode: RepoMode::Poc,
+            max_concurrent_jobs: 1,
+            config: json!({ "issue_trust": "collaborators" }),
+        })
+        .await
+        .unwrap();
+
+    // Repo with default (any) policy
+    store
+        .create_repo(&NewRepo {
+            slug: "open-repo".into(),
+            url: "https://github.com/org/open-repo".into(),
+            default_branch: "main".into(),
+            language: "rust".into(),
+            mode: RepoMode::Poc,
+            max_concurrent_jobs: 1,
+            config: json!({}),
+        })
+        .await
+        .unwrap();
+
+    let github_api = MockServer::start().await;
+    for (login, permission) in [("alice", "write"), ("mallory", "read")] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/org/trusted-repo/collaborators/{login}/permission"
+            )))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "permission": permission })),
+            )
+            .mount(&github_api)
+            .await;
+    }
+
+    let secrets = Secrets::fixed([
+        (GITHUB_SECRET_ENV, SECRET),
+        (COMMENT_TOKEN_ENV, "comment-token"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            notifier: Some(GitHubNotifier::new(&github_api.uri(), secrets.clone())),
+            secrets,
+            ..config()
+        },
+    );
+
+    let issue_with_author = |repo_name: &str, number: u64, author: Option<&str>| {
+        let mut b = labeled(repo_name, number, "aegis");
+        if let Some(login) = author {
+            b["issue"]["user"] = json!({ "login": login, "type": "User" });
+        }
+        b
+    };
+
+    // 1. Author alice can write -> Accepted and queued
+    let (status, body) = github(
+        &app,
+        "issues",
+        "d-alice",
+        &issue_with_author("org/trusted-repo", 1, Some("alice")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["data"]["status"], "queued");
+
+    // 2. Author mallory cannot write -> Ignored
+    let (status, body) = github(
+        &app,
+        "issues",
+        "d-mallory",
+        &issue_with_author("org/trusted-repo", 2, Some("mallory")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "ignored");
+    assert_eq!(
+        body["data"]["reason"],
+        "the issue author cannot write to the repository"
+    );
+
+    // 3. No author specified on trusted repo -> Ignored
+    let (status, body) = github(
+        &app,
+        "issues",
+        "d-anon",
+        &issue_with_author("org/trusted-repo", 3, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "ignored");
+    assert_eq!(body["data"]["reason"], "the issue author is unknown");
+
+    // 4. On open-repo (default policy "any"), mallory is accepted and queued
+    let (status, body) = github(
+        &app,
+        "issues",
+        "d-open-mallory",
+        &issue_with_author("org/open-repo", 4, Some("mallory")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["data"]["status"], "queued");
+
+    db.drop().await;
+}
+
+/// #358: An issue labeled on a GitLab project with `issue_trust = "collaborators"`
+/// queues a job only if the author has Developer access.
+#[tokio::test]
+async fn a_gitlab_issue_author_must_be_a_developer_when_the_repo_requires_it() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone();
+    store
+        .create_repo(&NewRepo {
+            slug: "trusted-gl".into(),
+            url: "https://gitlab.com/group/trusted-gl".into(),
+            default_branch: "main".into(),
+            language: "rust".into(),
+            mode: RepoMode::Poc,
+            max_concurrent_jobs: 1,
+            config: json!({ "issue_trust": "collaborators" }),
+        })
+        .await
+        .unwrap();
+
+    let gitlab_api = MockServer::start().await;
+    for (user_id, access_level) in [(10, 30), (20, 20)] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/projects/group%2Ftrusted-gl/members/all/{user_id}"
+            )))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "access_level": access_level })),
+            )
+            .mount(&gitlab_api)
+            .await;
+    }
+
+    let secrets = Secrets::fixed([
+        (GITLAB_TOKEN_ENV, TOKEN),
+        (GITLAB_COMMENT_TOKEN_ENV, "gl-comment-token"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            gitlab_notifier: Some(GitLabNotifier::new(&gitlab_api.uri(), secrets.clone())),
+            secrets,
+            ..config()
+        },
+    );
+
+    let gl_issue = |iid: u64, author_id: Option<u64>| {
+        let mut hook = json!({
+            "object_kind": "issue",
+            "project": { "path_with_namespace": "group/trusted-gl",
+                         "web_url": "https://gitlab.com/group/trusted-gl" },
+            "object_attributes": { "iid": iid, "action": "update" },
+            "changes": { "labels": { "previous": [], "current": [{ "title": "aegis" }] } }
+        });
+        if let Some(id) = author_id {
+            hook["object_attributes"]["author_id"] = json!(id);
+        }
+        hook
+    };
+
+    // User 10 has access_level 30 (Developer) -> Queued
+    let (status, body) = gitlab(&app, "Issue Hook", "d-gl-10", &gl_issue(1, Some(10))).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["data"]["status"], "queued");
+
+    // User 20 has access_level 20 (Reporter) -> Ignored
+    let (status, body) = gitlab(&app, "Issue Hook", "d-gl-20", &gl_issue(2, Some(20))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "ignored");
+    assert_eq!(
+        body["data"]["reason"],
+        "the issue author cannot write to the repository"
+    );
+
+    db.drop().await;
+}
