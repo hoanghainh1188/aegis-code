@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<section aria-labelledby="users-heading">
+  <p class="eyebrow">Admin · <a href="/admin/repos">Repos</a> · <a href="/admin/audit">Audit log</a></p>
+  <h1 id="users-heading">Users</h1>
+  <p class="note">People (by the e-mail the SSO gives) and services (API tokens). Open one to see their roles and change the admin right; roles in a repo are given on the repo's page.</p>
+  <form class="filters" action="/admin/users" method="get">
+    <label>Find
+      <input type="text" name="q" value="{{ q }}" maxlength="320" placeholder="name or e-mail" autocomplete="off">
+    </label>
+    <button type="submit">Find</button>
+    {% if !q.is_empty() %}<a class="button ghost" href="/admin/users">Clear</a>{% endif %}
+  </form>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Admin</th><th scope="col" class="num">Repos</th><th scope="col">Last seen (UTC)</th></tr></thead>
+    <tbody>
+    {% for u in rows %}
+      <tr>
+        <td><a href="/admin/users/{{ u.id }}">{{ u.name }}</a></td>
+        <td>{% if u.service %}service{% else %}person{% endif %}</td>
+        <td>{% if u.admin %}<strong>admin</strong>{% endif %}</td>
+        <td class="num">{{ u.repos }}</td>
+        <td>{{ u.seen }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">No one{% if !q.is_empty() %} matches{% endif %}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if let Some(n) = next %}<p class="pager"><a href="{{ n }}">Older →</a></p>{% endif %}
+</section>
+
+<section aria-labelledby="new-admin-heading" class="band">
+  <h2 id="new-admin-heading">Make someone an admin</h2>
+  <p class="note">An admin may do everything in every repo, these pages included. A person may be named before they sign in for the first time; a name without <code>@</code> is a service.</p>
+  <details class="confirm">
+    <summary class="button ghost">Add an admin…</summary>
+    <form method="post" action="/admin/users" class="inline">
+      {% include "form_guard.html" %}
+      <label>E-mail or service
+        <input type="text" name="who" required maxlength="320" placeholder="name@example.com" autocomplete="off">
+      </label>
+      <button type="submit" class="danger">Make admin</button>
+    </form>
+  </details>
+</section>
+{% endblock %}

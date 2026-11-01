@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ user.name }}{% endblock %}
+{% block content %}
+<section aria-labelledby="user-heading">
+  <p class="eyebrow"><a href="/admin/users">Users</a></p>
+  <h1 id="user-heading">{{ user.name }}</h1>
+  <dl class="facts">
+    <div><dt>Kind</dt><dd>{% if user.service %}service{% else %}person{% endif %}</dd></div>
+    <div><dt>Admin</dt><dd>{% if user.admin %}yes{% else %}no{% endif %}</dd></div>
+    <div><dt>Last seen (UTC)</dt><dd>{{ user.seen }}</dd></div>
+    <div><dt>Since (UTC)</dt><dd>{{ created_at }}</dd></div>
+  </dl>
+  {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
+  <p><a href="{{ audit_link }}">What they did, in the audit log</a></p>
+</section>
+
+<section aria-labelledby="admin-heading" class="band">
+  <h2 id="admin-heading">Admin right</h2>
+  {% if user.admin %}
+    {% if is_self %}
+    <p class="note">This is you. Another admin can take your admin right; the last admin keeps it.</p>
+    {% else %}
+    <details class="confirm">
+      <summary class="button ghost">Take the admin right…</summary>
+      <form method="post" action="/admin/users/{{ user.id }}/admin" class="inline">
+        {% include "form_guard.html" %}
+        <input type="hidden" name="admin" value="false">
+        <p class="note">They keep their roles in each repo. The last admin cannot lose the right.</p>
+        <button type="submit" class="danger">Yes, take it from {{ user.name }}</button>
+      </form>
+    </details>
+    {% endif %}
+  {% else %}
+  <details class="confirm">
+    <summary class="button ghost">Make admin…</summary>
+    <form method="post" action="/admin/users/{{ user.id }}/admin" class="inline">
+      {% include "form_guard.html" %}
+      <input type="hidden" name="admin" value="true">
+      <p class="note">An admin may do everything in every repo, these pages included.</p>
+      <button type="submit" class="danger">Yes, make {{ user.name }} an admin</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+
+<section aria-labelledby="roles-heading" class="band">
+  <h2 id="roles-heading">Roles</h2>
+  {% if user.admin %}<p class="note">As an admin they may do everything in every repo, whatever their roles.</p>{% endif %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Repo</th><th scope="col">Role</th></tr></thead>
+    <tbody>
+    {% for r in roles %}
+      <tr><td><a href="/admin/repos/{{ r.repo_id }}">{{ r.repo }}</a></td><td>{{ r.role }}</td></tr>
+    {% else %}
+      <tr><td colspan="2" class="empty">No role in any repo. Give one on the repo's page.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}
