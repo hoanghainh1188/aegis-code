@@ -326,7 +326,7 @@ Step-by-step onboarding of GitHub or GitLab repositories, from initial registrat
 
    Workers fetch latest commits from the default branch before starting every job, requiring no manual git sync.
 
-5. Management commands: `... repo show <slug> > repo.json`, edit, then `... repo update repo.json`. List repositories via `... repo list`.
+5. Management commands: `... repo show <slug> > repo.json`, edit, then `... repo update repo.json`. List repositories via `... repo list` (a paused one ends with `paused`). Pause a repository that runs wrong or spends too fast with `... repo pause <slug> [--reason <text>] [--cancel-queued]`: its queued jobs wait (or are cancelled) and new ones are still recorded until `... repo resume <slug>`; the repository's admin page does the same (#374).
 
 6. **Writing Effective Conventions:** Detail commands required to execute a **single** test and specify where reproduction tests should be authored. General language test conventions already exist in `prompts/conventions/`; repository conventions should focus on project-specific guidelines.
 

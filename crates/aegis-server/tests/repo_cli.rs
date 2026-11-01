@@ -194,3 +194,56 @@ async fn a_repo_that_cannot_run_is_refused_before_anything_is_written() {
     assert_eq!(run(s, &modes, &["list"]).await.unwrap(), "no repos");
     assert!(run(s, &modes, &["remove", "demo"]).await.is_err());
 }
+
+/// #374: `repo pause|resume`, as the pages do it.
+#[tokio::test]
+async fn a_repo_is_paused_and_resumed_by_command() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let tmp = scratch("pause");
+    let up = upstream(&tmp.0);
+    let modes = modes(&tmp.0);
+    let file = repo_file(&tmp.0, "demo.toml", &demo(&up, ""));
+    run(s, &modes, &["add", &file]).await.unwrap();
+    let id = s.repo_by_slug("demo").await.unwrap().unwrap().id;
+
+    let out = run(
+        s,
+        &modes,
+        &[
+            "pause",
+            "demo",
+            "--reason",
+            "too many PRs",
+            "--cancel-queued",
+        ],
+    )
+    .await
+    .unwrap();
+    assert!(
+        out.contains("repo `demo` paused") && out.contains("0 queued job"),
+        "{out}"
+    );
+    let pause = s.repo_pause(id).await.unwrap().unwrap();
+    assert_eq!(pause.reason.as_deref(), Some("too many PRs"));
+    let listed = run(s, &modes, &["list"]).await.unwrap();
+    assert!(listed.ends_with("\tpaused"), "{listed}");
+    let err = run(s, &modes, &["pause", "demo"]).await.unwrap_err();
+    assert!(err.contains("paused already"), "{err}");
+
+    let out = run(s, &modes, &["resume", "demo"]).await.unwrap();
+    assert!(out.contains("repo `demo` resumed"), "{out}");
+    assert!(s.repo_pause(id).await.unwrap().is_none());
+    assert!(!run(s, &modes, &["list"]).await.unwrap().contains("paused"));
+    let err = run(s, &modes, &["resume", "nope"]).await.unwrap_err();
+    assert!(err.contains("no repo `nope`"), "{err}");
+    let err = run(s, &modes, &["pause", "demo", "--why", "x"])
+        .await
+        .unwrap_err();
+    assert!(err.contains("pause <slug>"), "{err}");
+
+    assert_eq!(
+        actions(s).await,
+        ["repo.register", "repo.pause", "repo.resume"]
+    );
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET status = 'cancelled', cancel_requested = true,\n                         reason = $2, updated_at = now()\n                     WHERE repo_id = $1 AND status = 'queued'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c0c964c15187b56c557eaa33fdc282eb3e74ab82340289d232bb836df897f53a"
+}
