@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<section aria-labelledby="audit-heading">
+  <p class="eyebrow">Admin · <a href="/admin/repos">Repos</a></p>
+  <h1 id="audit-heading">Audit log</h1>
+  <p class="note">Every write, by whom and when: roles, repos, jobs, reviews, tokens, budgets. Newest first; it cannot be changed.</p>
+  <form class="filters" action="/admin/audit" method="get">
+    <label>Repo
+      <select name="repo_id">
+        <option value="">any</option>
+        {% for r in repos %}<option value="{{ r.value }}"{% if r.selected %} selected{% endif %}>{{ r.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Who
+      <input type="text" name="actor" value="{{ actor }}" maxlength="320" placeholder="name@example.com" autocomplete="off">
+    </label>
+    <label>Action
+      <select name="action">
+        <option value="">any</option>
+        {% for a in actions %}<option value="{{ a.value }}"{% if a.selected %} selected{% endif %}>{{ a.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Show</button>
+    {% if filtered %}<a class="button ghost" href="/admin/audit">Clear</a>{% endif %}
+  </form>
+  <div class="scroll">
+  <table class="audit">
+    <thead><tr><th scope="col">When (UTC)</th><th scope="col">Who</th><th scope="col">Action</th><th scope="col">On</th><th scope="col">Detail</th></tr></thead>
+    <tbody>
+    {% for e in rows %}
+      <tr>
+        <td class="num">{{ e.at }}</td>
+        <td>{{ e.who }}{% if let Some(v) = e.via %} <span class="note">({{ v }})</span>{% endif %}</td>
+        <td><code>{{ e.action }}</code></td>
+        <td>{% if let Some((id, slug)) = e.repo %}<a href="/admin/repos/{{ id }}">{{ slug }}</a>{% endif %}{% if let Some(j) = e.job %} <a href="/jobs/{{ j }}">job #{{ j }}</a>{% endif %}</td>
+        <td class="detail">{{ e.detail }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">Nothing{% if filtered %} for these filters{% endif %}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if let Some(n) = next %}<p class="pager"><a href="{{ n }}">Older →</a></p>{% endif %}
+</section>
+{% endblock %}

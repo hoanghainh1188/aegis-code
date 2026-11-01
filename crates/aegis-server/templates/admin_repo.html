@@ -12,6 +12,7 @@
   </dl>
   {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
   {% if can_edit %}<p class="actions"><a class="button ghost" href="/admin/repos/{{ repo.id.0 }}/edit">Change this repo</a> <a class="button ghost" href="/admin/repos/{{ repo.id.0 }}/connection">Connection to the forge</a></p>{% endif %}
+  <p><a href="/admin/audit?repo_id={{ repo.id.0 }}">This repo's audit log</a></p>
 </section>
 
 <section aria-labelledby="clone-heading" class="band">

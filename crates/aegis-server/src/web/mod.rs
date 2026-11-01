@@ -8,6 +8,7 @@
 
 mod actions;
 mod admin;
+mod audit;
 mod connection;
 mod dashboard;
 mod guard;
@@ -50,6 +51,7 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/jobs/{id}/cancel", post(actions::cancel))
         .route("/jobs/{id}/retry", post(actions::retry))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
+        .route("/admin/audit", get(audit::list))
         .route("/admin/repos", get(admin::repos).post(repo_admin::create))
         .route("/admin/repos/new", get(repo_admin::new_form))
         .route("/admin/repos/{id}", get(admin::repo))

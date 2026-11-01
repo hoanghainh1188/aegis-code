@@ -106,6 +106,17 @@ pub(crate) async fn record(
     Ok(())
 }
 
+/// Which entries to read (#368); each `None` is any.
+#[derive(Debug, Clone, Default)]
+pub struct AuditFilter {
+    pub repo: Option<RepoId>,
+    /// Who did it, by name (an e-mail, a service, `github`), case aside.
+    pub actor: Option<String>,
+    /// The action; one ending in `.` takes every action it starts
+    /// (`job.` is `job.create`, `job.cancel`…).
+    pub action: Option<String>,
+}
+
 impl Store {
     /// Newest first; only `repo`'s entries when given.
     pub async fn audit_log(
@@ -113,15 +124,39 @@ impl Store {
         repo: Option<RepoId>,
         page: Page,
     ) -> Result<PageOf<AuditEntry>, StoreError> {
+        let filter = AuditFilter {
+            repo,
+            ..AuditFilter::default()
+        };
+        self.audit_log_where(&filter, page).await
+    }
+
+    /// The entries `filter` takes, newest first.
+    pub async fn audit_log_where(
+        &self,
+        filter: &AuditFilter,
+        page: Page,
+    ) -> Result<PageOf<AuditEntry>, StoreError> {
+        let (exact, prefix) = match filter.action.as_deref() {
+            Some(a) if a.ends_with('.') => (None, Some(a)),
+            Some(a) => (Some(a), None),
+            None => (None, None),
+        };
         let rows = sqlx::query!(
             "SELECT id, at, actor_kind, actor_id, actor_name, action, repo_id, job_id, detail
              FROM audit_log
              WHERE ($1::bigint IS NULL OR repo_id = $1)
                AND ($2::bigint IS NULL OR id < $2)
+               AND ($4::text IS NULL OR lower(actor_name) = lower($4))
+               AND ($5::text IS NULL OR action = $5)
+               AND ($6::text IS NULL OR starts_with(action, $6))
              ORDER BY id DESC LIMIT $3",
-            repo.map(|r| r.0),
+            filter.repo.map(|r| r.0),
             page.cursor(),
             page.fetch(),
+            filter.actor.as_deref(),
+            exact,
+            prefix,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -144,5 +179,14 @@ impl Store {
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         Ok(PageOf::new(entries, page, |e| e.id))
+    }
+
+    /// Every action the log has, in order: what the page offers to filter by.
+    pub async fn audit_actions(&self) -> Result<Vec<String>, StoreError> {
+        Ok(
+            sqlx::query_scalar!("SELECT DISTINCT action FROM audit_log ORDER BY action LIMIT 200")
+                .fetch_all(&self.pool)
+                .await?,
+        )
     }
 }

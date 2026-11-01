@@ -253,3 +253,7 @@ ul.checks { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: g
 ul.checks li { border-left: 4px solid var(--rule-strong); padding: var(--space-2) var(--space-3); background: var(--surface); overflow-wrap: anywhere; }
 ul.checks li.pass { border-color: var(--pass); }
 ul.checks li.fail { border-color: var(--fail); background: var(--fail-wash); }
+
+/* The audit log (#368). */
+table.audit td.detail { font: 0.8rem/1.4 var(--font-num); color: var(--ink-soft); overflow-wrap: anywhere; min-width: 16rem; max-width: 32rem; }
+table.audit td.num { white-space: nowrap; }
