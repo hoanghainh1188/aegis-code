@@ -71,6 +71,48 @@
 </section>
 {% endif %}
 
+{% if user.service %}
+<section aria-labelledby="tokens-heading" class="band">
+  <h2 id="tokens-heading">API tokens</h2>
+  {% if let Some(t) = new_token %}
+  <div class="notice" role="status">
+    <p><strong>The new token, shown this once.</strong> Copy it now into the service's secret store; only its hash is kept here.</p>
+    <pre class="token"><code>{{ t }}</code></pre>
+    <p class="note">The service sends it as <code>Authorization: Bearer &lt;token&gt;</code> to <code>/api/v1</code>, with the roles it has in each repo.</p>
+  </div>
+  {% endif %}
+  {% if tokens.is_empty() %}
+  <p class="note">No live token.</p>
+  {% else %}
+  <p class="note">{{ tokens.len() }} live token{% if tokens.len() != 1 %}s{% endif %}. A token does not end by itself: revoke one that is no longer used.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Token</th><th scope="col">Made (UTC)</th><th scope="col"><span class="visually-hidden">Revoke</span></th></tr></thead>
+    <tbody>
+    {% for t in tokens %}
+      <tr><td>#{{ t.id }}</td><td>{{ t.created_at }}</td><td><form method="post" action="/admin/users/{{ user.id }}/tokens/{{ t.id }}/revoke">{% include "form_guard.html" %}<button type="submit" class="ghost">Revoke</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  <form method="post" action="/admin/users/{{ user.id }}/tokens" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">Make a token</button>
+  </form>
+  {% if !tokens.is_empty() %}
+  <details class="confirm">
+    <summary class="button ghost">Revoke every token…</summary>
+    <form method="post" action="/admin/users/{{ user.id }}/tokens/revoke-all" class="stack">
+      {% include "form_guard.html" %}
+      <p class="note">For a token that leaked, or a service no longer used. What uses them stops at once.</p>
+      <button type="submit" class="danger">Yes, revoke every token of {{ user.name }}</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+{% endif %}
+
 <section aria-labelledby="roles-heading" class="band">
   <h2 id="roles-heading">Roles</h2>
   {% if user.admin %}<p class="note">As an admin they may do everything in every repo, whatever their roles.</p>{% endif %}
