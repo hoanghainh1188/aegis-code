@@ -57,6 +57,7 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
     assert_eq!(
         statuses(&report),
         [
+            (StepName::Scope, StepStatus::Passed),
             (
                 StepName::Dependencies,
                 StepStatus::Skipped(Skip::NoDependencyChange)
