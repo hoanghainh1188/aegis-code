@@ -119,6 +119,8 @@ impl KpiRow {
 /// One row of the monthly budgets.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BudgetRow {
+    /// The repo's id, for the link to its budget page.
+    pub id: i64,
     pub label: String,
     pub spent: String,
     pub cap: String,
@@ -130,6 +132,8 @@ pub struct BudgetRow {
     pub bar: u32,
     pub state: &'static str,
     pub class: &'static str,
+    /// Whether the one reading may change the cap (#372).
+    pub editable: bool,
 }
 
 impl BudgetRow {
@@ -148,6 +152,7 @@ impl BudgetRow {
             BudgetState::Spent => ("Exhausted: no new jobs", "bad"),
         };
         Self {
+            id: budget.repo_id.0,
             label: budget.slug.clone(),
             spent: dollars(budget.spent_usd),
             cap: budget.monthly_usd.map_or("—".into(), dollars),
@@ -157,7 +162,12 @@ impl BudgetRow {
             bar: share.map_or(0, |s| (s * 100.0).round().clamp(0.0, 100.0) as u32),
             state,
             class,
+            editable: false,
         }
+    }
+
+    pub fn editable(self, editable: bool) -> Self {
+        Self { editable, ..self }
     }
 }
 

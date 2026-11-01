@@ -127,6 +127,9 @@ td.bad { color: var(--fail); background: var(--fail-wash); }
 td.warn { color: var(--warn); background: var(--warn-wash); }
 dd.ok, strong.ok { color: var(--pass); }
 dd.bad, strong.bad { color: var(--fail); }
+dd.warn { color: var(--warn); }
+/* The link to change a repo's cap, beside its name (#372). */
+.budget a.change { font-size: var(--text-small); font-weight: 400; margin-left: var(--space-2); }
 .empty { color: var(--ink-soft); font-style: italic; }
 
 .bars { width: min(100%, 26rem); height: auto; }

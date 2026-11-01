@@ -32,7 +32,7 @@
     <tbody>
     {% for b in budgets %}
       <tr>
-        <th scope="row">{{ b.label }}</th>
+        <th scope="row">{{ b.label }}{% if b.editable %} <a class="change" href="/repos/{{ b.id }}/budget">Change<span class="visually-hidden"> the cap of {{ b.label }}</span></a>{% endif %}</th>
         <td class="num">{{ b.spent }}</td>
         <td class="num">{{ b.cap }}</td>
         <td class="num">{{ b.left }}</td>
