@@ -20,8 +20,8 @@ pub struct Wanted {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
-    /// The trigger label was put on an issue.
-    Issue,
+    /// The trigger label was put on an issue. `author`: who opened the issue.
+    Issue { author: Option<String> },
     /// CI failed on `branch`; a job only if it is the repo's default one.
     CiFailure { branch: String },
     /// A review round asked for on the agent's open PR `pr_url` (#244):
@@ -113,6 +113,8 @@ struct GithubIssue {
     number: u64,
     #[serde(default)]
     pull_request: Option<serde_json::Value>,
+    #[serde(default)]
+    user: Option<Sender>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,10 +297,11 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
                 return Err(ignored("a pull request, not an issue"));
             }
             let path = checked_path(&e.repository.full_name, 2)?;
+            let author = e.issue.user.map(|u| u.login);
             Ok(Wanted {
                 issue_ref: checked_ref(format!("{path}#{}", e.issue.number))?,
                 repo_url: e.repository.html_url,
-                kind: Kind::Issue,
+                kind: Kind::Issue { author },
             })
         }
         "workflow_run" => {
@@ -351,6 +354,8 @@ struct GitlabIssueHook {
 #[derive(Debug, Deserialize)]
 struct GitlabIssue {
     iid: u64,
+    #[serde(default)]
+    author_id: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -465,10 +470,11 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
                 return Err(ignored(format!("not the label `{label}` put on an issue")));
             }
             let path = checked_path(&e.project.path_with_namespace, MAX_GITLAB_PARTS)?;
+            let author = e.object_attributes.author_id.map(|id| id.to_string());
             Ok(Wanted {
                 issue_ref: checked_ref(format!("{path}#{}", e.object_attributes.iid))?,
                 repo_url: e.project.web_url,
-                kind: Kind::Issue,
+                kind: Kind::Issue { author },
             })
         }
         "Pipeline Hook" => {
@@ -684,7 +690,7 @@ mod tests {
             Wanted {
                 repo_url: "https://github.com/typst/typst".into(),
                 issue_ref: "typst/typst#12".into(),
-                kind: Kind::Issue,
+                kind: Kind::Issue { author: None },
             }
         );
         assert!(matches!(
@@ -703,6 +709,18 @@ mod tests {
             github("ping", b"{}", "aegis"),
             Err(Skip::Ignored(_))
         ));
+
+        // When the issue has an author (user login).
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&labeled("aegis", "typst/typst")).unwrap();
+        body["issue"]["user"] = json!({ "login": "alice", "type": "User" });
+        let wanted = github("issues", &body.to_string().into_bytes(), "aegis").unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::Issue {
+                author: Some("alice".into())
+            }
+        );
     }
 
     fn run(conclusion: &str, event: &str, head: &str) -> Vec<u8> {
@@ -755,6 +773,18 @@ mod tests {
         let wanted = gitlab("Issue Hook", &hook(&["bug"], &["bug", "aegis"]), "aegis").unwrap();
         assert_eq!(wanted.issue_ref, "group/sub/app#3");
         assert_eq!(wanted.repo_url, "https://gitlab.com/group/sub/app");
+        assert_eq!(wanted.kind, Kind::Issue { author: None });
+
+        let mut with_author: serde_json::Value =
+            serde_json::from_slice(&hook(&["bug"], &["bug", "aegis"])).unwrap();
+        with_author["object_attributes"]["author_id"] = json!(123);
+        let wanted = gitlab("Issue Hook", &with_author.to_string().into_bytes(), "aegis").unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::Issue {
+                author: Some("123".into())
+            }
+        );
         assert!(matches!(
             gitlab("Issue Hook", &hook(&["aegis"], &["aegis", "bug"]), "aegis"),
             Err(Skip::Ignored(_))

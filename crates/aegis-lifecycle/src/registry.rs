@@ -153,7 +153,71 @@ pub struct RepoSettings {
     /// warnings and batches them (#27); needs `sonar`.
     #[serde(default)]
     pub sonar_poll: Option<PollConfig>,
+    /// Who may trigger a job by labeling an issue (#358).
+    #[serde(default, skip_serializing_if = "is_default_issue_trust")]
+    pub issue_trust: IssueTrustConfig,
     pub fork: ForkConfig,
+}
+
+impl RepoSettings {
+    pub fn issue_trust_policy(&self) -> IssueTrustPolicy {
+        self.issue_trust.policy()
+    }
+}
+
+/// Who may trigger a job by labeling an issue (#358).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueTrustPolicy {
+    /// Any issue author triggers a job when the trigger label is added.
+    #[default]
+    Any,
+    /// Only issue authors who can write to the repo trigger a job.
+    #[serde(
+        alias = "collaborators_only",
+        alias = "members",
+        alias = "members_only"
+    )]
+    Collaborators,
+}
+
+impl IssueTrustPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Collaborators => "collaborators",
+        }
+    }
+}
+
+/// The issue trust configuration: either a direct string or a table with `policy`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IssueTrustConfig {
+    Direct(IssueTrustPolicy),
+    Table {
+        #[serde(default)]
+        policy: IssueTrustPolicy,
+    },
+}
+
+impl Default for IssueTrustConfig {
+    fn default() -> Self {
+        Self::Direct(IssueTrustPolicy::Any)
+    }
+}
+
+impl IssueTrustConfig {
+    pub fn policy(&self) -> IssueTrustPolicy {
+        match self {
+            Self::Direct(p) => *p,
+            Self::Table { policy } => *policy,
+        }
+    }
+}
+
+fn is_default_issue_trust(c: &IssueTrustConfig) -> bool {
+    c.policy() == IssueTrustPolicy::Any
 }
 
 /// What registering a repo takes.
@@ -691,5 +755,28 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(cfg.repo.dirs[0].path, "web");
+    }
+
+    #[test]
+    fn issue_trust_config_parses_string_or_table() {
+        let direct: RepoSettings = serde_json::from_value(serde_json::json!({
+            "fork": { "owner": "o", "name": "n", "token_env": "T" },
+            "issue_trust": "collaborators"
+        }))
+        .unwrap();
+        assert_eq!(direct.issue_trust_policy(), IssueTrustPolicy::Collaborators);
+
+        let table: RepoSettings = serde_json::from_value(serde_json::json!({
+            "fork": { "owner": "o", "name": "n", "token_env": "T" },
+            "issue_trust": { "policy": "collaborators" }
+        }))
+        .unwrap();
+        assert_eq!(table.issue_trust_policy(), IssueTrustPolicy::Collaborators);
+
+        let default_val: RepoSettings = serde_json::from_value(serde_json::json!({
+            "fork": { "owner": "o", "name": "n", "token_env": "T" }
+        }))
+        .unwrap();
+        assert_eq!(default_val.issue_trust_policy(), IssueTrustPolicy::Any);
     }
 }
