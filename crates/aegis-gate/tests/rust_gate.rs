@@ -1085,9 +1085,8 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
     let repo = Repo::new("rust", &[]);
     repo.write("tests/my_test.rs", "#[test]\nfn t() {}\n");
     // Commit to base
+    repo.commit_base("add test to base");
     let dir = repo.dir();
-    common::git(&dir, &["add", "tests/my_test.rs"]);
-    common::git(&dir, &["commit", "-m", "add test to base"]);
 
     // Now delete the test file in the working tree
     std::fs::remove_file(repo.dir().join("tests/my_test.rs")).unwrap();
@@ -1177,9 +1176,8 @@ fn scope_enforcement_blocks_added_test_skips_when_configured() {
     );
     let repo = Repo::new("rust", &[]);
     repo.write("tests/my_test.rs", "#[test]\nfn t() {}\n");
+    repo.commit_base("add test to base");
     let dir = repo.dir();
-    common::git(&dir, &["add", "tests/my_test.rs"]);
-    common::git(&dir, &["commit", "-m", "add test to base"]);
 
     // Now edit to add #[ignore]
     repo.replace("tests/my_test.rs", "#[test]", "#[test]\n#[ignore]");
