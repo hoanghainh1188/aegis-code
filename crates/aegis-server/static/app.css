@@ -260,6 +260,8 @@ h3 { font-size: var(--text-base); margin: var(--space-3) 0 var(--space-2); }
 .check.pass { color: var(--pass); }
 .check.fail { color: var(--fail); }
 .check.skip { color: var(--ink-soft); }
+/* What to do about a webhook that made no job (#373). */
+.webhooks .hint { display: block; color: var(--ink-soft); font-size: var(--text-small); }
 ul.checks { list-style: none; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); }
 ul.checks li { border-left: 4px solid var(--rule-strong); padding: var(--space-2) var(--space-3); background: var(--surface); overflow-wrap: anywhere; }
 ul.checks li.pass { border-color: var(--pass); }

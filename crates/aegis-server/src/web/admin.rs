@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 use super::dashboard::all_repos;
 use super::repo_admin::{RepoAdminExt, clone_part_of, settings_of};
+use super::webhooks::{self, WebhookRow};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::Access;
 use crate::auth::cli::kind_of;
@@ -20,6 +21,8 @@ use crate::auth::cli::kind_of;
 /// The roles a form may give, as `grant` takes them; the least first, so
 /// the form starts on it.
 const ROLES: [&str; 3] = ["viewer", "reviewer", "maintainer"];
+/// The webhooks shown on a repo's page.
+const SHOWN_WEBHOOKS: u32 = 20;
 
 pub(crate) fn admin_only(access: &Access) -> Result<(), WebError> {
     if access.is_admin() {
@@ -95,6 +98,8 @@ struct RepoPage<'a> {
     /// The clone part, rendered: it also answers alone while polled.
     clone: String,
     can_edit: bool,
+    /// What became of its recent webhooks (#373).
+    webhooks: Vec<WebhookRow>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -114,7 +119,8 @@ pub async fn repo(
 ) -> WebResult {
     admin_only(&access)?;
     let repo = repo_of(&store, id).await?;
-    let members = store.repo_members(repo.id).await?;
+    let repo_id = repo.id;
+    let members = store.repo_members(repo_id).await?;
     // A fixed message per word, never the request's own text.
     let notice = match q.done.as_str() {
         "granted" => Some("Role given; it applies from their next request."),
@@ -141,6 +147,7 @@ pub async fn repo(
         settings,
         clone,
         can_edit: admin.is_some(),
+        webhooks: webhooks::rows(&store, repo_id, SHOWN_WEBHOOKS).await?,
     })
 }
 

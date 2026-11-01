@@ -20,6 +20,12 @@
   {{ clone|safe }}
 </section>
 
+<section aria-labelledby="webhooks-heading" class="band">
+  <h2 id="webhooks-heading">Recent webhooks</h2>
+  <p class="note">What became of the forge's last {{ webhooks.len() }} deliveries for this repo, kept 30 days: the job each made or found, or why it made none. Deliveries with a bad signature name no repo; see the <a href="/admin/repos/{{ repo.id.0 }}/connection">connection page</a>.</p>
+  {% include "webhook_table.html" %}
+</section>
+
 <section aria-labelledby="settings-heading" class="band">
   <h2 id="settings-heading">Settings</h2>
   <p class="note">As a repo file: what <code>aegis-server repo show</code> prints, in TOML.</p>

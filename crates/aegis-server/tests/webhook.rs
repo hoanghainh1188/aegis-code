@@ -792,8 +792,12 @@ async fn every_delivery_is_recorded_for_its_repo() {
     assert_eq!(body["data"]["status"], "pong");
     let (_, body) = github(&app, "issues", "d-1", &labeled("acme/app", 1, "bug")).await;
     assert_eq!(body["data"]["status"], "ignored", "{body}");
-    let (status, _) = github(&app, "issues", "d-2", &labeled("acme/app", 2, "aegis")).await;
+    let (status, body) = github(&app, "issues", "d-2", &labeled("acme/app", 2, "aegis")).await;
     assert_eq!(status, StatusCode::ACCEPTED);
+    let made = aegis_store::JobId(body["data"]["job_id"].as_i64().unwrap());
+    // #373: the same delivery again is kept as received before.
+    let (status, _) = github(&app, "issues", "d-2", &labeled("acme/app", 2, "aegis")).await;
+    assert_eq!(status, StatusCode::OK);
     let bad = [
         ("x-github-event", "issues"),
         ("x-github-delivery", "d-3"),
@@ -811,12 +815,16 @@ async fn every_delivery_is_recorded_for_its_repo() {
     assert_eq!(
         outcomes,
         [
+            ("duplicate", Some("d-2")),
             ("queued", Some("d-2")),
             ("ignored", Some("d-1")),
             ("ping", Some("d-ping"))
         ]
     );
-    let ignored = &seen[1];
+    // #373: the job a delivery made is kept with it, for a link.
+    let jobs: Vec<Option<aegis_store::JobId>> = seen.iter().map(|e| e.job_id).collect();
+    assert_eq!(jobs, [None, Some(made), None, None]);
+    let ignored = &seen[2];
     assert!(
         ignored.reason.as_deref().is_some_and(|r| !r.is_empty()),
         "{ignored:?}"

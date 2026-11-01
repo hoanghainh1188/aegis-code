@@ -61,18 +61,7 @@
 
 <section aria-labelledby="recent-heading" class="band">
   <h2 id="recent-heading">Last webhooks</h2>
-  <div class="scroll">
-  <table>
-    <thead><tr><th scope="col">Received (UTC)</th><th scope="col">From</th><th scope="col">Event</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
-    <tbody>
-    {% for w in webhooks %}
-      <tr><td>{{ w.received_at }}</td><td>{{ w.source }}</td><td><code>{{ w.event }}</code></td><td>{% if w.good %}<span class="check pass">{{ w.outcome }}</span>{% else %}<span class="check fail">{{ w.outcome }}</span>{% endif %}</td><td>{{ w.reason }}</td></tr>
-    {% else %}
-      <tr><td colspan="5" class="empty">No webhook from this repo yet. GitHub sends a ping when the webhook is made; GitLab's "Test" sends a sample event.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
+  {% include "webhook_table.html" %}
   {% for b in bad_signatures %}
   <p class="notice bad">{{ b.count }} {{ b.source }} webhook(s) with a bad signature in the last {{ bad_hours }} hours, the last at {{ b.last }} UTC. They name no repo; if they are yours, the webhook's secret is not the value of <code>{{ forge.webhook_secret }}</code>.</p>
   {% endfor %}

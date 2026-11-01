@@ -42,7 +42,7 @@ use std::time::Instant;
 use aegis_ledger::IssueId;
 use aegis_secrets::Secrets;
 use aegis_store::{
-    Delivered, JobSource, NewDelivery, NewJob, NewWebhookEvent, RepoId, Store, StoreError,
+    Delivered, JobId, JobSource, NewDelivery, NewJob, NewWebhookEvent, RepoId, Store, StoreError,
     WebhookOutcome, WebhookSource,
 };
 use axum::body::{Body, Bytes, to_bytes};
@@ -266,6 +266,7 @@ async fn admit<'a>(
                     repo: None,
                     outcome: WebhookOutcome::BadSignature,
                     reason: None,
+                    job: None,
                 },
             )
             .await;
@@ -378,6 +379,8 @@ struct Handled {
     reason: Option<String>,
     /// The repo it was matched to; found from the delivery when `None`.
     repo: Option<RepoId>,
+    /// The job it made or found, for a link on the repo's page (#373).
+    job: Option<JobId>,
 }
 
 impl Handled {
@@ -392,6 +395,14 @@ impl Handled {
             outcome: Some(outcome),
             reason,
             repo,
+            job: None,
+        }
+    }
+
+    fn with_job(self, job: JobId) -> Self {
+        Self {
+            job: Some(job),
+            ..self
         }
     }
 
@@ -429,6 +440,7 @@ impl Handled {
             repo,
             outcome,
             reason: self.reason,
+            job: self.job,
         };
         record(hooks, event).await;
         self.response
@@ -472,6 +484,7 @@ fn internal(delivery: &str, e: &StoreError) -> Handled {
         outcome: None,
         reason: None,
         repo: None,
+        job: None,
     }
 }
 
@@ -567,6 +580,7 @@ async fn deliver(
                 Some(reason),
                 Some(repo.id),
             )
+            .with_job(job.id)
         }
         Ok(Delivered::AlreadyLive(job)) => {
             tracing::info!(
@@ -584,6 +598,7 @@ async fn deliver(
                 Some(format!("{issue_ref} already has job {}", job.0)),
                 Some(repo.id),
             )
+            .with_job(job)
         }
         Ok(Delivered::Refused(job)) => {
             tracing::info!(delivery, job = job.id.0, repo = %repo.slug, issue_ref, "job refused: the repo's budget is spent");
@@ -606,6 +621,7 @@ async fn deliver(
                 Some(why),
                 Some(repo.id),
             )
+            .with_job(JobId(job_id))
         }
         Ok(Delivered::Duplicate) => {
             tracing::info!(delivery, "webhook delivery received before");
@@ -740,6 +756,7 @@ async fn review_round(
             Some(why),
             Some(repo.id),
         )
+        .with_job(root.id)
     };
     match delivered {
         Ok(Delivered::Queued(job)) => {
@@ -754,6 +771,7 @@ async fn review_round(
                 Some(reason),
                 Some(repo.id),
             )
+            .with_job(job.id)
         }
         Ok(Delivered::Duplicate) => {
             tracing::info!(delivery, "webhook delivery received before");
@@ -777,7 +795,8 @@ async fn review_round(
             WebhookOutcome::AlreadyLive,
             Some(why),
             Some(repo.id),
-        ),
+        )
+        .with_job(root.id),
         Err(StoreError::Conflict(why) | StoreError::BudgetSpent(why)) => refused(why).await,
         Err(e) => internal(delivery, &e),
     }

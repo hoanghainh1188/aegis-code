@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT source, delivery_id, event, outcome, reason, received_at\n             FROM webhook_events WHERE repo_id = $1\n             ORDER BY received_at DESC, id DESC LIMIT $2",
+  "query": "SELECT source, delivery_id, event, outcome, reason, job_id, received_at\n             FROM webhook_events WHERE repo_id = $1\n             ORDER BY received_at DESC, id DESC LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,17 @@
       },
       {
         "ordinal": 5,
+        "name": "job_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "webhook_events",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "received_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -82,8 +93,9 @@
       true,
       false,
       true,
+      true,
       false
     ]
   },
-  "hash": "3e4a980a539866f26e8e4261b58d8a4aba838f89f2c084a34f015dc85081b7d4"
+  "hash": "d2a245777cb5a3afa378ab516cf0dbc49b7c28f6a2a98d0c6f0510f3e899a6a6"
 }
