@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}AI{% endblock %}
+{% block content %}
+<section aria-labelledby="ai-heading">
+  <p class="eyebrow">Admin · <a href="/admin/repos">Repos</a> · <a href="/admin/users">Users</a> · <a href="/admin/audit">Audit log</a></p>
+  <h1 id="ai-heading">AI</h1>
+  <p class="note">The model provider of each mode, as the server loaded it from the mode's file at start. Keys stay in the secret store: only their names, and whether the store has them, show here. Changing a provider or a model is a change to the mode's file and a restart.</p>
+</section>
+
+{% for m in modes %}
+<section aria-labelledby="mode-{{ m.name }}" class="band">
+  <h2 id="mode-{{ m.name }}">Mode <code>{{ m.name }}</code></h2>
+  {% if let Some(c) = m.config %}
+  <dl class="facts">
+    <div><dt>Provider</dt><dd>{{ c.provider }}</dd></div>
+    <div><dt>Where</dt><dd class="ref">{{ c.target }}</dd></div>
+    <div><dt>Key</dt><dd>{% if let Some((name, set)) = c.key %}<code>{{ name }}</code> {% if set %}<span class="check pass">set</span>{% else %}<span class="check fail">missing</span>{% endif %}{% else %}the server's AWS role{% endif %}</dd></div>
+    <div><dt>Job budget</dt><dd>{{ c.max_cost_usd }}, {{ c.max_model_calls }} model calls</dd></div>
+  </dl>
+  {% if let Some(g) = c.guard %}<p class="note"><strong>Guard:</strong> {{ g }}.</p>{% endif %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Tier</th><th scope="col">Model</th><th scope="col">Effort</th></tr></thead>
+    <tbody>
+    {% for t in c.tiers %}<tr><td>{{ t.tier }}</td><td><code>{{ t.model }}</code></td><td>{{ t.effort }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <form method="post" action="/admin/ai/{{ m.name }}/check" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">Check the connection</button>
+    <span class="note">Sends one short request to the light model; it costs a little, so once a minute at most.</span>
+  </form>
+  {% if let Some(r) = m.check %}
+  <ul class="checks" role="status">
+    {% if r.ok %}<li class="pass"><span class="check pass">pass</span> {{ r.detail }}</li>{% else %}<li class="fail"><span class="check fail">fail</span> {{ r.detail }}</li>{% endif %}
+  </ul>
+  {% endif %}
+  {% else %}
+  <p class="note">Not configured: the server's <code>[modes]</code> has no file for it, so no repo can use it.</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}
