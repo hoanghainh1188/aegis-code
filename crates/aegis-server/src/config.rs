@@ -39,6 +39,8 @@ pub struct ServerConfig {
     pub sonar: SonarSection,
     #[serde(default)]
     pub reviews: ReviewsSection,
+    #[serde(default)]
+    pub web: WebSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
@@ -98,6 +100,17 @@ impl Default for SonarSection {
     fn default() -> Self {
         Self { check_s: 60 }
     }
+}
+
+/// The pages (#376).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSection {
+    /// Whether an admin may make a repo's webhooks from its connection
+    /// page, with a token given for that once and never kept: off unless
+    /// turned on, as that token can do more than the agent's.
+    #[serde(default)]
+    pub make_webhooks: bool,
 }
 
 /// Review rounds on the agent's PRs (#243).

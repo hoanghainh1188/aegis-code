@@ -2,14 +2,21 @@
 //! forge sends webhooks and which events to turn on, whether each secret
 //! the repo needs is in the store (never its value), what became of the
 //! repo's last webhooks, and, on demand, a check of its tokens and URL
-//! against the forge's API.
+//! against the forge's API. With `[web] make_webhooks` (#376), the admin
+//! makes the webhooks from here with a token given for that once: used
+//! for the request and dropped, never kept, logged, audited or shown; the
+//! secret they are signed with is the server's and never reaches the
+//! browser.
 
 use aegis_lifecycle::ForkPlatform;
-use aegis_pr::{GitHub, GitLab, PrError, RepoAccess};
+use aegis_pr::{GitHub, GitLab, HookDone, PrError, RepoAccess};
 use aegis_store::{BadSignatures, Repo, Store};
 use askama::Template;
-use axum::Extension;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Redirect};
+use axum::{Extension, Form};
+use serde::Deserialize;
 
 use super::admin::admin_only;
 use super::repo_admin::{RepoAdmin, RepoAdminExt, editing, repo_of};
@@ -37,6 +44,11 @@ struct Forge {
     repo_events: &'static [&'static str],
     /// Events to turn on for the fork, for review rounds.
     fork_events: &'static [&'static str],
+    /// The same, as the forge's API names them (#376).
+    repo_hook_events: &'static [&'static str],
+    fork_hook_events: &'static [&'static str],
+    /// What a token needs to make webhooks there.
+    hook_right: &'static str,
 }
 
 const GITHUB: Forge = Forge {
@@ -49,6 +61,13 @@ const GITHUB: Forge = Forge {
         "Pull request review comments",
         "Issue comments",
     ],
+    repo_hook_events: &["issues", "workflow_run"],
+    fork_hook_events: &[
+        "pull_request_review",
+        "pull_request_review_comment",
+        "issue_comment",
+    ],
+    hook_right: "the `admin:repo_hook` scope (fine-grained: Webhooks read and write), or admin of the repository",
 };
 
 const GITLAB: Forge = Forge {
@@ -57,6 +76,9 @@ const GITLAB: Forge = Forge {
     comment_token: GITLAB_COMMENT_TOKEN_ENV,
     repo_events: &["Issues events", "Pipeline events"],
     fork_events: &["Comments"],
+    repo_hook_events: &["issues_events", "pipeline_events"],
+    fork_hook_events: &["note_events"],
+    hook_right: "the Maintainer role on the project and the `api` scope",
 };
 
 fn forge_of(platform: ForkPlatform) -> &'static Forge {
@@ -137,6 +159,10 @@ struct ConnectionPage<'a> {
     webhooks: Vec<WebhookRow>,
     bad_signatures: Vec<BadRow>,
     bad_hours: i32,
+    /// `[web] make_webhooks` (#376).
+    can_make_webhooks: bool,
+    /// What the last making did, said once.
+    made: Option<&'static str>,
 }
 
 async fn is_set(admin: &RepoAdmin, name: &str) -> bool {
@@ -163,6 +189,7 @@ async fn page(
     me: &Me,
     repo: &Repo,
     checks: Option<Vec<CheckRow>>,
+    made: Option<&'static str>,
 ) -> WebResult {
     let file = RepoFile::of(repo).map_err(|e| {
         tracing::error!(repo = %repo.slug, error = %e, "web: stored repo does not read back");
@@ -218,9 +245,12 @@ async fn page(
             .map(BadRow::from)
             .collect(),
         bad_hours: BAD_SIGNATURE_HOURS,
+        can_make_webhooks: admin.make_webhooks,
+        made,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn show(
     State(store): State<Store>,
     Extension(nonce): Extension<Nonce>,
@@ -229,11 +259,28 @@ pub async fn show(
     Extension(auth): Extension<Auth>,
     Extension(admin): RepoAdminExt,
     Path(id): Path<i64>,
+    Query(q): Query<MadeQuery>,
 ) -> WebResult {
     admin_only(&access)?;
     let admin = editing(admin)?;
     let repo = repo_of(&store, id).await?;
-    page(&store, &admin, &auth, &nonce, &me, &repo, None).await
+    // A fixed message per word, never the request's own text.
+    let made = match q.made.as_str() {
+        "created" => Some(
+            "Webhook created. GitHub sends a ping at once: it shows below as \"ping: connected\".",
+        ),
+        "updated" => Some(
+            "Webhook updated: the one already pointing at this server now has the events and secret it needs.",
+        ),
+        _ => None,
+    };
+    page(&store, &admin, &auth, &nonce, &me, &repo, None, made).await
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MadeQuery {
+    #[serde(default)]
+    made: String,
 }
 
 pub async fn check(
@@ -250,7 +297,149 @@ pub async fn check(
     let repo = repo_of(&store, id).await?;
     let checks = run_checks(&admin, &repo).await;
     tracing::info!(repo = %repo.slug, by = %access.actor.name, "repo connection checked");
-    page(&store, &admin, &auth, &nonce, &me, &repo, Some(checks)).await
+    page(
+        &store,
+        &admin,
+        &auth,
+        &nonce,
+        &me,
+        &repo,
+        Some(checks),
+        None,
+    )
+    .await
+}
+
+/// The webhook form (#376). Not `Debug`: the token is never printed.
+#[derive(Deserialize)]
+pub struct HookForm {
+    /// `repo` or `fork`.
+    #[serde(default)]
+    place: String,
+    #[serde(default)]
+    token: String,
+}
+
+fn bad(message: impl Into<String>) -> WebError {
+    WebError::new(StatusCode::BAD_REQUEST, message)
+}
+
+/// Makes, or updates, the repo's or the fork's webhook to this server,
+/// with the token the admin gave for that once.
+pub async fn make_webhooks(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Extension(auth): Extension<Auth>,
+    Extension(admin): RepoAdminExt,
+    Path(id): Path<i64>,
+    Form(form): Form<HookForm>,
+) -> WebResult {
+    admin_only(&access)?;
+    let admin = editing(admin)?;
+    if !admin.make_webhooks {
+        // As if the form did not exist: it is off unless turned on.
+        return Err(WebError::not_found("page"));
+    }
+    let repo = repo_of(&store, id).await?;
+    let given = form.token.trim();
+    if given.is_empty() {
+        return Err(bad(
+            "give a token that may manage the webhooks: it is used once and not kept",
+        ));
+    }
+    let file =
+        RepoFile::of(&repo).map_err(|_| bad("the repo's settings do not read as a repo file"))?;
+    let fork = &file.settings.fork;
+    let forge = forge_of(fork.platform);
+    // The token and the secret go to the forge the server is configured
+    // with, never to an API root a repo's settings name.
+    let api = match fork.platform {
+        ForkPlatform::GitHub => admin.github_api.clone(),
+        ForkPlatform::GitLab => admin.gitlab_api.clone(),
+    };
+    let (path, events) = match form.place.as_str() {
+        "repo" => {
+            let path = upstream_path(fork.platform, &repo.url).ok_or_else(|| {
+                bad(format!(
+                    "`{}` is not a {} repository URL",
+                    repo.url, forge.name
+                ))
+            })?;
+            (path, forge.repo_hook_events)
+        }
+        "fork" if fork.api.trim_end_matches('/') == api.trim_end_matches('/') => {
+            (fork.path(), forge.fork_hook_events)
+        }
+        "fork" => {
+            return Err(bad(format!(
+                "the fork is on `{}`, not on the forge this server is configured with: make its webhook by hand",
+                fork.api
+            )));
+        }
+        _ => return Err(bad("place: `repo` or `fork`")),
+    };
+    let public = auth.public_url();
+    if public.is_empty() {
+        return Err(bad(
+            "set the server's `[auth] public_url` first: it is where the forge sends webhooks",
+        ));
+    }
+    let Some(secret) = token(&admin, forge.webhook_secret).await else {
+        return Err(bad(format!(
+            "the secret store has no `{}`, the webhook's secret: add it first",
+            forge.webhook_secret
+        )));
+    };
+    let url = format!("{public}/webhooks/{}", forge.name);
+    let done = match fork.platform {
+        ForkPlatform::GitHub => {
+            let (owner, name) = path.split_once('/').unwrap_or((path.as_str(), ""));
+            match GitHub::new(&api, owner, name, given) {
+                Ok(gh) => gh.ensure_hook(&url, &secret, events).await,
+                Err(e) => Err(e),
+            }
+        }
+        ForkPlatform::GitLab => match GitLab::new(&api, &path, given) {
+            Ok(gl) => gl.ensure_hook(&url, &secret, events).await,
+            Err(e) => Err(e),
+        },
+    };
+    let (hook, created) = match done {
+        Ok(HookDone::Created(hook)) => (hook, true),
+        Ok(HookDone::Updated(hook)) => (hook, false),
+        Err(e) => {
+            let said = hook_refusal(&e, forge, &path, given, &secret);
+            tracing::info!(repo = %repo.slug, place = %form.place, why = %said, "webhook not made");
+            return Err(WebError::new(StatusCode::BAD_GATEWAY, said));
+        }
+    };
+    store
+        .audit_webhook_made_by(repo.id, &form.place, hook, created, &access.actor)
+        .await?;
+    tracing::info!(repo = %repo.slug, place = %form.place, hook, created, by = %access.actor.name, "webhook made");
+    let word = if created { "created" } else { "updated" };
+    Ok(Redirect::to(&format!("/admin/repos/{id}/connection?made={word}")).into_response())
+}
+
+/// Why the forge would not make the webhook, said plainly; neither the
+/// token nor the secret appears.
+fn hook_refusal(e: &PrError, forge: &Forge, path: &str, token: &str, secret: &str) -> String {
+    let status = match e {
+        PrError::GitHub { status, .. } | PrError::GitLab { status, .. } => *status,
+        _ => 0,
+    };
+    let said = match status {
+        403 | 404 => format!(
+            "the token may not manage the webhooks of `{path}`: it needs {}",
+            forge.hook_right
+        ),
+        _ => refusal(e, &format!("the webhooks of `{path}`"), token),
+    };
+    said.replace(token, "***")
+        .replace(secret, "***")
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// What a forge's refusal means, said plainly; `secret` never appears.

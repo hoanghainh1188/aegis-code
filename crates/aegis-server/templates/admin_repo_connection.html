@@ -26,6 +26,26 @@
       <p class="note">For review rounds on the agent's pull requests.</p>
     </div>
   </div>
+  {% if let Some(m) = made %}<p class="notice" role="status">{{ m }}</p>{% endif %}
+  {% if can_make_webhooks %}
+  <h3 id="make-heading">Make them from here</h3>
+  <p class="note">Give a token that may manage webhooks there: {{ forge.hook_right }}. It is used for this request only, then dropped: not kept, logged or recorded. The webhook is signed with the server's own <code>{{ forge.webhook_secret }}</code>, which never comes through your browser. A webhook already pointing at this server is updated instead of doubled.</p>
+  <form method="post" action="/admin/repos/{{ repo.id.0 }}/connection/webhooks" class="inline" aria-labelledby="make-heading">
+    {% include "form_guard.html" %}
+    <label>Where
+      <select name="place" required>
+        <option value="repo">the repo, {{ repo.url }}</option>
+        <option value="fork">the fork, {{ fork }}</option>
+      </select>
+    </label>
+    <label>Token, used once
+      <input type="password" name="token" required autocomplete="new-password" spellcheck="false" data-1p-ignore data-lpignore="true">
+    </label>
+    <button type="submit">Make the webhook</button>
+  </form>
+  {% else %}
+  <p class="note">Make them by hand on the forge, or let an admin make them from here with a token given once: set <code>[web] make_webhooks = true</code> in the server's configuration.</p>
+  {% endif %}
 </section>
 
 <section aria-labelledby="secrets-heading" class="band">

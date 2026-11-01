@@ -22,6 +22,7 @@ mod forge;
 mod git;
 mod github;
 mod gitlab;
+mod hooks;
 mod review;
 
 use std::path::Path;
@@ -42,6 +43,7 @@ pub use forge::Forge;
 pub use git::{GITHUB_USER, GITLAB_USER, Identity, Remote, token_env, token_env_as};
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};
+pub use hooks::HookDone;
 pub use review::{GITLAB_DEVELOPER, NoteAt, PullState, REPLY_MARKER, ReviewNote};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

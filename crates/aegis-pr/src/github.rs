@@ -62,18 +62,22 @@ impl ApiError {
 }
 
 /// `https://…`, or `http://` to this machine (tests). The bearer token
-/// goes there.
+/// goes there, so the host is read as a URL's, not by its first letters
+/// (`http://localhost.example` is not this machine, #376), and a URL with
+/// a user or password in it is refused.
 pub(crate) fn checked_api(api: &str) -> Result<String, PrError> {
     let api = api.trim_end_matches('/');
-    let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
-        .iter()
-        .any(|p| api.starts_with(p));
-    if api.starts_with("https://") || local {
+    let refused = || PrError::InvalidRemote(format!("API root `{api}` must use https"));
+    let url = reqwest::Url::parse(api).map_err(|_| refused())?;
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(refused());
+    }
+    let host = url.host_str().unwrap_or_default();
+    let local = url.scheme() == "http" && matches!(host, "localhost" | "127.0.0.1" | "[::1]");
+    if (url.scheme() == "https" && !host.is_empty()) || local {
         Ok(api.to_owned())
     } else {
-        Err(PrError::InvalidRemote(format!(
-            "API root `{api}` must use https"
-        )))
+        Err(refused())
     }
 }
 
@@ -233,14 +237,28 @@ impl GitHub {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<T, PrError> {
+        self.call(reqwest::Method::POST, path, Some(body)).await
+    }
+
+    /// `method` on `path` of this repo, with `body` as JSON when there is
+    /// one; the reply read as `T`.
+    pub(crate) async fn call<T: serde::de::DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<T, PrError> {
         let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
-        let response = self
+        let mut request = self
             .client
-            .post(&url)
+            .request(method, &url)
             .bearer_auth(&self.token)
             .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", API_VERSION)
-            .json(body)
+            .header("X-GitHub-Api-Version", API_VERSION);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request
             .send()
             .await
             .map_err(|e| PrError::Http(e.to_string()))?;
@@ -310,5 +328,34 @@ impl GitHub {
             &json!({ "body": body }),
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_api_root_is_https_or_this_machine_by_its_host() {
+        for ok in [
+            "https://api.github.com",
+            "https://git.acme.example/api/v3/",
+            "http://localhost:8080",
+            "http://127.0.0.1:9000/api",
+            "http://[::1]:1234",
+        ] {
+            assert!(checked_api(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://api.github.com",
+            "http://localhost.attacker.example",
+            "http://127.0.0.1.attacker.example/",
+            "http://localhost@attacker.example",
+            "https://user:pass@api.github.com",
+            "ftp://localhost",
+            "localhost",
+        ] {
+            assert!(checked_api(bad).is_err(), "{bad}");
+        }
     }
 }

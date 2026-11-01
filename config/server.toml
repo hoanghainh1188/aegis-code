@@ -103,3 +103,10 @@ check_s = 60
 # Review rounds a PR of the agent may have after the job that opened it
 # (#243): each goes on with the PR's branch and has a budget of its own.
 max_rounds = 3
+
+[web]
+# Let an admin make a repo's webhooks from its "Connection to the forge"
+# page with a forge token given once (#376): GitHub `admin:repo_hook`,
+# GitLab Maintainer. The token is used for that request and dropped, never
+# kept, logged or audited. Off unless turned on.
+make_webhooks = false
