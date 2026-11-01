@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.2...v0.2.3) (2026-11-01)
+
+
+### Documentation
+
+* install from the published release; npm-release environment ([#347](https://github.com/hoanghainh1188/aegis-code/issues/347)) ([ac3f445](https://github.com/hoanghainh1188/aegis-code/commit/ac3f445bd6aa94934bfd341883355a610642e06d))
+
 ## [0.2.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.2.1...v0.2.2) (2026-11-01)
 
 
