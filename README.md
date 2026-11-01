@@ -9,7 +9,7 @@
 [![Rust 2024](https://img.shields.io/badge/rust-2024-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
 [![Status: Phase 2 Platform](https://img.shields.io/badge/status-Phase%202%20Platform-00F5D4.svg?style=flat-square)]()
-[![npm: @hoanghainh1188/aegis](https://img.shields.io/npm/v/@hoanghainh1188/aegis?style=flat-square&color=crimson&label=aegis&logo=npm)](https://www.npmjs.com/package/@hoanghainh1188/aegis)
+[![npm: @hoanghainh/aegis](https://img.shields.io/npm/v/@hoanghainh/aegis?style=flat-square&color=crimson&label=aegis&logo=npm)](https://www.npmjs.com/package/@hoanghainh/aegis)
 [![PostgreSQL Queue](https://img.shields.io/badge/queue-PostgreSQL%20SKIP%20LOCKED-336791.svg?style=flat-square&logo=postgresql)]()
 [![Sandbox: Air-Gapped Docker](https://img.shields.io/badge/sandbox-Docker%20--network%20none-2496ED.svg?style=flat-square&logo=docker)]()
 
@@ -117,7 +117,7 @@ The reviewer's side of this, step by step, is in the [Reviewer Guide](docs/revie
 Choose the path that fits your role.
 
 > [!IMPORTANT]
-> **No release has been published yet.** There is no `vX.Y.Z` tag, so the npm package `@hoanghainh1188/aegis`, the GHCR images and the offline bundles do not exist yet; they appear with the first release ([docs/release.md](docs/release.md)). Until then:
+> **No release has been published yet.** There is no `vX.Y.Z` tag, so the npm package `@hoanghainh/aegis`, the GHCR images and the offline bundles do not exist yet; they appear with the first release ([docs/release.md](docs/release.md)). Until then:
 > * **Developers** install `aegis` from source (the `cargo install` line below).
 > * **Operators** build the images locally and deploy them with `--offline` ([On-Premise Runbook, "Before the First Release"](docs/runbook/on-premise.md#before-the-first-release-local-images)).
 > * The **local trial** and **building from source** work as written.
@@ -130,7 +130,7 @@ Interact with an Aegis instance your team already runs, from your terminal, usin
 cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client
 
 # After the first release: install via npm (macOS, Linux - prebuilt binaries bundled)
-npm install -g @hoanghainh1188/aegis
+npm install -g @hoanghainh/aegis
 
 # Log in with your personal token (from https://<aegis-server>/me/tokens)
 aegis login https://aegis.internal.example.com
@@ -525,7 +525,7 @@ aegis-code/
 ├── docker/                   # Dockerfiles for `aegis-server` and per-language verification sandboxes
 ├── docs/                     # Architectural Decision Records (ADRs), design specs, measurements, and operator runbooks
 ├── eval/                     # Empirical benchmark datasets and harnesses across all 6 supported languages
-├── npm/                      # Pre-bundled npm package wrapper for `@hoanghainh1188/aegis`
+├── npm/                      # Pre-bundled npm package wrapper for `@hoanghainh/aegis`
 ├── scripts/                  # Operational scripts (30-minute local trial, release bundling, benchmarks)
 └── tests/                    # Workspace-level end-to-end and integration test suites
 ```

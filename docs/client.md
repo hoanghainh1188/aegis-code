@@ -11,7 +11,7 @@ The command-line interface for software engineers to dispatch and track maintena
 Supported on macOS (arm64/x86_64) and Linux (arm64/x86_64), requires Node 18+:
 
 ```bash
-npm install -g @hoanghainh1188/aegis
+npm install -g @hoanghainh/aegis
 ```
 
 The package bundles native pre-compiled binaries for all four architectures with zero runtime downloads. Versioning mirrors `aegis-server` (`vX.Y.Z`, [docs/release.md](release.md)).

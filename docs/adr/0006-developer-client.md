@@ -29,7 +29,7 @@ While `aegis-server` `/api/v1` exposed comprehensive job operations (create, ins
 3. **Distribution Strategy:**
    - Compiled for macOS (arm64, x86_64) and Linux (arm64, x86_64) bundled into `tar.gz` with SHA-256 checksums attached to GitHub Releases.
    - Rust developers can install via `cargo install --locked --git https://github.com/hoanghainh1188/aegis-code aegis-client`.
-   - **Update (#263):** Releases synchronize with server versions (`vX.Y.Z`, [docs/release.md](../release.md)). Pre-bundled npm package `@hoanghainh1188/aegis` embeds native binaries for four platforms with a lightweight JS launcher, requiring zero runtime compilation or downloads.
+   - **Update (#263):** Releases synchronize with server versions (`vX.Y.Z`, [docs/release.md](../release.md)). Pre-bundled npm package `@hoanghainh/aegis` embeds native binaries for four platforms with a lightweight JS launcher, requiring zero runtime compilation or downloads.
 
 ## Consequences
 
