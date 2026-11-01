@@ -25,6 +25,7 @@ mod registry;
 mod replay;
 mod review;
 mod run;
+mod untrusted;
 
 pub use answer::{FinalAnswer, ReviewReply, Status, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};

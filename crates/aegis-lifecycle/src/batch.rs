@@ -31,6 +31,7 @@ use crate::answer::{FinalAnswer, Status};
 use crate::job::{self, Worktree};
 use crate::publish::publish;
 use crate::run::{Ending, Finish, Kept, gate, gate_run, module_map, sonar_step, work};
+use crate::untrusted::defang;
 use crate::{IssueInput, LifecycleError, Platform, RunConfig};
 
 /// Warnings read from the server for one issue.
@@ -83,8 +84,8 @@ fn first_message(issue: &IssueInput, group: &Group) -> String {
          <title>{}</title>\n</issue>\n\n{}\nA warning that is not a bug needs no \
          reproduction test: leave `repro_test` out of the final answer for it.\n",
         issue.url,
-        issue.title,
-        group.brief()
+        defang(&issue.title),
+        defang(&group.brief())
     )
 }
 

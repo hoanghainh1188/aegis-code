@@ -9,6 +9,7 @@ use aegis_provider::{
 use aegis_router::{Classification, TierModel, parse_classification};
 
 use crate::IssueInput;
+use crate::untrusted::defang;
 
 const CLASSIFY_MAX_TOKENS: u32 = 600;
 const SUMMARY_MAX_TOKENS: u32 = 800;
@@ -76,7 +77,8 @@ pub async fn classify<P: ModelProvider + Sync>(
 ) -> (Classification, Option<Response>) {
     let text = format!(
         "<issue>\n<title>{}</title>\n{}\n</issue>",
-        issue.title, issue.body
+        defang(&issue.title),
+        defang(&issue.body)
     );
     match ask(provider, light, CLASSIFY_SYSTEM, text, CLASSIFY_MAX_TOKENS).await {
         Ok(response) => {
@@ -95,7 +97,7 @@ pub async fn summarize_gate<P: ModelProvider + Sync>(
     light: &TierModel,
     gate_text: &str,
 ) -> (String, Option<Response>) {
-    let text = format!("<check-output>\n{gate_text}\n</check-output>");
+    let text = format!("<check-output>\n{}\n</check-output>", defang(gate_text));
     match ask(provider, light, SUMMARY_SYSTEM, text, SUMMARY_MAX_TOKENS).await {
         Ok(response) => {
             let summary = reply_text(&response);
