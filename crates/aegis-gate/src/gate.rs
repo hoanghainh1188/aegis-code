@@ -29,6 +29,7 @@ use crate::integrity::Snapshot;
 use crate::parts::{self, GatePart};
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 use crate::sandbox::Sandbox;
+use crate::scope::{ScopePolicy, analyze_scope};
 use crate::sonar::{self, SonarStep};
 use crate::{GateError, deps};
 
@@ -86,6 +87,8 @@ pub struct GateRequest<'a> {
     pub sonar: Option<SonarStep>,
     /// The repo's own policy for the profile's `dependencies.audit` (#159).
     pub audit: AuditPolicy,
+    /// Patch scope limit and enforcement policy (#359).
+    pub scope: ScopePolicy,
     /// Directories another profile owns (#71); `profile`, `sandbox`,
     /// `fetch` and `build_cache` are the rest of the repo's. Only the parts
     /// the patch changes are checked, the rest of the repo first.
@@ -505,6 +508,35 @@ impl<'a> Run<'a> {
                     .iter()
                     .any(|c| deps::matches_any(&t.on_change, &c.path))
             })
+    }
+
+    fn scope(&self) -> Result<StepReport, GateError> {
+        let name = StepName::Scope;
+        let violations = analyze_scope(
+            self.req.repo,
+            self.req.base,
+            &self.all_changes,
+            &self.req.scope,
+        )?;
+
+        let detail = violations.summary();
+        if self.req.scope.enforce && !violations.is_empty() {
+            Ok(StepReport {
+                name,
+                status: StepStatus::Failed,
+                duration: Duration::ZERO,
+                detail: format!("patch violates scope limits: {detail}"),
+                logs: vec![],
+            })
+        } else {
+            Ok(StepReport {
+                name,
+                status: StepStatus::Passed,
+                duration: Duration::ZERO,
+                detail,
+                logs: vec![],
+            })
+        }
     }
 
     fn dependencies(&mut self) -> Result<StepReport, GateError> {
@@ -1378,6 +1410,7 @@ impl<'a> Run<'a> {
     fn step(&mut self, name: StepName) -> Result<StepReport, GateError> {
         let gate = &self.part.profile.gate;
         match name {
+            StepName::Scope => self.scope(),
             StepName::Integrity => Ok(self.integrity()),
             StepName::Dependencies => self.dependencies(),
             StepName::Format => self.simple(name, &gate.format.clone()),
@@ -1564,7 +1597,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
             reports[k].push((label, step));
         }
     }
-    let steps = StepName::ALL
+    let steps: Vec<StepReport> = StepName::ALL
         .into_iter()
         .zip(reports)
         .map(|(name, reports)| parts::merge(name, reports))
@@ -1576,12 +1609,17 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         }
     }
     let (tree, base) = (run.tree.clone(), run.base.clone());
+    let scope_warnings = match steps.iter().find(|s| s.name == StepName::Scope) {
+        Some(s) if !s.detail.is_empty() => vec![s.detail.clone()],
+        _ => vec![],
+    };
     Ok(GateReport {
         steps,
         tree,
         base,
         references: run.references,
         parts: touched.iter().map(|&i| dirs[i].clone()).collect(),
+        scope_warnings,
     })
 }
 

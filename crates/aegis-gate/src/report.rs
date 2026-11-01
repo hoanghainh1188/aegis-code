@@ -11,6 +11,7 @@ const MAX_LINE_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepName {
+    Scope,
     Dependencies,
     Format,
     Lint,
@@ -24,7 +25,8 @@ pub enum StepName {
 }
 
 impl StepName {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
+        Self::Scope,
         Self::Dependencies,
         Self::Format,
         Self::Lint,
@@ -38,6 +40,7 @@ impl StepName {
 
     pub fn id(self) -> &'static str {
         match self {
+            Self::Scope => "scope",
             Self::Dependencies => "dependencies",
             Self::Format => "format",
             Self::Lint => "lint",
@@ -139,6 +142,8 @@ pub struct GateReport {
     /// Directories of the parts the gate checked, the rest of the repo
     /// (`""`) first (#71): their coverage reports are this run's.
     pub parts: Vec<String>,
+    /// Scope warnings detected by the scope step (#359) to flag reviewers on the PR.
+    pub scope_warnings: Vec<String>,
 }
 
 impl GateReport {

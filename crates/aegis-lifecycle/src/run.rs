@@ -905,6 +905,7 @@ pub(crate) async fn gate(
             .collect::<Vec<_>>(),
         sonar,
         cfg.repo.audit_policy(),
+        cfg.repo.scope_policy(),
     );
     let report = tokio::task::spawn_blocking(move || {
         let (
@@ -923,6 +924,7 @@ pub(crate) async fn gate(
             reference_groups,
             sonar,
             audit,
+            scope,
         ) = owned;
         let parts = profiles.parts()[1..]
             .iter()
@@ -952,6 +954,7 @@ pub(crate) async fn gate(
             reference_groups,
             sonar,
             audit,
+            scope,
             parts,
         })
     })

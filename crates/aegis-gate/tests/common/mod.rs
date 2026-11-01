@@ -19,7 +19,7 @@ pub struct Repo {
     root: PathBuf,
 }
 
-fn git(dir: &Path, args: &[&str]) {
+pub fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -245,6 +245,7 @@ impl Repo {
             reference_groups: reference_groups.to_vec(),
             sonar: None,
             audit,
+            scope: aegis_gate::ScopePolicy::default(),
             parts: vec![],
         })
         .unwrap()

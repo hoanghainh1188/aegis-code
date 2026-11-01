@@ -20,6 +20,7 @@ mod integrity;
 mod parts;
 mod report;
 mod sandbox;
+mod scope;
 mod sonar;
 
 pub use build_cache::BuildCache;
@@ -31,4 +32,5 @@ pub use gate::{AuditPolicy, FetchStep, GateRequest, ReferenceGroup, Repro, run_g
 pub use parts::GatePart;
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 pub use sandbox::{CLIENT_ENV, Hardening, Limits, Sandbox, WORKDIR};
+pub use scope::{ScopePolicy, ScopeViolations, analyze_scope, is_test_file};
 pub use sonar::{Flow, FlowLocation, SonarIssue, SonarStep, TextRange, open_issues};

@@ -156,12 +156,19 @@ pub struct RepoSettings {
     /// Who may trigger a job by labeling an issue (#358).
     #[serde(default, skip_serializing_if = "is_default_issue_trust")]
     pub issue_trust: IssueTrustConfig,
+    /// Patch scope restrictions for gate and PR review (#359).
+    #[serde(default, skip_serializing_if = "is_default_patch_scope")]
+    pub patch_scope: PatchScopeConfig,
     pub fork: ForkConfig,
 }
 
 impl RepoSettings {
     pub fn issue_trust_policy(&self) -> IssueTrustPolicy {
         self.issue_trust.policy()
+    }
+
+    pub fn patch_scope_policy(&self) -> &PatchScopeConfig {
+        &self.patch_scope
     }
 }
 
@@ -218,6 +225,31 @@ impl IssueTrustConfig {
 
 fn is_default_issue_trust(c: &IssueTrustConfig) -> bool {
     c.policy() == IssueTrustPolicy::Any
+}
+
+/// Patch scope limits and controls (#359).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchScopeConfig {
+    /// Maximum number of changed files permitted before warning or failing.
+    #[serde(default)]
+    pub max_files: Option<usize>,
+    /// Maximum number of distinct directories permitted before warning or failing.
+    #[serde(default)]
+    pub max_dirs: Option<usize>,
+    /// Whether deleting test files is allowed (default: false, disallow deletions).
+    #[serde(default)]
+    pub allow_test_deletion: bool,
+    /// Whether adding test skips/ignores is allowed (default: false, disallow skipping tests).
+    #[serde(default)]
+    pub allow_test_skips: bool,
+    /// Whether scope violations fail the gate (`true`) or only warn & flag reviewer (`false`, default).
+    #[serde(default)]
+    pub enforce: bool,
+}
+
+fn is_default_patch_scope(c: &PatchScopeConfig) -> bool {
+    *c == PatchScopeConfig::default()
 }
 
 /// What registering a repo takes.
@@ -342,6 +374,7 @@ impl Modes {
                 licenses: settings.licenses,
                 ignored_advisories: settings.ignored_advisories,
                 hidden_test: settings.hidden_test,
+                patch_scope: Some(settings.patch_scope),
                 fork: settings.fork,
             },
             identity: mode.identity.clone(),
@@ -778,5 +811,39 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(default_val.issue_trust_policy(), IssueTrustPolicy::Any);
+    }
+
+    #[test]
+    fn patch_scope_config_parses_table_and_defaults() {
+        let custom: RepoSettings = serde_json::from_value(serde_json::json!({
+            "fork": { "owner": "o", "name": "n", "token_env": "T" },
+            "patch_scope": {
+                "max_files": 15,
+                "max_dirs": 3,
+                "allow_test_deletion": true,
+                "allow_test_skips": false,
+                "enforce": true
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            custom.patch_scope_policy(),
+            &PatchScopeConfig {
+                max_files: Some(15),
+                max_dirs: Some(3),
+                allow_test_deletion: true,
+                allow_test_skips: false,
+                enforce: true,
+            }
+        );
+
+        let default_val: RepoSettings = serde_json::from_value(serde_json::json!({
+            "fork": { "owner": "o", "name": "n", "token_env": "T" }
+        }))
+        .unwrap();
+        assert_eq!(
+            default_val.patch_scope_policy(),
+            &PatchScopeConfig::default()
+        );
     }
 }

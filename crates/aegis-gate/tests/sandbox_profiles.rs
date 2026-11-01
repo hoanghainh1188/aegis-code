@@ -155,6 +155,7 @@ fn gate_in_container(
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
     })
     .unwrap()

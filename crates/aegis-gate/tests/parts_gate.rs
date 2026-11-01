@@ -157,6 +157,7 @@ impl Repo {
             reference_groups: vec![],
             sonar,
             audit: AuditPolicy::default(),
+            scope: aegis_gate::ScopePolicy::default(),
             parts: vec![GatePart {
                 dir: "py".into(),
                 profile: &py,
