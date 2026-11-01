@@ -14,6 +14,14 @@ pub const MAX_PERSONAL_TOKENS: i64 = 10;
 /// The longest a personal token lives, in days.
 pub const MAX_TOKEN_DAYS: u32 = 90;
 
+/// A service's live API token, as its page lists it (#371); never the
+/// token itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceToken {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+}
+
 /// A person's live token, as their page lists it; never the token itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersonalToken {
@@ -131,13 +139,24 @@ impl Store {
         id: i64,
         actor: &Actor,
     ) -> Result<bool, StoreError> {
+        self.revoke_token(person, id, actor).await
+    }
+
+    /// Revokes token `id` of `user`, a person's or a service's (#371);
+    /// `false` when they have no such live token.
+    pub async fn revoke_token(
+        &self,
+        user: UserId,
+        id: i64,
+        actor: &Actor,
+    ) -> Result<bool, StoreError> {
         let mut tx = self.pool.begin().await?;
         let work = async {
             let revoked = sqlx::query!(
                 "UPDATE api_tokens SET revoked_at = now()
                  WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL",
                 id,
-                person.0,
+                user.0,
             )
             .execute(&mut *tx)
             .await?
@@ -150,5 +169,19 @@ impl Store {
         }
         .await;
         tx::commit(tx, work).await
+    }
+
+    /// A service's live API tokens (#371), newest first: their IDs and
+    /// when they were made, never their hash.
+    pub async fn service_tokens(&self, service: UserId) -> Result<Vec<ServiceToken>, StoreError> {
+        Ok(sqlx::query_as!(
+            ServiceToken,
+            "SELECT id, created_at FROM api_tokens
+             WHERE user_id = $1 AND revoked_at IS NULL AND label IS NULL
+             ORDER BY id DESC LIMIT 100",
+            service.0,
+        )
+        .fetch_all(&self.pool)
+        .await?)
     }
 }

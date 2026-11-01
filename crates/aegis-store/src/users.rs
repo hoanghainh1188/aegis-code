@@ -587,6 +587,38 @@ impl Store {
         tx::commit(tx, work).await
     }
 
+    /// Registers the service `name` (#371), its roles and tokens given
+    /// after; `Conflict` when it is there already.
+    pub async fn create_service(&self, name: &str, actor: &Actor) -> Result<User, StoreError> {
+        let name = user_name(UserKind::Service, name)?;
+        if name.contains('@') {
+            return Err(StoreError::Invalid {
+                field: "name",
+                message: format!("`{name}`: a service's name has no `@`; that is a person"),
+            });
+        }
+        let mut tx = self.pool.begin().await?;
+        let work = async {
+            let user: User = sqlx::query_as!(
+                UserRow,
+                "INSERT INTO users (kind, name) VALUES ('service', $1)
+                 ON CONFLICT (kind, name) DO NOTHING
+                 RETURNING id, kind, name, is_admin",
+                name,
+            )
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?
+            .ok_or_else(|| StoreError::Conflict(format!("there is a service `{name}` already")))?
+            .try_into()?;
+            let detail = serde_json::json!({ "user": user.name, "kind": "service" });
+            audit::record(&mut tx, actor, "user.create", Target::default(), detail).await?;
+            Ok::<_, StoreError>(user)
+        }
+        .await;
+        tx::commit(tx, work).await
+    }
+
     /// Adds an API token, by its hash, to the service `service`, created
     /// when missing.
     pub async fn create_token(

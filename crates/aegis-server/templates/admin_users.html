@@ -33,6 +33,18 @@
   {% if let Some(n) = next %}<p class="pager"><a href="{{ n }}">Older →</a></p>{% endif %}
 </section>
 
+<section aria-labelledby="new-service-heading" class="band">
+  <h2 id="new-service-heading">Add a service</h2>
+  <p class="note">CI or a connector that calls the API: name it, make it a token on its page, and give it roles on the repos' pages.</p>
+  <form method="post" action="/admin/services" class="inline">
+    {% include "form_guard.html" %}
+    <label>Name
+      <input type="text" name="name" required maxlength="320" placeholder="ci-bot" pattern="[^@]+" autocomplete="off">
+    </label>
+    <button type="submit">Add service</button>
+  </form>
+</section>
+
 <section aria-labelledby="new-admin-heading" class="band">
   <h2 id="new-admin-heading">Make someone an admin</h2>
   <p class="note">An admin may do everything in every repo, these pages included. A person may be named before they sign in for the first time; a name without <code>@</code> is a service.</p>

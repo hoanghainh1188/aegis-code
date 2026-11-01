@@ -126,8 +126,10 @@ async fn an_admin_sees_people_and_services_and_their_roles() {
         assert!(list.body.contains(text), "{text}: {}", list.body);
     }
     let found = get(&app, &admin, "/admin/users?q=DEV").await;
+    let start = found.body.find("<tbody>").unwrap();
+    let rows = &found.body[start..start + found.body[start..].find("</tbody>").unwrap()];
     assert!(
-        found.body.contains("dev@x.test") && !found.body.contains("ci-bot"),
+        rows.contains("dev@x.test") && !rows.contains("ci-bot"),
         "{}",
         found.body
     );

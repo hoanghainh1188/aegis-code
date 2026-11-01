@@ -146,6 +146,15 @@ struct UserPage<'a> {
     notice: Option<&'static str>,
     /// A person's sessions that have not expired (#370).
     sessions: Vec<SessionRow>,
+    /// A service's live API tokens (#371).
+    tokens: Vec<TokenRow>,
+    /// A token just made, shown this once.
+    new_token: Option<String>,
+}
+
+struct TokenRow {
+    id: i64,
+    created_at: String,
 }
 
 struct SessionRow {
@@ -159,7 +168,7 @@ pub struct UserQuery {
     done: String,
 }
 
-async fn summary_of(store: &Store, id: i64) -> Result<UserSummary, WebError> {
+pub(super) async fn summary_of(store: &Store, id: i64) -> Result<UserSummary, WebError> {
     store
         .user_summary(UserId(id))
         .await?
@@ -175,8 +184,34 @@ pub async fn detail(
     Query(q): Query<UserQuery>,
 ) -> WebResult {
     admin_only(&access)?;
-    let user = summary_of(&store, id).await?;
-    let repos = all_repos(&store).await?;
+    // A fixed message per word, never the request's own text.
+    let notice = match q.done.as_str() {
+        "granted" => Some("Now an admin; it applies from their next request."),
+        "revoked" => Some("No longer an admin; it applies from their next request."),
+        "signed_out" => Some("Signed out everywhere: their sessions are ended."),
+        "service_added" => {
+            Some("Service added: make it a token, and give it roles on the repos' pages.")
+        }
+        "token_revoked" => Some("Token revoked: it no longer works."),
+        "tokens_revoked" => Some("Every token of this service is revoked."),
+        _ => None,
+    };
+    user_page(&store, &nonce, &me, &access, id, notice, None).await
+}
+
+/// User `id`'s page, with `new_token` shown once when one was just made
+/// (#371).
+pub(super) async fn user_page(
+    store: &Store,
+    nonce: &Nonce,
+    me: &Me,
+    access: &Access,
+    id: i64,
+    notice: Option<&'static str>,
+    new_token: Option<String>,
+) -> WebResult {
+    let user = summary_of(store, id).await?;
+    let repos = all_repos(store).await?;
     let slugs: HashMap<RepoId, &str> = repos.iter().map(|(id, r)| (*id, r.slug.as_str())).collect();
     let roles = store
         .repo_roles(user.user.id)
@@ -190,13 +225,6 @@ pub async fn detail(
             role: role.as_str(),
         })
         .collect();
-    // A fixed message per word, never the request's own text.
-    let notice = match q.done.as_str() {
-        "granted" => Some("Now an admin; it applies from their next request."),
-        "revoked" => Some("No longer an admin; it applies from their next request."),
-        "signed_out" => Some("Signed out everywhere: their sessions are ended."),
-        _ => None,
-    };
     let at = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M").to_string();
     let sessions = store
         .live_sessions(user.user.id)
@@ -207,9 +235,22 @@ pub async fn detail(
             expires_at: at(s.expires_at),
         })
         .collect();
+    let tokens = if user.user.kind == UserKind::Service {
+        store
+            .service_tokens(user.user.id)
+            .await?
+            .into_iter()
+            .map(|t| TokenRow {
+                id: t.id,
+                created_at: at(t.created_at),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     render(&UserPage {
         nonce: nonce.as_str(),
-        me: &me,
+        me,
         is_self: access.actor.user == Some(user.user.id),
         audit_link: format!("/admin/audit?actor={}", encoded(&user.user.name)),
         created_at: user.created_at.format("%Y-%m-%d %H:%M").to_string(),
@@ -217,6 +258,8 @@ pub async fn detail(
         roles,
         notice,
         sessions,
+        tokens,
+        new_token,
     })
 }
 
