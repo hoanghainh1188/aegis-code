@@ -68,6 +68,15 @@ async fn a_paused_repos_jobs_wait_and_run_again_once_resumed() {
         ("admin@x.test", Some("runs wild"))
     );
     assert!(s.repo_pause(b).await.unwrap().is_none());
+    // Its queued job says why at once, before any claim looks.
+    let said = s
+        .job(queued.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .reason
+        .unwrap_or_default();
+    assert!(said.starts_with("waiting: the repo is paused"), "{said}");
     assert_eq!(s.paused_repos().await.unwrap().len(), 1);
     // Twice is refused: it says it is paused already.
     assert!(matches!(

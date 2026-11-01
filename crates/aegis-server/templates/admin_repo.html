@@ -16,7 +16,7 @@
 </section>
 
 <section aria-labelledby="pause-heading" class="band">
-  <h2 id="pause-heading">Jobs</h2>
+  <h2 id="pause-heading">Pause or resume</h2>
   {% if let Some(p) = pause %}
   <p class="notice bad"><span class="check fail">Paused</span> by {{ p.by }} at {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}. Queued jobs wait and new ones are recorded; none runs until the repo is resumed.</p>
   <form method="post" action="/admin/repos/{{ repo.id.0 }}/resume" class="inline">

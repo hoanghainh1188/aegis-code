@@ -181,6 +181,15 @@ impl Store {
                 .await?
                 .rows_affected()
             } else {
+                // Said at once, not only when a claim next looks (#328
+                // drops what a claim that takes nothing wrote).
+                sqlx::query!(
+                    "UPDATE jobs SET reason = $2 WHERE repo_id = $1 AND status = 'queued'",
+                    repo.0,
+                    pause.waiting_reason(),
+                )
+                .execute(&mut *tx)
+                .await?;
                 0
             };
             let target = Target {

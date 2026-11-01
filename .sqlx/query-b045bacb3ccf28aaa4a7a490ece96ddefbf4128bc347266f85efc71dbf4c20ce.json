@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET reason = $2 WHERE repo_id = $1 AND status = 'queued'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b045bacb3ccf28aaa4a7a490ece96ddefbf4128bc347266f85efc71dbf4c20ce"
+}
