@@ -56,6 +56,7 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/admin/users", get(users::list).post(users::add_admin))
         .route("/admin/users/{id}", get(users::detail))
         .route("/admin/users/{id}/admin", post(users::set_admin))
+        .route("/admin/users/{id}/sign-out", post(users::sign_out))
         .route("/admin/repos", get(admin::repos).post(repo_admin::create))
         .route("/admin/repos/new", get(repo_admin::new_form))
         .route("/admin/repos/{id}", get(admin::repo))

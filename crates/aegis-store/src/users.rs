@@ -117,6 +117,29 @@ async fn ensure_user(
     .try_into()
 }
 
+/// Ends every session of `user` on `conn`, audited as `session.revoke`.
+async fn end_sessions_in(
+    conn: &mut PgConnection,
+    user: &User,
+    actor: &Actor,
+) -> Result<u64, StoreError> {
+    let ended = sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user.id.0)
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+    let detail = serde_json::json!({ "user": user.name, "ended": ended });
+    audit::record(conn, actor, "session.revoke", Target::default(), detail).await?;
+    Ok(ended)
+}
+
+/// A session the admin sees (#370): when it began and when it ends, never
+/// its token or hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSession {
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
 impl Store {
     /// The person the SSO vouched for: found by `subject`, else by
     /// `email` when that row has no subject yet (roles granted before the
@@ -345,16 +368,66 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         let work = async {
             let user = ensure_user(&mut tx, kind, name, false).await?;
-            let ended = sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user.id.0)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected();
-            let detail = serde_json::json!({ "user": user.name, "ended": ended });
-            audit::record(&mut tx, actor, "session.revoke", Target::default(), detail).await?;
-            Ok::<_, StoreError>(ended)
+            end_sessions_in(&mut tx, &user, actor).await
         }
         .await;
         tx::commit(tx, work).await
+    }
+
+    /// Signs `user` out everywhere (#370): every session ended, as
+    /// [`Store::end_sessions_of`] does, and their personal tokens revoked
+    /// too when `tokens`, in one transaction. The sessions and the tokens
+    /// ended.
+    pub async fn sign_out_everywhere(
+        &self,
+        user: UserId,
+        tokens: bool,
+        actor: &Actor,
+    ) -> Result<(u64, u64), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let work = async {
+            let user: User = sqlx::query_as!(
+                UserRow,
+                "SELECT id, kind, name, is_admin FROM users WHERE id = $1",
+                user.0,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("user {}", user.0)))?
+            .try_into()?;
+            let sessions = end_sessions_in(&mut tx, &user, actor).await?;
+            let revoked = if tokens {
+                let revoked = sqlx::query!(
+                    "UPDATE api_tokens SET revoked_at = now()
+                     WHERE user_id = $1 AND revoked_at IS NULL",
+                    user.id.0,
+                )
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+                let detail = serde_json::json!({ "user": user.name, "revoked": revoked });
+                audit::record(&mut tx, actor, "token.revoke", Target::default(), detail).await?;
+                revoked
+            } else {
+                0
+            };
+            Ok::<_, StoreError>((sessions, revoked))
+        }
+        .await;
+        tx::commit(tx, work).await
+    }
+
+    /// `user`'s sessions that have not expired, the latest first.
+    pub async fn live_sessions(&self, user: UserId) -> Result<Vec<LiveSession>, StoreError> {
+        Ok(sqlx::query_as!(
+            LiveSession,
+            "SELECT created_at, expires_at FROM sessions
+             WHERE user_id = $1 AND expires_at > now()
+             ORDER BY created_at DESC LIMIT 100",
+            user.0,
+        )
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// The user of a live API token: a service's, or a person's own token

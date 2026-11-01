@@ -57,7 +57,7 @@ pub use types::{
     UserKind, WebhookOutcome, WebhookSource,
 };
 pub use user_list::UserSummary;
-pub use users::{PendingLogin, RepoMember, Session, TokenHash};
+pub use users::{LiveSession, PendingLogin, RepoMember, Session, TokenHash};
 pub use webhook_log::{BadSignatures, NewWebhookEvent, WebhookEvent};
 
 /// The schema's migrations, expand/contract (`docs/runbook`): an older
