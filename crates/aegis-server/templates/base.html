@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0}'>
 <title>{% block title %}aegis{% endblock %} · aegis</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="{{ crate::web::css_href() }}">
 <script src="/static/htmx-2.0.11.min.js" nonce="{{ nonce }}" defer></script>
 </head>
 <body>
