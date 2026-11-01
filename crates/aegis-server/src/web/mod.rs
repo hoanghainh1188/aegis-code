@@ -18,6 +18,7 @@ mod repo_admin;
 mod repo_form;
 mod review;
 mod tokens;
+mod users;
 mod view;
 
 use aegis_store::{Job, JobId, RepoRole, Store, StoreError};
@@ -52,6 +53,9 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/jobs/{id}/retry", post(actions::retry))
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
         .route("/admin/audit", get(audit::list))
+        .route("/admin/users", get(users::list).post(users::add_admin))
+        .route("/admin/users/{id}", get(users::detail))
+        .route("/admin/users/{id}/admin", post(users::set_admin))
         .route("/admin/repos", get(admin::repos).post(repo_admin::create))
         .route("/admin/repos/new", get(repo_admin::new_form))
         .route("/admin/repos/{id}", get(admin::repo))

@@ -26,6 +26,7 @@ mod stats;
 mod tokens;
 mod tx;
 mod types;
+mod user_list;
 mod users;
 mod webhook_log;
 
@@ -55,6 +56,7 @@ pub use types::{
     NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, User, UserId,
     UserKind, WebhookOutcome, WebhookSource,
 };
+pub use user_list::UserSummary;
 pub use users::{PendingLogin, RepoMember, Session, TokenHash};
 pub use webhook_log::{BadSignatures, NewWebhookEvent, WebhookEvent};
 

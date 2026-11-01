@@ -471,6 +471,8 @@ impl Store {
     }
 
     /// Makes `kind`/`name` an admin of every repo, or no longer one.
+    /// `Conflict` when that would leave no admin (#369): someone must be
+    /// able to give rights from the pages.
     pub async fn set_admin(
         &self,
         kind: UserKind,
@@ -481,6 +483,18 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         let work = async {
             let user = ensure_user(&mut tx, kind, name, admin).await?;
+            if !admin && user.is_admin {
+                // Locked, so two admins cannot take each other's rights at once.
+                let admins = sqlx::query_scalar!("SELECT id FROM users WHERE is_admin FOR UPDATE")
+                    .fetch_all(&mut *tx)
+                    .await?;
+                if admins.len() <= 1 {
+                    return Err(StoreError::Conflict(format!(
+                        "{} is the last admin; make someone else an admin first",
+                        user.name
+                    )));
+                }
+            }
             sqlx::query!(
                 "UPDATE users SET is_admin = $2 WHERE id = $1",
                 user.id.0,
