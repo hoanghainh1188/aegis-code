@@ -37,9 +37,9 @@ pub use lockfile::{AllowList, read_lockfile};
 pub use parts::{ProfilePart, RepoProfiles, check_dir, deepest, in_dir, join_dir, part_label};
 pub use policy::{check_advisory, check_license, default_licenses, deny_config, osv_config};
 pub use profile::{
-    Coverage, CoverageFormat, Dependencies, DependencyTree, Detect, FileMatch, GateSteps,
-    LspOptions, Profile, Profiles, Sandbox, Sonar, SonarScanner, TestOutput, find_reports,
-    glob_match, path_glob,
+    ALWAYS_PROTECTED, Coverage, CoverageFormat, Dependencies, DependencyTree, Detect, FileMatch,
+    GateSteps, LspOptions, Profile, Profiles, Sandbox, Sonar, SonarScanner, TestOutput,
+    find_reports, glob_match, path_glob,
 };
 pub use resolve::{
     CustomHarness, GateOverrides, GatePlan, ProfileOverrides, ReferenceUpdate, ResolvedProfile,
