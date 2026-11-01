@@ -67,7 +67,7 @@ const GITHUB: Forge = Forge {
         "pull_request_review_comment",
         "issue_comment",
     ],
-    hook_right: "the `admin:repo_hook` scope (fine-grained: Webhooks read and write), or admin of the repository",
+    hook_right: "the admin:repo_hook scope (fine-grained: Webhooks read and write), or admin of the repository",
 };
 
 const GITLAB: Forge = Forge {
@@ -78,7 +78,7 @@ const GITLAB: Forge = Forge {
     fork_events: &["Comments"],
     repo_hook_events: &["issues_events", "pipeline_events"],
     fork_hook_events: &["note_events"],
-    hook_right: "the Maintainer role on the project and the `api` scope",
+    hook_right: "the Maintainer role on the project and the api scope",
 };
 
 fn forge_of(platform: ForkPlatform) -> &'static Forge {
