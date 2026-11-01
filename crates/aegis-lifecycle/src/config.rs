@@ -179,6 +179,9 @@ pub struct RepoConfig {
     /// the tests as separate arguments, `{tests_regex}` one `^(a|b)$`.
     #[serde(default)]
     pub hidden_test: Option<Vec<String>>,
+    /// Patch scope limits and controls (#359).
+    #[serde(default)]
+    pub patch_scope: Option<crate::registry::PatchScopeConfig>,
     pub fork: ForkConfig,
 }
 
@@ -248,6 +251,18 @@ impl RepoConfig {
         aegis_gate::AuditPolicy {
             licenses: self.licenses.clone(),
             ignored_advisories: self.ignored_advisories.clone(),
+        }
+    }
+
+    /// The repo's policy for patch scope (#359).
+    pub fn scope_policy(&self) -> aegis_gate::ScopePolicy {
+        let p = self.patch_scope.as_ref().cloned().unwrap_or_default();
+        aegis_gate::ScopePolicy {
+            max_files: p.max_files,
+            max_dirs: p.max_dirs,
+            allow_test_deletion: p.allow_test_deletion,
+            allow_test_skips: p.allow_test_skips,
+            enforce: p.enforce,
         }
     }
 

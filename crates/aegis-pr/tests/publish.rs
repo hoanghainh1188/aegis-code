@@ -109,6 +109,7 @@ fn gated(scratch: &Scratch, test_command: &str) -> (PathBuf, PathBuf, GateReport
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
     })
     .unwrap();

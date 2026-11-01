@@ -64,6 +64,7 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
     assert_eq!(
         statuses(&report),
         [
+            (StepName::Scope, StepStatus::Passed),
             (
                 StepName::Dependencies,
                 StepStatus::Skipped(Skip::NoDependencyChange)
@@ -83,10 +84,10 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
     // The base checkout is gone and the patch is untouched.
     assert!(!repo.work().join("base").exists());
     assert!(repo.dir().join("tests/fourth_item.rs").exists());
+    let s = report.to_string();
     assert!(
-        report
-            .to_string()
-            .starts_with("Gate passed.\n  dependencies skipped")
+        s.starts_with("Gate passed.\n  scope        passed (0s)\n  dependencies skipped"),
+        "{s}"
     );
 }
 
@@ -255,7 +256,7 @@ fn unformatted_code_stops_the_gate_at_format() {
     );
 
     let report = repo.gate(&profile(Language::Rust, FAKE_COVERAGE), None);
-    let after: Vec<StepStatus> = report.steps[2..].iter().map(|s| s.status.clone()).collect();
+    let after: Vec<StepStatus> = report.steps[3..].iter().map(|s| s.status.clone()).collect();
     assert_eq!(
         report.step(StepName::Format).unwrap().status,
         StepStatus::Failed
@@ -406,6 +407,7 @@ fn work_dir_inside_the_repo_is_refused() {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
     })
     .unwrap_err();
@@ -593,6 +595,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             reference_groups: vec![],
             sonar: None,
             audit: Default::default(),
+            scope: aegis_gate::ScopePolicy::default(),
             parts: vec![],
         })
     };
@@ -1069,5 +1072,199 @@ path = "TestResults/*/coverage.opencover.xml"
                 .contains("TestResults/*/coverage.opencover.xml`"),
         "{}",
         step.detail
+    );
+}
+
+#[test]
+fn scope_enforcement_blocks_deleted_test_files_when_configured() {
+    let rust = profile(
+        Language::Rust,
+        "[gate]\nformat = false\nlint = false\nrepro_test = false\ntest = [\"true\"]\ncoverage = false\n",
+    );
+    // Base commit with a test file
+    let repo = Repo::new("rust", &[]);
+    repo.write("tests/my_test.rs", "#[test]\nfn t() {}\n");
+    // Commit to base
+    repo.commit_base("add test to base");
+    let dir = repo.dir();
+
+    // Now delete the test file in the working tree
+    std::fs::remove_file(repo.dir().join("tests/my_test.rs")).unwrap();
+
+    let allowed = Default::default();
+    let work = repo.work();
+
+    // 1. When enforce = false, passes with warning
+    let report = aegis_gate::run_gate(&aegis_gate::GateRequest {
+        repo: &dir,
+        base: "main",
+        profile: &rust,
+        allowed: &allowed,
+        repro: None,
+        work_dir: &work.join("warn"),
+        env: vec![],
+        step_timeout: Duration::from_secs(10),
+        cancel: CancelToken::new(),
+        sandbox: None,
+        fetch: None,
+        build_cache: None,
+        allowed_tests: vec![],
+        reference_groups: vec![],
+        sonar: None,
+        audit: Default::default(),
+        scope: aegis_gate::ScopePolicy {
+            allow_test_deletion: false,
+            enforce: false,
+            ..Default::default()
+        },
+        parts: vec![],
+    })
+    .unwrap();
+    let scope_step = report.step(StepName::Scope).unwrap();
+    assert_eq!(scope_step.status, StepStatus::Passed);
+    assert!(
+        scope_step
+            .detail
+            .contains("deleted test file `tests/my_test.rs`"),
+        "{:?}",
+        scope_step.detail
+    );
+    assert!(!report.scope_warnings.is_empty());
+
+    // 2. When enforce = true, fails the gate
+    let report = aegis_gate::run_gate(&aegis_gate::GateRequest {
+        repo: &dir,
+        base: "main",
+        profile: &rust,
+        allowed: &allowed,
+        repro: None,
+        work_dir: &work.join("fail"),
+        env: vec![],
+        step_timeout: Duration::from_secs(10),
+        cancel: CancelToken::new(),
+        sandbox: None,
+        fetch: None,
+        build_cache: None,
+        allowed_tests: vec![],
+        reference_groups: vec![],
+        sonar: None,
+        audit: Default::default(),
+        scope: aegis_gate::ScopePolicy {
+            allow_test_deletion: false,
+            enforce: true,
+            ..Default::default()
+        },
+        parts: vec![],
+    })
+    .unwrap();
+    let scope_step = report.step(StepName::Scope).unwrap();
+    assert_eq!(scope_step.status, StepStatus::Failed);
+    assert!(
+        scope_step
+            .detail
+            .contains("deleted test file `tests/my_test.rs`"),
+        "{:?}",
+        scope_step.detail
+    );
+}
+
+#[test]
+fn scope_enforcement_blocks_added_test_skips_when_configured() {
+    let rust = profile(
+        Language::Rust,
+        "[gate]\nformat = false\nlint = false\nrepro_test = false\ntest = [\"true\"]\ncoverage = false\n",
+    );
+    let repo = Repo::new("rust", &[]);
+    repo.write("tests/my_test.rs", "#[test]\nfn t() {}\n");
+    repo.commit_base("add test to base");
+    let dir = repo.dir();
+
+    // Now edit to add #[ignore]
+    repo.replace("tests/my_test.rs", "#[test]", "#[test]\n#[ignore]");
+
+    let allowed = Default::default();
+    let work = repo.work();
+
+    let report = aegis_gate::run_gate(&aegis_gate::GateRequest {
+        repo: &dir,
+        base: "main",
+        profile: &rust,
+        allowed: &allowed,
+        repro: None,
+        work_dir: &work,
+        env: vec![],
+        step_timeout: Duration::from_secs(10),
+        cancel: CancelToken::new(),
+        sandbox: None,
+        fetch: None,
+        build_cache: None,
+        allowed_tests: vec![],
+        reference_groups: vec![],
+        sonar: None,
+        audit: Default::default(),
+        scope: aegis_gate::ScopePolicy {
+            allow_test_skips: false,
+            enforce: true,
+            ..Default::default()
+        },
+        parts: vec![],
+    })
+    .unwrap();
+    let scope_step = report.step(StepName::Scope).unwrap();
+    assert_eq!(scope_step.status, StepStatus::Failed);
+    assert!(
+        scope_step
+            .detail
+            .contains("added test skip/ignore pattern `#[ignore`"),
+        "{:?}",
+        scope_step.detail
+    );
+}
+
+#[test]
+fn scope_enforcement_blocks_excessive_file_count() {
+    let rust = profile(
+        Language::Rust,
+        "[gate]\nformat = false\nlint = false\nrepro_test = false\ntest = [\"true\"]\ncoverage = false\n",
+    );
+    let repo = Repo::new("rust", &[]);
+    repo.write("src/extra1.rs", "pub fn e1() {}\n");
+    repo.write("src/extra2.rs", "pub fn e2() {}\n");
+
+    let allowed = Default::default();
+    let dir = repo.dir();
+    let work = repo.work();
+
+    let report = aegis_gate::run_gate(&aegis_gate::GateRequest {
+        repo: &dir,
+        base: "main",
+        profile: &rust,
+        allowed: &allowed,
+        repro: None,
+        work_dir: &work,
+        env: vec![],
+        step_timeout: Duration::from_secs(10),
+        cancel: CancelToken::new(),
+        sandbox: None,
+        fetch: None,
+        build_cache: None,
+        allowed_tests: vec![],
+        reference_groups: vec![],
+        sonar: None,
+        audit: Default::default(),
+        scope: aegis_gate::ScopePolicy {
+            max_files: Some(1),
+            enforce: true,
+            ..Default::default()
+        },
+        parts: vec![],
+    })
+    .unwrap();
+    let scope_step = report.step(StepName::Scope).unwrap();
+    assert_eq!(scope_step.status, StepStatus::Failed);
+    assert!(
+        scope_step.detail.contains("exceeded limit (1)"),
+        "{:?}",
+        scope_step.detail
     );
 }

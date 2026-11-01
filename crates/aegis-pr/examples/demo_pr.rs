@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
     })?;
     println!("{report}");

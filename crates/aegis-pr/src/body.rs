@@ -139,10 +139,12 @@ fn mark(step: &aegis_gate::StepReport, coverage: Option<f64>) -> Option<String> 
     let id = step.name.id();
     Some(match (&step.status, step.name) {
         (StepStatus::Skipped(Skip::NotInProfile | Skip::NoDependencyChange), _) => return None,
+        (StepStatus::Passed, StepName::Scope) if step.detail.is_empty() => return None,
         (StepStatus::Passed, StepName::Coverage) => match coverage {
             Some(p) => format!("coverage {p:.1}%"),
             None => "coverage ✔".to_owned(),
         },
+        (StepStatus::Passed, StepName::Scope) => "scope ⚠".to_owned(),
         (StepStatus::Passed, _) => format!("{id} ✔"),
         (StepStatus::Failed, _) => format!("{id} ✘"),
         (StepStatus::Skipped(_), _) => format!("{id} –"),
@@ -230,6 +232,13 @@ pub fn render(pr: &PrContent<'_>) -> String {
             spans(&updated.tests)
         );
     }
+    if !pr.gate.scope_warnings.is_empty() {
+        out.push_str("\n> [!WARNING]\n> **Cảnh báo phạm vi patch (Patch Scope):**\n");
+        for w in &pr.gate.scope_warnings {
+            let _ = writeln!(out, "> - {}", inert(w));
+        }
+        out.push_str("> Người review cần kiểm tra kỹ trước khi duyệt merge.\n");
+    }
     let models: Vec<String> = pr.cost.models.iter().map(|m| inert(m)).collect();
     let _ = write!(
         out,
@@ -247,6 +256,10 @@ pub fn render(pr: &PrContent<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use aegis_gate::StepReport;
+
     use super::*;
 
     #[test]
@@ -307,6 +320,7 @@ mod tests {
                 files: vec!["tests/ref/html/hashes.txt".into()],
             },
             parts: vec![String::new()],
+            scope_warnings: vec![],
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
@@ -339,5 +353,60 @@ mod tests {
         );
         assert!(body.contains("`math-99`, … và 1 khác\n"), "{body}");
         assert!(!body.contains("math-100"), "{body}");
+    }
+
+    #[test]
+    fn scope_warnings_are_rendered_with_callout() {
+        let gate = GateReport {
+            steps: vec![
+                StepReport {
+                    name: StepName::Scope,
+                    status: StepStatus::Passed,
+                    duration: Duration::ZERO,
+                    detail: "changed files (25) exceeded limit (20)".into(),
+                    logs: vec![],
+                },
+                StepReport {
+                    name: StepName::Test,
+                    status: StepStatus::Passed,
+                    duration: Duration::ZERO,
+                    detail: String::new(),
+                    logs: vec![],
+                },
+            ],
+            tree: "t".into(),
+            base: "b".into(),
+            references: aegis_gate::UpdatedReferences::default(),
+            parts: vec![String::new()],
+            scope_warnings: vec![
+                "patch changed 25 files, exceeding limit of 20".into(),
+                "deleted test file `tests/foo.rs` is not allowed by patch scope policy".into(),
+            ],
+        };
+        let body = render(&PrContent {
+            issue_url: "https://github.com/o/r/issues/1".into(),
+            cause: "c".into(),
+            changes: vec![],
+            repro_test: None,
+            allowed_test_changes: vec![],
+            allowed_reference_changes: vec![],
+            gate: &gate,
+            coverage_percent: None,
+            cost: Cost {
+                models: vec![],
+                model_calls: 0,
+                usd: 0.0,
+            },
+        });
+        assert!(body.contains("> [!WARNING]"), "{body}");
+        assert!(
+            body.contains("> **Cảnh báo phạm vi patch (Patch Scope):**"),
+            "{body}"
+        );
+        assert!(
+            body.contains("> - patch changed 25 files, exceeding limit of 20"),
+            "{body}"
+        );
+        assert!(body.contains("scope ⚠"), "{body}");
     }
 }

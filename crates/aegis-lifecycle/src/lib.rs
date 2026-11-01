@@ -38,7 +38,8 @@ pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};
 pub use publish::fork_forge_of;
 pub use registry::{
-    IssueTrustConfig, IssueTrustPolicy, ModeConfig, Modes, RepoRun, RepoSettings, RepoSpec,
+    IssueTrustConfig, IssueTrustPolicy, ModeConfig, Modes, PatchScopeConfig, RepoRun, RepoSettings,
+    RepoSpec,
 };
 pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;
