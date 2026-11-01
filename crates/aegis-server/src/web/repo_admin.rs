@@ -4,7 +4,9 @@
 //! the background; the repo's page says whether it is being made, is
 //! there, or failed, with the end of git's output.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use aegis_lang::Language;
 use aegis_lifecycle::{LifecycleError, Modes};
@@ -34,6 +36,9 @@ pub struct RepoAdmin {
     /// `AEGIS_GITHUB_API`, `AEGIS_GITLAB_API`, as the webhooks use them.
     pub(super) github_api: String,
     pub(super) gitlab_api: String,
+    /// When each mode's provider was last checked (#367), to check at
+    /// most once a minute: each check costs a little.
+    pub(super) ai_checks: Arc<std::sync::Mutex<HashMap<&'static str, Instant>>>,
 }
 
 impl RepoAdmin {
@@ -51,7 +56,13 @@ impl RepoAdmin {
                 crate::webhook::GITLAB_API_ENV,
                 crate::webhook::DEFAULT_GITLAB_API,
             ),
+            ai_checks: Arc::default(),
         }
+    }
+
+    /// The modes' configuration the server loaded.
+    pub(super) fn modes(&self) -> &Modes {
+        &self.modes
     }
 
     /// With these API roots for the repos' own projects (tests).

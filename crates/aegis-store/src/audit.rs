@@ -181,6 +181,18 @@ impl Store {
         Ok(PageOf::new(entries, page, |e| e.id))
     }
 
+    /// Records `action` by `actor` on its own, for what changes nothing
+    /// here (#367: a check against a model provider).
+    pub async fn audit_event(
+        &self,
+        actor: &Actor,
+        action: &str,
+        detail: serde_json::Value,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.pool.acquire().await?;
+        record(&mut conn, actor, action, Target::default(), detail).await
+    }
+
     /// Every action the log has, in order: what the page offers to filter by.
     pub async fn audit_actions(&self) -> Result<Vec<String>, StoreError> {
         Ok(
