@@ -88,6 +88,16 @@ jobs:
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      # The test build, the profiles' toolchains and the cache can fill
+      # the runner's disk (#344). Drop preinstalled SDKs this job does
+      # not use.
+      - if: needs.changes.outputs.code == 'true'
+        name: Free disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift
+          df -h /
       - if: needs.changes.outputs.code == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
