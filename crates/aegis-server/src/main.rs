@@ -231,7 +231,10 @@ async fn run(args: Args) -> Result<(), String> {
         // The admin pages add and change repos against the modes (#330); an
         // API that cannot load them still serves everything else.
         let repos = match modes(&config) {
-            Ok(modes) => Some(aegis_server::web::RepoAdmin::new(modes, secrets.clone())),
+            Ok(modes) => Some(
+                aegis_server::web::RepoAdmin::new(modes, secrets.clone())
+                    .with_webhook_making(config.web.make_webhooks),
+            ),
             Err(e) => {
                 tracing::warn!(error = %e, "repos cannot be added or changed from the pages");
                 None

@@ -67,9 +67,23 @@ impl GitLab {
             });
         }
         let api = checked_api(api)?;
+        // `PRIVATE-TOKEN` is not a header a redirect drops, as it does
+        // `Authorization`: a redirect is followed on the same host only.
+        let same_host = reqwest::redirect::Policy::custom(|attempt| {
+            let first = attempt
+                .previous()
+                .first()
+                .and_then(|u| u.host_str().map(str::to_owned));
+            if attempt.previous().len() < 10 && first.as_deref() == attempt.url().host_str() {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        });
         let client = reqwest::Client::builder()
             .user_agent("aegis-code")
             .timeout(HTTP_TIMEOUT)
+            .redirect(same_host)
             .build()
             .map_err(|e| PrError::GitLab {
                 status: 0,

@@ -134,6 +134,10 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
             "/admin/repos/{id}/connection",
             get(connection::show).post(connection::check),
         )
+        .route(
+            "/admin/repos/{id}/connection/webhooks",
+            post(connection::make_webhooks),
+        )
         .route("/admin/repos/{id}/pause", post(admin::pause))
         .route("/admin/repos/{id}/resume", post(admin::resume))
         .route("/admin/repos/{id}/roles", post(admin::grant))

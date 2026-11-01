@@ -4,7 +4,8 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::{JobId, RepoId, Store, StoreError, WebhookOutcome, WebhookSource};
+use crate::audit::{self, Target};
+use crate::{Actor, JobId, RepoId, Store, StoreError, WebhookOutcome, WebhookSource};
 
 /// How long a delivery's outcome is kept.
 const KEPT_DAYS: i32 = 30;
@@ -104,6 +105,27 @@ impl Store {
                 })
             })
             .collect()
+    }
+
+    /// That `actor` made or updated `repo`'s webhook `hook_id` on its forge
+    /// (#376), on the repo itself or its fork (`place`): only that, never
+    /// the token it was made with nor its secret.
+    pub async fn audit_webhook_made_by(
+        &self,
+        repo: RepoId,
+        place: &str,
+        hook_id: u64,
+        created: bool,
+        actor: &Actor,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let target = Target {
+            repo: Some(repo),
+            job: None,
+        };
+        let detail = serde_json::json!({ "place": place, "hook_id": hook_id, "created": created });
+        let work = audit::record(&mut tx, actor, "repo.webhook", target, detail).await;
+        crate::tx::commit(tx, work).await
     }
 
     /// Deliveries whose signature did not verify in the last `hours`, by

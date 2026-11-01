@@ -39,6 +39,8 @@ pub struct RepoAdmin {
     /// When each mode's provider was last checked (#367), to check at
     /// most once a minute: each check costs a little.
     pub(super) ai_checks: Arc<std::sync::Mutex<HashMap<&'static str, Instant>>>,
+    /// `[web] make_webhooks` (#376).
+    pub(super) make_webhooks: bool,
 }
 
 impl RepoAdmin {
@@ -57,6 +59,16 @@ impl RepoAdmin {
                 crate::webhook::DEFAULT_GITLAB_API,
             ),
             ai_checks: Arc::default(),
+            make_webhooks: false,
+        }
+    }
+
+    /// Whether an admin may make a repo's webhooks from its connection
+    /// page (#376).
+    pub fn with_webhook_making(self, on: bool) -> Self {
+        Self {
+            make_webhooks: on,
+            ..self
         }
     }
 
