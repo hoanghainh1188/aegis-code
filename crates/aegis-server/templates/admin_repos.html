@@ -4,7 +4,8 @@
 <section aria-labelledby="repos-heading">
   <p class="eyebrow">Admin</p>
   <h1 id="repos-heading">Repos</h1>
-  <p class="note">Every registered repo. Open one to see and change who has which role in it. Registering a repo is still <code>aegis-server repo add</code> on the server.</p>
+  <p class="note">Every registered repo. Open one to see its settings and clone, change it, and change who has which role in it.</p>
+  {% if can_edit %}<p><a class="button" href="/admin/repos/new">Add a repo</a></p>{% else %}<p class="note">This server has not loaded the modes' configuration: add repos with <code>aegis-server repo add</code>.</p>{% endif %}
   <div class="scroll">
   <table>
     <thead><tr><th scope="col">Repo</th><th scope="col">URL</th><th scope="col">Language</th><th scope="col">Mode</th><th scope="col" class="num">Jobs at once</th></tr></thead>

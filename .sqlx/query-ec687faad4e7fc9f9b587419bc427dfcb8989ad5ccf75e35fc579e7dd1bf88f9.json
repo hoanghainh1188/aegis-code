@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE repo_clones SET state = $2, log_tail = $3, finished_at = now()\n             WHERE repo_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ec687faad4e7fc9f9b587419bc427dfcb8989ad5ccf75e35fc579e7dd1bf88f9"
+}

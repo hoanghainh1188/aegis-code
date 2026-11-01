@@ -123,7 +123,12 @@ impl RepoFile {
 
 /// The fork's token for cloning a private repo, when the store has it.
 async fn read_token(secrets: &Secrets, spec: &RepoSpec) -> Result<Option<String>, String> {
-    let name = &spec.settings.fork.token_env;
+    fork_token(secrets, &spec.settings.fork.token_env).await
+}
+
+/// The secret `name`, a fork's `token_env`, when the store has it; the
+/// pages clone with it too (#330).
+pub async fn fork_token(secrets: &Secrets, name: &str) -> Result<Option<String>, String> {
     Ok(secrets
         .get_or_load(name)
         .await

@@ -10,6 +10,7 @@
 
 mod audit;
 mod budget;
+mod clones;
 mod deliveries;
 mod error;
 mod jobs;
@@ -38,6 +39,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 pub use audit::{Actor, AuditEntry};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
+pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};
 pub use error::StoreError;
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;

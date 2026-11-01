@@ -228,7 +228,16 @@ async fn run(args: Args) -> Result<(), String> {
             .map_err(|e| format!("listen on {}: {e}", config.api.listen))?;
         tracing::info!(listen = %config.api.listen, "API listening");
         let auth = Auth::new(store.clone(), config.auth.clone(), secrets.clone())?;
-        let app = api::router(store.clone(), auth);
+        // The admin pages add and change repos against the modes (#330); an
+        // API that cannot load them still serves everything else.
+        let repos = match modes(&config) {
+            Ok(modes) => Some(aegis_server::web::RepoAdmin::new(modes, secrets.clone())),
+            Err(e) => {
+                tracing::warn!(error = %e, "repos cannot be added or changed from the pages");
+                None
+            }
+        };
+        let app = api::router_with(store.clone(), auth, repos);
         let shutdown = shutdown.clone();
         parts.spawn(async move {
             // The peer's address for the limit of failed requests (#173).
