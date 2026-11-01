@@ -35,7 +35,10 @@ pub use navigate::{Lookup, LookupAt, LookupResult};
 pub use run_tests::{RUN_TESTS_TIMEOUT, TestRun, TestSettings};
 pub use sbfl::{SbflFormula, SbflMatrix, SuspiciousElement, TestExecution};
 pub use search::{FileHit, Hits, MAX_RESULTS, SearchResult, SymbolHit, TextHit};
-pub use secrets::{MARKER as REDACTED_MARKER, Redacted, redact};
+pub use secrets::{
+    MARKER as REDACTED_MARKER, Redacted, is_high_entropy_secret, is_sensitive_path, redact,
+    redact_file_content, shannon_entropy,
+};
 pub use server::AciServer;
 pub use summary::{MAP_FORMAT, load_or_create_summary, module_summary};
 pub use viewer::{WINDOW, Window};
