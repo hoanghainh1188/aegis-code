@@ -9,7 +9,7 @@ flowchart LR
     C --> D[release.yml]
     D --> E[GHCR: aegis-server, aegis-sandbox-* X.Y.Z, cosign keyless sign]
     D --> F[Release Assets: offline bundle, versions.txt]
-    D --> G[Release Assets: aegis tar.gz] --> H[npmjs: @hoanghainh1188/aegis]
+    D --> G[Release Assets: aegis tar.gz] --> H[npmjs: @hoanghainh/aegis]
 ```
 
 ---
@@ -32,7 +32,7 @@ flowchart LR
 | --- | --- |
 | Secret `RELEASE_PLEASE_TOKEN`: Fine-grained PAT scoped strictly to this repo with Contents, Pull requests, and Issues Read/Write. Releases triggered by default `GITHUB_TOKEN` do not cascade to `release.yml` | Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions |
 | Environment `npm-release` (optional required reviewers) | Settings $\rightarrow$ Environments |
-| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh1188-aegis-X.Y.Z.tgz` from Release, run `npm login`, then `npm publish hoanghainh1188-aegis-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured | Operator workstation |
+| **Initial Manual npm Publish:** npm requires trusted publisher configuration on existing packages. Download `hoanghainh-aegis-X.Y.Z.tgz` from Release, run `npm login` as the npm user `hoanghainh` (the scope is the npm account, not the GitHub owner `hoanghainh1188`), then `npm publish hoanghainh-aegis-X.Y.Z.tgz --access public`. The automated `npm publish` step in `release.yml` will fail on this initial run; re-run after trusted publisher is configured | Operator workstation |
 | Configure Trusted Publisher for package: Repository `hoanghainh1188/aegis-code`, workflow `release.yml`, environment `npm-release` | npmjs.com $\rightarrow$ package $\rightarrow$ Settings |
 | Make GHCR Packages **Public** so users can pull without authentication | GitHub $\rightarrow$ Packages $\rightarrow$ each `aegis-*` $\rightarrow$ Package settings |
 
@@ -46,7 +46,7 @@ All components of a release share an identical version:
 | --- | --- |
 | Server | `ghcr.io/hoanghainh1188/aegis-server:X.Y.Z` |
 | Gate Sandboxes | `ghcr.io/hoanghainh1188/aegis-sandbox-<python\|rust\|node\|java\|go\|dotnet>:X.Y.Z`; server calls these locally by bare names `aegis-sandbox-<profile>` |
-| Client | `aegis-X.Y.Z-<target>.tar.gz`, npm `@hoanghainh1188/aegis@X.Y.Z` |
+| Client | `aegis-X.Y.Z-<target>.tar.gz`, npm `@hoanghainh/aegis@X.Y.Z` |
 | Database | Final migration included in the release, documented in `versions.txt`; server runs migrations automatically on boot |
 
 Server and sandboxes must run identical versions. The client supports backward compatibility, as `/api/v1` APIs are additive and non-breaking.
