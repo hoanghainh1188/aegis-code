@@ -41,6 +41,10 @@ const PATTERNS: &[(&str, &str)] = &[
         "assigned-secret",
         r#"(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|auth[_-]?token|private[_-]?key|client[_-]?secret)\b["']?\s*[:=]\s*["'](?P<v>[^"'\s]{8,})["']"#,
     ),
+    (
+        "entropy-assigned-secret",
+        r#"(?i)\b(?:bearer|token|credential|passphrase|auth[_-]?secret|jwt[_-]?secret|encryption[_-]?key)\b["']?\s*[:=]\s*["'](?P<v>[^"'\s]{16,})["']"#,
+    ),
 ];
 
 const PEM_BEGIN: &str = "-----BEGIN ";
@@ -118,13 +122,104 @@ impl Redacted {
     }
 }
 
+/// Computes the Shannon entropy in bits per character for string `s`.
+pub fn shannon_entropy(s: &str) -> f64 {
+    if s.is_empty() {
+        return 0.0;
+    }
+    let mut freq = [0usize; 256];
+    let mut total = 0usize;
+    for &b in s.as_bytes() {
+        freq[b as usize] += 1;
+        total += 1;
+    }
+    let total_f = total as f64;
+    let mut entropy = 0.0;
+    for &count in &freq {
+        if count > 0 {
+            let p = count as f64 / total_f;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
+/// Checks whether characters in `s` are predominantly sequential ASCII characters
+/// (e.g. `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef...` character sets or alphabets).
+fn is_sequential_alphabet(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() < 2 {
+        return false;
+    }
+    let mut seq = 0usize;
+    for w in bytes.windows(2) {
+        if (w[1] as i16) - (w[0] as i16) == 1 {
+            seq += 1;
+        }
+    }
+    (seq as f64 / (bytes.len() - 1) as f64) > 0.4
+}
+
+/// Checks if an unassigned token matches high-entropy secret characteristics.
+pub fn is_high_entropy_secret(s: &str) -> bool {
+    if s.len() < 20 || s.len() > 256 {
+        return false;
+    }
+    if placeholder(s) {
+        return false;
+    }
+    // Disallow path/code delimiters
+    if s.contains("::") || s.contains('/') || s.contains('\\') || s.contains('.') {
+        return false;
+    }
+    if is_sequential_alphabet(s) {
+        return false;
+    }
+    // Hex string (e.g. commits, object IDs) without explicit assignment is not treated as a secret
+    if s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    let has_lower = s.chars().any(|c| c.is_ascii_lowercase());
+    let has_upper = s.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = s.chars().any(|c| c.is_ascii_digit());
+    let classes = (has_lower as u8) + (has_upper as u8) + (has_digit as u8);
+    // Base62/Base64 random strings must span at least 3 character classes and not be kebab/snake case words
+    if classes >= 3 && s.matches('_').count() <= 2 && s.matches('-').count() <= 2 {
+        return shannon_entropy(s) >= 4.5;
+    }
+    false
+}
+
+static TOKEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[A-Za-z0-9+/=_-]{20,}\b").expect("token regex compiles"));
+
+/// Checks whether `line` contains known package or integrity hash contexts (e.g. `sha512-`, `integrity`, lockfiles).
+fn is_known_hash_context(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("sha512-")
+        || lower.contains("sha256-")
+        || lower.contains("sha384-")
+        || lower.contains("sha1-")
+        || lower.contains("integrity")
+        || lower.contains("contenthash")
+    {
+        return true;
+    }
+    let trimmed = line.trim();
+    trimmed.starts_with("\"h1:") || trimmed.starts_with("\"zh:")
+}
+
 fn redact_line(line: &str, hidden: &mut BTreeMap<&'static str, usize>) -> String {
     let mut out = line.to_owned();
     for (kind, re) in COMPILED.iter() {
         let mut spans: Vec<(usize, usize)> = Vec::new();
         for caps in re.captures_iter(&out) {
             let m = caps.name("v").or_else(|| caps.get(0)).expect("match");
-            if matches!(*kind, "assigned-secret" | "url-password") && placeholder(m.as_str()) {
+            if matches!(
+                *kind,
+                "assigned-secret" | "entropy-assigned-secret" | "url-password"
+            ) && placeholder(m.as_str())
+            {
                 continue;
             }
             spans.push((m.start(), m.end()));
@@ -135,7 +230,78 @@ fn redact_line(line: &str, hidden: &mut BTreeMap<&'static str, usize>) -> String
             *hidden.entry(kind).or_default() += 1;
         }
     }
+    // High-entropy token detection for remaining unassigned secrets (skip known integrity hashes)
+    if !is_known_hash_context(line) {
+        let mut entropy_spans: Vec<(usize, usize)> = Vec::new();
+        for m in TOKEN_RE.find_iter(&out) {
+            let token = m.as_str();
+            if is_high_entropy_secret(token) {
+                entropy_spans.push((m.start(), m.end()));
+            }
+        }
+        for (start, end) in entropy_spans.into_iter().rev() {
+            out.replace_range(start..end, &format!("{MARKER}high-entropy]"));
+            *hidden.entry("high-entropy").or_default() += 1;
+        }
+    }
     out
+}
+
+/// Checks whether `path` is a sensitive file (e.g. `.env`, `.env.local`, `*.pem`, `*.key`, `id_rsa`)
+/// whose entire content should be hidden from the agent.
+pub fn is_sensitive_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    let filename = normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or(&normalized)
+        .to_ascii_lowercase();
+
+    // Template and example files are not secrets
+    if [".example", ".sample", ".template", ".dist"]
+        .iter()
+        .any(|ext| filename.ends_with(ext))
+    {
+        return false;
+    }
+
+    // Environment files (.env, .env.local, .env.production, etc.)
+    if filename == ".env" || filename.starts_with(".env.") {
+        return true;
+    }
+
+    // Certificate and private key extensions
+    if [".pem", ".key", ".pfx", ".p12", ".pkcs12"]
+        .iter()
+        .any(|ext| filename.ends_with(ext))
+    {
+        return true;
+    }
+
+    // Common SSH private key file names without extension
+    matches!(
+        filename.as_str(),
+        "id_rsa" | "id_dsa" | "id_ecdsa" | "id_ed25519"
+    )
+}
+
+/// Redacts the full content of `path`: if `path` is a sensitive file, its lines are
+/// replaced by `[REDACTED:sensitive-file]`; otherwise standard line-by-line redaction is performed.
+pub fn redact_file_content(path: &str, content: &str) -> Redacted {
+    if is_sensitive_path(path) {
+        let mut hidden = BTreeMap::new();
+        *hidden.entry("sensitive-file").or_default() += 1;
+        let mut lines = Vec::new();
+        let total = content.lines().count().max(1);
+        for i in 1..=total {
+            lines.push(format!("{i}:{MARKER}sensitive-file]\n"));
+        }
+        return Redacted {
+            text: lines.concat(),
+            hidden,
+        };
+    }
+    redact(content)
 }
 
 /// Hides secret values in `text`, line by line; a PEM private key block is
@@ -272,5 +438,65 @@ mod tests {
         assert_eq!(r.text, code);
         assert!(r.hidden.is_empty());
         assert_eq!(r.with_notice(), code);
+    }
+
+    #[test]
+    fn shannon_entropy_calculation() {
+        assert_eq!(shannon_entropy(""), 0.0);
+        assert_eq!(shannon_entropy("aaaa"), 0.0);
+        // "ab" -> 1.0 bit
+        assert!((shannon_entropy("abab") - 1.0).abs() < 1e-6);
+        // Base64 alphabet has maximum entropy log2(64) = 6.0
+        let full_alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        assert!((shannon_entropy(full_alpha) - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hides_high_entropy_unassigned_tokens_and_assigned_secrets() {
+        // High-entropy random token
+        let token = "vL2qR5wT0yN4bC7zF3aE8dH1jK6mP9sU";
+        let text = format!("const SECRET_HASH: &str = \"{token}\";\n");
+        let r = redact(&text);
+        assert_eq!(
+            r.text,
+            "const SECRET_HASH: &str = \"[REDACTED:high-entropy]\";\n"
+        );
+        assert_eq!(r.count(), 1);
+
+        // Entropy assigned secret
+        let assigned = "bearer = \"vL2qR5wT0yN4bC7zF3aE8dH1\"\n";
+        let r2 = redact(assigned);
+        assert_eq!(r2.text, "bearer = \"[REDACTED:entropy-assigned-secret]\"\n");
+
+        // Sequential alphabet is not flagged as high entropy
+        let abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let r3 = redact(abc);
+        assert_eq!(r3.text, abc);
+    }
+
+    #[test]
+    fn sensitive_path_detection() {
+        assert!(is_sensitive_path(".env"));
+        assert!(is_sensitive_path(".env.local"));
+        assert!(is_sensitive_path("config/.env.prod"));
+        assert!(!is_sensitive_path(".env.example"));
+        assert!(!is_sensitive_path(".env.sample"));
+        assert!(!is_sensitive_path(".env.template"));
+        assert!(is_sensitive_path("server.pem"));
+        assert!(is_sensitive_path("certs/private.key"));
+        assert!(is_sensitive_path("auth/id_rsa"));
+        assert!(is_sensitive_path("id_ed25519"));
+        assert!(!is_sensitive_path("src/main.rs"));
+    }
+
+    #[test]
+    fn sensitive_file_content_redaction() {
+        let env_content = "DB_HOST=localhost\nDB_PASS=supersecret\nAPI_KEY=12345\n";
+        let r = redact_file_content(".env", env_content);
+        assert_eq!(
+            r.text,
+            "1:[REDACTED:sensitive-file]\n2:[REDACTED:sensitive-file]\n3:[REDACTED:sensitive-file]\n"
+        );
+        assert_eq!(r.count(), 1);
     }
 }

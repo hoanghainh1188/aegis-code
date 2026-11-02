@@ -74,6 +74,38 @@ fn open_shows_numbered_lines() {
 }
 
 #[test]
+fn open_sensitive_file_hides_content() {
+    let repo = Scratch::fixture("rust");
+    repo.write(".env", "DB_PASSWORD=supersecret\nAPI_KEY=tok123\n");
+    repo.write(
+        "server.pem",
+        "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n",
+    );
+    let mut aci = repo.aci(rust());
+
+    let env_window = aci.open(".env", None).unwrap();
+    assert_eq!(env_window.total, 2);
+    assert_eq!(
+        env_window.lines,
+        vec![
+            "[REDACTED:sensitive-file]".to_string(),
+            "[REDACTED:sensitive-file]".to_string(),
+        ]
+    );
+
+    let pem_window = aci.open("server.pem", None).unwrap();
+    assert_eq!(pem_window.total, 3);
+    assert_eq!(
+        pem_window.lines,
+        vec![
+            "[REDACTED:sensitive-file]".to_string(),
+            "[REDACTED:sensitive-file]".to_string(),
+            "[REDACTED:sensitive-file]".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn edit_is_formatted_with_the_profile_formatter() {
     if !tool_available(&["rustfmt", "--version"]) {
         return;

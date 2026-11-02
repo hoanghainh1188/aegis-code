@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use crate::secrets::{MARKER, is_sensitive_path};
 use crate::{AciError, Workspace};
 
 pub const WINDOW: usize = 100;
@@ -72,9 +73,16 @@ impl Viewer {
     ) -> Result<Window, AciError> {
         let path = ws.resolve(file)?;
         let text = ws.read_named_text(&path)?;
+        let display_path = ws.display(&path);
+        let lines: Vec<String> = if is_sensitive_path(&display_path) {
+            let total = text.lines().count().max(1);
+            vec![format!("{MARKER}sensitive-file]"); total]
+        } else {
+            text.lines().map(str::to_owned).collect()
+        };
         let mut open = OpenFile {
-            path: ws.display(&path),
-            lines: text.lines().map(str::to_owned).collect(),
+            path: display_path,
+            lines,
             first: 1,
         };
         let line = line.unwrap_or(1);
@@ -111,7 +119,12 @@ impl Viewer {
         };
         match ws.resolve(edited).and_then(|p| ws.read_named_text(&p)) {
             Ok(text) => {
-                open.lines = text.lines().map(str::to_owned).collect();
+                if is_sensitive_path(&open.path) {
+                    let total = text.lines().count().max(1);
+                    open.lines = vec![format!("{MARKER}sensitive-file]"); total];
+                } else {
+                    open.lines = text.lines().map(str::to_owned).collect();
+                }
                 open.first = open.first.min(open.last_first());
             }
             Err(_) => self.open = None,
