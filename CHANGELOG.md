@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.4.0...v0.5.0) (2026-11-02)
+
+
+### Features
+
+* **aci:** redact secrets by entropy and protect sensitive files ([#360](https://github.com/hoanghainh1188/aegis-code/issues/360)) ([#394](https://github.com/hoanghainh1188/aegis-code/issues/394)) ([36d33dc](https://github.com/hoanghainh1188/aegis-code/commit/36d33dcc198f88eccfeedd3f116a621de79527ae))
+
 ## [0.4.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.3.0...v0.4.0) (2026-11-01)
 
 
