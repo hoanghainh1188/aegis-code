@@ -236,13 +236,16 @@ fn a_step_over_its_memory_says_so_even_when_a_child_was_killed() {
 
 #[test]
 fn a_step_that_succeeds_stays_a_success_if_a_child_ran_out_of_memory() {
-    // What a step runs may let a child go over the limit on purpose.
+    // What a step runs may let a child go over the limit on purpose. The
+    // kernel may kill any process of the container, the shell too (#397):
+    // the children ask to go first, or the step itself would be killed.
     if !docker_ready() {
         return;
     }
     let tolerant = profile(
         Language::Rust,
-        "[gate]\nformat = [\"sh\", \"-c\", \"head -c 512m /dev/zero | tail > /dev/null; exit 0\"]\n",
+        "[gate]\nformat = [\"sh\", \"-c\", \"(echo 1000 > /proc/self/oom_score_adj && \
+         head -c 512m /dev/zero | tail > /dev/null); exit 0\"]\n",
     );
     let repo = Repo::new("rust", &[]);
     let mut sandbox = sandbox(&repo);
