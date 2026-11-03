@@ -43,6 +43,7 @@ fn egress(allow: &[&str]) -> Egress {
         docker: "docker".into(),
         proxy_image: PYTHON_IMAGE.into(),
         allow: allow.iter().map(|h| (*h).to_owned()).collect(),
+        ready_timeout: Egress::DEFAULT_READY_TIMEOUT,
     }
 }
 

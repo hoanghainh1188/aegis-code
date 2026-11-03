@@ -69,6 +69,9 @@ pub struct RunSection {
     /// Image the egress proxy of the fetch step runs in; any with Python 3.
     #[serde(default = "default_egress_image")]
     pub egress_image: String,
+    /// How long the egress proxy may take to listen once started (#326).
+    #[serde(default = "default_egress_ready_timeout")]
+    pub egress_ready_timeout_s: u64,
     /// Where the ledger is kept (#22). The database's URL is not part of
     /// the configuration: the command that opens it gets it from outside.
     #[serde(default)]
@@ -87,6 +90,10 @@ pub enum LedgerBackend {
 
 fn default_egress_image() -> String {
     "aegis-sandbox-python".into()
+}
+
+fn default_egress_ready_timeout() -> u64 {
+    aegis_gate::Egress::DEFAULT_READY_TIMEOUT.as_secs()
 }
 
 fn default_docker() -> String {
