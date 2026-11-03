@@ -146,6 +146,7 @@ fn gate_in_container(
                 docker: "docker".into(),
                 proxy_image: PROXY_IMAGE.into(),
                 allow: profile.fetch_hosts.clone(),
+                ready_timeout: Egress::DEFAULT_READY_TIMEOUT,
             },
             command: profile.fetch.command().unwrap().render(&[]).unwrap(),
             audit_hosts: vec![],

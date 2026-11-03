@@ -740,6 +740,7 @@ fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
             docker: cfg.run.docker.clone(),
             proxy_image: cfg.run.egress_image.clone(),
             allow: profile.fetch_hosts.clone(),
+            ready_timeout: Duration::from_secs(cfg.run.egress_ready_timeout_s),
         },
         command,
         audit_hosts: profile.profile.dependencies.audit_hosts.clone(),

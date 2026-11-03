@@ -101,6 +101,7 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
                 docker: "docker".into(),
                 proxy_image: PROXY_IMAGE.into(),
                 allow: vec!["repo.maven.apache.org".into()],
+                ready_timeout: Egress::DEFAULT_READY_TIMEOUT,
             },
             command: vec!["true".into()],
             audit_hosts: vec![],
