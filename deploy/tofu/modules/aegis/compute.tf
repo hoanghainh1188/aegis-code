@@ -53,6 +53,8 @@ resource "aws_launch_template" "server" {
     stop_timeout_s   = var.server_config.drain_s + 60
     # The unit of every deployment, on premises too (#262).
     aegis_unit = file("${path.module}/../../../systemd/aegis.service")
+    # Between aegis and the daemon (#321).
+    docker_proxy_unit = file("${path.module}/../../../systemd/aegis-docker-proxy.service")
     server_toml = templatefile("${path.module}/server.toml.tftpl", {
       region        = var.region
       secret_prefix = local.secret_prefix

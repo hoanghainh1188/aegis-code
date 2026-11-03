@@ -39,6 +39,7 @@ All variations between environments are encapsulated strictly in configuration f
 | **Language Profile** | Ecosystem-specific grammars, linters, test commands, lockfile parsers | Custom (`crates/aegis-lang`, [ADR 0004](../adr/0004-multi-language-profiles.md)) |
 | **Codebase-Memory MCP** | Relational call graph indexes in SQLite | Integrated (`codebase-memory-mcp` v0.12.1) |
 | **Gate Runner** | Format, lint, test, coverage, and Sonar validation in Docker | Custom (`crates/aegis-gate`) |
+| **Docker Socket Proxy** | Passes only the gate's and the ACI's Docker calls, and only hardened sandboxes of the workspace, to the host daemon | Custom (`crates/aegis-docker-proxy`, [ADR 0010](../adr/0010-docker-socket-proxy.md), #321) |
 | **PR Synthesizer** | Opens branches and PRs, formats root-cause analysis | Custom (`crates/aegis-pr`) |
 | **Token Ledger** | Per-call token accounting and USD cost tracking | Custom (`crates/aegis-ledger`) |
 | **Sonar Batcher** | Clusters static analysis issues, manages integration branches | Custom (`crates/aegis-sonar-batch`, #17) |

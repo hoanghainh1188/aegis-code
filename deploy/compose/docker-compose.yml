@@ -25,25 +25,58 @@ services:
       retries: 12
     networks: [db]
 
+  # Between aegis and the daemon (#321, ADR 0010): whoever holds the
+  # daemon's socket is root of this machine, so only this service does. It
+  # passes on the calls of the gate and the ACI, and only hardened
+  # containers with the workspace mounted. No network: Unix sockets only.
+  docker-proxy:
+    image: ${AEGIS_REGISTRY:-ghcr.io/hoanghainh1188}/aegis-server:${AEGIS_VERSION:?set AEGIS_VERSION in .env (./aegis-deploy.sh does)}
+    restart: unless-stopped
+    entrypoint: ["/usr/bin/tini", "--", "aegis-docker-proxy"]
+    command:
+      - --listen
+      - /run/aegis-docker/docker.sock
+      - --mount-root
+      - /srv/aegis/.workspace
+    # With Sonar in a mode: add `--network <[sonar] network>` and
+    # `--writable-image <[sonar] image>` here (docs/runbook/on-premise.md).
+    user: "10001:10001"
+    group_add:
+      - "${DOCKER_GID:?set DOCKER_GID in .env (./install.sh does)}"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - docker-api:/run/aegis-docker
+      # Read to resolve links in mount sources: the same path as the
+      # daemon's.
+      - /srv/aegis/.workspace:/srv/aegis/.workspace:ro
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/aegis-docker/docker.sock"]
+      interval: 5s
+      retries: 12
+
   aegis:
     image: ${AEGIS_REGISTRY:-ghcr.io/hoanghainh1188}/aegis-server:${AEGIS_VERSION:?set AEGIS_VERSION in .env (./aegis-deploy.sh does)}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      docker-proxy:
+        condition: service_healthy
     command: ["--config", "/etc/aegis/server.toml", "--role", "all"]
     # The image's user; the gate starts sandboxes with the same uid:gid, so
-    # the workspace belongs to it. The socket's group lets it reach the
-    # daemon: whoever holds the socket is root of this machine.
+    # the workspace belongs to it. It reaches the daemon through
+    # docker-proxy only, never the daemon's own socket.
     user: "10001:10001"
-    group_add:
-      - "${DOCKER_GID:?set DOCKER_GID in .env (./install.sh does)}"
     ports:
       - "${AEGIS_PUBLISH:-8080}:8080"
       # /metrics has no token (#32): this machine only.
       - "127.0.0.1:9464:9464"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - docker-api:/run/aegis-docker
       # The same path inside and out: the gate hands it to the daemon when
       # it mounts a job's tree into a sandbox.
       - /srv/aegis/.workspace:/srv/aegis/.workspace
@@ -52,6 +85,7 @@ services:
       # One file per secret (#261), only the aegis user may read them.
       - ./secrets:/run/secrets:ro
     environment:
+      DOCKER_HOST: unix:///run/aegis-docker/docker.sock
       # GitHub Enterprise or GitLab on premises: their API (not secrets).
       AEGIS_GITHUB_API: ${AEGIS_GITHUB_API:-}
       AEGIS_GITLAB_API: ${AEGIS_GITLAB_API:-}
@@ -76,6 +110,8 @@ networks:
 
 volumes:
   pgdata:
+  # docker-proxy's socket, shared with aegis only.
+  docker-api:
 
 secrets:
   postgres_password:

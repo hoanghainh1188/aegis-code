@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepares this Linux machine for aegis under systemd (#262,
 # docs/runbook/on-premise.md), once, as root: the workspace, /etc/aegis
-# (server.toml, aegis.env, secrets, modes), the unit and aegis-deploy.
+# (server.toml, aegis.env, secrets, modes), the units and aegis-deploy.
 # PostgreSQL is yours (on this machine or another): put its URL in
 # /etc/aegis/secrets/AEGIS_DATABASE_URL. Nothing that exists is
 # overwritten. Then: aegis-deploy <version>.
@@ -32,9 +32,10 @@ if [ ! -e /etc/aegis/aegis.env ]; then
 fi
 [ -e /etc/aegis/image.env ] || : > /etc/aegis/image.env
 install -m 0644 "$HERE/aegis.service" /etc/systemd/system/aegis.service
+install -m 0644 "$HERE/aegis-docker-proxy.service" /etc/systemd/system/aegis-docker-proxy.service
 install -m 0755 "$HERE/aegis-deploy" /usr/local/bin/aegis-deploy
 systemctl daemon-reload
-systemctl enable aegis
+systemctl enable aegis-docker-proxy aegis
 
 cat <<'NEXT'
 Next (docs/runbook/on-premise.md):

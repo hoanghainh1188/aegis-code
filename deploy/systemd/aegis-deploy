@@ -39,7 +39,8 @@ for p in ${AEGIS_SANDBOXES:-python}; do
 done
 
 echo "AEGIS_IMAGE=$registry/aegis-server:$version" > /etc/aegis/image.env
-systemctl restart aegis
+# The proxy runs the same image (#321).
+systemctl restart aegis-docker-proxy aegis
 for _ in $(seq 1 60); do
   if curl -fsS "$health" >/dev/null 2>&1; then
     if [ -n "$previous" ] && [ "$previous" != "$version" ]; then

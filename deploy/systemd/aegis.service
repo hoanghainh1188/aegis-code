@@ -2,24 +2,26 @@
 # the unit of on-premise machines (deploy/systemd/install.sh) and of the
 # AWS deployment (deploy/tofu/modules/aegis/user_data.sh.tftpl), one file.
 #
-# /etc/aegis/aegis.env: DOCKER_GID, AEGIS_ROLE, AEGIS_STOP_S, and
-# AEGIS_RUN_ARGS, the machine's own docker run arguments (network, ports,
-# secrets, log driver). /etc/aegis/image.env: AEGIS_IMAGE, written by
-# aegis-deploy. The workspace has the same path inside and out: the gate
-# hands it to the daemon when it mounts a job's tree into a sandbox.
+# /etc/aegis/aegis.env: AEGIS_ROLE, AEGIS_STOP_S, and AEGIS_RUN_ARGS, the
+# machine's own docker run arguments (network, ports, secrets, log driver).
+# /etc/aegis/image.env: AEGIS_IMAGE, written by aegis-deploy. The workspace
+# has the same path inside and out: the gate hands it to the daemon when it
+# mounts a job's tree into a sandbox. The daemon is reached through
+# aegis-docker-proxy.service (#321), never through its own socket.
 [Unit]
 Description=aegis-server
-After=docker.service network-online.target
+After=docker.service aegis-docker-proxy.service network-online.target
 Wants=network-online.target
-Requires=docker.service
+Requires=docker.service aegis-docker-proxy.service
 
 [Service]
 EnvironmentFile=/etc/aegis/aegis.env
 EnvironmentFile=/etc/aegis/image.env
 ExecStartPre=-/usr/bin/docker rm -f aegis
 ExecStart=/usr/bin/docker run --rm --name aegis \
-  --user 10001:10001 --group-add ${DOCKER_GID} \
-  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --user 10001:10001 \
+  --volume /run/aegis-docker:/run/aegis-docker \
+  --env DOCKER_HOST=unix:///run/aegis-docker/docker.sock \
   --volume /srv/aegis/.workspace:/srv/aegis/.workspace \
   --volume /etc/aegis/server.toml:/etc/aegis/server.toml:ro \
   --stop-timeout ${AEGIS_STOP_S} \
