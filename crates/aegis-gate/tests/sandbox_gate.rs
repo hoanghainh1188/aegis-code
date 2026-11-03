@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use aegis_gate::{CancelToken, Hardening, Limits, Sandbox, Skip, StepName, StepStatus};
 use aegis_lang::Language;
-use common::{Repo, profile, statuses};
+use common::{Repo, profile};
 
 const IMAGE: &str = "aegis-sandbox-rust";
 
@@ -74,18 +74,24 @@ fn the_rust_gate_passes_inside_the_container() {
         vec![],
         Some(sandbox),
     );
-    assert_eq!(
-        statuses(&report)[1..7],
-        [
-            (StepName::Format, StepStatus::Passed),
-            (StepName::Lint, StepStatus::Passed),
-            (StepName::Typecheck, StepStatus::Skipped(Skip::NotInProfile)),
-            (StepName::ReproTest, StepStatus::Skipped(Skip::NoReproTest)),
-            (StepName::Test, StepStatus::Passed),
-            (StepName::Coverage, StepStatus::Passed),
-        ],
-        "{report}"
-    );
+    // By name: a step added to the gate moves the others (#396).
+    let expected = [
+        (StepName::Format, StepStatus::Passed),
+        (StepName::Lint, StepStatus::Passed),
+        (StepName::Typecheck, StepStatus::Skipped(Skip::NotInProfile)),
+        (StepName::ReproTest, StepStatus::Skipped(Skip::NoReproTest)),
+        (StepName::Test, StepStatus::Passed),
+        (StepName::Coverage, StepStatus::Passed),
+    ];
+    let got: Vec<_> = expected
+        .iter()
+        .map(|(name, _)| (*name, report.step(*name).map(|s| s.status.clone())))
+        .collect();
+    let expected: Vec<_> = expected
+        .into_iter()
+        .map(|(name, status)| (name, Some(status)))
+        .collect();
+    assert_eq!(got, expected, "{report}");
 }
 
 #[test]
