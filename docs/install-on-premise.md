@@ -104,7 +104,7 @@ If your SSO, GitHub Enterprise or GitLab uses a certificate from an **internal C
 
 ### B1. Linux, Docker and Compose
 
-- **Machine:** Linux on **x86_64**, at least 4 vCPUs, 16 GB RAM and 100 GB SSD, used only by Aegis. The images are built for `linux/amd64` only. On arm64 they run only through emulation, slowly (#405).
+- **Machine:** Linux on **x86_64 or arm64**, at least 4 vCPUs, 16 GB RAM and 100 GB SSD, used only by Aegis. Docker pulls the image of your machine's architecture by itself. Releases up to 0.5.0 have `linux/amd64` images only; on arm64, use a later release (#405).
 - **Docker:** Docker Engine 25 or newer and the Compose plugin v2, from [Docker's install guide](https://docs.docker.com/engine/install/) for your distribution.
 - **Tools:** `git`, `openssl` and `curl`.
 

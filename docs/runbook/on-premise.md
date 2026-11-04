@@ -10,7 +10,7 @@ Core operations: [Installation & Setup](#1-installation--setup), [Registering Re
 
 | Requirement | Specification |
 | --- | --- |
-| Host Machine | Linux x86_64 (the images are built for `linux/amd64` only; on arm64 they run only under emulation, #405). Minimum: 4 vCPUs, 16 GB RAM, 100 GB SSD storage (sandbox images, git clones, and build caches reside locally). The machine should be dedicated exclusively to Aegis |
+| Host Machine | Linux x86_64 or arm64 (images are published for `linux/amd64` and `linux/arm64`; releases up to 0.5.0 have `linux/amd64` only, #405). Minimum: 4 vCPUs, 16 GB RAM, 100 GB SSD storage (sandbox images, git clones, and build caches reside locally). The machine should be dedicated exclusively to Aegis |
 | Docker Engine | Docker Engine 25+ (API 1.44, the oldest `aegis-docker-proxy` passes) and Docker Compose plugin v2 |
 | Outbound Network | Access to forges (GitHub, GitLab) and model APIs (Claude API, AWS Bedrock), unless utilizing local models. For isolated networks without Internet access, use the [offline bundle](../release.md#air-gapped--offline-environments) |
 | Inbound Traffic | Port 8080 behind your TLS reverse proxy: dashboard, REST API, webhooks. Compose publishes it on all interfaces unless `AEGIS_PUBLISH` says otherwise ([Reverse Proxy](#reverse-proxy-configuration-tls-termination)) |

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# The offline bundle of one release (#263, docs/release.md): each image of
-# the version saved to its own aegis-<name>-<version>.tar.gz (a GitHub
-# Release asset is at most 2 GB), its SHA-256, and versions.txt (digests,
-# last database migration). Run by release.yml; works on any machine that
+# The offline bundle of one release (#263, docs/release.md) for the
+# architecture of the Docker daemon (amd64 or arm64, #405): each image of
+# the version saved to its own aegis-<name>-<version>-<arch>.tar.gz (a
+# GitHub Release asset is at most 2 GB), its SHA-256, and
+# versions-<arch>.txt (digests, last database migration). Run by
+# release.yml on a machine of each architecture; works on any machine that
 # can pull the images.
 #
 # Usage: scripts/release/save-images.sh <version> <registry/owner> <out dir> [name…]
@@ -21,19 +23,21 @@ if [ ${#NAMES[@]} -eq 0 ]; then
   NAMES=(server sandbox-python sandbox-rust sandbox-node sandbox-java sandbox-go sandbox-dotnet)
 fi
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
+ARCH=$(docker version --format '{{.Server.Arch}}')
 mkdir -p "$OUT"
 
 {
   echo "aegis-code $VERSION"
+  echo "arch $ARCH"
   last=$(find "$REPO/crates/aegis-store/migrations" -name '*.sql' -exec basename {} .sql \; | sort | tail -1)
   echo "migration $last"
-} > "$OUT/versions.txt"
+} > "$OUT/versions-$ARCH.txt"
 
 save() {
   local image=$1 file=$2
-  docker pull --quiet "$image" >/dev/null
+  docker pull --quiet --platform "linux/$ARCH" "$image" >/dev/null
   digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
-  echo "image $image ${digest#*@}" >> "$OUT/versions.txt"
+  echo "image $image ${digest#*@}" >> "$OUT/versions-$ARCH.txt"
   docker save "$image" | gzip -6 > "$OUT/$file"
   if command -v sha256sum >/dev/null; then
     (cd "$OUT" && sha256sum "$file" > "$file.sha256")
@@ -46,9 +50,9 @@ save() {
 }
 
 for name in "${NAMES[@]}"; do
-  save "$PREFIX/aegis-$name:$VERSION" "aegis-$name-$VERSION.tar.gz"
+  save "$PREFIX/aegis-$name:$VERSION" "aegis-$name-$VERSION-$ARCH.tar.gz"
 done
 for image in ${AEGIS_EXTRA_IMAGES-postgres:17-alpine}; do
-  save "$image" "aegis-dep-$(echo "$image" | tr '/:' '--').tar.gz"
+  save "$image" "aegis-dep-$(echo "$image" | tr '/:' '--')-$ARCH.tar.gz"
 done
 cp "$REPO/scripts/release/load-images.sh" "$OUT/"
