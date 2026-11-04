@@ -45,7 +45,7 @@ Every container comes from `Hardening::args` (#320): no capabilities, `no-new-pr
    - it runs as uid 10001 with the socket's group, with no network, a read-only root and no capabilities;
    - only it mounts the daemon's socket. The workspace is mounted read-only at the same path, so links can be resolved;
    - its socket (`/run/aegis-docker/docker.sock`, mode 0600) is shared with `aegis`, which gets `DOCKER_HOST` pointing at it and no longer has the daemon's group;
-   - on Compose it is the `docker-proxy` service; under systemd it is `aegis-docker-proxy.service`, which `aegis.service` requires. On AWS this is the same unit.
+   - on Compose it is the `docker-proxy` service; under systemd it is `aegis-docker-proxy.service`, which `aegis.service` requires on a machine that runs jobs (drop-in `aegis.service.d/jobs.conf`; an API-only machine has no proxy, #323). On AWS this is the same unit.
 
 5. **Sonar.** The scanner runs on `[sonar] network` (default `bridge`) with its cache mounted and a writable root. A mode that enables Sonar adds `--network <that network>` and `--writable-image <the scanner image>` to the proxy's arguments.
 

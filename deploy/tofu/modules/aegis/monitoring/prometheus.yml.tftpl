@@ -15,20 +15,23 @@ alerting:
         - targets: ["127.0.0.1:9093"]
 
 scrape_configs:
-  # Mọi máy đang chạy có tag Name ${server_name}: thay máy (đổi AMI,
-  # user_data) không cần sửa gì ở đây. `instance` là id của máy.
+  # Mọi máy đang chạy có tag Name trong ${server_names}: thay máy (đổi
+  # AMI, user_data) không cần sửa gì ở đây. `instance` là id của máy,
+  # `role` là api, worker hoặc all (#323).
   - job_name: aegis
     ec2_sd_configs:
       - region: ${region}
         port: 9464
         filters:
           - name: tag:Name
-            values: ["${server_name}"]
+            values: ${server_names}
           - name: instance-state-name
             values: ["running"]
     relabel_configs:
       - source_labels: [__meta_ec2_instance_id]
         target_label: instance
+      - source_labels: [__meta_ec2_tag_aegis_role]
+        target_label: role
 
   - job_name: prometheus
     static_configs:

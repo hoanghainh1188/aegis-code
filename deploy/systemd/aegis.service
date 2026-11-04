@@ -7,12 +7,15 @@
 # /etc/aegis/image.env: AEGIS_IMAGE, written by aegis-deploy. The workspace
 # has the same path inside and out: the gate hands it to the daemon when it
 # mounts a job's tree into a sandbox. The daemon is reached through
-# aegis-docker-proxy.service (#321), never through its own socket.
+# aegis-docker-proxy.service (#321), never through its own socket. A machine
+# that runs jobs (`worker`, `all`) also gets aegis.service.d/jobs.conf, which
+# requires the proxy; an API machine (#323) has no proxy, and its daemon only
+# runs this container.
 [Unit]
 Description=aegis-server
 After=docker.service aegis-docker-proxy.service network-online.target
-Wants=network-online.target
-Requires=docker.service aegis-docker-proxy.service
+Wants=network-online.target aegis-docker-proxy.service
+Requires=docker.service
 
 [Service]
 EnvironmentFile=/etc/aegis/aegis.env

@@ -1,6 +1,6 @@
-output "instance_id" {
-  description = "Máy aegis-server; workflow deploy gửi lệnh `aegis-deploy` tới đây qua SSM."
-  value       = aws_instance.server.id
+output "instance_ids" {
+  description = "Máy aegis-server theo vai trò (`api` và `worker`, hoặc `all`); workflow deploy tìm chúng theo tag `aegis:role` và gửi `aegis-deploy` qua SSM."
+  value       = { for role, i in aws_instance.node : role => i.id }
 }
 
 output "image_tag_parameter" {

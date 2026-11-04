@@ -257,24 +257,48 @@ jobs:
         run: |
           test -n "$TAG" || { echo "::error::cần image_tag"; exit 1; }
           aws ecr describe-images --repository-name aegis-server --image-ids imageTag="$TAG" >/dev/null
-      - name: Ghi tag, chạy aegis-deploy trên máy qua SSM
+      # Máy có API trước (`api` hoặc `all`): health của nó cho biết image
+      # chạy được, trước khi đụng tới job đang chạy; rồi `worker`, mỗi máy
+      # drain theo worker.drain_s (#323).
+      - name: Ghi tag, chạy aegis-deploy trên từng máy qua SSM
         run: |
           previous=$(aws ssm get-parameter --name "/aegis/$NAME/image_tag" --query Parameter.Value --output text)
           echo "Tag trước: $previous (rollback: chạy lại deploy với tag này)" >> "$GITHUB_STEP_SUMMARY"
-          instance=$(aws ec2 describe-instances \
-            --filters "Name=tag:aegis:deployment,Values=$NAME" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
-          test "$instance" != None
-          aws ssm put-parameter --name "/aegis/$NAME/image_tag" --value "$TAG" --overwrite >/dev/null
-          command=$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
-            --comment "aegis-deploy $TAG" --timeout-seconds 900 \
-            --parameters "commands=[\"/usr/local/bin/aegis-deploy $TAG\"]" \
-            --query Command.CommandId --output text)
-          aws ssm wait command-executed --command-id "$command" --instance-id "$instance" || true
-          aws ssm get-command-invocation --command-id "$command" --instance-id "$instance" \
-            --query '[Status, StandardOutputContent, StandardErrorContent]' --output text
-          status=$(aws ssm get-command-invocation --command-id "$command" --instance-id "$instance" --query Status --output text)
-          if [ "$status" != Success ]; then
-            echo "::error::deploy $TAG: $status. Tag trong SSM vẫn là $TAG; rollback: chạy deploy với $previous"
-            exit 1
+          instances() {
+            aws ec2 describe-instances \
+              --filters "Name=tag:aegis:deployment,Values=$NAME" "Name=tag:aegis:role,Values=$1" \
+                "Name=instance-state-name,Values=running" \
+              --query 'Reservations[].Instances[].InstanceId' --output text
+          }
+          api=$(instances api,all)
+          workers=$(instances worker)
+          test -n "$api" || { echo "::error::không có máy api hay all đang chạy"; exit 1; }
+          # split: thiếu worker thì API chạy bản mới mà job chạy bản cũ.
+          if [ -n "$(instances api)" ] && [ -z "$workers" ]; then
+            echo "::error::có máy api nhưng không có máy worker đang chạy"; exit 1
           fi
+          aws ssm put-parameter --name "/aegis/$NAME/image_tag" --value "$TAG" --overwrite >/dev/null
+          deploy_on() {
+            local instance=$1 command status
+            command=$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
+              --comment "aegis-deploy $TAG" --timeout-seconds 900 \
+              --parameters "commands=[\"/usr/local/bin/aegis-deploy $TAG\"]" \
+              --query Command.CommandId --output text)
+            # `ssm wait` bỏ cuộc sau ~100 s; worker drain tới worker.drain_s.
+            # Chờ tới khi lệnh xong, quá --timeout-seconds thì SSM tự huỷ.
+            for _ in $(seq 1 200); do
+              status=$(aws ssm get-command-invocation --command-id "$command" --instance-id "$instance" \
+                --query Status --output text 2>/dev/null || echo Pending)
+              case "$status" in Pending|InProgress|Delayed) sleep 5 ;; *) break ;; esac
+            done
+            aws ssm get-command-invocation --command-id "$command" --instance-id "$instance" \
+              --query '[Status, StandardOutputContent, StandardErrorContent]' --output text
+            echo "$instance: $status" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$status" != Success ]; then
+              echo "::error::deploy $TAG trên $instance: $status. Tag trong SSM vẫn là $TAG; rollback: chạy deploy với $previous"
+              exit 1
+            fi
+          }
+          for instance in $api $workers; do
+            deploy_on "$instance"
+          done
