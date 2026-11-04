@@ -2,13 +2,15 @@
 
 For operators running Aegis on self-hosted infrastructure without AWS ([ADR 0007](../adr/0007-on-premise-deployment.md), #262). For AWS cloud deployments, see [AWS Runbook](README.md).
 
+> **First install?** Follow [Install Aegis on Premise](../install-on-premise.md): one path from a blank machine to the first PR, including how to make the bot, the tokens and the SSO client, with a check after each step. This runbook is the reference for operating it afterwards.
+
 Core operations: [Installation & Setup](#1-installation--setup), [Registering Repositories](#2-registering-repositories), [Upgrades & Rollback](#3-upgrades--rollback), [Backup & Disaster Recovery](#4-backup--disaster-recovery). Two installation methods are supported; the recommended default is **Docker Compose**. The **systemd** method is detailed in [Section 5](#5-systemd-alternative-to-compose).
 
 ## Prerequisites
 
 | Requirement | Specification |
 | --- | --- |
-| Host Machine | Linux x86_64 or arm64. Minimum: 4 vCPUs, 16 GB RAM, 100 GB SSD storage (sandbox images, git clones, and build caches reside locally). The machine should be dedicated exclusively to Aegis |
+| Host Machine | Linux x86_64 (the images are built for `linux/amd64` only; on arm64 they run only under emulation, #405). Minimum: 4 vCPUs, 16 GB RAM, 100 GB SSD storage (sandbox images, git clones, and build caches reside locally). The machine should be dedicated exclusively to Aegis |
 | Docker Engine | Docker Engine 25+ (API 1.44, the oldest `aegis-docker-proxy` passes) and Docker Compose plugin v2 |
 | Outbound Network | Access to forges (GitHub, GitLab) and model APIs (Claude API, AWS Bedrock), unless utilizing local models. For isolated networks without Internet access, use the [offline bundle](../release.md#air-gapped--offline-environments) |
 | Inbound Traffic | Port 8080 behind your TLS reverse proxy: dashboard, REST API, webhooks. Compose publishes it on all interfaces unless `AEGIS_PUBLISH` says otherwise ([Reverse Proxy](#reverse-proxy-configuration-tls-termination)) |
@@ -78,9 +80,9 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 
    The version is written without `v` (`0.1.0`, not `v0.1.0`): it is the image tag, while the git tag is `v0.1.0`.
 
-   #### Before the First Release: Local Images
+   #### Images Built from Source
 
-   No release has been published yet, so there is nothing to pull from GHCR. Build the images from the checkout under the names `aegis-deploy.sh` expects, then deploy them as an offline version. The sandbox list is `AEGIS_SANDBOXES` in `.env`; `python` is always needed (it is also the egress proxy of the gate's fetch step):
+   To run a commit that is not a release (or without access to GHCR), build the images from the checkout under the names `aegis-deploy.sh` expects, then deploy them as an offline version. The sandbox list is `AEGIS_SANDBOXES` in `.env`; `python` is always needed (it is also the egress proxy of the gate's fetch step):
 
    ```bash
    version=0.1.0-local
