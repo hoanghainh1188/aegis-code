@@ -1,7 +1,7 @@
 # Giám sát (#32, #33): một EC2 nhỏ chạy Prometheus, Alertmanager và
 # Grafana trong Docker, cùng VPC và cùng vùng với máy aegis-server.
-# Prometheus tìm máy server qua EC2 service discovery và scrape cổng 9464;
-# security group của server chỉ cho máy này vào cổng đó. Không cổng nào mở
+# Prometheus tìm các máy server (api, worker hoặc all) qua EC2 service discovery và scrape cổng 9464;
+# security group của từng loại máy chỉ cho máy này vào cổng đó. Không cổng nào mở
 # ra ngoài: Grafana mở bằng SSM port forwarding (docs/runbook, "Giám sát").
 #
 # Cấu hình (prometheus.yml, rules, alertmanager.yml, dashboard) nằm trên
@@ -19,7 +19,7 @@ locals {
     "prometheus/prometheus.yml" = templatefile("${local.monitoring_files}/prometheus.yml.tftpl", {
       name            = var.name
       region          = var.region
-      server_name     = "${local.prefix}-server"
+      server_names    = jsonencode([for role in keys(local.nodes) : "${local.prefix}-${role}"])
       scrape_interval = "30s"
     })
     "prometheus/rules/aegis.rules.yml" = file("${local.repo_deploy_dir}/alerts/aegis.rules.yml")
@@ -92,8 +92,8 @@ resource "aws_vpc_security_group_egress_rule" "monitoring_out" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "server_metrics_from_monitoring" {
-  count                        = local.monitoring
-  security_group_id            = aws_security_group.server.id
+  for_each                     = var.monitoring.enabled ? local.nodes : {}
+  security_group_id            = aws_security_group.node[each.key].id
   referenced_security_group_id = aws_security_group.monitoring[0].id
   description                  = "Prometheus scrapes /metrics"
   ip_protocol                  = "tcp"

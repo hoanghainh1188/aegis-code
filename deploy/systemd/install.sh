@@ -33,6 +33,7 @@ fi
 [ -e /etc/aegis/image.env ] || : > /etc/aegis/image.env
 install -m 0644 "$HERE/aegis.service" /etc/systemd/system/aegis.service
 install -m 0644 "$HERE/aegis-docker-proxy.service" /etc/systemd/system/aegis-docker-proxy.service
+install -D -m 0644 "$HERE/aegis.service.d/jobs.conf" /etc/systemd/system/aegis.service.d/jobs.conf
 install -m 0755 "$HERE/aegis-deploy" /usr/local/bin/aegis-deploy
 systemctl daemon-reload
 systemctl enable aegis-docker-proxy aegis

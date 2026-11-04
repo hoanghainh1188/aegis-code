@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Kiểm cấu hình OpenTofu không cần tài khoản AWS (#33): fmt, tflint,
-# validate, rồi `plan` của từng root với example.tfvars, backend local
-# tạm và thông tin đăng nhập giả. Không gọi API AWS nào; kết quả chỉ để
+# `tofu test` của module (provider giả, #323), validate, rồi `plan` của
+# từng root với example.tfvars, backend local tạm và thông tin đăng nhập
+# giả. Không gọi API AWS nào; kết quả chỉ để
 # kiểm, không apply được. Chạy từ bất kỳ đâu:
 #
 #   deploy/tofu/check.sh            # cần tofu và tflint trong PATH
@@ -17,6 +18,9 @@ tflint --init --config="$PWD/.tflint.hcl" >/dev/null
 tflint --recursive --config="$PWD/.tflint.hcl"
 
 export AWS_ACCESS_KEY_ID=offline-plan AWS_SECRET_ACCESS_KEY=offline-plan AWS_EC2_METADATA_DISABLED=true
+echo "== modules/aegis (tofu test)"
+tofu -chdir=modules/aegis init -input=false -backend=false -no-color >/dev/null
+tofu -chdir=modules/aegis test -no-color
 for root in "${ROOTS[@]}"; do
   echo "== $root"
   printf 'terraform {\n  backend "local" {\n    path = "%s"\n  }\n}\n' "$OUT/${root//\//-}.tfstate" > "$root/backend_override.tf"

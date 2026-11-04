@@ -1,7 +1,7 @@
 # VPC riêng: hai subnet public cho ALB và EC2 (ra Internet qua Internet
-# gateway, không cần NAT), hai subnet private cho RDS. EC2 chỉ nhận kết
-# nối từ ALB và từ máy Prometheus (cổng metrics, monitoring.tf); không mở
-# SSH, vào máy bằng SSM Session Manager.
+# gateway, không cần NAT), hai subnet private cho RDS. Máy API chỉ nhận kết
+# nối từ ALB và từ máy Prometheus (cổng metrics, monitoring.tf); máy worker
+# chỉ từ Prometheus. Không mở SSH, vào máy bằng SSM Session Manager.
 
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -72,34 +72,65 @@ resource "aws_vpc_security_group_ingress_rule" "alb_http" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "alb_to_server" {
+  for_each                     = local.api_nodes
   security_group_id            = aws_security_group.alb.id
-  referenced_security_group_id = aws_security_group.server.id
+  referenced_security_group_id = aws_security_group.node[each.key].id
   ip_protocol                  = "tcp"
   from_port                    = 8080
   to_port                      = 8080
 }
 
-resource "aws_security_group" "server" {
-  name        = "${local.prefix}-server"
-  description = "aegis-server: 8080 from the ALB, 9464 from Prometheus"
+# Một nhóm cho mỗi loại máy (#323). Không mở SSH, vào máy bằng SSM. Máy
+# `worker` không nhận kết nối nào ngoài Prometheus; không nhóm nào cho
+# worker vào, nên worker không gọi được vào máy API (chỉ qua ALB như mọi
+# người ngoài, cần đăng nhập hoặc chữ ký webhook).
+resource "aws_security_group" "node" {
+  for_each    = local.nodes
+  name        = "${local.prefix}-${each.key}"
+  description = each.value.serves_api ? "aegis ${each.key}: 8080 from the ALB, 9464 from Prometheus" : "aegis ${each.key}: 9464 from Prometheus only"
   vpc_id      = aws_vpc.main.id
   tags        = local.tags
 }
 
 resource "aws_vpc_security_group_ingress_rule" "server_from_alb" {
-  security_group_id            = aws_security_group.server.id
+  for_each                     = local.api_nodes
+  security_group_id            = aws_security_group.node[each.key].id
   referenced_security_group_id = aws_security_group.alb.id
   ip_protocol                  = "tcp"
   from_port                    = 8080
   to_port                      = 8080
 }
 
-# Ra ngoài: API model, GitHub/GitLab, ECR, Secrets Manager, registry gói
-# cho bước lấy phụ thuộc (qua proxy egress của gate, #66).
-resource "aws_vpc_security_group_egress_rule" "server_out" {
-  security_group_id = aws_security_group.server.id
+# Máy có API ra ngoài tự do: forge, tracker, Sonar, OIDC có thể ở cổng
+# bất kỳ; nó không chạy code của repo.
+resource "aws_vpc_security_group_egress_rule" "api_out" {
+  for_each          = local.api_nodes
+  security_group_id = aws_security_group.node[each.key].id
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "-1"
+}
+
+# Worker (#323): HTTPS ra ngoài (API model, forge, ECR, Secrets Manager,
+# SSM, registry gói qua proxy egress của gate, #66), thêm các cổng trong
+# `worker_egress_ports`, và PostgreSQL. Security group không lọc theo tên
+# miền; tên miền do proxy egress lọc. DNS của VPC, NTP và IMDS ở địa chỉ
+# link-local, không qua security group.
+resource "aws_vpc_security_group_egress_rule" "worker_out" {
+  for_each          = var.layout == "split" ? toset([for p in var.worker_egress_ports : tostring(p)]) : toset([])
+  security_group_id = aws_security_group.node["worker"].id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "tcp"
+  from_port         = tonumber(each.key)
+  to_port           = tonumber(each.key)
+}
+
+resource "aws_vpc_security_group_egress_rule" "worker_to_db" {
+  count                        = var.layout == "split" ? 1 : 0
+  security_group_id            = aws_security_group.node["worker"].id
+  referenced_security_group_id = aws_security_group.db.id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
 }
 
 resource "aws_security_group" "db" {
@@ -110,8 +141,9 @@ resource "aws_security_group" "db" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "db_from_server" {
+  for_each                     = local.nodes
   security_group_id            = aws_security_group.db.id
-  referenced_security_group_id = aws_security_group.server.id
+  referenced_security_group_id = aws_security_group.node[each.key].id
   ip_protocol                  = "tcp"
   from_port                    = 5432
   to_port                      = 5432

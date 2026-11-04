@@ -4,7 +4,7 @@ For operations, deployment, and rollback guides, refer to [AWS Operations Runboo
 
 | Directory | Scope & Contents |
 | --- | --- |
-| `modules/aegis` | Complete deployment module: VPC, EC2 host with Docker (`all` role), RDS PostgreSQL, ALB + ACM certificate, Secrets Manager placeholders (empty values), SSM parameter for image tags, CloudWatch Logs, instance IAM roles; dedicated monitoring EC2 (Prometheus, Alertmanager, Grafana, SNS) consuming rules from `deploy/alerts/` and dashboards from `deploy/grafana/` |
+| `modules/aegis` | Complete deployment module: VPC, EC2 `api` (behind the ALB, no job) and EC2 `worker` (jobs and sandboxes, no inbound traffic), each with its own IAM role and security group, or a single `all` machine with `layout = "single"` (#323), RDS PostgreSQL, ALB + ACM certificate, Secrets Manager placeholders (empty values), SSM parameter for image tags, CloudWatch Logs, instance IAM roles; dedicated monitoring EC2 (Prometheus, Alertmanager, Grafana, SNS) consuming rules from `deploy/alerts/` and dashboards from `deploy/grafana/` |
 | `envs/staging` | Staging environment, `poc` mode, defaults to `ap-northeast-1` |
 | `envs/customer-jp` | Customer production environment, region hardcoded to `ap-northeast-1` (Tokyo), Multi-AZ RDS |
 | `bootstrap` | One-time setup per AWS account: GitHub OIDC provider, IAM roles `aegis-ci-plan`/`-image`/`-apply`, ECR repositories |
@@ -17,6 +17,6 @@ Validate configuration locally without requiring AWS credentials (CI executes th
 deploy/tofu/check.sh
 ```
 
-Executes `tofu fmt -check`, `tflint`, `tofu validate`, and generates dry-run execution plans across roots with `example.tfvars`, `-var offline_plan=true` (bypasses credential verification), temporary local backend, and `-refresh=false`. All data sources avoid runtime API lookups (AMIs resolve via SSM aliases during boot; account IDs pass via variables), ensuring comprehensive validation offline.
+Executes `tofu fmt -check`, `tflint`, `tofu test` of `modules/aegis` (mock AWS provider: which machine is behind the ALB, which secrets each IAM role reads, which ports are open, #323), `tofu validate`, and generates dry-run execution plans across roots with `example.tfvars`, `-var offline_plan=true` (bypasses credential verification), temporary local backend, and `-refresh=false`. All data sources avoid runtime API lookups (AMIs resolve via SSM aliases during boot; account IDs pass via variables), ensuring comprehensive validation offline.
 
 For real AWS accounts: run `tofu init -backend-config=backend.hcl`, followed by `tofu plan -var-file=<env>.tfvars`. The `apply` action runs strictly via CI/CD workflows under GitHub protected environments with mandatory reviewers.

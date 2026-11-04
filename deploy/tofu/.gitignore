@@ -8,3 +8,5 @@
 backend.hcl
 backend_override.tf
 crash.log
+# `tofu test` của module tự init (check.sh); khoá provider ở các root.
+modules/**/.terraform.lock.hcl

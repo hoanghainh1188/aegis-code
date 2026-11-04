@@ -75,14 +75,40 @@ variable "sandbox_profiles" {
   default     = ["python", "rust", "node", "java", "go", "dotnet"]
 }
 
+variable "layout" {
+  description = "`split`: máy `api` (sau ALB, không chạy job) và máy `worker` (chạy job, không nhận traffic) tách nhau, mỗi máy một IAM role và security group (#323). `single`: một máy `all` làm cả hai, rẻ hơn cho môi trường nhỏ, nhưng code của repo chạy cạnh khoá phiên, secret webhook và role của API (docs/runbook/README.md, \"Worker and Docker Isolation\")."
+  type        = string
+  default     = "split"
+  validation {
+    condition     = contains(["split", "single"], var.layout)
+    error_message = "layout: `split` hoặc `single`."
+  }
+}
+
 variable "instance_type" {
-  description = "Máy chạy API và worker (vai trò `all`). Test của repo chạy trên chính máy này, trong container sandbox."
+  description = "Máy chạy job: `worker`, hoặc `all` khi `layout = \"single\"`. Test của repo chạy trên chính máy này, trong container sandbox."
   type        = string
   default     = "m7i.xlarge"
 }
 
+variable "api_instance_type" {
+  description = "Máy `api` khi `layout = \"split\"`: chỉ API, webhook, dashboard và bản clone mà trang admin kiểm tra."
+  type        = string
+  default     = "t3.medium"
+}
+
+variable "worker_egress_ports" {
+  description = "Cổng TCP máy `worker` được mở ra ngoài, ngoài PostgreSQL trong VPC. 443 đủ cho API model, GitHub, GitLab.com, ECR, Secrets Manager và registry gói; thêm cổng của forge hay Sonar tự host nếu có (ví dụ 9000)."
+  type        = list(number)
+  default     = [443]
+  validation {
+    condition     = length(var.worker_egress_ports) > 0 && alltrue([for p in var.worker_egress_ports : p >= 1 && p <= 65535 && floor(p) == p])
+    error_message = "worker_egress_ports: ít nhất một cổng, mỗi cổng 1–65535."
+  }
+}
+
 variable "workspace_volume_gb" {
-  description = "Đĩa riêng cho workspace của job, cache build và image sandbox, gắn ở /srv/aegis/.workspace."
+  description = "Đĩa riêng của máy chạy job cho workspace, cache build và image sandbox, gắn ở /srv/aegis/.workspace."
   type        = number
   default     = 200
 }
@@ -144,7 +170,7 @@ variable "server_config" {
 }
 
 variable "monitoring" {
-  description = "Máy giám sát (monitoring.tf): Prometheus scrape cổng 9464 của server, nạp deploy/alerts/aegis.rules.yml, gửi cảnh báo qua SNS; Grafana nạp deploy/grafana/*.json. `alert_emails` đăng ký nhận cảnh báo (phải xác nhận qua email)."
+  description = "Máy giám sát (monitoring.tf): Prometheus scrape cổng 9464 của mọi máy server, nạp deploy/alerts/aegis.rules.yml, gửi cảnh báo qua SNS; Grafana nạp deploy/grafana/*.json. `alert_emails` đăng ký nhận cảnh báo (phải xác nhận qua email)."
   type = object({
     enabled              = optional(bool, true)
     instance_type        = optional(string, "t3.small")

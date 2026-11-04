@@ -1,5 +1,6 @@
-# Một bản triển khai aegis-server (ADR 0003 §6): một EC2 có Docker chạy
-# vai trò `all`, RDS PostgreSQL, secret trong Secrets Manager, ALB có TLS.
+# Một bản triển khai aegis-server (ADR 0003 §6): một EC2 `api` sau ALB có
+# TLS và một EC2 `worker` có Docker (hoặc một máy `all`, `layout`), RDS
+# PostgreSQL, secret trong Secrets Manager.
 # Mọi tài nguyên ở `var.region`; với `customer_jp` vùng đó là
 # ap-northeast-1.
 

@@ -16,6 +16,17 @@ locals {
     var.server_config.oidc_issuer == "" ? [] : ["AEGIS_OIDC_CLIENT_SECRET"],
     var.enable_poc ? ["ANTHROPIC_API_KEY"] : [],
   )
+  # Secret chỉ máy có API đọc (#323): ký phiên đăng nhập, kiểm chữ ký
+  # webhook, OIDC (crates/aegis-server/src/auth, src/webhook). Role `worker`
+  # đọc mọi secret khác của bản triển khai, cả secret của repo thêm sau từ
+  # trang admin (#330), nhưng bị Deny những tên này. Secret mới chỉ API
+  # dùng phải thêm vào đây.
+  api_only_secret_names = [
+    "AEGIS_SESSION_KEY",
+    "AEGIS_OIDC_CLIENT_SECRET",
+    "AEGIS_GITHUB_WEBHOOK_SECRET",
+    "AEGIS_GITLAB_WEBHOOK_TOKEN",
+  ]
 }
 
 resource "aws_secretsmanager_secret" "server" {
