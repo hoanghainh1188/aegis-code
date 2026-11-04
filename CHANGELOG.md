@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.5.0...v0.6.0) (2026-11-04)
+
+
+### Features
+
+* **deploy:** publish images for linux/amd64 and linux/arm64 ([#407](https://github.com/hoanghainh1188/aegis-code/issues/407)) ([f2e1270](https://github.com/hoanghainh1188/aegis-code/commit/f2e127032e7d0eb549afe1398b8a3c533bc5237b)), closes [#405](https://github.com/hoanghainh1188/aegis-code/issues/405)
+* **deploy:** run the API and the workers on separate EC2 machines ([#323](https://github.com/hoanghainh1188/aegis-code/issues/323)) ([#403](https://github.com/hoanghainh1188/aegis-code/issues/403)) ([9e2b86d](https://github.com/hoanghainh1188/aegis-code/commit/9e2b86d7d85a4d3d5053e2cf4387f7533677f5c0))
+* **security:** filter the Docker API between aegis and the daemon ([#321](https://github.com/hoanghainh1188/aegis-code/issues/321)) ([#402](https://github.com/hoanghainh1188/aegis-code/issues/402)) ([a8e4b32](https://github.com/hoanghainh1188/aegis-code/commit/a8e4b328bf3fa45654ca6b01eefc804a7bbd6a75))
+
+
+### Bug Fixes
+
+* **gate:** wait for the egress proxy without polling and tell slow from broken ([#326](https://github.com/hoanghainh1188/aegis-code/issues/326)) ([#398](https://github.com/hoanghainh1188/aegis-code/issues/398)) ([59cd95c](https://github.com/hoanghainh1188/aegis-code/commit/59cd95cd773f56a2de2a418d937eb71b51e5b4b0))
+
+
+### Documentation
+
+* install on premise, from a blank machine to the first PR ([#404](https://github.com/hoanghainh1188/aegis-code/issues/404)) ([#406](https://github.com/hoanghainh1188/aegis-code/issues/406)) ([46a2a7e](https://github.com/hoanghainh1188/aegis-code/commit/46a2a7e758c09c9ba131376baac0a17a0bd5cd85))
+
 ## [0.5.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.4.0...v0.5.0) (2026-11-02)
 
 
