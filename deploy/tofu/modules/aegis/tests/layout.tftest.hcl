@@ -36,78 +36,6 @@ mock_provider "aws" {
   }
 }
 
-# Mỗi secret một ARN, để phân biệt secret nào worker đọc được.
-override_resource {
-  target = aws_secretsmanager_secret.server["AEGIS_DATABASE_URL"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/AEGIS_DATABASE_URL-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["AEGIS_SESSION_KEY"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/AEGIS_SESSION_KEY-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["AEGIS_GITHUB_WEBHOOK_SECRET"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/AEGIS_GITHUB_WEBHOOK_SECRET-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["AEGIS_GITLAB_WEBHOOK_TOKEN"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/AEGIS_GITLAB_WEBHOOK_TOKEN-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["AEGIS_GITHUB_COMMENT_TOKEN"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/AEGIS_GITHUB_COMMENT_TOKEN-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["AEGIS_GITLAB_COMMENT_TOKEN"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/AEGIS_GITLAB_COMMENT_TOKEN-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["ANTHROPIC_API_KEY"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/ANTHROPIC_API_KEY-AbCdEf" }
-}
-
-override_resource {
-  target = aws_secretsmanager_secret.server["FORK_TOKEN"]
-  values = { arn = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/FORK_TOKEN-AbCdEf" }
-}
-
-# Mỗi security group một id, để biết luật nào thuộc nhóm nào.
-override_resource {
-  target = aws_security_group.node["api"]
-  values = { id = "sg-0api" }
-}
-
-override_resource {
-  target = aws_security_group.node["worker"]
-  values = { id = "sg-0worker" }
-}
-
-override_resource {
-  target = aws_security_group.node["all"]
-  values = { id = "sg-0all" }
-}
-
-override_resource {
-  target = aws_security_group.monitoring[0]
-  values = { id = "sg-0monitoring" }
-}
-
-override_resource {
-  target = aws_security_group.alb
-  values = { id = "sg-0alb" }
-}
-
-override_resource {
-  target = aws_security_group.db
-  values = { id = "sg-0db" }
-}
-
 variables {
   name               = "test"
   region             = "ap-northeast-1"
@@ -135,16 +63,14 @@ run "split_by_default" {
     condition     = keys(aws_vpc_security_group_ingress_rule.server_from_alb) == ["api"]
     error_message = "ALB chỉ vào được máy api."
   }
+  # Luật vào của mỗi máy là một instance có key là vai trò của máy đó
+  # (network.tf, monitoring.tf): worker chỉ có luật của Prometheus.
   assert {
     condition = [
-      for r in aws_vpc_security_group_ingress_rule.server_metrics_from_monitoring : r.referenced_security_group_id
-      if r.security_group_id == aws_security_group.node["worker"].id
-    ] == [aws_security_group.monitoring[0].id]
-    error_message = "Vào máy worker chỉ có Prometheus."
-  }
-  assert {
-    condition     = length([for r in aws_vpc_security_group_ingress_rule.server_from_alb : r if r.security_group_id == aws_security_group.node["worker"].id]) == 0
-    error_message = "Không luật nào cho ALB vào máy worker."
+      for k, r in aws_vpc_security_group_ingress_rule.server_metrics_from_monitoring : k
+      if r.referenced_security_group_id == aws_security_group.monitoring[0].id
+    ] == ["api", "worker"]
+    error_message = "Prometheus vào được cổng metrics của mọi máy."
   }
   assert {
     condition     = keys(aws_ebs_volume.workspace) == ["worker"]
@@ -182,12 +108,16 @@ run "the_worker_cannot_read_the_secrets_of_the_api" {
     ]) == "Deny"
     error_message = "NoApiSecrets là Deny."
   }
+  # Secrets Manager đặt ARN là `…:secret:<name>-<6 ký tự>`: mẫu Deny phải
+  # theo đúng tên secret module tạo.
   assert {
     condition = alltrue([
       for n in ["AEGIS_SESSION_KEY", "AEGIS_GITHUB_WEBHOOK_SECRET", "AEGIS_GITLAB_WEBHOOK_TOKEN"] :
-      startswith(aws_secretsmanager_secret.server[n].arn, "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:aegis/test/${n}-")
+      contains(one([
+        for st in data.aws_iam_policy_document.node["worker"].statement : st.resources if st.sid == "NoApiSecrets"
+      ]), "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:${aws_secretsmanager_secret.server[n].name}-??????")
     ])
-    error_message = "ARN thật của secret khớp mẫu Deny (tên, gạch ngang, hậu tố)."
+    error_message = "Mẫu Deny khớp tên của secret module tạo."
   }
   assert {
     condition     = length([for st in data.aws_iam_policy_document.node["api"].statement : st if st.sid == "NoApiSecrets"]) == 0
