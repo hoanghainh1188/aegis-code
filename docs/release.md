@@ -8,7 +8,7 @@ flowchart LR
     B -- squash-merge --> C[tag vX.Y.Z + GitHub Release]
     C --> D[release.yml]
     D --> E[GHCR: aegis-server, aegis-sandbox-* X.Y.Z, cosign keyless sign]
-    D --> F[Release Assets: offline bundle, versions.txt]
+    D --> F[Release Assets: offline bundles per architecture]
     D --> G[Release Assets: aegis tar.gz] --> H[npmjs: @hoanghainh/aegis]
 ```
 
@@ -19,8 +19,9 @@ flowchart LR
 1. **Merge Release PR:** When Conventional Commits land on `main`, `release-please` opens or updates a pull request titled `chore(release): aegis-code X.Y.Z`. `feat` increments minor version, `fix` increments patch; during `0.x`, breaking changes (`!`) also increment minor version. The PR updates versions across `Cargo.toml`, `Cargo.lock`, `npm/aegis/package.json`, `version.txt`, and generates `CHANGELOG.md`.
 2. **Approve and Squash-Merge:** `release-please` automatically tags the repository and publishes a GitHub Release, triggering [.github/workflows/release.yml](../.github/workflows/release.yml):
    - `version`: Validates that tag matches versions across all manifests;
-   - `images`: Builds and pushes 7 container images tagged `X.Y.Z` and `X.Y`, signed via Cosign keyless signing;
-   - `offline`: Runs `docker save` for each image and attaches tarballs to the GitHub Release;
+   - `images`: Builds the 7 container images for `linux/amd64` and `linux/arm64`, each architecture on a runner of its own (no QEMU emulation), and pushes them by digest;
+   - `manifests`: Tags each image's two architectures together as `X.Y.Z` and `X.Y`, then signs it via Cosign keyless signing (`--recursive`: the index and both images);
+   - `offline`: On a runner of each architecture, runs `docker save` for each image and attaches the tarballs to the GitHub Release;
    - `client`, `publish-client`: Compiles binaries for four target architectures, builds npm package, and publishes to npmjs.
 3. **Re-running Failed Release Jobs:** Actions $\rightarrow$ Release $\rightarrow$ *Run workflow* targeting the release tag. Artifact publishing steps are idempotent (`--clobber` for release assets, identical image tags, and `npm view` check before `npm publish`).
 
@@ -47,7 +48,7 @@ All components of a release share an identical version:
 | Server | `ghcr.io/hoanghainh1188/aegis-server:X.Y.Z` |
 | Gate Sandboxes | `ghcr.io/hoanghainh1188/aegis-sandbox-<python\|rust\|node\|java\|go\|dotnet>:X.Y.Z`; server calls these locally by bare names `aegis-sandbox-<profile>` |
 | Client | `aegis-X.Y.Z-<target>.tar.gz`, npm `@hoanghainh/aegis@X.Y.Z` |
-| Database | Final migration included in the release, documented in `versions.txt`; server runs migrations automatically on boot |
+| Database | Final migration included in the release, documented in `versions-<arch>.txt`; server runs migrations automatically on boot |
 
 Server and sandboxes must run identical versions. The client supports backward compatibility, as `/api/v1` APIs are additive and non-breaking.
 
@@ -61,21 +62,23 @@ cosign verify ghcr.io/hoanghainh1188/aegis-server:X.Y.Z \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Digest values for each image are recorded in `versions.txt` attached to the GitHub Release.
+Digest values for each image (the multi-architecture index) are recorded in `versions-amd64.txt` and `versions-arm64.txt` attached to the GitHub Release.
 
 ---
 
 ## Air-Gapped / Offline Environments
 
-Download the following assets from the GitHub Release page on an Internet-connected workstation:
-- Image tarballs `aegis-*-X.Y.Z.tar.gz` and their respective `.sha256` files (you may omit unused language sandboxes, except `sandbox-python` which serves as the egress proxy for gate fetch operations);
-- Third-party dependencies bundle `aegis-dep-*.tar.gz` for Compose (`postgres:17-alpine`);
-- `versions.txt` and `load-images.sh`.
+Each file of the bundle names its architecture, `<arch>` being `amd64` (x86_64) or `arm64`: take the one of the target host (`docker version --format '{{.Server.Arch}}'` on it). Download the following assets from the GitHub Release page on an Internet-connected workstation:
+- Image tarballs `aegis-*-X.Y.Z-<arch>.tar.gz` and their respective `.sha256` files (you may omit unused language sandboxes, except `sandbox-python` which serves as the egress proxy for gate fetch operations);
+- Third-party dependencies bundle `aegis-dep-*-<arch>.tar.gz` for Compose (`postgres:17-alpine`);
+- `versions-<arch>.txt` and `load-images.sh`.
+
+Releases up to 0.5.0 have amd64 bundles only, named without `-<arch>`.
 
 Transfer all files to the target host and run:
 
 ```bash
-./load-images.sh            # Validates SHA-256 checksums, loads docker images, tags sandboxes with bare names
+./load-images.sh            # Validates SHA-256 checksums, loads the host architecture's images, tags sandboxes with bare names
 ```
 
 Proceed with host deployment using [On-Premise Operations Runbook](runbook/on-premise.md), passing tag `X.Y.Z`.

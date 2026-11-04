@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Loads the images of an offline bundle (#263, docs/release.md) into the
 # local Docker daemon, each checked against its SHA-256 first. Run in the
-# directory holding aegis-*.tar.gz and their .sha256 files, on a machine
-# with no access to the registry. Sandbox images are also tagged with the
+# directory holding aegis-*-<arch>.tar.gz and their .sha256 files, on a
+# machine with no access to the registry; only the files of the daemon's
+# architecture are loaded (#405). Sandbox images are also tagged with the
 # bare name the profiles use (`aegis-sandbox-rust`).
 #
 # Usage: ./load-images.sh [dir]
 set -euo pipefail
 
 cd "${1:-.}"
+arch=$(docker version --format '{{.Server.Arch}}')
 shopt -s nullglob
-bundles=(aegis-*.tar.gz)
+bundles=(aegis-*-"$arch".tar.gz)
 if [ ${#bundles[@]} -eq 0 ]; then
-  echo "load-images.sh: no aegis-*.tar.gz in $(pwd)" >&2
+  echo "load-images.sh: no aegis-*-$arch.tar.gz in $(pwd) (this machine is $arch)" >&2
   exit 1
 fi
 for file in "${bundles[@]}"; do
@@ -33,4 +35,4 @@ for file in "${bundles[@]}"; do
       ;;
   esac
 done
-[ -f versions.txt ] && cat versions.txt
+[ -f "versions-$arch.txt" ] && cat "versions-$arch.txt"
