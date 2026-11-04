@@ -46,6 +46,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-docker-proxy"
+version = "0.5.0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aegis-gate"
 version = "0.5.0"
 dependencies = [

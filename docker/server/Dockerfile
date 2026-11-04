@@ -4,7 +4,8 @@
 #   docker build -f docker/server/Dockerfile -t aegis-server .
 #
 # Next to it: aegis-aci (the agent's tools, found next to the running
-# program), codebase-memory-mcp (the call graph), git (job checkouts) and
+# program), aegis-docker-proxy (between aegis and the daemon, #321),
+# codebase-memory-mcp (the call graph), git (job checkouts) and
 # the docker client (the gate runs each step in a sandbox container,
 # Design §6–§7). The sandbox images per profile stay in docker/<profile>/
 # and run on the host's daemon.
@@ -28,9 +29,10 @@ COPY docker/egress docker/egress
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p aegis-server -p aegis-aci \
+    cargo build --release --locked -p aegis-server -p aegis-aci -p aegis-docker-proxy \
         --features aegis-server/bedrock \
- && install -D -m 0755 target/release/aegis-server target/release/aegis-aci -t /out
+ && install -D -m 0755 target/release/aegis-server target/release/aegis-aci \
+        target/release/aegis-docker-proxy -t /out
 
 # Only the client: the daemon is the host's (docs/runbook/README.md, "Worker
 # và Docker").
@@ -67,8 +69,11 @@ COPY --from=build /out/ /usr/local/bin/
 # Not root. The gate starts sandboxes as this same uid:gid, so the host's
 # workspace directory must belong to it (deploy/tofu/modules/aegis/user_data.sh).
 ARG AEGIS_UID=10001
+# /run/aegis-docker: the socket of aegis-docker-proxy (#321), the same image
+# run with `--entrypoint`. A named volume there starts with this owner.
 RUN groupadd --gid ${AEGIS_UID} aegis \
- && useradd --uid ${AEGIS_UID} --gid aegis --home-dir /srv/aegis --create-home aegis
+ && useradd --uid ${AEGIS_UID} --gid aegis --home-dir /srv/aegis --create-home aegis \
+ && install -d -o aegis -g aegis -m 0700 /run/aegis-docker
 WORKDIR /srv/aegis
 # Mode configurations and prices; relative paths in them are taken from
 # here. The server's own configuration is mounted at /etc/aegis.

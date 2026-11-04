@@ -1,0 +1,38 @@
+# aegis-docker-proxy (#321, ADR 0010): between aegis and this machine's
+# Docker daemon. Whoever holds the daemon's socket is root of the machine,
+# so only this unit's container does; aegis gets /run/aegis-docker instead,
+# where only the calls of the gate and the ACI pass, and only hardened
+# containers with the workspace mounted. The same image as aegis.service,
+# with another entrypoint; one file on premises and on AWS.
+#
+# /etc/aegis/aegis.env: DOCKER_GID, and AEGIS_DOCKER_PROXY_ARGS (with Sonar
+# in a mode: `--network <[sonar] network> --writable-image <[sonar] image>`).
+# /etc/aegis/image.env: AEGIS_IMAGE, written by aegis-deploy.
+[Unit]
+Description=aegis-docker-proxy
+After=docker.service
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/etc/aegis/aegis.env
+EnvironmentFile=/etc/aegis/image.env
+ExecStartPre=-/usr/bin/docker rm -f aegis-docker-proxy
+ExecStartPre=/usr/bin/install -d -o 10001 -g 10001 -m 0700 /run/aegis-docker
+ExecStart=/usr/bin/docker run --rm --name aegis-docker-proxy \
+  --user 10001:10001 --group-add ${DOCKER_GID} \
+  --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume /run/aegis-docker:/run/aegis-docker \
+  --volume /srv/aegis/.workspace:/srv/aegis/.workspace:ro \
+  --entrypoint /usr/bin/tini \
+  ${AEGIS_IMAGE} -- aegis-docker-proxy \
+  --listen /run/aegis-docker/docker.sock \
+  --mount-root /srv/aegis/.workspace \
+  $AEGIS_DOCKER_PROXY_ARGS
+ExecStartPost=/bin/sh -c 'for _ in $(seq 1 60); do [ -S /run/aegis-docker/docker.sock ] && exit 0; sleep 1; done; exit 1'
+ExecStop=/usr/bin/docker stop aegis-docker-proxy
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

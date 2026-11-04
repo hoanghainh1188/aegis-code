@@ -22,12 +22,21 @@ For operators running Aegis on AWS (#33, [ADR 0003](../adr/0003-platform-service
 
 ### Worker and Docker Isolation
 
-The gate executes each verification step inside a sandbox container (`docker run --network none --cap-drop ALL …`, Architecture §6–§7). On EC2, the `aegis` container communicates with the **host Docker daemon** via the mounted socket `/var/run/docker.sock`, with `--group-add` matching the socket group (container user is uid 10001, non-root). Sandboxes are sibling containers to `aegis`, not nested containers.
+The gate executes each verification step inside a sandbox container (`docker run --network none --cap-drop ALL …`, Architecture §6–§7). Sandboxes are sibling containers to `aegis` on the **host Docker daemon**, not nested containers. `aegis` does not hold the daemon's socket. It reaches the daemon through `aegis-docker-proxy` ([ADR 0010](../adr/0010-docker-socket-proxy.md), #321), a separate container from the same image (`aegis-docker-proxy.service`, which `aegis.service` requires). Only the proxy mounts `/var/run/docker.sock` and has the socket's group. `aegis` (uid 10001, non-root) gets the proxy's socket at `/run/aegis-docker/docker.sock` through `DOCKER_HOST`.
 
-Two key implications:
+Three key implications:
 
-- **Workspace path parity:** The workspace path must be identical inside the container and on the host (`/srv/aegis/.workspace`), because the gate sends its own paths to the Docker daemon when mounting `/work`. The sandbox executes as uid 10001, so this directory must be owned by uid 10001.
-- **Security boundary:** Controlling the Docker socket grants effective root access to the host machine. A command injection vulnerability in the gate's `docker run` parameters (e.g., mounting `/`) could compromise the host and its IAM instance profile. Current mitigations: the gate constructs arguments as an array without passing through shell parsing; the EC2 instance runs only Aegis; IMDSv2 hop limit is set to 1 so bridge/none network containers (sandboxes, Sonar scanners) cannot retrieve host metadata credentials, while `aegis` runs with `--network host` to access IMDS; instance IAM role is scoped strictly to reading `aegis/<environment>/*` secrets, pulling ECR, and writing CloudWatch logs; SSH is disabled. Future hardening: rootless Docker, socket filtering proxy, or separating worker instances from API nodes.
+- **Workspace path parity:** The workspace path must be identical inside the container and on the host (`/srv/aegis/.workspace`), because the gate sends its own paths to the Docker daemon when mounting `/work`. The sandbox executes as uid 10001, so this directory must be owned by uid 10001. The proxy mounts it read-only at the same path to resolve links in mount sources.
+- **What the proxy allows:**
+  - **Calls:** only those the gate and the ACI make: create, attach, wait, kill and remove containers, logs, the fetch step's internal networks, pulling and inspecting images. Every call on a container needs one named by aegis.
+  - **Containers:** only with the #320 hardening, a non-root user, and bind mounts that resolve under the workspace. On `none`, the fetch network, or the default bridge without mounts (the egress proxy).
+  - **Refused calls** are logged by `aegis-docker-proxy` as `refused` with method, path and reason (`docker logs aegis-docker-proxy`). A refusal shows in the job's log as `aegis-docker-proxy refused the call: …`.
+  - **Sonar:** a mode with Sonar adds `--network <[sonar] network> --writable-image <[sonar] image>` to `AEGIS_DOCKER_PROXY_ARGS` in `/etc/aegis/aegis.env`.
+- **Security boundary:** Controlling the Docker socket grants effective root access to the host machine; now only the proxy does.
+  - **Remaining mitigations:** the gate builds arguments as an array without shell parsing; the EC2 instance runs only Aegis; IMDSv2 hop limit is set to 1, so bridge/none network containers (sandboxes, Sonar scanners) cannot retrieve host metadata credentials, while `aegis` runs with `--network host` to access IMDS; the instance IAM role is scoped strictly to reading `aegis/<environment>/*` secrets, pulling ECR and writing CloudWatch logs; SSH is disabled.
+  - **Gaps left:** a process that can write to the workspace could swap a directory for a link between the proxy's check and the daemon's mount, and the proxy does not limit which images run.
+  - **Future hardening:** rootless Docker, and separating worker instances from API nodes (#323).
+  - **Kubernetes:** this section does not apply there. Each worker Pod has its own daemon in a DinD sidecar ([ADR 0008](../adr/0008-gate-sandbox-on-kubernetes.md)), and no proxy is deployed.
 
 ---
 
