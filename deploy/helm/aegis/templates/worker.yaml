@@ -1,6 +1,7 @@
 {{- $name := printf "%s-worker" (include "aegis.fullname" .) -}}
 {{- $ns := include "aegis.workerNamespace" . -}}
 {{- $socket := "/run/dind/docker.sock" -}}
+{{- $proxySocket := "/run/aegis-docker/docker.sock" -}}
 {{- $workspace := "/srv/aegis/.workspace" -}}
 {{- $sandbox := .Values.sandboxImages -}}
 {{- if not (has $sandbox.source (list "pull" "offline" "none")) -}}
@@ -151,6 +152,41 @@ spec:
             - {name: offline, mountPath: /offline, readOnly: true}
             {{- end }}
         {{- end }}
+        # Between the worker and the daemon (ADR 0010): whoever holds the
+        # daemon's socket can reach root on the node, so the worker only
+        # gets this one. After the image step, whose calls it would refuse.
+        # A native sidecar like dind, and stopped before it. A Pod has no
+        # `network_mode: none`: this shares the Pod's network and listens
+        # only on its socket.
+        - name: docker-proxy
+          image: {{ include "aegis.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          restartPolicy: Always
+          command: ["/usr/bin/tini", "--", "aegis-docker-proxy"]
+          args:
+            - --listen
+            - {{ $proxySocket }}
+            - --upstream
+            - {{ $socket }}
+            - --mount-root
+            - {{ $workspace }}
+            {{- with .Values.worker.dockerProxy.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            {{- include "aegis.containerSecurity" . | nindent 12 }}
+          startupProbe:
+            exec:
+              command: ["test", "-S", "{{ $proxySocket }}"]
+            periodSeconds: 1
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.worker.dockerProxy.resources | nindent 12 }}
+          volumeMounts:
+            # Read to resolve links in mount sources: the daemon's path.
+            - {name: workspace, mountPath: {{ $workspace }}, readOnly: true}
+            - {name: dind-socket, mountPath: /run/dind}
+            - {name: docker-api, mountPath: /run/aegis-docker}
       containers:
         - name: aegis
           image: {{ include "aegis.image" . }}
@@ -161,7 +197,7 @@ spec:
           ports:
             - {name: metrics, containerPort: 9464}
           env:
-            - {name: DOCKER_HOST, value: "unix://{{ $socket }}"}
+            - {name: DOCKER_HOST, value: "unix://{{ $proxySocket }}"}
             {{- with .Values.worker.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -180,7 +216,7 @@ spec:
             - {name: secrets, mountPath: /run/secrets, readOnly: true}
             - {name: tmp, mountPath: /tmp}
             - {name: workspace, mountPath: {{ $workspace }}}
-            - {name: dind-socket, mountPath: /run/dind}
+            - {name: docker-api, mountPath: /run/aegis-docker}
       {{- with .Values.worker.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -201,6 +237,8 @@ spec:
             defaultMode: 0400
         - {name: tmp, emptyDir: {}}
         - {name: dind-socket, emptyDir: {}}
+        # The proxy's socket, shared with the worker only.
+        - {name: docker-api, emptyDir: {}}
         {{- if eq $sandbox.source "offline" }}
         - name: offline
           persistentVolumeClaim:

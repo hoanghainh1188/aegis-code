@@ -49,7 +49,13 @@ Every container comes from `Hardening::args` (#320): no capabilities, `no-new-pr
 
 5. **Sonar.** The scanner runs on `[sonar] network` (default `bridge`) with its cache mounted and a writable root. A mode that enables Sonar adds `--network <that network>` and `--writable-image <the scanner image>` to the proxy's arguments.
 
-6. **Kubernetes is out of scope.** Each worker Pod has its own daemon in a DinD sidecar ([ADR 0008](0008-gate-sandbox-on-kubernetes.md)), so the socket gives root of that Pod's daemon, not of a shared node daemon. The proxy can be added there later as a third container.
+6. **Kubernetes (#411).** Each worker Pod has its own daemon in a DinD sidecar ([ADR 0008](0008-gate-sandbox-on-kubernetes.md)). That sidecar is privileged, so its socket gives root of the node, as §4 of ADR 0008 accepted until now. The Helm chart runs the proxy as a third native sidecar of the Pod, after `dind` and the step that loads the sandbox images:
+   - it follows §4: uid 10001 (the daemon's socket has that group), a read-only root, no capabilities, and the workspace read-only at the same path;
+   - only `dind`, the image step and the proxy mount the daemon's socket. The proxy's own socket reaches the `aegis` container through an `emptyDir`, and `DOCKER_HOST` points at it;
+   - **a Pod has no `network_mode: none`**, so the proxy shares the Pod's network, unlike on Compose. It listens only on its Unix socket and opens no port;
+   - a mode with Sonar passes the arguments of §5 through `worker.dockerProxy.extraArgs`.
+
+   The proxy guards against the `aegis` process, not against a sandbox that escapes: that one lands inside the privileged sidecar, and the node's isolation still rests on the hardening and on a dedicated node pool (ADR 0008).
 
 ## Consequences
 

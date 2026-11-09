@@ -109,6 +109,14 @@ worker:
     resources:
       requests: {cpu: "1", memory: 2Gi}
       limits: {memory: 8Gi}
+  # aegis-docker-proxy between the worker and its daemon (ADR 0010).
+  dockerProxy:
+    # A mode with Sonar needs [--network, <[sonar] network>,
+    # --writable-image, <[sonar] image>], or its scanner is refused.
+    extraArgs: []
+    resources:
+      requests: {cpu: 50m, memory: 32Mi}
+      limits: {memory: 256Mi}
 
 # Into each worker Pod's daemon before the worker starts.
 sandboxImages:

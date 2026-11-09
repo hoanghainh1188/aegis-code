@@ -5,13 +5,17 @@ The Helm chart in [`deploy/helm/aegis`](../../deploy/helm/aegis) runs aegis on a
 | | |
 | --- | --- |
 | API | Deployment, `--role api`, no Docker. Service on 8080, optional Ingress |
-| Workers | StatefulSet, `--role worker`, in a namespace of their own. Each Pod has a Docker daemon in a `dind` sidecar and two volumes: the workspace and `/var/lib/docker` |
+| Workers | StatefulSet, `--role worker`, in a namespace of their own. Each Pod has a Docker daemon in a `dind` sidecar, `aegis-docker-proxy` in front of it, and two volumes: the workspace and `/var/lib/docker` |
 | PostgreSQL | Your own by default. `postgresql.enabled` runs one in the release, for a trial |
 | Secrets | Kubernetes Secrets you create, mounted as files in `/run/secrets` ([#261](README.md#on-premise-file-based-secrets-261)). None is in the chart or its values |
 
 ## Security Model
 
-**The `dind` sidecar is privileged, so whoever takes over a worker process can become root on its node.** ADR 0008 §4 accepts this, and the chart limits what that reaches:
+**The `dind` sidecar is privileged, so whoever holds its socket can become root on its node.** The worker does not hold it: only `dind`, the `sandbox-images` step and the `docker-proxy` sidecar mount that socket. The `aegis` container reaches the daemon through [`aegis-docker-proxy`](../adr/0010-docker-socket-proxy.md), which passes only the gate's calls and hardened sandboxes with the workspace mounted, so a compromised worker process cannot start a privileged container.
+
+The proxy runs as uid 10001 with a read-only root and no capabilities. A Pod has no `network_mode: none`, so unlike on Compose it shares the Pod's network; it listens only on a Unix socket. Refused calls are logged as `refused` with method, path and reason: `kubectl -n aegis-worker logs aegis-worker-0 -c docker-proxy`. A mode with Sonar needs `worker.dockerProxy.extraArgs: [--network, <[sonar] network>, --writable-image, <[sonar] image>]`, or its scanner is refused.
+
+**What is still open.** A sandbox that escapes its container lands inside the privileged sidecar and can become root on the node, and the proxy's two known gaps apply here too: a process that can write to the workspace can race the mount check, and any image may run, though only hardened. The chart limits what that reaches:
 
 - Run workers on a dedicated, tainted node pool (`worker.nodeSelector`, `worker.tolerations`), so that the node holds nothing else.
 - The worker namespace is the only one that needs Pod Security level `privileged`. The API's and PostgreSQL's Pods meet `restricted`.
@@ -20,7 +24,7 @@ The Helm chart in [`deploy/helm/aegis`](../../deploy/helm/aegis) runs aegis on a
 - NetworkPolicies let a worker out only on DNS, 443 and PostgreSQL's port, and let nothing in but the Prometheus you name. The cloud metadata range is excluded. **By default those ports stay open towards the rest of the cluster**, including the Kubernetes API's Service on 443: add your cluster's Pod and Service CIDRs to `networkPolicy.blockedCidrs` to close them. The chart's PostgreSQL keeps its own rule, but a database of yours inside those CIDRs would be cut off. The cluster's network plugin must enforce NetworkPolicy, or these do nothing.
 - A compromised sandbox has less to work with: it runs inside the Pod's daemon with `--network none`, no capabilities and no socket.
 
-`aegis-docker-proxy` ([ADR 0010](../adr/0010-docker-socket-proxy.md)) is not deployed here: the worker holds the daemon's socket directly. Clusters that cannot allow `privileged` need Sysbox or Kata through `worker.runtimeClassName`.
+Clusters that cannot allow `privileged` need Sysbox or Kata through `worker.runtimeClassName`.
 
 ## 1. Installation
 
@@ -155,6 +159,7 @@ kubectl -n aegis-worker exec aegis-worker-0 -c aegis -- aegis-server --config /e
 | Pod refused with `violates PodSecurity` | The worker namespace lacks the label of step 1 |
 | `aegis-worker-0` is `Init:CrashLoopBackOff` | `kubectl -n aegis-worker logs aegis-worker-0 -c sandbox-images`: a pull that failed, or a bundle file missing for this version and architecture |
 | `Init` stays on `dind` | `kubectl -n aegis-worker logs aegis-worker-0 -c dind`. A daemon that cannot use `overlayfs` on the volume usually means a StorageClass with an unsuitable filesystem (NFS): use a block volume |
+| A job fails with `aegis-docker-proxy refused the call` | `kubectl -n aegis-worker logs aegis-worker-0 -c docker-proxy` names the call and the reason. A mode with Sonar needs `worker.dockerProxy.extraArgs` |
 | `secret ... is open to others than its owner` | The Secret is mounted some other way than this chart's. Files must be `0400` or `0600`, or `0440` with root as owner and the process's group as group |
 | `AEGIS_DATABASE_URL: not loaded` | The key is missing from that role's Secret |
 | A job's fetch step cannot reach a host | The worker's egress: only 443 is open. Add a port in `networkPolicy.workerExtraEgressPorts` |
