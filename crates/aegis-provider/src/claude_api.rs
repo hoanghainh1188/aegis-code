@@ -158,7 +158,13 @@ impl ModelProvider for ClaudeApi {
             .map_err(|e| ProviderError::Transport(e.without_url().to_string()))?;
 
         if status.is_success() {
-            serde_json::from_str(&text).map_err(|e| ProviderError::Decode(e.to_string()))
+            let mut response: Response =
+                serde_json::from_str(&text).map_err(|e| ProviderError::Decode(e.to_string()))?;
+            // Claude API returns the TTL split; this is a no-op then. Kept
+            // so a missing split never prices 5-minute writes at the 1h rate
+            // (#55).
+            response.usage.attribute_writes_from_plan(request.cache);
+            Ok(response)
         } else {
             Err(error_from(status, retry_after_s, &text))
         }

@@ -7,7 +7,7 @@ use aws_sdk_bedrockruntime::operation::invoke_model::InvokeModelError;
 use aws_sdk_bedrockruntime::primitives::Blob;
 
 use crate::body::{Target, build_body};
-use crate::{ModelPolicy, ModelProvider, ProviderError, Request, Response};
+use crate::{CachePlan, ModelPolicy, ModelProvider, ProviderError, Request, Response};
 
 #[derive(Debug, Clone)]
 pub struct Bedrock {
@@ -48,9 +48,19 @@ impl ModelProvider for Bedrock {
             .await
             .map_err(error_from)?;
 
-        serde_json::from_slice(output.body().as_ref())
-            .map_err(|e| ProviderError::Decode(e.to_string()))
+        decode_response(output.body().as_ref(), request.cache)
     }
+}
+
+/// Decode an `InvokeModel` body and attribute unsplit cache writes (#55).
+fn decode_response(body: &[u8], plan: CachePlan) -> Result<Response, ProviderError> {
+    let mut response: Response =
+        serde_json::from_slice(body).map_err(|e| ProviderError::Decode(e.to_string()))?;
+    // Bedrock usually returns usage.cache_creation by TTL; when it does
+    // not, price from the request's static TTL instead of the ledger's
+    // 1h default (#55).
+    response.usage.attribute_writes_from_plan(plan);
+    Ok(response)
 }
 
 fn error_from(error: SdkError<InvokeModelError, HttpResponse>) -> ProviderError {
@@ -85,7 +95,8 @@ fn error_from(error: SdkError<InvokeModelError, HttpResponse>) -> ProviderError 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CachePlan, Message};
+    use crate::{CachePlan, CacheTtl, Message};
+    use serde_json::json;
 
     fn offline_client() -> aws_sdk_bedrockruntime::Client {
         let config = aws_sdk_bedrockruntime::Config::builder()
@@ -111,5 +122,67 @@ mod tests {
         };
         let err = provider.send(&request).await.unwrap_err();
         assert!(matches!(err, ProviderError::PolicyViolation { .. }));
+    }
+
+    #[test]
+    fn decode_attributes_unsplit_writes_from_the_plan() {
+        let body = serde_json::to_vec(&json!({
+            "id": "msg_bdrk_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "jp.anthropic.claude-haiku-5-5",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 4,
+                "output_tokens": 1,
+                "cache_creation_input_tokens": 900,
+                "cache_read_input_tokens": 0
+            }
+        }))
+        .unwrap();
+        let response = decode_response(
+            &body,
+            CachePlan {
+                static_ttl: CacheTtl::FiveMinutes,
+                issue_message: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(response.usage.cache_creation.ephemeral_5m_input_tokens, 900);
+        assert_eq!(response.usage.cache_creation.ephemeral_1h_input_tokens, 0);
+    }
+
+    #[test]
+    fn decode_keeps_a_backend_ttl_split() {
+        let body = serde_json::to_vec(&json!({
+            "id": "msg_bdrk_2",
+            "type": "message",
+            "role": "assistant",
+            "model": "jp.anthropic.claude-haiku-5-5",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 4,
+                "output_tokens": 1,
+                "cache_creation_input_tokens": 362,
+                "cache_read_input_tokens": 0,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 288,
+                    "ephemeral_1h_input_tokens": 74
+                }
+            }
+        }))
+        .unwrap();
+        let response = decode_response(
+            &body,
+            CachePlan {
+                static_ttl: CacheTtl::FiveMinutes,
+                issue_message: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(response.usage.cache_creation.ephemeral_5m_input_tokens, 288);
+        assert_eq!(response.usage.cache_creation.ephemeral_1h_input_tokens, 74);
     }
 }
