@@ -1,0 +1,16 @@
+{{- if .Values.worker.namespace.create }}
+{{- if eq (include "aegis.workerNamespace" .) .Release.Namespace -}}
+{{- fail "worker.namespace.create needs a namespace other than the release's: it would make the API's privileged" -}}
+{{- end }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "aegis.workerNamespace" . }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+    # The dind sidecar is privileged (ADR 0008 §3).
+    pod-security.kubernetes.io/enforce: privileged
+  annotations:
+    # Its Secret and volumes are not the chart's to delete.
+    helm.sh/resource-policy: keep
+{{- end }}

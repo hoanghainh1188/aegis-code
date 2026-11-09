@@ -454,6 +454,7 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **AWS (Production)** | EC2 + systemd | RDS PostgreSQL | AWS Secrets Manager | Cloud enterprise, High availability | [AWS Runbook](docs/runbook/README.md) |
 | **On-Premise Compose** | Docker Compose | Local PostgreSQL | File-based (`./secrets/`) | Internal data centers, Private clouds | [On-Premise Runbook](docs/runbook/on-premise.md) |
+| **Kubernetes** | Helm chart, Docker-in-Docker sidecar per worker | External, or in the release for a trial | Kubernetes Secrets as files | Existing clusters | [Kubernetes Runbook](docs/runbook/kubernetes.md) |
 | **On-Premise systemd** | Host systemd | Dedicated Postgres | File-based (`/etc/aegis/secrets/`) | Bare-metal Linux servers | [ADR 0007](docs/adr/0007-on-premise-deployment.md) |
 | **Kubernetes** | Worker Pods | External Postgres | K8s Secrets / CSI | Cloud-native multi-tenant clusters | [ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md) |
 
@@ -560,6 +561,7 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [Local End-to-End Trial Guide](docs/local-trial.md) – Step-by-step local platform walkthrough
 * [Production AWS Runbook](docs/runbook/README.md) – Deployment, secret rotation, and incident triage
 * [On-Premise Operations Runbook](docs/runbook/on-premise.md) – Single-machine Docker Compose and systemd management
+* [Kubernetes Operations Runbook](docs/runbook/kubernetes.md) – Helm chart: install, upgrades, rollback
 * [Release Operations](docs/release.md) – Release-please, GHCR container images, and offline packages
 * [Contributing & Development Conventions](CLAUDE.md) – Commit formats, branching, and pre-PR verification
 

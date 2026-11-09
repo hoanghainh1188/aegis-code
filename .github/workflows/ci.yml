@@ -208,6 +208,29 @@ jobs:
       - if: needs.changes.outputs.code != 'true'
         run: echo "Skipping alerts for documentation-only changes"
 
+  helm:
+    name: helm
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      HELM_VERSION: "4.3.1"
+    steps:
+      - uses: actions/checkout@v4
+      - if: needs.changes.outputs.code == 'true'
+        name: Install helm
+        run: |
+          tarball="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" "https://get.helm.sh/$tarball"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball.sha256sum" "https://get.helm.sh/$tarball.sha256sum"
+          (cd "$RUNNER_TEMP" && sha256sum -c "$tarball.sha256sum")
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/linux-amd64" >> "$GITHUB_PATH"
+      - if: needs.changes.outputs.code == 'true'
+        name: Lint and render the chart
+        run: deploy/helm/check.sh
+      - if: needs.changes.outputs.code != 'true'
+        run: echo "Skipping helm for documentation-only changes"
+
   deny:
     name: deny
     needs: changes

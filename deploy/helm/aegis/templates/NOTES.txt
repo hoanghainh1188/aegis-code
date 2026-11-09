@@ -1,0 +1,11 @@
+aegis {{ .Chart.AppVersion }} is installing.
+
+  API:     {{ include "aegis.fullname" . }}-api.{{ .Release.Namespace }}:8080
+  Workers: namespace {{ include "aegis.workerNamespace" . }}
+
+The first start of a worker fetches the sandbox images into its daemon, a
+few GB. Follow it with:
+
+  kubectl -n {{ include "aegis.workerNamespace" . }} logs {{ include "aegis.fullname" . }}-worker-0 -c sandbox-images -f
+
+Registering repos, upgrades and rollback: docs/runbook/kubernetes.md

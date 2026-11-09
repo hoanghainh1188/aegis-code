@@ -1,0 +1,230 @@
+{{- $name := printf "%s-worker" (include "aegis.fullname" .) -}}
+{{- $ns := include "aegis.workerNamespace" . -}}
+{{- $socket := "/run/dind/docker.sock" -}}
+{{- $workspace := "/srv/aegis/.workspace" -}}
+{{- $sandbox := .Values.sandboxImages -}}
+{{- if not (has $sandbox.source (list "pull" "offline" "none")) -}}
+{{- fail "sandboxImages.source must be pull, offline or none" -}}
+{{- end -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  clusterIP: None
+  selector:
+    {{- include "aegis.selector" (list . "worker") | nindent 4 }}
+  ports:
+    - {name: metrics, port: 9464, targetPort: metrics}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  serviceName: {{ $name }}
+  replicas: {{ int .Values.worker.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "aegis.selector" (list . "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aegis.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+      annotations:
+        checksum/config: {{ include "aegis.configHash" . }}
+    spec:
+      automountServiceAccountToken: false
+      # Long enough for the worker to drain its running jobs.
+      terminationGracePeriodSeconds: {{ add (int .Values.config.worker.drainSeconds) 60 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- include "aegis.podSecurity" . | nindent 8 }}
+      initContainers:
+        # The aegis user owns these, 2770: fsGroup alone leaves an emptyDir
+        # 2777, and codebase-memory-mcp refuses a HOME under a directory
+        # anyone may write, and a socket directory in one.
+        - name: volume-modes
+          image: {{ include "aegis.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "chown 10001:10001 {{ $workspace }} /tmp && chmod 2770 {{ $workspace }} /tmp"]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER]
+          volumeMounts:
+            - {name: workspace, mountPath: {{ $workspace }}}
+            - {name: tmp, mountPath: /tmp}
+        # A native sidecar: up before the worker starts, and still up while
+        # it drains. As an ordinary container it would get SIGTERM at the
+        # same moment, and the running gates would lose their daemon.
+        - name: dind
+          image: {{ printf "%s:%s" .Values.worker.dind.image.repository .Values.worker.dind.image.tag }}
+          imagePullPolicy: {{ .Values.worker.dind.image.pullPolicy }}
+          restartPolicy: Always
+          # Not the image's entrypoint: without TLS directories it also
+          # opens tcp://0.0.0.0:2375, root for anyone on the Pod network.
+          command:
+            - dind
+            - dockerd
+            - --host=unix://{{ $socket }}
+            - --group=10001
+          securityContext:
+            privileged: true
+          startupProbe:
+            exec:
+              command: ["docker", "--host", "unix://{{ $socket }}", "version"]
+            periodSeconds: 2
+            timeoutSeconds: 10
+            failureThreshold: 90
+          livenessProbe:
+            exec:
+              command: ["docker", "--host", "unix://{{ $socket }}", "version"]
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.worker.dind.resources | nindent 12 }}
+          volumeMounts:
+            # The same path as in the worker: the gate hands it to the
+            # daemon when it mounts a job's tree into a sandbox.
+            - {name: workspace, mountPath: {{ $workspace }}}
+            - {name: dind-socket, mountPath: /run/dind}
+            # A directory of the volume, not its root: the daemon makes its
+            # root 0710, the kubelet would see a mismatch at the next start
+            # and give every file of every image to fsGroup.
+            - {name: docker, mountPath: /var/lib/docker, subPath: docker}
+        {{- if ne $sandbox.source "none" }}
+        - name: sandbox-images
+          image: {{ include "aegis.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - bash
+            - -euo
+            - pipefail
+            - -c
+            - |
+              registry={{ default .Values.image.registry $sandbox.registry | quote }}
+              version={{ default .Chart.AppVersion .Values.image.tag | quote }}
+              arch=$(docker version --format {{ "'{{.Server.Arch}}'" }})
+              for profile in {{ join " " $sandbox.profiles }}; do
+                image="$registry/aegis-sandbox-$profile:$version"
+                if ! docker image inspect "$image" >/dev/null 2>&1; then
+                  {{- if eq $sandbox.source "pull" }}
+                  docker pull --quiet "$image"
+                  {{- else }}
+                  gunzip -c "/offline/aegis-sandbox-$profile-$version-$arch.tar.gz" | docker load --quiet
+                  {{- end }}
+                fi
+                docker tag "$image" "aegis-sandbox-$profile"
+                # Other versions would fill the volume; a rollback fetches
+                # its own again.
+                docker images "$registry/aegis-sandbox-$profile" --format {{ "'{{.Repository}}:{{.Tag}}'" }} \
+                  | { grep -vxF "$image" || true; } | xargs -r docker rmi
+              done
+          env:
+            - {name: DOCKER_HOST, value: "unix://{{ $socket }}"}
+          securityContext:
+            {{- include "aegis.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: dind-socket, mountPath: /run/dind}
+            - {name: tmp, mountPath: /tmp}
+            {{- if eq $sandbox.source "offline" }}
+            - {name: offline, mountPath: /offline, readOnly: true}
+            {{- end }}
+        {{- end }}
+      containers:
+        - name: aegis
+          image: {{ include "aegis.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/aegis/server.toml", "--role", "worker"]
+          securityContext:
+            {{- include "aegis.containerSecurity" . | nindent 12 }}
+          ports:
+            - {name: metrics, containerPort: 9464}
+          env:
+            - {name: DOCKER_HOST, value: "unix://{{ $socket }}"}
+            {{- with .Values.worker.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            tcpSocket: {port: metrics}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aegis, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: workspace, mountPath: {{ $workspace }}}
+            - {name: dind-socket, mountPath: /run/dind}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        {{- include "aegis.configVolume" . | nindent 8 }}
+        - name: secrets
+          secret:
+            secretName: {{ required "worker.secretName is required" .Values.worker.secretName }}
+            defaultMode: 0400
+        - {name: tmp, emptyDir: {}}
+        - {name: dind-socket, emptyDir: {}}
+        {{- if eq $sandbox.source "offline" }}
+        - name: offline
+          persistentVolumeClaim:
+            claimName: {{ required "sandboxImages.offline.claimName is required with source: offline" $sandbox.offline.claimName }}
+            readOnly: true
+        {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.worker.persistence.workspace.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.worker.persistence.workspace.size }}
+    - metadata:
+        name: docker
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.worker.persistence.docker.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.worker.persistence.docker.size }}
