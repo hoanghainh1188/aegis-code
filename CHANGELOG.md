@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.7.0...v0.8.0) (2026-11-09)
+
+
+### Features
+
+* **deploy:** put aegis-docker-proxy between the worker and DinD in the Helm chart ([#411](https://github.com/hoanghainh1188/aegis-code/issues/411)) ([#412](https://github.com/hoanghainh1188/aegis-code/issues/412)) ([3313336](https://github.com/hoanghainh1188/aegis-code/commit/33133360135ed525c7720b9cb4b4c358e8e932ee))
+
 ## [0.7.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.6.0...v0.7.0) (2026-11-09)
 
 
