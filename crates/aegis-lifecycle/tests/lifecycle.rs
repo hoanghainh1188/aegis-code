@@ -797,10 +797,10 @@ async fn impact_events(store: &MemoryLedger) -> Vec<LedgerEvent> {
         .collect()
 }
 
-/// #203: before the first gate run the platform asks the code graph for
-/// the callers of what the patch changed, outside its files, and the agent
-/// reads them before answering again. Runs only with `AEGIS_CBM_BIN`, as
-/// the `code_graph` tests.
+/// #203, #267: right after the first edit to a source file, the platform asks
+/// the code graph for the callers of what the patch changed, outside its files,
+/// and the agent reads them in the next turn before answering. Runs only with
+/// `AEGIS_CBM_BIN`, as the `code_graph` tests.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_agent_reads_the_callers_outside_its_patch_before_the_gate() {
     let Ok(program) = std::env::var("AEGIS_CBM_BIN") else {
@@ -813,15 +813,7 @@ async fn the_agent_reads_the_callers_outside_its_patch_before_the_gate() {
     let scratch = repo_with_bug();
     let server = github().await;
     caller_on_base(&scratch);
-    let model = Scripted::new(
-        vec![
-            create_repro("t1"),
-            fix("t2"),
-            fixed_answer(),
-            fixed_answer(),
-        ],
-        vec![],
-    );
+    let model = Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]);
     let mut cfg = config(&scratch, &server.uri(), 20);
     let runtime = with_graph(&mut cfg, program, "note");
     let p = platform(cfg, model);
@@ -829,8 +821,8 @@ async fn the_agent_reads_the_callers_outside_its_patch_before_the_gate() {
     let report = run(&p, CancellationToken::new()).await;
     assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
     let core = p.provider.requests_for("core");
-    assert_eq!(core.len(), 4, "one more answer after the note");
-    let note = core[3].messages.last().unwrap();
+    assert_eq!(core.len(), 3, "receives note after edit and answers");
+    let note = core[2].messages.last().unwrap();
     let text = note
         .content
         .iter()
@@ -841,6 +833,10 @@ async fn the_agent_reads_the_callers_outside_its_patch_before_the_gate() {
         .unwrap();
     assert!(
         text.contains("Called from:\n- src/fill.rs: `fill`"),
+        "{text}"
+    );
+    assert!(
+        text.contains("These files may also need to be changed to complete the fix"),
         "{text}"
     );
     assert_eq!(
