@@ -38,7 +38,7 @@ Three key implications:
   - **Remaining mitigations:** the gate builds arguments as an array without shell parsing; each EC2 instance runs only Aegis; IMDSv2 hop limit is set to 1, so bridge/none network containers (sandboxes, Sonar scanners) cannot retrieve host metadata credentials, while `aegis` runs with `--network host` to access IMDS; each instance's IAM role reads only its deployment's secrets (`aegis/<environment>/*`, without the API-only ones on `worker`), pulls ECR (sandbox images only where jobs run) and writes CloudWatch logs; SSH is disabled.
   - **Gaps left:** a process that can write to the workspace could swap a directory for a link between the proxy's check and the daemon's mount, and the proxy does not limit which images run. Security groups filter by port, not by name: the worker's names are filtered by the gate's egress proxy only during the fetch step.
   - **Future hardening:** rootless Docker; gVisor for the sandboxes (#322).
-  - **Kubernetes:** this section does not apply there. Each worker Pod has its own daemon in a DinD sidecar ([ADR 0008](../adr/0008-gate-sandbox-on-kubernetes.md)), and no proxy is deployed.
+  - **Kubernetes:** each worker Pod has its own daemon in a DinD sidecar ([ADR 0008](../adr/0008-gate-sandbox-on-kubernetes.md)), and the proxy runs beside it as another sidecar with the same rules ([ADR 0010](../adr/0010-docker-socket-proxy.md) §6). The `aegis` container has only the proxy's socket. Refused calls are in `kubectl logs <pod> -c docker-proxy`, and a mode with Sonar sets `worker.dockerProxy.extraArgs` ([Kubernetes runbook](kubernetes.md#security-model)).
 
 ---
 

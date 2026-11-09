@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Helm chart without a cluster (#281): lint it, render it, and hold the
-# properties ADR 0008 asks for. CI runs this; the runbook's kind check is
+# properties ADR 0008 and ADR 0010 ask for. CI runs this; the runbook's kind check is
 # the one that runs a job.
 set -euo pipefail
 
@@ -30,6 +30,13 @@ check() {
   fi
 }
 count() { { grep -cE -- "$1" || true; }; }
+# One container of a rendered Pod, by name: its lines up to the next one.
+container() {
+  awk -v name="        - name: $1" '
+    $0 == name { c=1; print; next }
+    c && (/^        - name: / || /^      [a-zA-Z]/) { c=0 }
+    c'
+}
 fails_with() {
   local what=$1 message=$2
   shift 2
@@ -59,7 +66,7 @@ check "the daemon's only listener is the socket" 1 "$(count '--host=unix:///run/
 check "no TCP listener for the daemon" 0 "$(grep -v '^ *#' <<<"$all" | count 'tcp://|2375')"
 check "dind skips the image's entrypoint" 1 "$(count '^ +- dind$' <<<"$worker")"
 # Before the worker, after it on the way down.
-check "dind is a native sidecar" 1 "$(count 'restartPolicy: Always' <<<"$worker")"
+check "dind and the proxy are the native sidecars" 2 "$(count 'restartPolicy: Always' <<<"$worker")"
 check "workspace and /tmp are 2770" 1 "$(count 'chmod 2770 /srv/aegis/.workspace /tmp' <<<"$worker")"
 check "docker storage is a directory of its volume" 1 "$(count 'mountPath: /var/lib/docker, subPath: docker' <<<"$worker")"
 check "no Pod gets a ServiceAccount token" 0 "$(count 'automountServiceAccountToken: true' <<<"$all")"
@@ -80,6 +87,30 @@ check "a float" 2 "$(count '^    max_cost_usd = 4.00$' <<<"$big")"
 
 check "a change of configuration rolls the Pods" 1 \
   "$(sort -u <<<"$(grep 'checksum/config' <<<"$all"; render --set config.worker.maxWorkers=9 | grep 'checksum/config')" | wc -l | awk '{print ($1 >= 2)}')"
+
+# ADR 0010: whoever holds the daemon's socket can reach root on the node.
+aegis=$(container aegis <<<"$worker")
+proxy=$(container docker-proxy <<<"$worker")
+check "the worker has no daemon socket" 0 "$(count 'dind|hostPath|/var/run/docker' <<<"$aegis")"
+check "the worker has the proxy's socket" 1 "$(count 'name: DOCKER_HOST, value: "unix:///run/aegis-docker/docker.sock"' <<<"$aegis")"
+check "the worker mounts the proxy's socket" 1 "$(count 'name: docker-api, mountPath: /run/aegis-docker' <<<"$aegis")"
+check "only dind, the image step and the proxy mount the daemon's socket" 3 "$(count 'name: dind-socket, mountPath' <<<"$worker")"
+check "the proxy runs as aegis" 1 "$(count 'runAsUser: 10001' <<<"$proxy")"
+check "the proxy has a read-only root" 1 "$(count 'readOnlyRootFilesystem: true' <<<"$proxy")"
+check "the proxy has no capabilities" 1 "$(count 'drop: \[ALL\]' <<<"$proxy")"
+check "the proxy is not privileged" 0 "$(count 'privileged' <<<"$proxy")"
+check "the proxy reads the workspace only" 1 "$(count 'name: workspace, mountPath: /srv/aegis/.workspace, readOnly: true' <<<"$proxy")"
+check "the proxy talks to the daemon" 1 "$(count '^ +- /run/dind/docker.sock$' <<<"$proxy")"
+check "the proxy's mounts stay in the workspace" 1 "$(count '^ +- /srv/aegis/.workspace$' <<<"$proxy")"
+check "the proxy opens no port" 0 "$(count 'ports:|tcp://|--network' <<<"$proxy")"
+check "the proxy waits for its socket" 1 "$(count 'command: \["test", "-S", "/run/aegis-docker/docker.sock"\]' <<<"$proxy")"
+order=$(sed '/^      volumes:/q' <<<"$worker" | grep -E '^        - name: ' | awk '{print $3}' | paste -sd, -)
+check "the proxy starts after dind and the images" "volume-modes,dind,sandbox-images,docker-proxy,aegis" "$order"
+noimages=$(render --set sandboxImages.source=none | doc StatefulSet aegis-worker)
+check "without an image step the proxy still starts" 1 "$(count 'name: docker-proxy' <<<"$noimages")"
+check "without an image step only two mount the daemon's socket" 2 "$(count 'name: dind-socket, mountPath' <<<"$noimages")"
+sonar=$(render --set-json 'worker.dockerProxy.extraArgs=["--network","sonar"]' | doc StatefulSet aegis-worker | container docker-proxy)
+check "the proxy takes a mode's Sonar arguments" 1 "$(count '^ +- sonar$' <<<"$sonar")"
 
 # Options.
 offline=$(render --set sandboxImages.source=offline --set sandboxImages.offline.claimName=bundle)
