@@ -1,0 +1,8 @@
+# What deploy/helm/check.sh renders; no cluster involved.
+config:
+  auth:
+    publicUrl: https://aegis.example.internal
+api:
+  secretName: aegis-api
+worker:
+  secretName: aegis-worker

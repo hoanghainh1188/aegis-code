@@ -1,0 +1,172 @@
+# aegis on Kubernetes (ADR 0008, docs/runbook/kubernetes.md). No secret is
+# in this file or in the chart: `api.secretName`, `worker.secretName` and
+# `postgresql.secretName` name Secrets you create yourself.
+
+image:
+  registry: ghcr.io/hoanghainh1188
+  repository: aegis-server
+  # Empty: the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Rendered to server.toml. Written out here, not passed through `toToml`:
+# Helm reads every number as a float, and server.toml's integers would
+# come out as `12.0` or `1e+06`.
+config:
+  secretsRefreshSeconds: 300
+  # Each repo runs with the configuration of its mode. The image ships
+  # config/poc.toml and config/customer-jp.toml; your own go in `modeFiles`
+  # and are named here as /etc/aegis/modes/<file>.
+  modes:
+    poc: config/poc.toml
+  modeFiles: {}
+  auth:
+    # Required: the address users and webhooks reach.
+    publicUrl: ""
+    sessionHours: 12
+    apiRequestsPerMinute: 120
+    apiFailuresPerMinute: 20
+    # How many proxies set X-Forwarded-For before the API. Empty: 1 with
+    # `ingress.enabled`, otherwise 0, so that no client can write its own
+    # address.
+    trustedProxies: null
+    oidc:
+      issuer: ""
+      clientId: ""
+  budget:
+    timeZone: UTC
+    warnRatio: 0.8
+  worker:
+    maxWorkers: 2
+    maxCostUsd: 4.0
+    leaseSeconds: 60
+    renewSeconds: 20
+    pollSeconds: 5
+    # The worker Pod's terminationGracePeriodSeconds is this plus 60.
+    drainSeconds: 600
+    retryBaseSeconds: 30
+  trackers:
+    pollSeconds: 300
+  sonar:
+    checkSeconds: 60
+  reviews:
+    maxRounds: 3
+  # Appended to server.toml as is, for sections not above (`[web]`).
+  extraToml: ""
+
+api:
+  replicas: 1
+  # Required. Files of /run/secrets: AEGIS_DATABASE_URL, AEGIS_SESSION_KEY,
+  # the webhook secrets, AEGIS_OIDC_CLIENT_SECRET.
+  secretName: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  replicas: 1
+  # Its own namespace, whose Pod Security level must be `privileged`: the
+  # API's can stay `restricted`.
+  namespace:
+    # Empty: `<release namespace>-worker`.
+    name: ""
+    # false: you create and label it, and can put its Secret there before
+    # installing. true: the chart does, and keeps it on uninstall.
+    create: false
+  # Required. Files of /run/secrets: AEGIS_DATABASE_URL, the mode's API key,
+  # the comment tokens, each repo's fork, Sonar and tracker tokens. Never
+  # the API's own (session key, webhook secrets, OIDC client secret).
+  secretName: ""
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {memory: 4Gi}
+  extraEnv: []
+  # A dedicated, tainted node pool (ADR 0008 §3).
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Sysbox or Kata, where the cluster has them (ADR 0008).
+  runtimeClassName: ""
+  persistence:
+    # Cannot be changed after install: they are volumeClaimTemplates.
+    workspace:
+      size: 50Gi
+      storageClass: ""
+    docker:
+      size: 50Gi
+      storageClass: ""
+  dind:
+    image:
+      repository: docker
+      tag: 29-dind
+      pullPolicy: IfNotPresent
+    # Limits the sandboxes too: they run inside this container.
+    resources:
+      requests: {cpu: "1", memory: 2Gi}
+      limits: {memory: 8Gi}
+
+# Into each worker Pod's daemon before the worker starts.
+sandboxImages:
+  # pull: from `registry`, without credentials. offline: from a volume
+  # holding the release's aegis-sandbox-*.tar.gz (docs/release.md). none:
+  # you load them yourself.
+  source: pull
+  # Empty: image.registry.
+  registry: ""
+  profiles: [python, go, rust, node, java, dotnet]
+  offline:
+    # A PersistentVolumeClaim in the worker namespace, mounted read-only:
+    # ReadOnlyMany with more than one worker on different nodes.
+    claimName: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+networkPolicy:
+  enabled: true
+  # NetworkPolicy peers allowed to reach the API's port. Empty: any.
+  apiFrom: []
+  # Peers allowed to scrape port 9464. Empty: none, so nothing can scrape
+  # until you name Prometheus here.
+  metricsFrom: []
+  # Taken out of the egress to 443 and PostgreSQL's port. Add the cluster's
+  # Pod and Service CIDRs to keep a compromised worker from reaching other
+  # workloads there. The chart's own PostgreSQL stays reachable; a database
+  # of yours inside those CIDRs would not.
+  blockedCidrs: [169.254.0.0/16]
+  # Besides DNS, 443 and PostgreSQL: a self-hosted forge's or Sonar's port.
+  apiExtraEgressPorts: []
+  workerExtraEgressPorts: []
+  postgresPort: 5432
+
+# PostgreSQL inside the release, for a trial. The default is your own: put
+# its URL in AEGIS_DATABASE_URL.
+postgresql:
+  enabled: false
+  image:
+    repository: postgres
+    tag: 17-alpine
+    pullPolicy: IfNotPresent
+  # Required when enabled: a Secret with the key `password`.
+  secretName: ""
+  persistence:
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}

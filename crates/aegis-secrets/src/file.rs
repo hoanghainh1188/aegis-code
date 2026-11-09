@@ -5,7 +5,8 @@
 //!
 //! A file is read every time the secret is: a new file is a rotated
 //! secret, without a restart. A file anyone but its owner may read or
-//! write, or a link that leads out of the directory, is refused. The
+//! write (but for our own group on a file root owns: [`mode_is_private`]), or
+//! a link that leads out of the directory, is refused. The
 //! directory itself is not checked: Docker's and Kubernetes' are `0755`
 //! and owned by root, and names are not secret.
 
@@ -68,14 +69,30 @@ impl FileSource {
 /// Only the owner may read or write a secret file.
 #[cfg(unix)]
 fn check_mode(name: &str, meta: &std::fs::Metadata) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let mode = meta.permissions().mode() & 0o777;
-    if mode & 0o077 != 0 {
+    // SAFETY: getegid cannot fail and touches no memory.
+    let own_group = unsafe { libc::getegid() };
+    if !mode_is_private(mode, meta.uid(), meta.gid(), own_group) {
         return Err(format!(
             "secret `{name}` is open to others than its owner (mode {mode:o}): make it 0400 or 0600"
         ));
     }
     Ok(())
+}
+
+/// A file root owns may also be read by its group when that is this
+/// process's group: a Kubernetes Secret volume with `fsGroup`, where the
+/// kubelet makes every file `root:<fsGroup> 0440` whatever `defaultMode`
+/// says, and the group is how a process that is not root reads it (#281).
+#[cfg(unix)]
+fn mode_is_private(mode: u32, owner: u32, group: u32, own_group: u32) -> bool {
+    let group_read = if owner == 0 && group == own_group {
+        0o040
+    } else {
+        0
+    };
+    mode & 0o077 & !group_read == 0
 }
 
 #[cfg(not(unix))]
@@ -162,6 +179,25 @@ mod tests {
         let err = err.to_string();
         assert!(err.contains("mode 644"), "{err}");
         assert!(!err.contains("ghp_very_secret"), "{err}");
+    }
+
+    #[test]
+    fn group_read_is_private_only_for_our_own_group_on_a_file_root_owns() {
+        const OURS: u32 = 10001;
+        // A Kubernetes Secret volume with `fsGroup`: root:<ours>, 0440.
+        assert!(mode_is_private(0o440, 0, OURS, OURS));
+        assert!(mode_is_private(0o400, 0, 0, OURS));
+        assert!(mode_is_private(0o400, OURS, OURS, OURS));
+        assert!(mode_is_private(0o600, OURS, OURS, OURS));
+        // Root shared it with a group we are not the group of.
+        assert!(!mode_is_private(0o440, 0, 50, OURS));
+        assert!(!mode_is_private(0o640, 0, 50, OURS));
+        // The owner chose to share it.
+        assert!(!mode_is_private(0o440, OURS, OURS, OURS));
+        // Writing by the group, or anything for others, never.
+        assert!(!mode_is_private(0o460, 0, OURS, OURS));
+        assert!(!mode_is_private(0o444, 0, OURS, OURS));
+        assert!(!mode_is_private(0o401, 0, OURS, OURS));
     }
 
     #[tokio::test]

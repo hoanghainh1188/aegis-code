@@ -1,0 +1,97 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aegis.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aegis.selector" (list . "api") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - {port: 8080}
+      {{- with $np.apiFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with $np.metricsFrom }}
+    - ports:
+        - {port: 9464}
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - ports:
+        - {port: 443}
+        - {port: {{ int $np.postgresPort }}}
+        {{- range $np.apiExtraEgressPorts }}
+        - {port: {{ int . }}}
+        {{- end }}
+      to:
+        {{- include "aegis.egressPeer" $np.blockedCidrs | nindent 8 }}
+    {{- if $.Values.postgresql.enabled }}
+    - ports:
+        - {port: 5432}
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "aegis.selector" (list $ "postgresql") | nindent 14 }}
+    {{- end }}
+---
+# A worker takes no connection but Prometheus', and no rule lets it reach
+# the API's port (ADR 0008 §3). The fetch step of its sandboxes goes out
+# through this Pod, so it is bound by this too.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aegis.fullname" . }}-worker
+  namespace: {{ include "aegis.workerNamespace" . }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aegis.selector" (list . "worker") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- with $np.metricsFrom }}
+    - ports:
+        - {port: 9464}
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - ports:
+        - {port: 443}
+        - {port: {{ int $np.postgresPort }}}
+        {{- range $np.workerExtraEgressPorts }}
+        - {port: {{ int . }}}
+        {{- end }}
+      to:
+        {{- include "aegis.egressPeer" $np.blockedCidrs | nindent 8 }}
+    {{- if $.Values.postgresql.enabled }}
+    - ports:
+        - {port: 5432}
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "aegis.selector" (list $ "postgresql") | nindent 14 }}
+    {{- end }}
+{{- end }}

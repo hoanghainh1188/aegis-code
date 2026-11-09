@@ -1,0 +1,98 @@
+{{- $name := printf "%s-api" (include "aegis.fullname" .) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ int .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aegis.selector" (list . "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aegis.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        checksum/config: {{ include "aegis.configHash" . }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "aegis.podSecurity" . | nindent 8 }}
+      containers:
+        - name: aegis
+          image: {{ include "aegis.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/aegis/server.toml", "--role", "api"]
+          securityContext:
+            {{- include "aegis.containerSecurity" . | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: metrics, containerPort: 9464}
+          {{- with .Values.api.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            httpGet: {path: /api/v1/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /api/v1/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/v1/health, port: http}
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aegis, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            # A repo added from the dashboard is cloned here to check it.
+            # Workers make their own clone.
+            - {name: workspace, mountPath: /srv/aegis/.workspace}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        {{- include "aegis.configVolume" . | nindent 8 }}
+        - name: secrets
+          secret:
+            secretName: {{ required "api.secretName is required" .Values.api.secretName }}
+            defaultMode: 0400
+        - {name: tmp, emptyDir: {}}
+        - {name: workspace, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aegis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    {{- include "aegis.selector" (list . "api") | nindent 4 }}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+    - {name: metrics, port: 9464, targetPort: metrics}

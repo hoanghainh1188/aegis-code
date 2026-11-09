@@ -181,7 +181,7 @@ To register new repository tokens: add their names to `repo_secret_names` in `TO
 
 Configuration: `[secrets] source = "file"`, `dir = "/run/secrets"`. Each secret corresponds to a file named after the secret key: Docker secrets, Kubernetes Secrets mounted as volumes (`defaultMode: 0400`), or systemd credentials (`LoadCredential=`, where `dir` resolves to `$CREDENTIALS_DIRECTORY`).
 - Whitespace and trailing newlines are trimmed upon reading.
-- **Security Validation:** The server strictly rejects files readable or writable by group/others (enforces `0400` or `0600`) and symlinks resolving outside `dir`. Missing mandatory secrets halt server startup with an explicit error.
+- **Security Validation:** The server rejects files readable or writable by group/others (enforces `0400` or `0600`; `0440` is accepted only on a file owned by root with the process's group, which is what a Secret volume with `fsGroup` gives) and symlinks resolving outside `dir`. Missing mandatory secrets halt server startup with an explicit error.
 - **Atomic Rotation:** Update secret files by writing to a neighboring temporary file followed by an atomic `mv`, ensuring the process never reads partially written files:
 
   ```bash
