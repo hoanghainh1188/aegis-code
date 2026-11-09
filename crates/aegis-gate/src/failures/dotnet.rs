@@ -21,6 +21,7 @@ pub(super) fn failing(output: &str) -> BTreeSet<String> {
         if CRASHED.iter().any(|c| line.contains(c)) {
             failed.insert(format!("dotnet::{DID_NOT_FINISH}"));
         }
+        let line = without_xunit_log(&line);
         // Only a name followed by its duration: an error message may start
         // with "Failed" too.
         let vstest = line
@@ -35,6 +36,13 @@ pub(super) fn failing(output: &str) -> BTreeSet<String> {
         }
     }
     failed
+}
+
+/// The line up to xUnit's own `[xUnit.net 00:00:18.08] …` log: tests running
+/// in parallel can print it right after a result, before the line ends.
+fn without_xunit_log(line: &str) -> &str {
+    line.split_once("[xUnit.net ")
+        .map_or(line, |(before, _)| before)
 }
 
 /// `rest` without its trailing `<open><duration><close>`, when it has one:
@@ -174,6 +182,23 @@ mod tests {
             failing(out).into_iter().collect::<Vec<_>>(),
             ["Shop.Tests.RedisTests.Connects"]
         );
+    }
+
+    #[test]
+    fn xunit_log_stuck_to_a_result_line_is_not_part_of_it() {
+        let out = "  Failed ConnectByIPTests.ConnectByVariousEndpoints (RESP2)(ep: InterNetwork/localhost:6379, expectedFamily: InterNetwork) [1 ms][xUnit.net 00:00:18.08]     ConnectByIPTests.ConnectByVariousEndpoints (RESP2)(ep: Unspecified/localhost:6379, expectedFamily: Unspecified) [FAIL]\n";
+        assert_eq!(
+            failing(out).into_iter().collect::<Vec<_>>(),
+            [
+                "ConnectByIPTests.ConnectByVariousEndpoints (RESP2)(ep: InterNetwork/localhost:6379, expectedFamily: InterNetwork)"
+            ]
+        );
+    }
+
+    #[test]
+    fn xunit_log_lines_are_not_results() {
+        let out = "[xUnit.net 00:00:18.08]     Shop.Tests.CartTests.Param(x: 2) [FAIL]\n";
+        assert!(failing(out).is_empty());
     }
 
     #[test]
