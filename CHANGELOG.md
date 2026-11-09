@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.6.0...v0.7.0) (2026-11-09)
+
+
+### Features
+
+* **deploy:** Helm chart for aegis-server with a Docker-in-Docker sandbox ([#281](https://github.com/hoanghainh1188/aegis-code/issues/281)) ([#409](https://github.com/hoanghainh1188/aegis-code/issues/409)) ([cd6aef2](https://github.com/hoanghainh1188/aegis-code/commit/cd6aef2e050eddc5e831d7305205b4ed41a1480a))
+* **lifecycle:** trigger graph impact note early and rank affected files ([#267](https://github.com/hoanghainh1188/aegis-code/issues/267)) ([#408](https://github.com/hoanghainh1188/aegis-code/issues/408)) ([99b7b7f](https://github.com/hoanghainh1188/aegis-code/commit/99b7b7f9a5d4306d251d163655237cc0530966c1))
+
 ## [0.6.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.5.0...v0.6.0) (2026-11-04)
 
 
