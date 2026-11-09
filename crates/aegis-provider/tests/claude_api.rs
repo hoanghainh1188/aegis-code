@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use aegis_provider::{
-    CachePlan, ClaudeApi, ContentBlock, Message, ModelProvider, ProviderError, Request, StopReason,
+    CachePlan, CacheTtl, ClaudeApi, ContentBlock, Message, ModelProvider, ProviderError, Request,
+    StopReason,
 };
 use aegis_secrets::{MemorySource, Secrets};
 use serde_json::json;
@@ -69,6 +70,39 @@ async fn sends_headers_and_decodes_response() {
     assert_eq!(response.usage.cache_creation_input_tokens, 600);
     assert_eq!(response.usage.cache_creation.ephemeral_5m_input_tokens, 100);
     assert_eq!(response.usage.cache_creation.ephemeral_1h_input_tokens, 500);
+}
+
+#[tokio::test]
+async fn attributes_unsplit_cache_writes_from_the_request_plan() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "msg_2",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-5-5",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 4,
+                "output_tokens": 1,
+                "cache_creation_input_tokens": 900,
+                "cache_read_input_tokens": 0
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut req = request();
+    req.cache = CachePlan {
+        static_ttl: CacheTtl::FiveMinutes,
+        issue_message: None,
+    };
+    let response = provider_for(&server).await.send(&req).await.unwrap();
+    assert_eq!(response.usage.cache_creation.ephemeral_5m_input_tokens, 900);
+    assert_eq!(response.usage.cache_creation.ephemeral_1h_input_tokens, 0);
 }
 
 #[tokio::test]

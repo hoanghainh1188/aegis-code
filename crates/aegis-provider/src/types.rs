@@ -168,10 +168,43 @@ pub struct Usage {
     #[serde(default, deserialize_with = "null_as_zero")]
     pub cache_read_input_tokens: u64,
     /// Split of `cache_creation_input_tokens` by TTL, priced differently
-    /// (design §4.3). Some backends omit it; the ledger then treats the
-    /// unattributed tokens as one-hour writes.
+    /// (design §4.3). Some backends omit it; providers then call
+    /// [`Usage::attribute_writes_from_plan`] so the ledger does not price
+    /// every write at the one-hour rate (#55). Any remainder the ledger still
+    /// sees unattributed is treated as a one-hour write.
     #[serde(default, deserialize_with = "null_as_zero")]
     pub cache_creation: CacheCreation,
+}
+
+impl Usage {
+    /// When the backend reported cache writes but no TTL split, attribute
+    /// them all to [`CachePlan::static_ttl`].
+    ///
+    /// Bedrock `InvokeModel` usually returns the split (same shape as the
+    /// Claude API). When it does not, leaving the tokens unattributed would
+    /// make the ledger charge the 1h write multiplier for 5-minute writes
+    /// (~60% too high). BP4 is always five minutes and small next to the
+    /// static prefix; with a one-hour plan this intentionally prices that
+    /// tiny BP4 write at the 1h rate so the budget is never underestimated
+    /// (#55). A partial split is left alone: the ledger still prices any
+    /// remainder as one-hour writes.
+    pub fn attribute_writes_from_plan(&mut self, plan: CachePlan) {
+        let attributed = self
+            .cache_creation
+            .ephemeral_5m_input_tokens
+            .saturating_add(self.cache_creation.ephemeral_1h_input_tokens);
+        if attributed > 0 || self.cache_creation_input_tokens == 0 {
+            return;
+        }
+        match plan.static_ttl {
+            CacheTtl::FiveMinutes => {
+                self.cache_creation.ephemeral_5m_input_tokens = self.cache_creation_input_tokens;
+            }
+            CacheTtl::OneHour => {
+                self.cache_creation.ephemeral_1h_input_tokens = self.cache_creation_input_tokens;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -273,5 +306,77 @@ mod tests {
         );
         let err = serde_json::to_value(ContentBlock::tool_error("t", "boom")).unwrap();
         assert_eq!(err["is_error"], json!(true));
+    }
+
+    #[test]
+    fn unsplit_cache_writes_follow_the_plans_static_ttl() {
+        let mut five = Usage {
+            cache_creation_input_tokens: 900,
+            ..Usage::default()
+        };
+        five.attribute_writes_from_plan(CachePlan {
+            static_ttl: CacheTtl::FiveMinutes,
+            issue_message: None,
+        });
+        assert_eq!(five.cache_creation.ephemeral_5m_input_tokens, 900);
+        assert_eq!(five.cache_creation.ephemeral_1h_input_tokens, 0);
+
+        let mut hour = Usage {
+            cache_creation_input_tokens: 900,
+            ..Usage::default()
+        };
+        hour.attribute_writes_from_plan(CachePlan {
+            static_ttl: CacheTtl::OneHour,
+            issue_message: None,
+        });
+        assert_eq!(hour.cache_creation.ephemeral_5m_input_tokens, 0);
+        assert_eq!(hour.cache_creation.ephemeral_1h_input_tokens, 900);
+    }
+
+    #[test]
+    fn attribute_writes_from_plan_leaves_an_existing_split_alone() {
+        let mut usage = Usage {
+            cache_creation_input_tokens: 700,
+            cache_creation: CacheCreation {
+                ephemeral_5m_input_tokens: 100,
+                ephemeral_1h_input_tokens: 500,
+            },
+            ..Usage::default()
+        };
+        usage.attribute_writes_from_plan(CachePlan {
+            static_ttl: CacheTtl::FiveMinutes,
+            issue_message: None,
+        });
+        assert_eq!(usage.cache_creation.ephemeral_5m_input_tokens, 100);
+        assert_eq!(usage.cache_creation.ephemeral_1h_input_tokens, 500);
+    }
+
+    #[test]
+    fn attribute_writes_from_plan_is_a_noop_without_writes() {
+        let mut usage = Usage::default();
+        usage.attribute_writes_from_plan(CachePlan {
+            static_ttl: CacheTtl::FiveMinutes,
+            issue_message: None,
+        });
+        assert_eq!(usage, Usage::default());
+    }
+
+    #[test]
+    fn attribute_writes_from_plan_leaves_a_partial_split_alone() {
+        // 200 tokens remain unattributed; the ledger prices those as 1h.
+        let mut usage = Usage {
+            cache_creation_input_tokens: 700,
+            cache_creation: CacheCreation {
+                ephemeral_5m_input_tokens: 100,
+                ephemeral_1h_input_tokens: 400,
+            },
+            ..Usage::default()
+        };
+        usage.attribute_writes_from_plan(CachePlan {
+            static_ttl: CacheTtl::FiveMinutes,
+            issue_message: None,
+        });
+        assert_eq!(usage.cache_creation.ephemeral_5m_input_tokens, 100);
+        assert_eq!(usage.cache_creation.ephemeral_1h_input_tokens, 400);
     }
 }

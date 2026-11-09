@@ -138,6 +138,11 @@ pub struct TokenCounts {
 impl TokenCounts {
     /// Cache writes the backend did not split by TTL are counted as one-hour
     /// writes, the dearer rate, so the budget is never underestimated.
+    ///
+    /// Providers that know the request's [`aegis_provider::CachePlan`] should
+    /// call [`aegis_provider::Usage::attribute_writes_from_plan`] first so
+    /// Bedrock (or any backend) that omits the split still prices 5-minute
+    /// writes at the 5-minute rate (#55).
     pub fn from_usage(usage: &Usage) -> Self {
         let split = usage.cache_creation;
         let attributed = split.ephemeral_5m_input_tokens + split.ephemeral_1h_input_tokens;
@@ -521,6 +526,22 @@ mod tests {
         };
         let counts = TokenCounts::from_usage(&usage);
         assert_eq!((counts.cache_write_5m, counts.cache_write_1h), (0, 900));
+    }
+
+    #[test]
+    fn token_counts_follow_a_provider_filled_five_minute_split() {
+        // Providers call Usage::attribute_writes_from_plan when the backend
+        // omits the TTL split (#55); the ledger then prices at 5m, not 1h.
+        let mut usage = Usage {
+            cache_creation_input_tokens: 900,
+            ..Usage::default()
+        };
+        usage.attribute_writes_from_plan(aegis_provider::CachePlan {
+            static_ttl: aegis_provider::CacheTtl::FiveMinutes,
+            issue_message: None,
+        });
+        let counts = TokenCounts::from_usage(&usage);
+        assert_eq!((counts.cache_write_5m, counts.cache_write_1h), (900, 0));
     }
 
     #[test]

@@ -21,6 +21,10 @@ url = "2.5.8"
 # Bedrock backend (customer-code configuration, ap-northeast-1 with `jp.` profiles).
 bedrock = ["dep:aws-config", "dep:aws-sdk-bedrockruntime"]
 
+[[test]]
+name = "live_bedrock"
+required-features = ["bedrock"]
+
 [dev-dependencies]
 aegis-secrets = { path = "../aegis-secrets" }
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread"] }
