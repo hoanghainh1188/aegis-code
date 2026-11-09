@@ -5,7 +5,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends git ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
 
 # osv-scanner: the dependencies step's audit of a changed lockfile (#159,
 # #191), through a proxy to the profile's audit_hosts only. A pinned
-# release, checked against its published SHA-256.
+# release, checked against its published SHA-256. curl retries cover
+# transient GitHub Releases 5xx (#414).
 ARG OSV_SCANNER_VERSION=2.7.0
 ARG TARGETARCH
 RUN set -eu; \
@@ -24,7 +25,8 @@ RUN set -eu; \
       arm64) sum=4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7 ;; \
       *) echo "no osv-scanner for $arch" >&2; exit 1 ;; \
     esac; \
-    python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], '/usr/local/bin/osv-scanner')" \
+    curl --retry 6 --retry-delay 5 --retry-all-errors -fsSL \
+      -o /usr/local/bin/osv-scanner \
       "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_${arch}"; \
     echo "$sum  /usr/local/bin/osv-scanner" | sha256sum -c -; \
     chmod 0755 /usr/local/bin/osv-scanner; \
