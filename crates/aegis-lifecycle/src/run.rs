@@ -35,7 +35,7 @@ use tokio_util::sync::CancellationToken;
 use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
-use crate::code_graph::{self, CodeGraph, ServerCalls};
+use crate::code_graph::{self, CodeGraph, ServerCalls, changed_functions};
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -1132,7 +1132,8 @@ where
     let mut answer_retries = 0;
     let mut dearest_call_usd: f64 = 0.0;
     let mut first_expert_call = false;
-    let mut impact_checked = false;
+    let mut impact_checks: usize = 0;
+    let mut known_functions: BTreeSet<String> = BTreeSet::new();
     loop {
         let tier = router.tier();
         let mut budget = BudgetCheck::new(
@@ -1146,7 +1147,7 @@ where
             // New model, cold cache: the first Expert call costs more.
             budget = budget.with_first_call_estimate(dearest_call_usd * 3.0);
         }
-        let check = JobCheck::new(budget, router, cancel.clone());
+        let check = JobCheck::new(budget, router, cancel.clone()).with_impact_checks(impact_checks);
         let seen = session.messages().len();
         let model = model_spec(cfg, tier);
         let outcome = run_loop(
@@ -1216,6 +1217,38 @@ where
                     first_expert_call = true;
                     continue;
                 }
+                Some(Halt::CheckImpact) => {
+                    let record = ledger.record();
+                    let calls_left = cfg
+                        .budget
+                        .max_model_calls
+                        .saturating_sub(record.model_calls);
+                    let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
+                    let room = calls_left >= IMPACT_CALLS
+                        && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
+                    if !room {
+                        // Not enough budget room to act on impact notes; stop checking.
+                        impact_checks = 2;
+                        continue;
+                    }
+                    let current_functions = changed_functions(tree, base);
+                    if impact_checks == 0 || !current_functions.is_subset(&known_functions) {
+                        known_functions = current_functions;
+                        impact_checks += 1;
+                        if let Some(impact) = tools.impact(base).await {
+                            match impact {
+                                Ok(impact) => {
+                                    ledger.impact_checked(impact.files(), None).await?;
+                                    if let Some(note) = impact.note() {
+                                        session = session.with_user_text(note);
+                                    }
+                                }
+                                Err(why) => ledger.impact_checked(Vec::new(), Some(why)).await?,
+                            }
+                        }
+                    }
+                    continue;
+                }
                 None => return Ok(Ending::stop(Outcome::StoppedSteps, reason)),
             },
             LoopEnd::Finished { .. } => last_reply(&session),
@@ -1252,36 +1285,6 @@ where
                 Outcome::StoppedSteps,
                 format!("agent stopped: {why}"),
             ));
-        }
-
-        // Once a job, before its first gate run: the code the graph links
-        // to the patch, for the agent to check (#203). The graph only
-        // helps, so a failed query lets the patch go on to the gate.
-        // Not when the budget leaves the agent too few calls to act on the
-        // note: the patch would then stop at the budget instead of going to
-        // the gate.
-        let record = ledger.record();
-        let calls_left = cfg
-            .budget
-            .max_model_calls
-            .saturating_sub(record.model_calls);
-        let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
-        let room =
-            calls_left >= IMPACT_CALLS && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
-        if room
-            && !std::mem::replace(&mut impact_checked, true)
-            && let Some(impact) = tools.impact(base).await
-        {
-            match impact {
-                Ok(impact) => {
-                    ledger.impact_checked(impact.files(), None).await?;
-                    if let Some(note) = impact.note() {
-                        session = session.with_user_text(note);
-                        continue;
-                    }
-                }
-                Err(why) => ledger.impact_checked(Vec::new(), Some(why)).await?,
-            }
         }
 
         let gate_started = Instant::now();

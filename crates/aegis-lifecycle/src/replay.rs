@@ -201,7 +201,14 @@ impl ReplayProvider {
             });
         match last_text {
             Some(text) if turns > 0 && text.starts_with(IMPACT_OPENING) => {
-                return vec![ContentBlock::text(replay.answer)];
+                return match replay.calls.get(turns) {
+                    Some((name, input)) => vec![ContentBlock::ToolUse {
+                        id: format!("replay-{turns}"),
+                        name: name.clone(),
+                        input: input.clone(),
+                    }],
+                    None => vec![ContentBlock::text(replay.answer)],
+                };
             }
             Some(_) if turns > 0 => return stopped(&request.messages),
             _ => {}
@@ -340,6 +347,7 @@ mod tests {
         let note = crate::code_graph::Impact {
             callers: [("fs.go".to_owned(), ["Save".to_owned()].into())].into(),
             callees: Default::default(),
+            direct: Default::default(),
         }
         .note()
         .unwrap();

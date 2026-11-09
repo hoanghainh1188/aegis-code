@@ -43,7 +43,7 @@ const IMPACT_FILES: usize = 8;
 const IMPACT_NAMES: usize = 4;
 /// How the impact note starts: the replay (#280) tells it from the gate's
 /// feedback by it.
-pub(crate) const IMPACT_OPENING: &str = "Before the checks run: the code graph links the \
+pub(crate) const IMPACT_OPENING: &str = "The code graph links the \
      functions you changed to code in files your patch does not touch.\n";
 
 /// The calls the platform makes itself, on a server's tools the agent may
@@ -158,7 +158,7 @@ impl<'a, T: ServerCalls + Sync> CodeGraph<'a, T> {
             if outcome.is_error {
                 return Err(outcome.content);
             }
-            *side = linked(&graph.project, &outcome.content)?;
+            *side = linked(&graph.project, &outcome.content, &mut impact.direct)?;
         }
         Ok(impact)
     }
@@ -231,13 +231,32 @@ async fn refresh<T: ServerCalls + Sync>(tools: &T, graph: &Graph) -> Result<(), 
 pub(crate) struct Impact {
     pub(crate) callers: BTreeMap<String, BTreeSet<String>>,
     pub(crate) callees: BTreeMap<String, BTreeSet<String>>,
+    pub(crate) direct: BTreeSet<String>,
 }
 
 impl Impact {
-    /// The files named, callers' and callees' together.
+    /// The files named, callers' and callees' together, ranked by relevance:
+    /// files with direct links first, then by total affected functions,
+    /// then by callers count, then alphabetically.
     pub(crate) fn files(&self) -> Vec<String> {
-        let files: BTreeSet<&String> = self.callers.keys().chain(self.callees.keys()).collect();
-        files.into_iter().cloned().collect()
+        let all: BTreeSet<&String> = self.callers.keys().chain(self.callees.keys()).collect();
+        let mut files: Vec<String> = all.into_iter().cloned().collect();
+        files.sort_by(|a, b| {
+            let a_dir = self.direct.contains(a);
+            let b_dir = self.direct.contains(b);
+            let a_total = self.callers.get(a).map_or(0, |s| s.len())
+                + self.callees.get(a).map_or(0, |s| s.len());
+            let b_total = self.callers.get(b).map_or(0, |s| s.len())
+                + self.callees.get(b).map_or(0, |s| s.len());
+            let a_callers = self.callers.get(a).map_or(0, |s| s.len());
+            let b_callers = self.callers.get(b).map_or(0, |s| s.len());
+            b_dir
+                .cmp(&a_dir)
+                .then_with(|| b_total.cmp(&a_total))
+                .then_with(|| b_callers.cmp(&a_callers))
+                .then_with(|| a.cmp(b))
+        });
+        files
     }
 
     /// What the agent reads before the gate; `None` when the graph links
@@ -255,22 +274,30 @@ impl Impact {
                 continue;
             }
             text.push_str(&format!("\n{title}:\n"));
-            text.push_str(&listing(side));
+            text.push_str(&listing(side, &self.direct));
         }
         text.push_str(
-            "\nCheck whether the fix needs a change there too: the same fault in a place \
-             that does the same job, or a caller that relies on what you changed. The graph \
-             matches calls by name, so read the code before you change it. Then reply with \
-             the final JSON answer again, the same one if nothing else needs to change.",
+            "\nThese files may also need to be changed to complete the fix \
+             (e.g. updating a caller to handle the new behavior, or fixing \
+             the same fault in a related place). Inspect each file listed above. \
+             If you decide not to modify a listed file, you must state why in \
+             your response for each file.",
         );
         Some(text)
     }
 }
 
-/// One line per file, the files with the most functions first.
-fn listing(side: &BTreeMap<String, BTreeSet<String>>) -> String {
+/// One line per file, direct links and files with the most functions first.
+fn listing(side: &BTreeMap<String, BTreeSet<String>>, direct: &BTreeSet<String>) -> String {
     let mut files: Vec<_> = side.iter().collect();
-    files.sort_by_key(|(file, names)| (std::cmp::Reverse(names.len()), *file));
+    files.sort_by(|(fa, na), (fb, nb)| {
+        let a_dir = direct.contains(*fa);
+        let b_dir = direct.contains(*fb);
+        b_dir
+            .cmp(&a_dir)
+            .then_with(|| nb.len().cmp(&na.len()))
+            .then_with(|| fa.cmp(fb))
+    });
     let mut text = String::new();
     for (file, names) in files.iter().take(IMPACT_FILES) {
         let shown: Vec<String> = names
@@ -296,7 +323,11 @@ fn listing(side: &BTreeMap<String, BTreeSet<String>>) -> String {
 /// The functions of `detect_changes`' JSON answer, by file, without the
 /// changed files (the agent's new files among them), tests, nodes that
 /// stand for a whole file, and the language's own (`<python-builtins>`).
-fn linked(project: &str, answer: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+fn linked(
+    project: &str,
+    answer: &str,
+    direct: &mut BTreeSet<String>,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let answer: Value = serde_json::from_str(answer)
         .map_err(|e| format!("the graph's answer is not JSON ({e}): {answer}"))?;
     let changed: BTreeSet<&str> = answer["changed_files"]
@@ -316,6 +347,10 @@ fn linked(project: &str, answer: &str) -> Result<BTreeMap<String, BTreeSet<Strin
             || aegis_lang::is_test_path(file)
         {
             continue;
+        }
+        let hop = node["hop"].as_u64().unwrap_or(u64::MAX);
+        if hop <= 1 {
+            direct.insert(file.to_owned());
         }
         linked
             .entry(file.to_owned())
@@ -364,6 +399,110 @@ fn without_project(d: &ToolDefinition) -> ToolDefinition {
         input_schema: schema,
         ..d.clone()
     }
+}
+
+/// Functions changed in the working tree compared to `base`.
+/// Returns qualified function identifiers such as `file::function_name`.
+pub(crate) fn changed_functions(repo: &Path, base: &str) -> BTreeSet<String> {
+    let out = std::process::Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["-c", "core.hooksPath=/dev/null", "-C"])
+        .arg(repo)
+        .args([
+            "diff",
+            "-U0",
+            "--no-color",
+            "--no-ext-diff",
+            "--end-of-options",
+            base,
+        ])
+        .output();
+    let Ok(out) = out else {
+        return BTreeSet::new();
+    };
+    if !out.status.success() {
+        return BTreeSet::new();
+    }
+    let diff = String::from_utf8_lossy(&out.stdout);
+    parse_diff_changed_functions(repo, &diff)
+}
+
+/// Parses git unified diff output (-U0) and maps changed line ranges to functions.
+fn parse_diff_changed_functions(repo: &Path, diff: &str) -> BTreeSet<String> {
+    let mut changed = BTreeSet::new();
+    let mut current_file: Option<String> = None;
+    let mut changed_lines: Vec<(usize, usize)> = Vec::new();
+    let profiles = aegis_lang::Profiles::builtin().ok();
+
+    let flush_file =
+        |file: &Option<String>, lines: &[(usize, usize)], changed: &mut BTreeSet<String>| {
+            let Some(file) = file else { return };
+            if aegis_lang::is_test_path(file) || lines.is_empty() {
+                return;
+            }
+            let full_path = repo.join(file);
+            let Ok(source) = std::fs::read_to_string(&full_path) else {
+                for (start, count) in lines {
+                    changed.insert(format!("{file}:{start}+{count}"));
+                }
+                return;
+            };
+            let lang = profiles
+                .as_ref()
+                .and_then(|p| p.language_of(Path::new(file)));
+            if let Some(lang) = lang
+                && let Ok(symbols) = aegis_lang::symbols_in(lang, Some(Path::new(file)), &source)
+            {
+                let mut matched = false;
+                for sym in symbols {
+                    let sym_start = sym.start_line;
+                    let sym_end = sym.end_line;
+                    let intersects = lines.iter().any(|&(start, count)| {
+                        let range_end = start + count.max(1).saturating_sub(1);
+                        start <= sym_end && range_end >= sym_start
+                    });
+                    if intersects {
+                        let name = sym
+                            .container
+                            .as_ref()
+                            .map_or_else(|| sym.name.clone(), |c| format!("{c}::{}", sym.name));
+                        changed.insert(format!("{file}::{name}"));
+                        matched = true;
+                    }
+                }
+                if matched {
+                    return;
+                }
+            }
+            // Fallback when tree-sitter finds no symbols or file is unsupported
+            for (start, count) in lines {
+                changed.insert(format!("{file}:{start}+{count}"));
+            }
+        };
+
+    for line in diff.lines() {
+        if line.starts_with("+++ b/") {
+            flush_file(&current_file, &changed_lines, &mut changed);
+            changed_lines.clear();
+            current_file = Some(line.trim_start_matches("+++ b/").to_owned());
+        } else if line.starts_with("@@ ") {
+            // e.g. @@ -10,3 +15,6 @@ or @@ -10 +15 @@
+            if let Some(plus_part) = line.split('+').nth(1) {
+                let nums = plus_part.split_whitespace().next().unwrap_or("");
+                let mut parts = nums.split(',');
+                if let Some(start_str) = parts.next()
+                    && let Ok(start) = start_str.parse::<usize>()
+                {
+                    let count = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+                    changed_lines.push((start, count));
+                }
+            }
+        }
+    }
+    flush_file(&current_file, &changed_lines, &mut changed);
+    changed
 }
 
 #[cfg(test)]
@@ -898,11 +1037,35 @@ mod tests {
                 (format!("src/m{i}.rs"), names)
             })
             .collect();
-        let text = listing(&side);
+        let text = listing(&side, &BTreeSet::new());
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), IMPACT_FILES + 1, "{text}");
         assert_eq!(lines[0], "- src/m9.rs: `f0`, `f1`, `f2`, `f3` and 6 more");
         assert_eq!(lines[IMPACT_FILES], "- and 2 more files");
+    }
+
+    #[test]
+    fn direct_links_are_ranked_first() {
+        let mut callers = BTreeMap::new();
+        callers.insert(
+            "src/indirect.rs".to_owned(),
+            BTreeSet::from(["a".into(), "b".into(), "c".into()]),
+        );
+        callers.insert("src/direct.rs".to_owned(), BTreeSet::from(["d".into()]));
+        let mut direct = BTreeSet::new();
+        direct.insert("src/direct.rs".to_owned());
+        let impact = Impact {
+            callers,
+            callees: BTreeMap::new(),
+            direct,
+        };
+        assert_eq!(impact.files(), ["src/direct.rs", "src/indirect.rs"]);
+        let note = impact.note().unwrap();
+        let direct_pos = note.find("src/direct.rs").unwrap();
+        let indirect_pos = note.find("src/indirect.rs").unwrap();
+        assert!(direct_pos < indirect_pos);
+        assert!(note.contains("These files may also need to be changed to complete the fix"));
+        assert!(note.contains("If you decide not to modify a listed file, you must state why"));
     }
 
     #[test]
@@ -930,5 +1093,33 @@ mod tests {
         ] {
             assert!(!aegis_lang::is_test_path(source), "{source}");
         }
+    }
+
+    #[test]
+    fn parse_diff_maps_changed_lines_and_ignores_tests() {
+        let temp = std::env::temp_dir().join(format!("aegis-diff-test-{}", std::process::id()));
+        let src = temp.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let code = "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\npub fn sub(a: i32, b: i32) -> i32 {\n    a - b\n}\n";
+        std::fs::write(src.join("lib.rs"), code).unwrap();
+        let diff = "diff --git a/tests/test_foo.rs b/tests/test_foo.rs\n\
+                    --- a/tests/test_foo.rs\n\
+                    +++ b/tests/test_foo.rs\n\
+                    @@ -1,2 +1,3 @@\n\
+                    +#[test]\n\
+                    diff --git a/src/lib.rs b/src/lib.rs\n\
+                    --- a/src/lib.rs\n\
+                    +++ b/src/lib.rs\n\
+                    @@ -2,1 +2,1 @@\n\
+                    -    a + b\n\
+                    +    a.saturating_add(b)\n";
+        let changed = parse_diff_changed_functions(&temp, diff);
+        assert!(changed.contains("src/lib.rs::add"), "{changed:?}");
+        assert!(!changed.contains("src/lib.rs::sub"), "{changed:?}");
+        assert!(
+            !changed.iter().any(|f| f.starts_with("tests/")),
+            "{changed:?}"
+        );
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }
