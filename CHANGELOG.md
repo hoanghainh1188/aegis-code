@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.8.0...v0.8.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **deps:** bump rmcp to 3.9.0 for RUSTSEC advisories ([#419](https://github.com/hoanghainh1188/aegis-code/issues/419)) ([285f16d](https://github.com/hoanghainh1188/aegis-code/commit/285f16d1d00ad62bcd07271b04e029fe65754094)), closes [#418](https://github.com/hoanghainh1188/aegis-code/issues/418)
+* **infra:** retry osv-scanner downloads on GitHub Releases 5xx ([#415](https://github.com/hoanghainh1188/aegis-code/issues/415)) ([12ba143](https://github.com/hoanghainh1188/aegis-code/commit/12ba1437e826bcaf0a3c11dd00f8d6aceddaada7)), closes [#414](https://github.com/hoanghainh1188/aegis-code/issues/414)
+* **provider:** attribute unsplit Bedrock cache writes from CachePlan ([#416](https://github.com/hoanghainh1188/aegis-code/issues/416)) ([a895f4b](https://github.com/hoanghainh1188/aegis-code/commit/a895f4b67927d7279083d1eae946f1ebcf2962fe))
+
 ## [0.8.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.7.0...v0.8.0) (2026-11-09)
 
 
