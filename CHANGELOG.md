@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.8.1...v0.8.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **gate:** accept a display name under a class filter in dotnet repro ([#430](https://github.com/hoanghainh1188/aegis-code/issues/430)) ([20cad1d](https://github.com/hoanghainh1188/aegis-code/commit/20cad1d43fc5ce53e42342a896b924a9520e8761)), closes [#422](https://github.com/hoanghainh1188/aegis-code/issues/422)
+* **gate:** match a repo path against Vitest's project-relative one ([#431](https://github.com/hoanghainh1188/aegis-code/issues/431)) ([411ac5c](https://github.com/hoanghainh1188/aegis-code/commit/411ac5cd803aa79563b854ac8fed55ef459672f2)), closes [#423](https://github.com/hoanghainh1188/aegis-code/issues/423)
+* **gate:** read VSTest results with xUnit log stuck to their end ([#421](https://github.com/hoanghainh1188/aegis-code/issues/421)) ([284895e](https://github.com/hoanghainh1188/aegis-code/commit/284895eff9b70a0a20ecc9c3e03ed1c2297abe0a))
+
+
+### Documentation
+
+* **eval:** report KPIs for the four new language profiles ([#427](https://github.com/hoanghainh1188/aegis-code/issues/427)) ([bde9675](https://github.com/hoanghainh1188/aegis-code/commit/bde967539a9db7a953dcc1975886f623c43f6a62))
+
 ## [0.8.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.8.0...v0.8.1) (2026-11-09)
 
 
