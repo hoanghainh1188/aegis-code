@@ -1018,6 +1018,21 @@ fn hidden_in_tool_results(messages: &[Message]) -> u32 {
     count(n)
 }
 
+/// The patch the gate passed, whole and ready for `git apply`, in the job
+/// dir of a run that opens no PR (#432): nothing else outlives the job's
+/// worktree for a reviewer to read. Written before the hidden tests, so a
+/// run stopped there still has it.
+fn keep_patch(
+    cfg: &RunConfig,
+    job_dir: &Path,
+    base: &str,
+    tree: &str,
+) -> Result<(), LifecycleError> {
+    let text = job::full_patch(&cfg.repo.path, base, tree)?;
+    let kept = job_dir.join("patch.diff");
+    std::fs::write(&kept, format!("{text}\n")).map_err(|e| LifecycleError::io(&kept, &e))
+}
+
 /// The fix's own tests on the agent's patch, after the PR is open (the
 /// PR holds the gated tree, so copying the tests in changes nothing sent).
 /// Same runner and sandbox as the gate's for `part`, the part holding the
@@ -1335,6 +1350,7 @@ where
                     publish(platform, ledger, profiles, tree, issue, &answer, &report).await?;
                 Some(published.url)
             } else {
+                keep_patch(cfg, job_dir, &report.base, &report.tree)?;
                 None
             };
             if let Some(hidden) = &issue.hidden {

@@ -59,10 +59,9 @@ pub fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, LifecycleErro
     git(repo, &["merge-base", "--end-of-options", a, b])
 }
 
-/// The patch from `from` to `to` that a PR holds (#312), as `git diff`
-/// shows it, redacted as the platform redacts anything it keeps, and cut
-/// to what the store keeps.
-pub fn patch(repo: &Path, from: &str, to: &str) -> Result<aegis_store::Patch, LifecycleError> {
+/// The whole patch from `from` to `to`, as `git diff` shows it, redacted
+/// as the platform redacts anything it keeps.
+pub fn full_patch(repo: &Path, from: &str, to: &str) -> Result<String, LifecycleError> {
     let full = git(
         repo,
         &[
@@ -74,8 +73,14 @@ pub fn patch(repo: &Path, from: &str, to: &str) -> Result<aegis_store::Patch, Li
             to,
         ],
     )?;
+    Ok(aegis_aci::redact(&full).text)
+}
+
+/// The patch from `from` to `to` that a PR holds (#312): [`full_patch`],
+/// cut to what the store keeps.
+pub fn patch(repo: &Path, from: &str, to: &str) -> Result<aegis_store::Patch, LifecycleError> {
     let patch = aegis_store::Patch {
-        diff: aegis_aci::redact(&full).text,
+        diff: full_patch(repo, from, to)?,
         truncated: false,
     };
     Ok(patch.capped())
@@ -231,6 +236,39 @@ impl Drop for Worktree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file for a reviewer to read (#432): past the store's cap, whole.
+    #[test]
+    fn the_full_patch_is_redacted_but_not_cut() {
+        let repo = std::env::temp_dir().join(format!("aegis-patch-{}", std::process::id()));
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |args: &[&str]| {
+            git(
+                &repo,
+                &[
+                    &["-c", "user.name=t", "-c", "user.email=t@example.com"],
+                    args,
+                ]
+                .concat(),
+            )
+            .unwrap()
+        };
+        g(&["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        g(&["add", "-A"]);
+        g(&["commit", "-qm", "base"]);
+        let secret = format!("ghp_{}", "a".repeat(36));
+        let big = "line\n".repeat(aegis_store::MAX_PATCH_BYTES / 4);
+        std::fs::write(repo.join("a.txt"), format!("{secret}\n{big}")).unwrap();
+        g(&["add", "-A"]);
+        g(&["commit", "-qm", "big"]);
+
+        let full = full_patch(&repo, "HEAD~1", "HEAD").unwrap();
+        assert!(full.len() > aegis_store::MAX_PATCH_BYTES);
+        assert!(!full.contains(&secret), "the token was kept");
+        assert!(patch(&repo, "HEAD~1", "HEAD").unwrap().truncated);
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
 
     #[test]
     fn the_digest_changes_with_the_kept_files_only() {

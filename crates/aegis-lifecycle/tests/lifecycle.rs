@@ -1362,6 +1362,12 @@ async fn an_eval_run_works_from_the_issue_base_and_passes_the_hidden_tests() {
         .unwrap();
     assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
     assert_eq!(report.hidden_tests_passed, Some(true));
+    // The PR holds the patch: the job dir keeps no copy (#432).
+    assert!(
+        !aegis_lifecycle::job_dir(&p.config, &run_id)
+            .join("patch.diff")
+            .exists()
+    );
     // The PR targets the issue's base, set on the fork as eval/<run>.
     let pr: Value = server.received_requests().await.unwrap()[0]
         .body_json()
@@ -1497,6 +1503,38 @@ async fn a_dry_run_replays_the_upstream_fix_without_a_model_or_a_pr() {
     assert_eq!(report.hidden_tests_passed, Some(true));
     assert_eq!(report.cost_usd, 0.0);
     assert_eq!(fork_refs(&scratch), "", "nothing was pushed");
+
+    // No PR holds the patch, so the job dir does (#432).
+    let kept = aegis_lifecycle::job_dir(&p.config, &run_id).join("patch.diff");
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert_eq!(text, format!("{}\n", report.patch.unwrap().diff));
+    assert!(
+        text.contains("diff --git a/src/lib.rs b/src/lib.rs"),
+        "{text}"
+    );
+    assert_applies_at(&p.config.repo.path, &eval.base_commit, &kept);
+}
+
+/// `patch` applies to the tree at `base`, in an index of its own.
+fn assert_applies_at(repo: &Path, base: &str, patch: &Path) {
+    let index = patch.with_extension("index");
+    let git_in_index = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .env("GIT_INDEX_FILE", &index)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git_in_index(&["read-tree", base]);
+    git_in_index(&["apply", "--cached", "--check", &patch.display().to_string()]);
+    std::fs::remove_file(&index).unwrap();
 }
 
 /// The configuration of a mode whose state is under `scratch`.
