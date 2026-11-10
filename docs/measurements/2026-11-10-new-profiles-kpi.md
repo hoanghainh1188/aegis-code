@@ -28,6 +28,29 @@ Báo cáo này nối tiếp [lượt chạy khô](2026-10-29-new-profiles-dry-ru
 
 Tín hiệu đáng chú ý nhất là tỉ lệ test ẩn qua trong số qua gate: 44%, so với 79% ở Phase 1.
 
+## Chấm lại theo quy tắc của #424
+
+Đợt này được chấm lại theo [quy tắc cho test ẩn gắn với lựa chọn của upstream](../../eval/README.md#scoring-hidden-tests-bound-to-upstream-choices-424), từ ledger và không gọi model. Việc phân loại dựa trên issue, test ẩn và code tại base, không nhìn kết quả lượt chạy, và áp dụng cho cả 20 issue.
+
+| Tỉ lệ qua gate và test ẩn | Tổng | TypeScript | Go | Java | C# |
+| --- | --- | --- | --- | --- | --- |
+| Chấm nghiêm (cả 20 issue) | 37.5% (15/40) | 40% (4/10) | 60% (6/10) | 30% (3/10) | 20% (2/10) |
+| **Chấm theo quy tắc** (bỏ 7 issue) | **57.7%** (15/26) | **66.7%** (4/6) | **100%** (6/6) | **50%** (3/6) | **25%** (2/8) |
+| Ngưỡng | ≥ 40% | ≥ 35% | ≥ 35% | ≥ 35% | ≥ 35% |
+
+Bảy issue bị loại: `zod-6643`, `zod-6657`, `gin-4638`, `gin-4760`, `gson-1247`, `gson-3113`, `Polly-3086`. Lý do từng issue nằm ở trường `upstream_bound` trong [eval/issues](../../eval/issues).
+
+So với bảng nhóm nguyên nhân bên dưới, có hai điểm khác:
+- `zod-6643` trước đây xếp vào nhóm agent, nay bị loại: issue nói về mảng không giới hạn độ dài, còn test ẩn chỉ kiểm tra mảng có giới hạn trên.
+- `StackExchange.Redis-2689` trước đây xếp vào nhóm upstream, nay vẫn được tính: tiêu đề đã nêu whitespace, và `RedisCommandException` suy ra được từ code. Hai lượt này tiếp tục tính là trượt.
+
+Cách đọc:
+- Theo quy tắc, tổng và ba ngôn ngữ đạt ngưỡng. C# vẫn chưa đạt.
+- Loại một issue nghĩa là issue đó không đo được agent, không có nghĩa bản vá của agent đúng. Bản vá của đợt này không được lưu lại nên không ai đọc lại được.
+- Mẫu nhỏ hơn: mỗi ngôn ngữ chỉ còn 6 đến 8 lượt, một lượt đổi kết quả làm tỉ lệ đổi 13 đến 17 điểm. `Go 100%` là 6/6 từ ba issue.
+- `zod-6027` và `NSubstitute-974` vẫn tính là trượt, dù #423 và #422 đã sửa gate. Nếu cả bốn lượt đều qua test ẩn khi đo lại, TypeScript lên 6/6 và C# lên 50% (4/8). Đây là cận trên, chưa đo.
+- "Được chấp nhận" ở đây vẫn là qua gate và test ẩn, chưa có người duyệt như ADR 0005.
+
 ## Vì sao không đạt
 
 25 lượt không đạt, chia theo nguyên nhân:
@@ -99,7 +122,7 @@ Nếu cả bốn lượt sau khi sửa gate đều qua test ẩn, TypeScript lê
 | --- | --- |
 | #422 | Gate nhận test NUnit dưới MTP khi lọc theo lớp |
 | #423 | Gate khớp đường dẫn tính từ gốc project của Vitest |
-| #424 | Quy tắc chấm khi test ẩn gắn với lựa chọn của upstream, rồi chấm lại đợt này |
+| #424 | Quy tắc chấm khi test ẩn gắn với lựa chọn của upstream, rồi chấm lại đợt này (xem mục "Chấm lại theo quy tắc của #424") |
 | #425 | Đưa Java lên ngưỡng 35% |
 | #426 | Đưa C# lên ngưỡng 35% |
 

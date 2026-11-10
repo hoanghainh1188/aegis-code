@@ -65,6 +65,26 @@ PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/gin.toml --set e
 PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/polly.toml --set eval/issues --only Polly-3086 --only Polly-3286
 ```
 
+### Scoring Hidden Tests Bound to Upstream Choices (#424)
+
+A hidden test comes from the human fix, so it can demand a choice the agent had no way to know. Passing such a test measures partly how well the agent guesses upstream. An issue is **upstream-bound** when at least one hidden test requires a specific detail for which all three hold:
+
+1. The detail is not stated in `title` or `body`. An explicit suggestion in `body` that upstream contradicted also counts.
+2. It cannot be derived from the code at `base_commit`, such as an established convention, a sibling implementation, or an existing exception type.
+3. A different choice would be a reasonable, behaviourally correct fix of what the issue describes.
+
+Scoring rules:
+
+- Classify from `title`, `body`, the hidden tests and the code at `base_commit`, **without looking at any run's outcome**, and classify every issue in a set, including those that passed.
+- Exclude only when all three conditions clearly hold. A borderline issue stays in the denominator.
+- Mark an excluded issue with `upstream_bound = "<reason>"`. Exclusion means the issue cannot measure the agent; it does not mean the agent's patch was correct.
+- Exclude both the passes and the failures of a bound issue.
+- Report the strict rate (all issues) next to the scored rate (bound issues excluded). Compare KPI thresholds against the scored rate.
+
+Seven of the 20 Phase 2 issues are upstream-bound: zod-6643, zod-6657, gin-4638, gin-4760, gson-1247, gson-3113, Polly-3086. StackExchange.Redis-2689 stays in as borderline: its title names whitespace, and `RedisCommandException` can be derived from the code. The 32 Phase 1 issues have not been classified.
+
+This rule replaces neither option considered for later runs: a reviewer blind to the hidden tests (ADR 0005), or adding upstream's decisions to `body`. Both need the patch or a new run, and the #259 patches were not retained.
+
 ---
 
 ## Schema Reference
@@ -81,6 +101,7 @@ PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/polly.toml --set
 | `changed_tests` | Reference visual/hash output updates (typst only) |
 | `hidden_known_failures` | Known sandbox environment failures (requiring external daemons or network access), excluded from scoring |
 | `body` | Ingested issue text ensuring deterministic inputs across benchmark runs |
+| `upstream_bound` | Optional. Why the hidden tests depend on an upstream choice the agent could not know; the issue is excluded from the scored rate (#424). Report-only: `aegis` does not read it |
 | `[verified]` | Verification outputs emitted by `verify.py` |
 
 Hidden test commands:
