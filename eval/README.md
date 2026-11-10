@@ -58,6 +58,8 @@ Total benchmark comprises **52 issues**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gs
 Each target repository maintains an isolated configuration mirroring `config/poc.toml`:
 - `config/gin.toml`, `config/zod.toml`, `config/gson.toml`, `config/polly.toml`, `config/nsubstitute.toml`, `config/stackexchange-redis.toml`
 
+With `--no-pr`, no PR holds the agent's patch, so each run that passes the gate keeps it at `<state_dir>/jobs/<run-id>/patch.diff` (#432), next to `hidden-tests.log`, for example `.workspace/state/jobs/gin-4638-r1/patch.diff`. The file is the complete `git diff` from `base_commit`, with secrets redacted, and is written before the hidden tests run. It applies with `git apply` unless redaction changed a line. A run stopped before the gate passes keeps no patch.
+
 Run benchmark evaluations:
 
 ```bash
