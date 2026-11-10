@@ -78,6 +78,7 @@ pub(super) fn selector(ids: &BTreeSet<String>) -> Option<String> {
     let files: BTreeSet<&str> = ids
         .iter()
         .map(|id| id.split_once(" > ").map_or(id.as_str(), |(file, _)| file))
+        .map(without_project)
         .collect();
     match files.len() {
         1 => files.first().map(|f| (*f).to_owned()),
@@ -177,6 +178,38 @@ PASS src/fine.test.js
         );
         assert_eq!(
             selector(&ids(&["src/a.test.ts > x", "src/b.test.ts > y"])),
+            None
+        );
+    }
+
+    /// The runner's file filter takes a path, so the project's label must
+    /// not reach it (#428).
+    #[test]
+    fn selects_a_file_without_its_project_label() {
+        let ids = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect();
+        assert_eq!(
+            selector(&ids(&[
+                "zod  src/a.test.ts > x > y",
+                "zod  src/a.test.ts > z"
+            ]))
+            .as_deref(),
+            Some("src/a.test.ts")
+        );
+        assert_eq!(
+            selector(&ids(&["|zod| src/a.test.ts > x"])).as_deref(),
+            Some("src/a.test.ts")
+        );
+        assert_eq!(
+            selector(&ids(&["zod  src/a.test.ts"])).as_deref(),
+            Some("src/a.test.ts")
+        );
+        // The same path in two projects is still one filter.
+        assert_eq!(
+            selector(&ids(&["zod  src/a.test.ts > x", "mini  src/a.test.ts > x"])).as_deref(),
+            Some("src/a.test.ts")
+        );
+        assert_eq!(
+            selector(&ids(&["zod  src/a.test.ts > x", "zod  src/b.test.ts > y"])),
             None
         );
     }
