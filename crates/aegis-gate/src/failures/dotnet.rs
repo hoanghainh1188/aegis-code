@@ -52,7 +52,9 @@ fn timed<'a>(rest: &'a str, open: &str, close: char) -> Option<&'a str> {
 /// Whether `id` is a test `dotnet test --filter <test>` selects. Each
 /// clause of the filter, `<property><op><value>` or a bare value, is
 /// checked against the name; a filter on traits alone cannot be, and
-/// takes every test.
+/// takes every test. Nor can a filter on the class or full name be checked
+/// against a method's display name, all MTP shows: the runner applied it,
+/// so what failed in that run was selected (#422).
 pub(super) fn names(id: &str, test: &str) -> bool {
     if id.contains("::") {
         return false;
@@ -69,6 +71,10 @@ pub(super) fn names(id: &str, test: &str) -> bool {
             };
             let value = value.replace('\\', "");
             match property.trim() {
+                "FullyQualifiedName" | "ClassName" if is_display_name(id) => {
+                    checked = true;
+                    true
+                }
                 "FullyQualifiedName" | "Name" | "DisplayName" | "ClassName" => {
                     checked = true;
                     is_named(id, &value, op == "~")
@@ -79,17 +85,22 @@ pub(super) fn names(id: &str, test: &str) -> bool {
     named || !checked
 }
 
-/// Whether the name `id` (fully qualified, or a display name alone) is the
-/// filter's `value`, or contains it when the operator is `~`.
+/// `id` without its arguments.
+fn bare(id: &str) -> &str {
+    id.split_once('(').map_or(id, |(name, _)| name).trim()
+}
+
+/// Whether `id` is a method's display name, without its class.
+fn is_display_name(id: &str) -> bool {
+    !bare(id).contains('.')
+}
+
+/// Whether the name `id` is the filter's `value`, or contains it when the
+/// operator is `~`.
 fn is_named(id: &str, value: &str, contains: bool) -> bool {
-    let bare = |s: &str| s.split_once('(').map_or(s, |(n, _)| n).trim().to_owned();
     let name = bare(id);
-    let dotted = |a: &str, b: &str| a == b || a.ends_with(&format!(".{b}"));
-    (contains && id.contains(value))
-        || dotted(&name, value)
-        || name.starts_with(&format!("{value}."))
-        // A display name without its class, as MTP shows it.
-        || (!name.contains('.') && dotted(value, &name))
+    let dotted = name == value || name.ends_with(&format!(".{value}"));
+    (contains && id.contains(value)) || dotted || name.starts_with(&format!("{value}."))
 }
 
 /// `FullyQualifiedName~A|FullyQualifiedName~B`, each name without its
@@ -226,6 +237,33 @@ mod tests {
         assert!(ran_nothing(
             "An issue was encountered verifying workloads. For more information, run \"dotnet workload update\".\n"
         ));
+    }
+
+    /// NUnit under MTP names the method alone, so a filter on its class
+    /// cannot be compared with it (#422).
+    #[test]
+    fn a_display_name_is_selected_by_a_filter_on_its_class() {
+        let log = "failed Should_configure_returns_for_generic_method_with_related_type_arguments (41ms)\n";
+        let failed = failing(log);
+        let id = failed.first().expect("one failing test");
+        let filter = "FullyQualifiedName~Issue974_GenericMethodInheritedTypeArguments";
+        assert!(names(id, filter));
+        assert!(names(id, "ClassName=Shop.Tests.CartTests"));
+        assert!(names(id, "Issue974_GenericMethodInheritedTypeArguments"));
+    }
+
+    #[test]
+    fn a_filter_on_the_method_still_tells_display_names_apart() {
+        assert!(names("Param (2)", "Name=Param"));
+        assert!(!names("Param (2)", "Name=Other"));
+        assert!(!names("Param (2)", "DisplayName=Other"));
+    }
+
+    #[test]
+    fn a_fully_qualified_name_is_still_compared_with_a_class_filter() {
+        let id = "Shop.Tests.CartTests.Param(x: 2)";
+        assert!(!names(id, "ClassName=Shop.Tests.OtherTests"));
+        assert!(!names(id, "FullyQualifiedName~Issue974"));
     }
 
     #[test]
