@@ -46,13 +46,30 @@ pub(super) fn failing(output: &str) -> BTreeSet<String> {
 }
 
 /// Whether `id` is a test `npm test -- <test>` selects: both runners take a
-/// file filter, so a file path containing `test`; or the test's own name.
+/// file filter, so a file path containing `test`, or one `test` ends with
+/// when the runner prints it from a project's root (#423); or the test's
+/// own name.
 pub(super) fn names(id: &str, test: &str) -> bool {
     if id.starts_with('<') {
         return false;
     }
     let (file, name) = id.split_once(" > ").unwrap_or((id, ""));
-    file.contains(test) || name == test || name.ends_with(&format!(" > {test}"))
+    let file = without_project(file);
+    file.contains(test)
+        || test.ends_with(&format!("/{file}"))
+        || name == test
+        || name.ends_with(&format!(" > {test}"))
+}
+
+/// `file` without the project label Vitest prints before it when the run
+/// has several projects: `zod  src/a.test.ts`, or `|zod| src/a.test.ts`
+/// without colours.
+fn without_project(file: &str) -> &str {
+    let labelled = file.split_once("  ").or_else(|| {
+        file.strip_prefix('|')
+            .and_then(|rest| rest.split_once("| "))
+    });
+    labelled.map_or(file, |(_, path)| path)
 }
 
 /// The one file every failing test is in: both runners take a file filter,
@@ -162,6 +179,40 @@ PASS src/fine.test.js
             selector(&ids(&["src/a.test.ts > x", "src/b.test.ts > y"])),
             None
         );
+    }
+
+    /// Vitest with several projects prints each file from its project's
+    /// root, after the project's label (#423).
+    #[test]
+    fn matches_a_repo_path_against_a_project_relative_one() {
+        let log =
+            " FAIL   zod  src/v4/classic/tests/escape.test.ts > escaping > escapes '/' and '~'\n";
+        let failed = failing(log);
+        let id = failed.first().expect("one failing test");
+        assert!(names(
+            id,
+            "packages/zod/src/v4/classic/tests/escape.test.ts"
+        ));
+        assert!(names(id, "src/v4/classic/tests/escape.test.ts"));
+        let colorless = "|zod| src/v4/classic/tests/escape.test.ts > escaping > x";
+        assert!(names(
+            colorless,
+            "packages/zod/src/v4/classic/tests/escape.test.ts"
+        ));
+    }
+
+    #[test]
+    fn a_file_of_the_same_name_elsewhere_does_not_match() {
+        let id = "zod  src/v4/classic/tests/escape.test.ts > escaping > x";
+        assert!(!names(id, "packages/zod/src/v4/mini/tests/escape.test.ts"));
+        assert!(!names(
+            id,
+            "packages/zod/src/v4/classic/tests/other-escape.test.ts"
+        ));
+        assert!(!names(id, "zod"));
+        assert!(!names("|zod| src/a.test.ts > x", "zod"));
+        // Only a whole path component may start the shorter path.
+        assert!(!names("v4/x.test.ts > y", "packages/zodv4/x.test.ts"));
     }
 
     #[test]
