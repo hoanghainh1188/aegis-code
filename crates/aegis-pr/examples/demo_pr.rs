@@ -85,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             model_calls: 0,
             usd: 0.0,
         },
+        input_flags: vec![],
     });
     let pr = github
         .open_pull_request(

@@ -3,6 +3,15 @@
 {% block content %}
 {% include "job_head.html" %}
 {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
+{% if !input_flags.is_empty() %}
+<section aria-labelledby="flags-heading" class="band flags">
+  <h2 id="flags-heading">Embedded instructions in what the job read</h2>
+  <ul class="changes">
+    {% for f in input_flags %}<li>{{ f.source }}, <code>{{ f.location }}</code>: {{ f.excerpt }}</li>{% endfor %}
+  </ul>
+  <p class="note">Found by the platform, not reported by the agent. The repo or the issue may be targeted: check the source.</p>
+</section>
+{% endif %}
 {% if let Some(a) = answer %}
 <section aria-labelledby="answer-heading" class="band answer">
   <h2 id="answer-heading">What the agent did</h2>

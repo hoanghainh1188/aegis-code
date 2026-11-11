@@ -449,6 +449,9 @@ where
         &batch,
         &answer,
         report,
+        // A Sonar batch's input is the analyser's own messages, and its
+        // groups ran as jobs of their own: nothing here to flag (#444).
+        &[],
     )
     .await?;
     let patch = crate::job::patch(checkout.path(), &report.base, &report.tree)?;

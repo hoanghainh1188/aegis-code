@@ -211,6 +211,7 @@ fn the_body_follows_the_template_and_model_text_is_inert() {
             model_calls: 7,
             usd: 0.4321,
         },
+        input_flags: vec![],
     });
     assert_eq!(
         body,

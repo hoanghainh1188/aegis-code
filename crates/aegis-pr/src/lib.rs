@@ -32,8 +32,8 @@ use aegis_gate::GateReport;
 pub use access::RepoAccess;
 pub use actions::{FailedJob, FailedRun};
 pub use body::{
-    AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, PrContent, gate_line, inert,
-    render,
+    AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, InputFlagNote, PrContent,
+    gate_line, inert, render,
 };
 pub use branch::{AgentBranch, EvalBranch};
 pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_message};

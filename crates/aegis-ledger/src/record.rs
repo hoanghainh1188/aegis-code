@@ -199,6 +199,19 @@ pub struct AnswerChange {
     pub note: String,
 }
 
+/// A line of untrusted text the job read that reads like an instruction to
+/// an AI agent (#444): where it is, the rule that matched it, and the line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputFlag {
+    /// `issue`, `CI log`, `review` or `file`.
+    pub source: String,
+    /// `path:line`, `line 12` of the issue, `note 2` of a review.
+    pub location: String,
+    pub rule: String,
+    /// The line, trimmed, redacted and capped.
+    pub excerpt: String,
+}
+
 /// One text the agent reports as trying to instruct it (#443).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnswerSuspicious {
@@ -282,6 +295,9 @@ pub enum LedgerEvent {
     },
     /// The agent's final answer (#316), each time it gives one.
     Answered(AnswerSummary),
+    /// Untrusted text the job read that reads like an instruction to an AI
+    /// agent, found by the platform (#444).
+    InputFlagged(InputFlag),
 }
 
 impl LedgerEvent {
@@ -296,7 +312,8 @@ impl LedgerEvent {
             | Self::ImpactChecked { .. }
             | Self::Escalated { .. }
             | Self::IssueRead { .. }
-            | Self::Answered(_) => &[],
+            | Self::Answered(_)
+            | Self::InputFlagged(_) => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
@@ -363,6 +380,10 @@ pub struct IssueRecord {
     /// The agent's last final answer.
     #[serde(default)]
     pub answer: Option<AnswerSummary>,
+    /// Embedded instructions the platform found in what the job read
+    /// (#444).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_flags: Vec<InputFlag>,
 }
 
 impl IssueRecord {
@@ -401,6 +422,7 @@ impl IssueRecord {
             issue_title: None,
             issue_url: None,
             answer: None,
+            input_flags: Vec::new(),
         }
     }
 
@@ -452,6 +474,7 @@ impl IssueRecord {
                 self.issue_url = Some(url.clone());
             }
             LedgerEvent::Answered(answer) => self.answer = Some(answer.clone()),
+            LedgerEvent::InputFlagged(flag) => self.input_flags.push(flag.clone()),
         }
         self
     }
