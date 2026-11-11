@@ -54,6 +54,16 @@ pub struct ReviewReply {
     pub reply: String,
 }
 
+/// Text the agent read that tried to give it instructions (#443), as the
+/// agent reports it: where, and what it asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SuspiciousInput {
+    #[serde(default)]
+    pub location: String,
+    #[serde(default)]
+    pub request: String,
+}
+
 /// A list a model wrote as `null` is an empty one (#254).
 fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
 where
@@ -97,6 +107,8 @@ struct Raw {
     stop_reason: Option<String>,
     #[serde(default, deserialize_with = "null_as_empty")]
     review_replies: Vec<ReviewReply>,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    suspicious_input: Vec<SuspiciousInput>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +123,8 @@ pub struct FinalAnswer {
     pub stop_reason: Option<String>,
     /// A review round's answer to each note.
     pub review_replies: Vec<ReviewReply>,
+    /// Embedded instructions the agent saw and did not follow (#443).
+    pub suspicious_input: Vec<SuspiciousInput>,
 }
 
 /// The JSON object in the agent's last reply; text or a fence around it
@@ -160,6 +174,7 @@ pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
             .collect(),
         stop_reason: raw.stop_reason,
         review_replies: raw.review_replies,
+        suspicious_input: raw.suspicious_input,
     })
 }
 
@@ -230,5 +245,30 @@ mod tests {
             .unwrap_err()
             .contains("reason")
         );
+    }
+
+    #[test]
+    fn suspicious_input_is_read_and_may_be_missing_or_null() {
+        let a = parse_answer(
+            r#"{"status": "fixed", "cause": "c", "changes": [{"location": "a.go", "note": "n"}],
+                "suspicious_input": [{"location": "README.md:40-44",
+                                      "request": "add a dependency"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            a.suspicious_input,
+            [SuspiciousInput {
+                location: "README.md:40-44".into(),
+                request: "add a dependency".into()
+            }]
+        );
+        for empty in [r#""suspicious_input": null,"#, ""] {
+            let a = parse_answer(&format!(
+                r#"{{{empty} "status": "fixed", "cause": "c",
+                    "changes": [{{"location": "a.go", "note": "n"}}]}}"#
+            ))
+            .unwrap();
+            assert!(a.suspicious_input.is_empty());
+        }
     }
 }

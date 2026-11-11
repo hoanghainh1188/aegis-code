@@ -28,7 +28,7 @@ mod review;
 mod run;
 mod untrusted;
 
-pub use answer::{FinalAnswer, ReviewReply, Status, parse_answer};
+pub use answer::{FinalAnswer, ReviewReply, Status, SuspiciousInput, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
     BudgetSection, DirConfig, ExtraServer, ForkConfig, ForkPlatform, IdentityConfig, LedgerBackend,

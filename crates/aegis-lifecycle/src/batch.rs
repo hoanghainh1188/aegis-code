@@ -178,6 +178,7 @@ impl<P, S> BatchSteps<'_, P, S> {
                 .collect(),
             stop_reason: None,
             review_replies: vec![],
+            suspicious_input: vec![],
         }
     }
 }
@@ -323,6 +324,7 @@ fn batch_answer(
             .collect(),
         stop_reason: None,
         review_replies: vec![],
+        suspicious_input: vec![],
     }
 }
 

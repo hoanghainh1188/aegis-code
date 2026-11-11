@@ -3,9 +3,9 @@
 use aegis_provider::Usage;
 
 use crate::{
-    AnswerChange, AnswerReply, AnswerSummary, GateRun, IssueId, IssueKind, IssueRecord,
-    LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review, Tier, TokenCounts,
-    ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, IssueId, IssueKind,
+    IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review, Tier,
+    TokenCounts, ToolCall,
 };
 
 /// Caps on what [`IssueLedger::issue_read`] and [`IssueLedger::answered`]
@@ -173,6 +173,15 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
                     note: r.note,
                     done: r.done,
                     reply: note(&r.reply),
+                })
+                .collect(),
+            suspicious_input: answer
+                .suspicious_input
+                .iter()
+                .take(MAX_CHANGES)
+                .map(|s| AnswerSuspicious {
+                    location: note(&s.location),
+                    request: note(&s.request),
                 })
                 .collect(),
         };
@@ -422,6 +431,7 @@ mod tests {
             repro_test: None,
             stop_reason: Some("gave up".into()),
             review_replies: vec![],
+            suspicious_input: vec![],
         };
         ledger.answered(first).await.unwrap();
         let last = AnswerSummary {
@@ -435,6 +445,7 @@ mod tests {
                 done: true,
                 reply: "done".into(),
             }],
+            suspicious_input: vec![],
         };
         ledger.answered(last).await.unwrap();
 
