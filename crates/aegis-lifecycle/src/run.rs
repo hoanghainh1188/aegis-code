@@ -20,8 +20,8 @@ use aegis_gate::{
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
-    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, IssueId, IssueKind,
-    IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, InputFlag, IssueId,
+    IssueKind, IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
     INHERITED_ENV, LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session,
@@ -203,6 +203,24 @@ where
         model_calls: record.model_calls,
         hidden_tests_passed: record.hidden_tests_passed,
     })
+}
+
+/// Embedded instructions in what the job read (#444), from the run's tool
+/// calls so far, recorded in the ledger.
+async fn flag_inputs<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    issue: &IssueInput,
+    round: Option<&ReviewRound>,
+    base: &str,
+) -> Result<Vec<InputFlag>, LifecycleError>
+where
+    S: LedgerStore,
+{
+    let events = platform.store.events(&ledger.record().issue_id).await?;
+    let flags = crate::flags::collect(issue, round, &events, &platform.config.repo.path, base)?;
+    ledger.input_flagged(&flags).await?;
+    Ok(flags)
 }
 
 /// The ledger's summary of a final answer (#316), every text redacted as
@@ -1340,6 +1358,13 @@ where
                     patch: None,
                 });
             }
+            // What the job read that speaks to an agent, for the reviewer
+            // (#444): in the ledger, and in the PR it opens.
+            let round = match finish {
+                Finish::Update(round) => Some(round.as_ref()),
+                _ => None,
+            };
+            let flags = flag_inputs(platform, ledger, issue, round, &report.base).await?;
             // The PR as the gate passed it, for the job's page (#312).
             let patch = Some(job::patch(&cfg.repo.path, &report.base, &report.tree)?);
             if let Finish::Update(round) = finish {
@@ -1354,8 +1379,10 @@ where
                 });
             }
             let pr_url = if cfg.run.open_prs {
-                let published =
-                    publish(platform, ledger, profiles, tree, issue, &answer, &report).await?;
+                let published = publish(
+                    platform, ledger, profiles, tree, issue, &answer, &report, &flags,
+                )
+                .await?;
                 Some(published.url)
             } else {
                 keep_patch(cfg, job_dir, &report.base, &report.tree)?;

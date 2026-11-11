@@ -5,9 +5,9 @@ use std::path::Path;
 
 use aegis_gate::GateReport;
 use aegis_lang::{CoverageFormat, RepoProfiles};
-use aegis_ledger::{IssueLedger, LedgerStore, Tier};
+use aegis_ledger::{InputFlag, IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
-    CommitInput, Cost, Forge, GitHub, GitLab, Identity, PrContent, Remote, abandon,
+    CommitInput, Cost, Forge, GitHub, GitLab, Identity, InputFlagNote, PrContent, Remote, abandon,
     cobertura_lines, cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated,
     push_gated_onto, render, write_commit_message,
 };
@@ -73,6 +73,7 @@ pub(crate) async fn publish<P, S>(
     issue: &IssueInput,
     answer: &FinalAnswer,
     gate: &GateReport,
+    flags: &[InputFlag],
 ) -> Result<Published, LifecycleError>
 where
     P: ModelProvider + Sync,
@@ -128,6 +129,14 @@ where
             model_calls: record.model_calls,
             usd: record.cost_usd,
         },
+        input_flags: flags
+            .iter()
+            .map(|f| InputFlagNote {
+                source: f.source.clone(),
+                location: f.location.clone(),
+                excerpt: f.excerpt.clone(),
+            })
+            .collect(),
     });
     let title = message.text.lines().next().unwrap_or("fix").to_owned();
     match forge

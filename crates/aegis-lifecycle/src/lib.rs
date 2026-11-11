@@ -17,6 +17,7 @@ mod code_graph;
 mod config;
 mod error;
 mod eval;
+pub mod flags;
 pub mod injection;
 mod issue;
 mod job;
@@ -26,6 +27,7 @@ mod registry;
 mod replay;
 mod review;
 mod run;
+mod shown;
 mod untrusted;
 
 pub use answer::{FinalAnswer, ReviewReply, Status, SuspiciousInput, parse_answer};

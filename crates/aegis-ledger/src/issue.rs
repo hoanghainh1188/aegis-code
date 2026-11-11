@@ -3,9 +3,9 @@
 use aegis_provider::Usage;
 
 use crate::{
-    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, IssueId, IssueKind,
-    IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review, Tier,
-    TokenCounts, ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, InputFlag, IssueId,
+    IssueKind, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review,
+    Tier, TokenCounts, ToolCall,
 };
 
 /// Caps on what [`IssueLedger::issue_read`] and [`IssueLedger::answered`]
@@ -186,6 +186,21 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
                 .collect(),
         };
         self.push(LedgerEvent::Answered(answer)).await
+    }
+
+    /// Embedded instructions found in what the job read (#444), each text
+    /// cut to its cap, at most [`MAX_CHANGES`].
+    pub async fn input_flagged(&mut self, flags: &[InputFlag]) -> Result<(), LedgerError> {
+        for flag in flags.iter().take(MAX_CHANGES) {
+            let flag = InputFlag {
+                source: capped(&flag.source, MAX_TITLE_CHARS),
+                location: capped(&flag.location, MAX_TITLE_CHARS),
+                rule: capped(&flag.rule, MAX_TITLE_CHARS),
+                excerpt: capped(&flag.excerpt, MAX_NOTE_CHARS),
+            };
+            self.push(LedgerEvent::InputFlagged(flag)).await?;
+        }
+        Ok(())
     }
 
     pub async fn hidden_tests(&mut self, passed: bool, duration_s: f64) -> Result<(), LedgerError> {

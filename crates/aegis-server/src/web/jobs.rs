@@ -5,7 +5,7 @@
 //! Hidden test results are never shown (ADR 0005): the reviewer must not
 //! know them before giving a verdict.
 
-use aegis_ledger::{AnswerSummary, IssueRecord, LedgerEvent, LedgerStore, Outcome};
+use aegis_ledger::{AnswerSummary, InputFlag, IssueRecord, LedgerEvent, LedgerStore, Outcome};
 use aegis_store::{Job, JobFilter, JobStatus, Page, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
@@ -316,6 +316,10 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
             ),
         ),
         LedgerEvent::IssueRead { title, .. } => row("issue", title.clone()),
+        LedgerEvent::InputFlagged(f) => row(
+            "embedded instruction",
+            format!("{}, {}: {}", f.source, f.location, f.excerpt),
+        ),
         LedgerEvent::Answered(a) => match (a.fixed, &a.stop_reason) {
             (true, _) => row("answer", format!("fixed · {} changes", a.changes.len())),
             (false, Some(why)) => row("answer", format!("stopped · {why}")),
@@ -464,6 +468,9 @@ struct JobPage<'a> {
     notice: Option<&'static str>,
     /// The agent's last final answer (#316).
     answer: Option<AnswerSummary>,
+    /// Embedded instructions the platform found in what the job read
+    /// (#444).
+    input_flags: Vec<InputFlag>,
     /// The patch its PR holds (#312).
     patch: Option<PatchView>,
 }
@@ -517,6 +524,7 @@ pub async fn detail(
         rounds_cost,
         notice: Done::parse(&q.done).map(Done::message),
         answer: record.answer.clone(),
+        input_flags: record.input_flags.clone(),
         patch: super::patch::of(&store, job.id).await?,
     })
 }
