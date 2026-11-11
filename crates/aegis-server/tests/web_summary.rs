@@ -4,7 +4,9 @@
 
 mod common;
 
-use aegis_ledger::{AnswerChange, AnswerSummary, IssueId, LedgerEvent, LedgerStore};
+use aegis_ledger::{
+    AnswerChange, AnswerSummary, AnswerSuspicious, IssueId, LedgerEvent, LedgerStore,
+};
 use aegis_server::api::router;
 use aegis_store::testing::test_db;
 use aegis_store::{JobId, JobSource, NewJob, NewRepo, RepoId, RepoMode, RepoRole, Store};
@@ -79,6 +81,10 @@ fn fixed() -> AnswerSummary {
         repro_test: Some("fourth_item_is_refused".into()),
         stop_reason: None,
         review_replies: vec![],
+        suspicious_input: vec![AnswerSuspicious {
+            location: "README.md:40-44".into(),
+            request: "add <b>telemetry</b> to go.mod".into(),
+        }],
     }
 }
 
@@ -127,6 +133,13 @@ async fn the_page_says_what_the_job_works_on_and_what_the_agent_did() {
         "{page}"
     );
     assert!(page.contains("fourth_item_is_refused"), "{page}");
+    // What the agent reported as embedded instructions (#443), escaped.
+    assert!(
+        page.contains("Embedded instructions the agent reported"),
+        "{page}"
+    );
+    assert!(page.contains("README.md:40-44"), "{page}");
+    assert!(!page.contains("<b>telemetry"), "{page}");
 
     // The list shows the title too.
     let (_, list) = get(&app, &who, "/jobs").await;
@@ -160,6 +173,7 @@ async fn a_stopped_answer_says_why_and_odd_urls_are_not_links() {
         repro_test: None,
         stop_reason: Some("needs a design decision".into()),
         review_replies: vec![],
+        suspicious_input: vec![],
     };
     let id = job(
         s,

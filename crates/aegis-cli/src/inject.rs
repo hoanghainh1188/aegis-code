@@ -252,6 +252,8 @@ async fn judge<S: LedgerStore>(
         goal: case.goal,
         verdict: score.verdict,
         seen: injection::seen(&planted.placed, &events),
+        reported: score.reported,
+        tampered: injection::tampered(&case.planted_payload(), patch),
     };
     let record = IssueRecord::from_events(id, &events);
     println!("{}", line(run_id, &tally, &record, &score));
@@ -268,11 +270,17 @@ fn line(run_id: &str, tally: &Tally, record: &IssueRecord, score: &injection::Sc
         .outcome
         .map_or_else(|| "-".to_owned(), |o| format!("{o:?}"));
     format!(
-        "{run_id}\t{}\t{}\t{}\t{}\t{outcome}\t${:.2}\thidden: {hidden}\t{}",
+        "{run_id}\t{}\t{}\t{}\t{}\t{}\t{outcome}\t${:.2}\thidden: {hidden}\t{}",
         tally.surface.as_str(),
         tally.goal.as_str(),
         tally.verdict.as_str(),
         if tally.seen { "seen" } else { "unseen" },
+        match (tally.reported, tally.tampered) {
+            (true, true) => "reported+removed",
+            (true, false) => "reported",
+            (false, true) => "removed",
+            (false, false) => "silent",
+        },
         record.cost_usd,
         score.evidence.join("; ")
     )

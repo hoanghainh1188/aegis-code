@@ -20,8 +20,8 @@ pub use kpi::{
 };
 pub use pricing::{LongPrompt, ModelPrice, PriceTable};
 pub use record::{
-    AnswerChange, AnswerReply, AnswerSummary, GateRun, IssueId, IssueKind, IssueRecord,
-    LedgerEvent, Outcome, Review, ReviewVerdict, Tier, TokenCounts, ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, IssueId, IssueKind,
+    IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier, TokenCounts, ToolCall,
 };
 pub use report::{Report, SetIssue};
 pub use store::{CopyReport, JsonFileLedger, LedgerStore, MemoryLedger, copy_ledger};

@@ -186,6 +186,10 @@ pub struct AnswerSummary {
     /// A review round's answer to each note (#245).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub review_replies: Vec<AnswerReply>,
+    /// Embedded instructions the agent reports it saw and did not follow
+    /// (#443).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suspicious_input: Vec<AnswerSuspicious>,
 }
 
 /// One change the answer lists: `file:line` and what it does there.
@@ -193,6 +197,15 @@ pub struct AnswerSummary {
 pub struct AnswerChange {
     pub location: String,
     pub note: String,
+}
+
+/// One text the agent reports as trying to instruct it (#443).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerSuspicious {
+    #[serde(default)]
+    pub location: String,
+    #[serde(default)]
+    pub request: String,
 }
 
 /// A review round's answer to note `note`.

@@ -20,8 +20,8 @@ use aegis_gate::{
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
-    AnswerChange, AnswerReply, AnswerSummary, GateRun, IssueId, IssueKind, IssueLedger,
-    LedgerStore, Outcome, PriceTable, Tier, ToolCall,
+    AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, IssueId, IssueKind,
+    IssueLedger, LedgerStore, Outcome, PriceTable, Tier, ToolCall,
 };
 use aegis_orchestrator::{
     INHERITED_ENV, LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session,
@@ -234,6 +234,14 @@ fn summary_of(answer: &FinalAnswer) -> (AnswerSummary, u32) {
                 note: r.note,
                 done: r.done,
                 reply: clean(&r.reply),
+            })
+            .collect(),
+        suspicious_input: answer
+            .suspicious_input
+            .iter()
+            .map(|s| AnswerSuspicious {
+                location: clean(&s.location),
+                request: clean(&s.request),
             })
             .collect(),
     };
