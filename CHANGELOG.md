@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.8.2...v0.9.0) (2026-11-11)
+
+
+### Features
+
+* **eval:** keep each run's patch when no PR is opened ([#434](https://github.com/hoanghainh1188/aegis-code/issues/434)) ([87884fe](https://github.com/hoanghainh1188/aegis-code/commit/87884fe3332361e6fedf4d03d163e4e0b72fdc8b)), closes [#432](https://github.com/hoanghainh1188/aegis-code/issues/432)
+* **orchestrator:** ask the agent to check the issue's rule, not only its example ([#425](https://github.com/hoanghainh1188/aegis-code/issues/425)) ([#438](https://github.com/hoanghainh1188/aegis-code/issues/438)) ([0596566](https://github.com/hoanghainh1188/aegis-code/commit/05965669a5de4c5818941b567ad156c1ad560585))
+
+
+### Bug Fixes
+
+* **gate:** drop Vitest's project label from the rerun selector ([#436](https://github.com/hoanghainh1188/aegis-code/issues/436)) ([4d39c8e](https://github.com/hoanghainh1188/aegis-code/commit/4d39c8e0282eb0a5e829e7260a4b39cfa0dd58d3)), closes [#428](https://github.com/hoanghainh1188/aegis-code/issues/428)
+
+
+### Documentation
+
+* **eval:** report the C# KPI rerun after the gate fix ([#437](https://github.com/hoanghainh1188/aegis-code/issues/437)) ([adbc5aa](https://github.com/hoanghainh1188/aegis-code/commit/adbc5aa93c02d697b8f54aba3186ebaad8e043c0)), closes [#426](https://github.com/hoanghainh1188/aegis-code/issues/426)
+* **eval:** score hidden tests bound to upstream choices ([#433](https://github.com/hoanghainh1188/aegis-code/issues/433)) ([0f86d4b](https://github.com/hoanghainh1188/aegis-code/commit/0f86d4b5edeb65fb73e44aceaa77a59b37c7bfa4)), closes [#424](https://github.com/hoanghainh1188/aegis-code/issues/424)
+
 ## [0.8.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.8.1...v0.8.2) (2026-11-10)
 
 
