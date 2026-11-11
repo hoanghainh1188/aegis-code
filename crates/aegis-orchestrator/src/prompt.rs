@@ -86,4 +86,12 @@ mod tests {
         assert!(SYSTEM_PROMPT.contains("`run_tests` runs one test"));
         assert!(SYSTEM_PROMPT.contains("It is not a check run"));
     }
+
+    // #425: both runs of gson-992 stopped once the issue's own example passed;
+    // both runs of gson-1768 went to the gate with tests still on the old text.
+    #[test]
+    fn the_instructions_ask_for_the_rule_and_the_old_output() {
+        assert!(SYSTEM_PROMPT.contains("An example in the issue is one instance"));
+        assert!(SYSTEM_PROMPT.contains("search the tests for the old text"));
+    }
 }
