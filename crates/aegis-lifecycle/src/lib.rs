@@ -17,6 +17,7 @@ mod code_graph;
 mod config;
 mod error;
 mod eval;
+pub mod injection;
 mod issue;
 mod job;
 mod light;
