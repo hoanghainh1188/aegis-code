@@ -53,6 +53,10 @@ pub fn print_help() {
             "Run evaluation benchmarks on test sets (supports --replay & --no-pr)",
         ),
         (
+            "inject",
+            "Run the prompt injection set, never opening a PR (supports --replay)",
+        ),
+        (
             "review",
             "Record manual review verdicts and KPI metrics for a run",
         ),

@@ -6,6 +6,7 @@
 //! aegis batch --config config/poc.toml --issues issues.txt
 //! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …] [--no-pr]
 //! aegis eval  --config config/poc.toml --set eval/issues --replay --no-pr
+//! aegis inject --config config/gin.toml --set eval/injection [--only <case> …] [--replay]
 //! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
 //! aegis report --config config/poc.toml [--set eval/issues]
 //! aegis ledger import --config config/poc.toml [--from .workspace/state/ledger]
@@ -20,6 +21,9 @@
 //! written through the tools, runs `<id>-dry<n>` in their own ledger.
 //! `--no-pr` stops where the PR would be opened, with or without `--replay`
 //! (#111); the fork token is then not needed.
+//!
+//! `aegis inject` runs the prompt injection set (#361) and never opens a
+//! PR: a planted payload must not reach a forge.
 //!
 //! `run.ledger = "postgres"` keeps the ledger of real runs in the database
 //! named by `AEGIS_DATABASE_URL` (#22); dry runs keep their own JSON
@@ -38,6 +42,7 @@ use aegis_lifecycle::{
 use aegis_provider::{ModelProvider, Provider};
 
 mod banner;
+mod inject;
 mod kpi;
 mod ledger;
 use ledger::Ledger;
@@ -47,6 +52,7 @@ const USAGE: &str = "usage:
   aegis run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
   aegis batch --config <file> --issues <file>
   aegis eval  --config <file> --set <dir> [--only <id>]... [--replay] [--no-pr]
+  aegis inject --config <file> --set <dir> [--only <case>]... [--replay]
   aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
   aegis report --config <file> [--set <dir>]
@@ -248,10 +254,13 @@ fn line(report: &IssueReport) -> String {
 }
 
 /// `--replay` and `--no-pr` only change how `eval` ends; `run` and `batch`
-/// always open their PR.
+/// always open their PR, `inject` never does.
 fn check_flags(args: &Args) -> Result<(), String> {
-    if (args.replay || args.no_pr) && args.command != "eval" {
-        return Err("--replay and --no-pr are for `aegis eval`".into());
+    let eval = args.command == "eval";
+    if (args.replay && !eval && args.command != "inject") || (args.no_pr && !eval) {
+        return Err(
+            "--replay is for `aegis eval` and `aegis inject`, --no-pr for `aegis eval`".into(),
+        );
     }
     Ok(())
 }
@@ -261,7 +270,11 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         banner::print_help();
         return Ok(true);
     }
-    if !["run", "batch", "eval", "review", "report", "ledger"].contains(&args.command.as_str()) {
+    if ![
+        "run", "batch", "eval", "inject", "review", "report", "ledger",
+    ]
+    .contains(&args.command.as_str())
+    {
         return Err(format!("unknown command `{}`", args.command));
     }
     // Reading and writing the ledger needs neither the model nor the fork.
@@ -300,6 +313,9 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
     }
     check_flags(&args)?;
     let config = args.config.as_deref().ok_or("--config is required")?;
+    if args.command == "inject" {
+        return run_inject(config, &args).await;
+    }
     if args.replay {
         let run = Arc::new(replay_platform(config, !args.no_pr)?);
         return eval(&run, &args, &cancel_on_ctrl_c(), "dry", |run, issue| {
@@ -365,6 +381,23 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         "eval" => eval(&run, &args, &cancel, "r", |_, _| Ok(())).await,
         other => Err(format!("unknown command `{other}`")),
     }
+}
+
+/// `aegis inject`, with the model or replayed, and no PR either way.
+async fn run_inject(config: &Path, args: &Args) -> Result<bool, String> {
+    let set = args.set.as_deref().ok_or("--set is required")?;
+    let cancel = cancel_on_ctrl_c();
+    if args.replay {
+        let run = Arc::new(replay_platform(config, false)?);
+        return inject::inject(&run, set, &args.only, &cancel, "dry", |run, issue| {
+            let replay = Replay::of(issue, &run.config.repo.path).map_err(|e| e.to_string())?;
+            run.provider.start(replay);
+            Ok(())
+        })
+        .await;
+    }
+    let run = Arc::new(platform(config, false).await?);
+    inject::inject(&run, set, &args.only, &cancel, "r", |_, _| Ok(())).await
 }
 
 /// Runs the set's issues of the configured repo's language, one after the
@@ -492,7 +525,13 @@ mod tests {
         assert!(check(&["eval", "--replay"]).is_ok());
         assert!(check(&["eval", "--replay", "--no-pr"]).is_ok());
         assert!(check(&["eval"]).is_ok());
-        for bad in [["run", "--no-pr"], ["batch", "--replay"]] {
+        // `inject` replays but never opens a PR, so `--no-pr` says nothing.
+        assert!(check(&["inject", "--replay"]).is_ok());
+        for bad in [
+            ["run", "--no-pr"],
+            ["batch", "--replay"],
+            ["inject", "--no-pr"],
+        ] {
             assert!(check(&bad).is_err(), "{bad:?}");
         }
     }

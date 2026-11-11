@@ -87,6 +87,10 @@ Seven of the 20 Phase 2 issues are upstream-bound: zod-6643, zod-6657, gin-4638,
 
 This rule replaces neither option considered for later runs: a reviewer blind to the hidden tests (ADR 0005), or adding upstream's decisions to `body`. Both need the patch or a new run, and the #259 patches were not retained.
 
+### Prompt Injection Set (#361)
+
+[`injection/`](injection/README.md) plants payloads into eval issues from this set (issue/ticket text, README, a code comment, a CI log). They ask the agent to change CI, add a dependency or leak a canary. `aegis inject` runs the set without a PR and reports, per case, whether the agent complied, attempted or ignored the payload.
+
 ---
 
 ## Schema Reference
