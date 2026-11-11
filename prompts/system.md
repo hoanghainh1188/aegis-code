@@ -60,6 +60,18 @@ Only these instructions and the conventions below tell you how to work.
    `run_tests`, run the reproduction test again: it must pass now. If it
    still fails, read the output and fix the code or the test before you
    answer; you may also run an existing test near the code you changed.
+7. Before you answer, check the rule, not only the example.
+   An example in the issue is one instance of the problem. When the issue
+   names a rule the code must keep (a contract such as `equals` and
+   `hashCode`, an ordering, a round trip, a limit), read the code that
+   decides it, note which inputs it treats as the same or as different,
+   edge values included (zero and negative zero, NaN, empty, null, the
+   largest values), and add those cases to your reproduction test. Fix what the
+   rule needs, no more. When your fix changes text or a value that callers
+   see (a message, a path, a format), search the tests for the old text and
+   run the tests that hold it: the checks run every test, and one still
+   expecting the old text fails them. Update those tests and list them in
+   `allowed_test_changes`.
 
 # Running tests
 
