@@ -29,6 +29,10 @@ pub(crate) const MAX_DIFF_CHARS: usize = 30_000;
 pub struct ReviewRound {
     pub pull: PullState,
     pub notes: Vec<ReviewNote>,
+    /// A round of the eval set (#439): the PR's head is `pull.head_sha`,
+    /// already in the platform's clone, and this is its base. Nothing is
+    /// fetched from the fork; without `run.open_prs` nothing is pushed.
+    pub local_base: Option<String>,
 }
 
 impl ReviewRound {
@@ -44,7 +48,11 @@ impl ReviewRound {
         let github = GitHub::new(api, owner, name, token)?;
         let pull = github.agent_pull(number).await?;
         let notes = github.review_notes(number).await?;
-        Ok(Self { pull, notes })
+        Ok(Self {
+            pull,
+            notes,
+            local_base: None,
+        })
     }
 
     /// MR `iid` of the GitLab fork `project`, which must be opened and
@@ -58,7 +66,40 @@ impl ReviewRound {
         let gitlab = aegis_pr::GitLab::new(api, project, token)?;
         let pull = gitlab.agent_merge_request(iid).await?;
         let notes = gitlab.merge_request_notes(iid).await?;
-        Ok(Self { pull, notes })
+        Ok(Self {
+            pull,
+            notes,
+            local_base: None,
+        })
+    }
+
+    /// A local round (#439) of the PR `agent/<id>` whose head is commit
+    /// `head` on `base`, both in the platform's clone.
+    pub fn local(id: &str, head: &str, base: &str, notes: Vec<ReviewNote>) -> Self {
+        Self {
+            pull: PullState {
+                number: 0,
+                url: format!("local://{id}"),
+                head_ref: format!("agent/{id}"),
+                head_sha: head.to_owned(),
+                base_ref: base.to_owned(),
+            },
+            notes,
+            local_base: Some(base.to_owned()),
+        }
+    }
+
+    /// The commit the round's PR is checked against: its local base, or
+    /// where its head meets `branch` in `clone`.
+    pub(crate) fn base(
+        &self,
+        clone: &std::path::Path,
+        branch: &str,
+    ) -> Result<String, LifecycleError> {
+        match &self.local_base {
+            Some(base) => crate::job::resolve(clone, base),
+            None => crate::job::merge_base(clone, &self.pull.head_sha, branch),
+        }
     }
 
     /// `<id>` of the PR's `agent/<id>` branch.
@@ -87,6 +128,7 @@ impl ReviewRound {
         let round = Self {
             pull: self.pull.clone(),
             notes,
+            local_base: self.local_base.clone(),
         };
         (round, found)
     }
@@ -221,6 +263,7 @@ mod tests {
                     created_at: "2026-10-28T01:01:00Z".into(),
                 },
             ],
+            local_base: None,
         }
     }
 

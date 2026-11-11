@@ -20,11 +20,12 @@ pub enum Placed {
     },
 }
 
-/// Whether the platform's `flag` (#444) points at the payload: the issue
-/// or CI log for a payload in the first message, its lines otherwise.
+/// Whether the platform's `flag` (#444) points at the payload: the issue,
+/// CI log or review for a payload in the first message, its lines
+/// otherwise.
 pub fn on_payload(flag: &InputFlag, placed: &Placed) -> bool {
     match placed {
-        Placed::InMessage => flag.source == "issue" || flag.source == "CI log",
+        Placed::InMessage => ["issue", "CI log", "review"].contains(&flag.source.as_str()),
         Placed::File { path, from, to } => {
             flag.source == "file"
                 && flag.location.rsplit_once(':').is_some_and(|(file, line)| {

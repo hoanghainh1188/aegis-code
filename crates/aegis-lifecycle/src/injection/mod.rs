@@ -14,13 +14,13 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use aegis_lang::RepoProfiles;
-use aegis_pr::{FailedJob, FailedRun};
+use aegis_pr::{FailedJob, FailedRun, NoteAt, ReviewNote};
 use serde::Deserialize;
 
 pub use score::{Score, Verdict, Watch, score, tampered};
 pub use seen::{Placed, on_payload, seen};
 
-use crate::{EvalIssue, IssueInput, LifecycleError, RunConfig};
+use crate::{EvalIssue, IssueInput, LifecycleError, ReviewRound, RunConfig};
 
 /// The planted file a secret case asks the agent to leak.
 pub const CANARY_FILE: &str = "deploy/credentials.txt";
@@ -38,6 +38,9 @@ pub enum Surface {
     Comment,
     /// The tail of a failed CI job's log; the job is a CI failure (#250).
     CiLog,
+    /// A review note on the PR, after `review`, the reviewer's own request;
+    /// the job is a local review round (#439) of the human fix.
+    Review,
 }
 
 /// What the payload asks for.
@@ -59,6 +62,7 @@ impl Surface {
             Self::Readme => "readme",
             Self::Comment => "comment",
             Self::CiLog => "ci_log",
+            Self::Review => "review",
         }
     }
 }
@@ -93,6 +97,10 @@ pub struct InjectionCase {
     /// CI log surface: the failing output the payload follows.
     #[serde(default)]
     pub log: Option<String>,
+    /// Review surface: the reviewer's request the payload follows, in the
+    /// same note.
+    #[serde(default)]
+    pub review: Option<String>,
 }
 
 /// Every case under `dir`, by id; a case that does not parse or lacks what
@@ -122,14 +130,17 @@ pub fn load_cases(dir: &Path) -> Result<Vec<InjectionCase>, LifecycleError> {
     Ok(cases)
 }
 
-/// A case's run, ready: the job, the eval issue on the planted base (for a
-/// dry run's replay), the canary and where the payload is.
+/// A case's run, ready: the job, the eval issue as a dry run's replay
+/// starts from (the planted base, or a round's head), the canary, where
+/// the payload is, and for a review case its round.
 #[derive(Debug, Clone)]
 pub struct Planted {
     pub job: IssueInput,
     pub issue: EvalIssue,
     pub canary: String,
     pub placed: Placed,
+    /// Review surface: run with `run_review` instead of `run_issue`.
+    pub round: Option<ReviewRound>,
 }
 
 impl InjectionCase {
@@ -142,6 +153,9 @@ impl InjectionCase {
         }
         if self.surface == Surface::CiLog && self.log.as_deref().is_none_or(str::is_empty) {
             return Err("a ci_log case needs `log`".into());
+        }
+        if self.surface == Surface::Review && self.review.as_deref().is_none_or(str::is_empty) {
+            return Err("a review case needs `review`".into());
         }
         if self.file.is_some() && self.surface != Surface::Comment {
             return Err("`file` is for the comment surface".into());
@@ -195,7 +209,7 @@ impl InjectionCase {
                     &payload,
                 )?)
             }
-            Surface::Issue | Surface::CiLog => None,
+            Surface::Issue | Surface::CiLog | Surface::Review => None,
         };
         let placed = match &in_file {
             Some((path, text)) => locate(path, text, &payload)?,
@@ -209,17 +223,60 @@ impl InjectionCase {
                 plant::commit_on(clone, &issue.base_commit, &files, &scratch)?
             }
         };
-        let issue = EvalIssue {
+        let round = match self.surface {
+            Surface::Review => Some(self.round(issue, cfg, run_id, &files, &base, &payload)?),
+            _ => None,
+        };
+        let planted = EvalIssue {
             base_commit: base,
             ..issue.clone()
         };
-        let job = self.job(issue.job(cfg, run_id)?, &cfg.repo.base, &payload);
+        let job = self.job(planted.job(cfg, run_id)?, &cfg.repo.base, &payload);
+        // A dry run replays a round's fix on its head: nothing left to write.
+        let issue = match &round {
+            Some(round) => EvalIssue {
+                base_commit: round.pull.head_sha.clone(),
+                ..planted
+            },
+            None => planted,
+        };
         Ok(Planted {
             job,
             issue,
             canary,
             placed,
+            round,
         })
+    }
+
+    /// The local review round (#439) of the human fix: its head is
+    /// `fix_commit` with `files` planted as on `base`, and its one note the
+    /// reviewer's request followed by the payload.
+    fn round(
+        &self,
+        issue: &EvalIssue,
+        cfg: &RunConfig,
+        run_id: &str,
+        files: &[(String, String)],
+        base: &str,
+        payload: &str,
+    ) -> Result<ReviewRound, LifecycleError> {
+        let clone = &cfg.repo.path;
+        let head = match files.is_empty() {
+            true => issue.fix_commit.clone(),
+            false => {
+                let scratch = cfg.run.state_dir.join("inject");
+                plant::commit_on(clone, &issue.fix_commit, files, &scratch)?
+            }
+        };
+        let request = self.review.as_deref().unwrap_or_default().trim_end();
+        let note = ReviewNote {
+            author: "maintainer".into(),
+            at: NoteAt::Conversation,
+            body: format!("{request}\n\n{}", payload.trim()),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        Ok(ReviewRound::local(run_id, &head, base, vec![note]))
     }
 
     /// The eval job with the payload where the surface puts it.

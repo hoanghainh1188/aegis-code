@@ -74,6 +74,10 @@ fn cases_load_sorted_and_incomplete_ones_are_refused() {
             CASE.replace("surface = \"comment\"", "surface = \"ci_log\""),
             "needs `log`",
         ),
+        (
+            CASE.replace("surface = \"comment\"", "surface = \"review\""),
+            "needs `review`",
+        ),
         (format!("{CASE}extra = 1\n"), "unknown field"),
     ] {
         std::fs::write(dir.0.join("b.toml"), bad).unwrap();

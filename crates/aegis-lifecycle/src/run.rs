@@ -356,30 +356,13 @@ where
         ..issue.clone()
     };
     ledger.classified(IssueKind::Bug).await?;
-    // The branch as it is now, reviewers' commits included.
-    let remote = fork_remote(platform)?;
-    let (clone, branch) = (cfg.repo.path.clone(), round.pull.head_ref.clone());
-    let url = remote.url().to_owned();
-    let auth = remote
-        .credentials()
-        .filter(|(_, t)| !t.is_empty())
-        .map(|(u, t)| (u, t.to_owned()));
-    let into = format!("review/{}", round.branch_id());
-    let head = tokio::task::spawn_blocking(move || {
-        let source = crate::clone::Source {
-            url: &url,
-            token: auth.as_ref().map(|(_, t)| t.as_str()),
-            user: auth.as_ref().map_or(aegis_pr::GITHUB_USER, |(u, _)| u),
-        };
-        crate::clone::fetch_ref(&clone, source, &branch, &into)
-    })
-    .await
-    .map_err(|e| LifecycleError::Config(format!("fetching the PR's branch: {e}")))??;
-    let base = job::merge_base(&cfg.repo.path, &head, &cfg.repo.base)?;
-    let diff = job::diff(&cfg.repo.path, &base, &head, MAX_DIFF_CHARS)?;
-    let diff = redact(&diff);
-    ledger.secrets_redacted(count(diff.count())).await?;
-    let first = round.first_message(issue, &diff.text);
+    let head = match round.local_base {
+        // A local round (#439): its head is in the clone already.
+        Some(_) => round.pull.head_sha.clone(),
+        None => fetch_head(platform, &round).await?,
+    };
+    // The round from the head just fetched, so its base is where that head
+    // meets the branch.
     let round = ReviewRound {
         pull: aegis_pr::PullState {
             head_sha: head,
@@ -387,6 +370,11 @@ where
         },
         ..round
     };
+    let base = round.base(&cfg.repo.path, &cfg.repo.base)?;
+    let diff = job::diff(&cfg.repo.path, &base, &round.pull.head_sha, MAX_DIFF_CHARS)?;
+    let diff = redact(&diff);
+    ledger.secrets_redacted(count(diff.count())).await?;
+    let first = round.first_message(issue, &diff.text);
     let profiles = cfg.repo.profiles(&platform.profiles)?;
     work(
         platform,
@@ -398,6 +386,33 @@ where
         cancel,
     )
     .await
+}
+
+/// The PR's branch as it is on the fork now, reviewers' commits
+/// included, fetched into the clone: its head commit.
+async fn fetch_head<P, S>(
+    platform: &Platform<P, S>,
+    round: &ReviewRound,
+) -> Result<String, LifecycleError> {
+    let cfg = &platform.config;
+    let remote = fork_remote(platform)?;
+    let (clone, branch) = (cfg.repo.path.clone(), round.pull.head_ref.clone());
+    let url = remote.url().to_owned();
+    let auth = remote
+        .credentials()
+        .filter(|(_, t)| !t.is_empty())
+        .map(|(u, t)| (u, t.to_owned()));
+    let into = format!("review/{}", round.branch_id());
+    tokio::task::spawn_blocking(move || {
+        let source = crate::clone::Source {
+            url: &url,
+            token: auth.as_ref().map(|(_, t)| t.as_str()),
+            user: auth.as_ref().map_or(aegis_pr::GITHUB_USER, |(u, _)| u),
+        };
+        crate::clone::fetch_ref(&clone, source, &branch, &into)
+    })
+    .await
+    .map_err(|e| LifecycleError::Config(format!("fetching the PR's branch: {e}")))?
 }
 
 /// In the Codebase-Memory server's `args` and `env`: the index directory
@@ -562,7 +577,7 @@ where
     // against the PR's base (#243).
     let (base, start) = match finish {
         Finish::Update(round) => (
-            job::merge_base(&cfg.repo.path, &round.pull.head_sha, &cfg.repo.base)?,
+            round.base(&cfg.repo.path, &cfg.repo.base)?,
             round.pull.head_sha.clone(),
         ),
         _ => {
@@ -1367,7 +1382,11 @@ where
             let flags = flag_inputs(platform, ledger, issue, round, &report.base).await?;
             // The PR as the gate passed it, for the job's page (#312).
             let patch = Some(job::patch(&cfg.repo.path, &report.base, &report.tree)?);
-            if let Finish::Update(round) = finish {
+            // Without `open_prs` (an eval's local round, #439) a round ends
+            // like any run that opens no PR: its patch kept, hidden tests run.
+            if let Finish::Update(round) = finish
+                && cfg.run.open_prs
+            {
                 let published =
                     publish_round(platform, ledger, tree, issue, round, &answer, &report).await?;
                 return Ok(Ending {

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use aegis_lang::{Language, Profiles};
 use aegis_ledger::{IssueId, IssueRecord, LedgerStore};
 use aegis_lifecycle::injection::{self, InjectionCase, Planted, Tally, Verdict, Watch};
-use aegis_lifecycle::{EvalIssue, Platform, RunConfig};
+use aegis_lifecycle::{EvalIssue, LifecycleError, Platform, RunConfig};
 use aegis_provider::ModelProvider;
 use tokio_util::sync::CancellationToken;
 
@@ -147,9 +147,28 @@ where
         .plant(issue, &run.config, &run_id)
         .map_err(|e| error(e.to_string()))?;
     start(run, &planted.issue).map_err(error)?;
-    let report = crate::one(run, planted.job.clone(), cancel)
-        .await
-        .map_err(|e| error(e.to_string()))?;
+    let report = match &planted.round {
+        // A review case is a local round of the human fix (#439).
+        Some(round) => {
+            let job = aegis_lifecycle::run_review(
+                Arc::clone(run),
+                planted.job.clone(),
+                round.clone(),
+                cancel.clone(),
+            );
+            tokio::spawn(job)
+                .await
+                .unwrap_or_else(|e| Err(LifecycleError::Config(format!("the job panicked: {e}"))))
+        }
+        None => crate::one(run, planted.job.clone(), cancel).await,
+    }
+    .map_err(|e| error(e.to_string()))?;
+    // Why a run stopped short of the gate: the ledger does not keep it.
+    if report.outcome != aegis_ledger::Outcome::PrOpened
+        && let Some(reason) = &report.reason
+    {
+        println!("{}\tstopped\t{reason}", report.issue_id);
+    }
     let patch = report.patch.map(|p| p.diff);
     let id = report.issue_id;
     judge(
@@ -260,7 +279,8 @@ async fn judge<S: LedgerStore>(
     // The platform's flags (#444), found again from what the run read, so
     // runs from before #444 are scored too.
     let base = &planted.issue.base_commit;
-    let flags = aegis_lifecycle::flags::collect(&planted.job, None, &events, clone, base)
+    let round = planted.round.as_ref();
+    let flags = aegis_lifecycle::flags::collect(&planted.job, round, &events, clone, base)
         .map_err(|e| e.to_string())?;
     let (on, stray): (Vec<_>, Vec<_>) = flags
         .iter()

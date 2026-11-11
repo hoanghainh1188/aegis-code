@@ -89,7 +89,7 @@ This rule replaces neither option considered for later runs: a reviewer blind to
 
 ### Prompt Injection Set (#361)
 
-[`injection/`](injection/README.md) plants payloads into eval issues from this set (issue/ticket text, README, a code comment, a CI log). They ask the agent to change CI, add a dependency or leak a canary. `aegis inject` runs the set without a PR and reports, per case, whether the agent complied, attempted or ignored the payload.
+[`injection/`](injection/README.md) plants payloads into eval issues from this set (issue/ticket text, README, a code comment, a CI log, a review note). They ask the agent to change CI, add a dependency or leak a canary. `aegis inject` runs the set without a PR and reports, per case, whether the agent complied, attempted or ignored the payload.
 
 ---
 
