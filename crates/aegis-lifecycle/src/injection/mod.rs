@@ -7,6 +7,7 @@
 
 mod plant;
 mod score;
+mod seen;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -17,6 +18,7 @@ use aegis_pr::{FailedJob, FailedRun};
 use serde::Deserialize;
 
 pub use score::{Score, Verdict, Watch, score};
+pub use seen::{Placed, seen};
 
 use crate::{EvalIssue, IssueInput, LifecycleError, RunConfig};
 
@@ -121,12 +123,13 @@ pub fn load_cases(dir: &Path) -> Result<Vec<InjectionCase>, LifecycleError> {
 }
 
 /// A case's run, ready: the job, the eval issue on the planted base (for a
-/// dry run's replay) and the canary.
+/// dry run's replay), the canary and where the payload is.
 #[derive(Debug, Clone)]
 pub struct Planted {
     pub job: IssueInput,
     pub issue: EvalIssue,
     pub canary: String,
+    pub placed: Placed,
 }
 
 impl InjectionCase {
@@ -170,25 +173,30 @@ impl InjectionCase {
         if self.goal == Goal::Secret {
             files.push((CANARY_FILE.to_owned(), canary_file(&canary)));
         }
-        match self.surface {
-            Surface::Readme => files.push(plant::readme(clone, &issue.base_commit, &payload)?),
+        let in_file = match self.surface {
+            Surface::Readme => Some(plant::readme(clone, &issue.base_commit, &payload)?),
             Surface::Comment => {
                 let file = self
                     .file
                     .as_deref()
                     .or(issue.source_files.first().map(String::as_str))
                     .ok_or_else(|| LifecycleError::Issue(format!("{} has no file", self.id)))?;
-                files.push(plant::comment(
+                Some(plant::comment(
                     clone,
                     &issue.base_commit,
                     &issue.fix_commit,
                     file,
                     issue.language,
                     &payload,
-                )?);
+                )?)
             }
-            Surface::Issue | Surface::CiLog => {}
-        }
+            Surface::Issue | Surface::CiLog => None,
+        };
+        let placed = match &in_file {
+            Some((path, text)) => locate(path, text, &payload)?,
+            None => Placed::InMessage,
+        };
+        files.extend(in_file);
         let base = match files.is_empty() {
             true => issue.base_commit.clone(),
             false => {
@@ -201,7 +209,12 @@ impl InjectionCase {
             ..issue.clone()
         };
         let job = self.job(issue.job(cfg, run_id)?, &cfg.repo.base, &payload);
-        Ok(Planted { job, issue, canary })
+        Ok(Planted {
+            job,
+            issue,
+            canary,
+            placed,
+        })
     }
 
     /// The eval job with the payload where the surface puts it.
@@ -236,6 +249,23 @@ impl InjectionCase {
             _ => job,
         }
     }
+}
+
+/// The lines of `text` (the planted `path`) that hold `payload`: from its
+/// first non-empty line, as many lines as it has.
+fn locate(path: &str, text: &str, payload: &str) -> Result<Placed, LifecycleError> {
+    let payload = payload.trim();
+    let first = payload.lines().next().unwrap_or_default().trim();
+    let from = text
+        .lines()
+        .position(|l| l.contains(first))
+        .ok_or_else(|| LifecycleError::Issue(format!("the payload is not in {path}")))?
+        + 1;
+    Ok(Placed::File {
+        path: path.to_owned(),
+        from,
+        to: from + payload.lines().count().saturating_sub(1),
+    })
 }
 
 /// The canary of run `run_id`: lowercase hex, which the redaction of
@@ -274,27 +304,39 @@ pub fn dependency_files(profiles: &RepoProfiles) -> Vec<String> {
     names.into_iter().collect()
 }
 
-/// Counts per goal and per surface: `complied/attempted/runs`.
-pub fn summary(results: &[(Surface, Goal, Verdict)]) -> String {
-    let mut by: BTreeMap<String, [usize; 3]> = BTreeMap::new();
-    for (surface, goal, verdict) in results {
+/// One scored case, for [`summary`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tally {
+    pub surface: Surface,
+    pub goal: Goal,
+    pub verdict: Verdict,
+    /// The payload was in front of the agent ([`seen`]).
+    pub seen: bool,
+}
+
+/// Counts for all cases, per goal and per surface. Rates are over the
+/// cases whose payload the agent saw: an unseen payload measures nothing.
+pub fn summary(results: &[Tally]) -> String {
+    let mut by: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    for t in results {
         let keys = [
             "all".to_owned(),
-            format!("goal {}", goal.as_str()),
-            format!("surface {}", surface.as_str()),
+            format!("goal {}", t.goal.as_str()),
+            format!("surface {}", t.surface.as_str()),
         ];
         for key in keys {
             let n = by.entry(key).or_default();
-            n[0] += usize::from(*verdict == Verdict::Complied);
-            n[1] += usize::from(*verdict == Verdict::Attempted);
-            n[2] += 1;
+            n[0] += usize::from(t.verdict == Verdict::Complied);
+            n[1] += usize::from(t.verdict == Verdict::Attempted);
+            n[2] += usize::from(t.seen);
+            n[3] += 1;
         }
     }
     let mut out = String::new();
-    for (key, [complied, attempted, runs]) in by {
+    for (key, [complied, attempted, seen, runs]) in by {
         let _ = writeln!(
             out,
-            "{key}: {complied} complied, {attempted} attempted, {runs} runs"
+            "{key}: {complied} complied, {attempted} attempted, {seen} of {runs} runs saw the payload"
         );
     }
     out

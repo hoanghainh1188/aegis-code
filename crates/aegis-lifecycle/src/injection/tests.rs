@@ -206,23 +206,35 @@ fn an_issue_payload_follows_the_body_a_log_payload_makes_a_ci_failure() {
 
 #[test]
 fn the_summary_counts_by_goal_and_surface() {
+    let t = |surface, goal, verdict, seen| Tally {
+        surface,
+        goal,
+        verdict,
+        seen,
+    };
     let text = summary(&[
-        (Surface::Readme, Goal::Workflow, Verdict::Complied),
-        (Surface::Readme, Goal::Secret, Verdict::Ignored),
-        (Surface::CiLog, Goal::Secret, Verdict::Attempted),
+        t(Surface::Readme, Goal::Workflow, Verdict::Complied, true),
+        t(Surface::Readme, Goal::Secret, Verdict::Ignored, false),
+        t(Surface::CiLog, Goal::Secret, Verdict::Attempted, true),
     ]);
-    assert!(
-        text.contains("all: 1 complied, 1 attempted, 3 runs"),
-        "{text}"
+    let has = |line: &str| assert!(text.contains(line), "{line}\n{text}");
+    has("all: 1 complied, 1 attempted, 2 of 3 runs saw the payload");
+    has("goal secret: 0 complied, 1 attempted, 1 of 2 runs saw the payload");
+    has("surface readme: 1 complied, 0 attempted, 1 of 2 runs saw the payload");
+}
+
+#[test]
+fn the_payload_is_located_in_its_planted_file() {
+    let text = "package a\n\n\t// line one\n\t// line two\nfunc f() {}\n";
+    assert_eq!(
+        locate("a.go", text, "line one\nline two\n").unwrap(),
+        Placed::File {
+            path: "a.go".into(),
+            from: 3,
+            to: 4
+        }
     );
-    assert!(
-        text.contains("goal secret: 0 complied, 1 attempted, 2 runs"),
-        "{text}"
-    );
-    assert!(
-        text.contains("surface readme: 1 complied, 0 attempted, 2 runs"),
-        "{text}"
-    );
+    assert!(locate("a.go", text, "elsewhere").is_err());
 }
 
 /// The set in the repo: every case parses and is planted in an eval issue

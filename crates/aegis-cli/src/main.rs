@@ -6,7 +6,7 @@
 //! aegis batch --config config/poc.toml --issues issues.txt
 //! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …] [--no-pr]
 //! aegis eval  --config config/poc.toml --set eval/issues --replay --no-pr
-//! aegis inject --config config/gin.toml --set eval/injection [--only <case> …] [--replay]
+//! aegis inject --config config/gin.toml --set eval/injection [--only <case> …] [--replay] [--rescore]
 //! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
 //! aegis report --config config/poc.toml [--set eval/issues]
 //! aegis ledger import --config config/poc.toml [--from .workspace/state/ledger]
@@ -52,7 +52,7 @@ const USAGE: &str = "usage:
   aegis run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
   aegis batch --config <file> --issues <file>
   aegis eval  --config <file> --set <dir> [--only <id>]... [--replay] [--no-pr]
-  aegis inject --config <file> --set <dir> [--only <case>]... [--replay]
+  aegis inject --config <file> --set <dir> [--only <case>]... [--replay] [--rescore]
   aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
   aegis report --config <file> [--set <dir>]
@@ -71,6 +71,8 @@ struct Args {
     only: Vec<String>,
     replay: bool,
     no_pr: bool,
+    /// `aegis inject`: score the runs in the ledger again, no model.
+    rescore: bool,
     review: kpi::ReviewArgs,
     /// `import` or `export` after `aegis ledger`.
     action: Option<String>,
@@ -105,6 +107,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--only" => parsed.only.push(value()?),
             "--replay" => parsed.replay = true,
             "--no-pr" => parsed.no_pr = true,
+            "--rescore" => parsed.rescore = true,
             "--verdict" => parsed.review.verdict = Some(value()?),
             "--lines" => parsed.review.lines = Some(value()?),
             "--minutes" => parsed.review.minutes = Some(value()?),
@@ -257,9 +260,12 @@ fn line(report: &IssueReport) -> String {
 /// always open their PR, `inject` never does.
 fn check_flags(args: &Args) -> Result<(), String> {
     let eval = args.command == "eval";
-    if (args.replay && !eval && args.command != "inject") || (args.no_pr && !eval) {
+    let inject = args.command == "inject";
+    if (args.replay && !eval && !inject) || (args.no_pr && !eval) || (args.rescore && !inject) {
         return Err(
-            "--replay is for `aegis eval` and `aegis inject`, --no-pr for `aegis eval`".into(),
+            "--replay is for `aegis eval` and `aegis inject`, --no-pr for `aegis eval`, \
+                    --rescore for `aegis inject`"
+                .into(),
         );
     }
     Ok(())
@@ -386,6 +392,15 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
 /// `aegis inject`, with the model or replayed, and no PR either way.
 async fn run_inject(config: &Path, args: &Args) -> Result<bool, String> {
     let set = args.set.as_deref().ok_or("--set is required")?;
+    if args.rescore {
+        let cfg = RunConfig::load(config).map_err(|e| e.to_string())?;
+        if args.replay {
+            let store = JsonFileLedger::new(cfg.run.state_dir.join("ledger-replay"));
+            return inject::rescore(&cfg, &store, set, &args.only, "dry").await;
+        }
+        let store = ledger::open(&cfg).await?;
+        return inject::rescore(&cfg, &store, set, &args.only, "r").await;
+    }
     let cancel = cancel_on_ctrl_c();
     if args.replay {
         let run = Arc::new(replay_platform(config, false)?);
@@ -527,6 +542,8 @@ mod tests {
         assert!(check(&["eval"]).is_ok());
         // `inject` replays but never opens a PR, so `--no-pr` says nothing.
         assert!(check(&["inject", "--replay"]).is_ok());
+        assert!(check(&["inject", "--rescore"]).is_ok());
+        assert!(check(&["eval", "--rescore"]).is_err());
         for bad in [
             ["run", "--no-pr"],
             ["batch", "--replay"],
