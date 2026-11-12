@@ -46,7 +46,7 @@ Thresholds are set in [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md).
 | **Review Time** | $\le 15$ min | **1.8 min** | Human time to judge one PR. |
 | **Prompt Cache Reads** | $\ge 70\%$ | **92%** | Share of input tokens served from the prompt cache. |
 
-Caveats: both projects are public, so models may have seen their fixes during training; Phase 1 reviewers could see hidden test results, which shortens review time. Both are re-measured on internal repositories during the pilot (#158). The four Phase 2 profiles (TypeScript, Java, Go, C#) have passed a dry run (19/20 issues, [report](docs/measurements/2026-10-29-new-profiles-dry-run.md)); their KPI run is #259.
+Caveats: both projects are public, so models may have seen their fixes during training; Phase 1 reviewers could see hidden test results, which shortens review time. Both are re-measured on internal repositories during the pilot (#157, #158). For the four Phase 2 profiles (TypeScript, Java, Go, C#), the KPI run (#259, [report](docs/measurements/2026-11-10-new-profiles-kpi.md)) and Java rerun (#425, [report](docs/measurements/2026-11-11-java-rerun-kpi.md)) met the ≥ 35% threshold on TypeScript, Go, and Java (50%–100% under the #424 scoring rule), while C# stands at 25% (#426, [report](docs/measurements/2026-11-10-csharp-rerun-kpi.md)) with prompt rule improvements tracked in #448.
 
 ---
 
@@ -532,14 +532,18 @@ aegis-code/
 
 ## 🗺️ 8. Roadmap & Project Status
 
-Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/aegis-code/milestones). Status as of October 2026:
+Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/aegis-code/milestones). Status as of November 2026:
 
 * ✅ **Phase 0 – Setup** (Completed): CI/CD pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
 * ✅ **Phase 1 – MVP / PoC** (Completed): Core agent loop, Rust and Python language profiles, empirical validation against 3 Core KPIs ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md), [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md)).
-* 🚧 **Phase 2 – Platform Service** (~90% Completed – Final Stage):
-  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles; unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes dind documentation ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md)).
-  - **In Progress / Remaining:** Staging cloud deployment via OpenTofu (#33), KPI evaluations on the 4 new language profiles (52 issues, [eval/README.md](eval/README.md), #259), and real-world team pilot (#158).
-* ⏳ **Phase 3 – Advanced Scaling** (Planned): Spectrum-Based Fault Localization (SBFL), deep context compression (SWEzze/SaraCoder), and expansion to additional language ecosystems.
+* 🚧 **Phase 2 – Platform Service** (~95% Completed – Final Stage):
+  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)).
+  - **In Progress / Remaining:** C# KPI uplift to ≥ 35% (#448), `search_text` `\n` fix (#449), README prompt injection eval (#441), `aegis check-repo` pre-flight check (#450), staging cloud deployment via OpenTofu (#33), internal repo KPI validation (#157), and real-world team pilot (#158).
+* ⏳ **Phase 3 – Expansion & AMS Readiness** (Planned – `Phase 3 – Mở rộng`):
+  - **Next-Gen AMS Operations & Legacy Readiness:** L1/L2 triage & non-code diagnostic lane (#451), APM/production log ingestion from Sentry/Datadog/CloudWatch (#452), ITSM connectors for ServiceNow/JSM (#453), ephemeral DB/service sidecar in gate + Golden Master evaluation on low-test legacy repos (#454), controlled CVE/dependency remediation workflow (#455), and additional language ecosystems (#37) plus review evidence (#36).
+  - **Evaluated & Deferred:** SBFL (#34, [report](docs/measurements/2026-10-27-sbfl-evaluation.md)) and deep context compression / SWEzze (#35, [report](docs/measurements/2026-10-28-context-compression.md)) were empirically evaluated and deferred from default execution (`NO-GO` under current 40-turn / 200k-context workloads).
+* ⏳ **Phase 4 – Enterprise AMS Scale & Governance** (Planned – `Phase 4 – AMS Quy mô Doanh nghiệp`):
+  - Incident & Domain Memory in PostgreSQL storing postmortems, review lessons, and per-repo business rules (#456); multi-tenant isolation, SLA-prioritized queue (`P1/P2/P3`), and MTTR/deflection reporting (#457).
 
 ---
 
