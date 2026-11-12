@@ -141,6 +141,37 @@ fn build_caches_and_binary_files_are_skipped() {
     ));
 }
 
+/// #449: an escape written in source (`\n` as two characters) is found as
+/// written, a tab is a tab, and a text with a line break in it, which no
+/// single line can hold, is refused rather than answered "No matches".
+#[test]
+fn search_text_matches_escapes_as_written_and_refuses_a_line_break() {
+    let (repo, aci) = rust_repo();
+    repo.write(
+        "src/msg.rs",
+        "const A: &str = \"at path $.\\n\";\nconst B: &str = \"a\\tb\\r\";\nconst C: &str = \"x\ty\";\n",
+    );
+
+    let lines = |text: &str| match aci.search_text(text, Some("src")).unwrap().hits {
+        Hits::Found(hits) => hits.iter().map(|h| h.line).collect::<Vec<_>>(),
+        Hits::TooMany { .. } => panic!("too many hits for {text:?}"),
+    };
+    assert_eq!(lines("path $.\\n"), [1]);
+    assert_eq!(lines("a\\tb\\r"), [2]);
+    assert_eq!(lines("x\ty"), [3]);
+    // A line break at either end is trimmed like other whitespace.
+    assert_eq!(lines("path $.\\n\"\n"), [1]);
+
+    for text in ["path $.\n\";", "a\r\nb", "b\\r\"\nconst"] {
+        let err = aci.search_text(text, Some("src")).unwrap_err();
+        let AciError::InvalidInput(message) = &err else {
+            panic!("{text:?}: {err:?}")
+        };
+        assert!(message.contains("one line"), "{message}");
+        assert!(message.contains("\\n"), "{message}");
+    }
+}
+
 #[test]
 fn windows_are_100_lines_with_hidden_counts() {
     let (repo, mut aci) = rust_repo();

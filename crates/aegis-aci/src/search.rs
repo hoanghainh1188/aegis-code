@@ -120,12 +120,22 @@ fn cut(line: &str) -> String {
 }
 
 /// Literal, case-sensitive match on each line of the text files in `dir`.
+/// An escape in source such as `\n` is matched as its two characters; a
+/// text with a line break inside can match no line and is refused (#449).
 pub fn search_text(
     ws: &Workspace,
     text: &str,
     dir: Option<&str>,
 ) -> Result<SearchResult<TextHit>, AciError> {
     let query = non_empty("search text", text)?;
+    if query.contains(['\n', '\r']) {
+        return Err(AciError::InvalidInput(
+            "search text has a line break; it is matched within one line. \
+             To find an escape written in source, such as `\\n`, give a \
+             backslash and `n`; otherwise search one line of the text."
+                .to_owned(),
+        ));
+    }
     let base = ws.resolve(dir.unwrap_or("."))?;
     let mut hits = Vec::new();
     let (files, mut skipped) = ws.files_under(&base)?;
