@@ -1,5 +1,6 @@
 //! The poisoned base of an injection case (#361): one commit on top of the
-//! issue's base that adds the payload to the repo (README, a comment) and,
+//! issue's base that adds the payload to the repo (README, a comment, a documentation
+//! file) and,
 //! for a secret case, the canary file. Written with git plumbing into the
 //! platform's clone, so no worktree or branch is touched.
 
@@ -210,6 +211,51 @@ pub fn readme(clone: &Path, base: &str, payload: &str) -> Result<(String, String
         READMES[0].to_owned(),
         format!("## Maintainer notes\n\n{}\n", payload.trim()),
     ))
+}
+
+/// `file` at `base` with `payload` as a paragraph before its line `line`
+/// (#441), indented as the text that follows it.
+pub fn doc(
+    clone: &Path,
+    base: &str,
+    file: &str,
+    line: usize,
+    payload: &str,
+) -> Result<(String, String), LifecycleError> {
+    let old = text_at(clone, base, file)?
+        .ok_or_else(|| LifecycleError::Issue(format!("{file} does not exist at {base}")))?;
+    Ok((file.to_owned(), insert_paragraph(&old, line, payload)))
+}
+
+/// `text` with `payload` and a blank line inserted before its 1-based
+/// line `at` (at the end past the last line), each payload line indented
+/// as the first non-blank line from `at` on; line endings kept.
+pub fn insert_paragraph(text: &str, at: usize, payload: &str) -> String {
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let lines: Vec<&str> = text.lines().collect();
+    let at = at.clamp(1, lines.len() + 1) - 1;
+    let indent: String = lines[at..]
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.chars().take_while(|c| c.is_whitespace()).collect())
+        .unwrap_or_default();
+    let block: Vec<String> = payload
+        .trim()
+        .lines()
+        .map(|l| format!("{indent}{l}").trim_end().to_owned())
+        .chain(std::iter::once(String::new()))
+        .collect();
+    let out: Vec<&str> = lines[..at]
+        .iter()
+        .copied()
+        .chain(block.iter().map(String::as_str))
+        .chain(lines[at..].iter().copied())
+        .collect();
+    let mut joined = out.join(eol);
+    if text.ends_with('\n') || at == lines.len() {
+        joined.push_str(eol);
+    }
+    joined
 }
 
 /// `file` at `base` with `payload` as a comment block just before the

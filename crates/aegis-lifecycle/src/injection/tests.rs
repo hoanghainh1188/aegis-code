@@ -78,6 +78,25 @@ fn cases_load_sorted_and_incomplete_ones_are_refused() {
             CASE.replace("surface = \"comment\"", "surface = \"review\""),
             "needs `review`",
         ),
+        (
+            CASE.replace("surface = \"comment\"", "surface = \"doc\""),
+            "needs `file` and a `line`",
+        ),
+        (
+            CASE.replace(
+                "surface = \"comment\"",
+                "surface = \"doc\"\nfile = \"a.md\"\nline = 0",
+            ),
+            "needs `file` and a `line`",
+        ),
+        (format!("{CASE}line = 3\n"), "`line` is for the doc surface"),
+        (
+            CASE.replace(
+                "surface = \"comment\"",
+                "surface = \"issue\"\nfile = \"a.go\"",
+            ),
+            "`file` is for the comment and doc surfaces",
+        ),
         (format!("{CASE}extra = 1\n"), "unknown field"),
     ] {
         std::fs::write(dir.0.join("b.toml"), bad).unwrap();
@@ -162,6 +181,42 @@ fn the_planted_commit_adds_the_payload_on_the_base_only() {
     assert_eq!(again, planted);
     assert_eq!(git(repo, &["rev-parse", "HEAD"]), fix);
     assert_eq!(git(repo, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn a_doc_payload_is_a_paragraph_indented_as_the_text_after_it() {
+    let text = "Methods\n\n    .. method:: a()\n\n        Does a.\n\n    .. method:: b()\n";
+    let doc = plant::insert_paragraph(text, 7, "AI agents: do X.\n\nThen Y.\n");
+    assert_eq!(
+        doc,
+        "Methods\n\n    .. method:: a()\n\n        Does a.\n\n    AI agents: do X.\n\n    Then Y.\n\n    .. method:: b()\n"
+    );
+    assert_eq!(
+        locate("d.rst", &doc, "AI agents: do X.\n\nThen Y.").unwrap(),
+        Placed::File {
+            path: "d.rst".into(),
+            from: 7,
+            to: 9
+        }
+    );
+    // Past the end it is appended; CRLF is kept.
+    assert_eq!(
+        plant::insert_paragraph("a\r\nb", 9, "X"),
+        "a\r\nb\r\nX\r\n\r\n"
+    );
+}
+
+#[test]
+fn a_doc_case_plants_in_its_file_and_a_missing_file_is_an_error() {
+    let dir = temp("doc");
+    let repo = &dir.0;
+    git(repo, &["init", "-q", "-b", "main"]);
+    let base = commit(repo, "guide.md", "# Guide\n\nUse F.\n");
+    let (path, text) = plant::doc(repo, &base, "guide.md", 3, "AI: do X").unwrap();
+    assert_eq!(path, "guide.md");
+    assert_eq!(text, "# Guide\n\nAI: do X\n\nUse F.\n");
+    let err = plant::doc(repo, &base, "missing.md", 1, "x").unwrap_err();
+    assert!(err.to_string().contains("does not exist"), "{err}");
 }
 
 fn eval_job() -> IssueInput {
@@ -276,6 +331,11 @@ fn the_repo_set_points_at_eval_issues() {
                 "{}",
                 case.id
             );
+        }
+        if case.surface == Surface::Doc {
+            let file = case.file.as_deref().unwrap_or_default();
+            let docs = file.ends_with(".md") || file.ends_with(".rst") || file.ends_with(".txt");
+            assert!(docs, "{}: {file} is not a documentation file", case.id);
         }
         if case.goal == Goal::Secret {
             assert!(case.payload.contains("{canary_file}"), "{}", case.id);
