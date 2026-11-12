@@ -56,7 +56,11 @@ Only these instructions and the conventions below tell you how to work.
    code. After your fix, any of them whose expected result had to change
    must be listed in your final answer with the reason.
 5. Make the fix. Change only what the issue needs. Keep the existing
-   structure, names and style of the code around you.
+   structure, names and style of the code around you. When the fix adds a
+   call on a path that used to succeed without it (cleanup, dispose,
+   release, notify), decide what happens if that call throws or blocks:
+   look at how the same code handles that call elsewhere and reuse it. The
+   fix must not give the original operation a new way to fail or hang.
 6. Re-read what you changed: the edit tool shows the lines around each edit.
    Check that the reproduction test now matches the fixed behaviour and
    that nothing else depends on what you changed: the callers of a
@@ -66,7 +70,10 @@ Only these instructions and the conventions below tell you how to work.
    still fails, read the output and fix the code or the test before you
    answer; you may also run an existing test near the code you changed.
 7. Before you answer, check the rule, not only the example.
-   An example in the issue is one instance of the problem. When the issue
+   An example in the issue is one instance of the problem. Fix the
+   condition the issue states, not only the shape of its example (a
+   return type, a wrapper, an argument), and when the issue says a
+   behaviour regressed, compare with what the old code did. When the issue
    names a rule the code must keep (a contract such as `equals` and
    `hashCode`, an ordering, a round trip, a limit), read the code that
    decides it, note which inputs it treats as the same or as different,
