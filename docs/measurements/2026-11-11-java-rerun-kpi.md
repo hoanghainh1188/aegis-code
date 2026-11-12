@@ -66,12 +66,12 @@ So sánh hai lượt ở #259:
 
 Ở #425, R3 lặp gần đúng R2: lượt 10–20 cho test tái hiện, lên Expert ở lượt 15, tới lượt 36–37 mới tìm chuỗi cũ. Agent tìm `Duplicate key` và `path $.\n`, sửa `MapTest` nhưng vẫn sót `JsonParserTest:140`, và trả lời ở lượt 40. R4 trả lời ở lượt 13, gate trượt, Expert sửa cả hai file và qua ở lượt 30.
 
-Vậy câu sau của bước 7 có được làm theo (R3, lượt 36–37), nhưng quá muộn và tìm sót. Chưa rõ vì sao lần tìm `path $.\n` không ra `JsonParserTest`, vì event không ghi kết quả công cụ. Một khả năng là `search_text` hiểu `\n` là xuống dòng, còn trong mã nguồn đó là hai ký tự. Điều này chưa kiểm.
+Vậy câu sau của bước 7 có được làm theo (R3, lượt 36–37), nhưng quá muộn. Lần tìm `path $.\n` **có ra** `JsonParserTest:140`. #449 đã chạy lại đúng truy vấn đó trên base commit: 3 kết quả, gồm `JsonParserTest:140`, `MapTest:666` và `JsonReaderTest:455`. Sau lần tìm, agent chạy test `MapTest`, `JsonReaderPathTest` và `JsonReaderTest` nhưng không chạy `JsonParserTest`, rồi trả lời. Gate trượt ở bước `test`, và agent mở `JsonParserTest:130` thì chạm trần. Vậy nguyên nhân là trần lượt và việc không chạy test của file vừa tìm thấy, không phải `search_text`.
 
 ## Đề xuất
 
 Chưa áp dụng và chưa đo.
-- **Kiểm `search_text` với chuỗi có `\n`.** Nếu công cụ thật sự hiểu sai, sửa ở ACI, không phải ở prompt.
+- ~~**Kiểm `search_text` với chuỗi có `\n`.**~~ Đã kiểm ở #449: công cụ tìm đúng `\n` viết trong mã nguồn. #449 chỉ thêm test hồi quy, và từ chối truy vấn có ký tự xuống dòng thật (trước đây trả "No matches").
 - **`gson-1768` nằm sát trần 40 lượt** (30, 40, 40, 28 qua bốn lượt). Bỏ được vòng gate trượt do test cũ thì có thể tiết kiệm 10–15 lượt. Nếu cần sửa tiếp, nên mở issue riêng.
 
 ## Lưu ý
