@@ -183,10 +183,16 @@ Evaluated against authentic internal repositories rather than synthetic benchmar
 
 ## 9. Implementation Roadmap
 
-| Phase | Duration | Scope | Milestones & Status |
-| --- | --- | --- | --- |
-| **0. Setup** | 1–2 weeks | Repo selection, Docker sandbox hardening, 30–50 issue benchmark curation | Completed (Oct 24, 2026) |
-| **1. MVP / PoC** | 4–6 weeks | Rust engine: provider, loop, ACI, gate, ledger; Rust and Python profiles; initial KPI evaluation | Completed (Oct 24, 2026, [ADR 0005](../adr/0005-kpi-thresholds-after-phase-1.md)) |
-| **2. Platform** | 2–3 months | TypeScript, Java, Go, C# profiles; platform service (`aegis-server`), PostgreSQL transactional queue, webhooks, dashboard, RBAC, OpenTofu IaC, on-premise & Helm bundles, developer CLI, prompt injection defense | ~95% Completed (Remaining: C# KPI uplift #448, `search_text` #449, README injection #441, `check-repo` #450, staging #33, internal KPI #157, pilot #158) |
-| **3. Expansion & AMS Readiness** | Future | L1/L2 triage & diagnostic lane (#451), APM log ingestion (#452), ITSM connectors (#453), ephemeral DB sidecars & Golden Master eval (#454), controlled CVE remediation (#455), additional languages (#37). *Note: SBFL (#34) and SWEzze (#35) were evaluated and deferred as `NO-GO` by default.* | Planned (`Phase 3 – Mở rộng`) |
-| **4. Enterprise AMS Scale** | Future | Incident & Domain Memory (#456), multi-tenant isolation, SLA priority queue (`P1/P2/P3`) & MTTR reporting (#457) | Planned (`Phase 4 – AMS Quy mô Doanh nghiệp`) |
+Five phases. Each phase closes on a measurement milestone, not a feature list; a missed milestone sends work back to the core engine before the next phase, without stopping the project ([ADR 0002](../adr/0002-full-platform-mvp-as-checkpoint.md)). Phase 3 and Phase 4 carry the AMS direction of [ADR 0011](../adr/0011-ams-direction.md).
+
+| Phase | Duration | Scope | Measurement Milestone | Status |
+| --- | --- | --- | --- | --- |
+| **0. Setup** | 1–2 weeks | Repo selection, Docker sandbox hardening, 30–50 issue benchmark curation | Written customer consent; tests run automatically in the sandbox | Completed (Oct 24, 2026); target repos are public forks of typst and scrapy, consent for an internal repository pending (#157) |
+| **1. MVP / PoC** | 4–6 weeks | Rust engine: provider, loop, ACI, gate, ledger; Rust and Python profiles; initial KPI evaluation | Thresholds of §8, fixed in [ADR 0005](../adr/0005-kpi-thresholds-after-phase-1.md) | Completed (Oct 24, 2026) |
+| **2. Platform** | 2–3 months | TypeScript, Java, Go, C# profiles; platform service (`aegis-server`), PostgreSQL transactional queue, webhooks, dashboard, RBAC, OpenTofu IaC, on-premise & Helm bundles, developer CLI, prompt injection defense | A team uses it daily (#158); monthly cost within budget; KPIs hold at MVP level, also on an internal repository (#157) | ~95% Completed (Remaining: C# KPI uplift #448, `check-repo` #450, staging #33, internal KPI #157, pilot #158) |
+| **3. Expansion & AMS Readiness** | After Phase 2 | L1/L2 triage & diagnostic lane (#451), APM log ingestion (#452), ITSM connectors (#453), ephemeral DB sidecars & Golden Master eval (#454), controlled CVE remediation (#455), additional languages (#37), review evidence (#36). *Note: SBFL (#34) and SWEzze (#35) were evaluated and deferred as `NO-GO` by default.* | Triage labels checked against human labels on pilot tickets, counting code defects routed away from the fix loop; ADR 0005 KPIs hold on tickets from APM and ITSM intake; sidecar & Golden Master report (regressions caught, gate time and cost); one sample CVE fixed without loosening the bug-fix lane | Planned (`Phase 3 – Mở rộng`); AMS items start after the pilot (#158) |
+| **4. Enterprise AMS Scale** | After Phase 3 | Incident & Domain Memory (#456), multi-tenant isolation, SLA priority queue (`P1/P2/P3`) & MTTR reporting (#457) | MTTR and SLA on-time rate per tenant; share of tickets resolved at triage versus by PR; cost per contract against budget; acceptance rate and model calls with and without incident memory. Thresholds fixed by an ADR after the first measurement | Planned (`Phase 4 – AMS Quy mô Doanh nghiệp`); entry requires the pilot report (#158), internal-repository KPIs (#157), and #451, #453 closed |
+
+Even after Phase 4, aegis covers L2/L3 code fixes and read-only diagnosis. L1 user support, data and configuration fixes, production incident response and change management stay outside it ([ADR 0011](../adr/0011-ams-direction.md)).
+
+Detailed progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188/aegis-code/milestones).
