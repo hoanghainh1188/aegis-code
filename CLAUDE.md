@@ -15,7 +15,7 @@ Every unit of work must trace back to a GitHub issue.
   - Domains: `area/infra` (Docker, CI, policies, prompts), `area/eval` (benchmarks, KPIs)
   - Platform (Phase 2): `area/server`, `area/connectors`, `area/web`, `area/security`, `area/deploy`
   - Specialized: `research` for exploratory spikes/measurements; `tech-debt` for deferred review items.
-- **Milestones:** `Phase 0 – Chuẩn bị`, `Phase 1 – MVP / PoC`, `Phase 2 – Platform`, `Phase 3 – Mở rộng`, or `Phase 4 – AMS Quy mô Doanh nghiệp` following Proposal §9 and [ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md).
+- **Milestones:** `Phase 0 – Chuẩn bị`, `Phase 1 – MVP / PoC`, `Phase 2 – Platform`, `Phase 3 – Mở rộng`, or `Phase 4 – AMS Quy mô Doanh nghiệp` following Proposal §9, [ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md) and [ADR 0011](docs/adr/0011-ams-direction.md) (AMS scope of Phase 3 and Phase 4).
 - **Dependencies:** Document explicit prerequisites at the bottom of the issue body as `**Dependencies:** #7, #9`. Never begin an issue until all dependencies are closed.
 - Out-of-scope discoveries arising during development must be filed as separate issues rather than bundled into active PRs.
 

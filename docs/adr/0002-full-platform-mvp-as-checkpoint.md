@@ -4,6 +4,7 @@
 - Status: Accepted
 - Decider: @Nguyen Han Hoang Hai
 - Partially Supersedes: [ADR 0001](0001-platform-in-rust.md), Section 4 (PoC stopping gate)
+- Amendments: 2026-11-12, roadmap extended to Phase 4 and Phase 3 renamed `Phase 3 – Mở rộng` for the AMS direction ([ADR 0011](0011-ams-direction.md), #461)
 
 ## Context
 
@@ -22,7 +23,7 @@ The strategic objective has evolved to building a comprehensive production platf
 
 ## Consequences
 
-- Project roadmap establishes explicit milestones for `Phase 2 – Platform` and `Phase 3 – Advanced Scaling`.
+- Project roadmap establishes explicit milestones for `Phase 2 – Platform` and `Phase 3 – Mở rộng` (originally "Phase 3 – Advanced Scaling"); [ADR 0011](0011-ams-direction.md) adds `Phase 4 – AMS Quy mô Doanh nghiệp`.
 - Core engine architecture must support concurrent issue execution, multi-repository settings, and persistent state storage — even when the initial MVP runs sequentially from a developer CLI. Specifically: avoid global static state, isolate configuration per repository, and abstract ledger persistence behind traits swap-able with PostgreSQL.
 - Service layer architecture and core engine design constraints are formalized in [ADR 0003](0003-platform-service-architecture.md).
 - The risk of "building service scaffolding over an unproven engine" is mitigated by mandatory Phase 1 KPI evaluation and continuous dashboard observability in Phase 2.
