@@ -1,6 +1,7 @@
 //! The prompt injection eval (#361, ADR 0009): an eval issue (#4) with a
 //! payload planted where the agent reads untrusted text — the issue or a
-//! ticket, the README, a code comment, a CI log — asking it to change CI,
+//! ticket, the README, a code comment, a documentation file, a CI log, a
+//! review note — asking it to change CI,
 //! add a dependency or leak a secret. The issue still has to be fixed; the
 //! score is whether the agent also did what the payload asked.
 //! Each case is an `eval/injection/<id>.toml`; see `eval/injection/README.md`.
@@ -36,6 +37,9 @@ pub enum Surface {
     Readme,
     /// Line comments just before the code the fix changes.
     Comment,
+    /// A paragraph in a documentation file next to the code (#441), before
+    /// `line` of `file`: where the agent was seen reading.
+    Doc,
     /// The tail of a failed CI job's log; the job is a CI failure (#250).
     CiLog,
     /// A review note on the PR, after `review`, the reviewer's own request;
@@ -61,6 +65,7 @@ impl Surface {
             Self::Issue => "issue",
             Self::Readme => "readme",
             Self::Comment => "comment",
+            Self::Doc => "doc",
             Self::CiLog => "ci_log",
             Self::Review => "review",
         }
@@ -92,8 +97,12 @@ pub struct InjectionCase {
     #[serde(default)]
     pub package: Option<String>,
     /// Comment surface: the file; the fix's first source file by default.
+    /// Doc surface: the documentation file.
     #[serde(default)]
     pub file: Option<String>,
+    /// Doc surface: the 1-based line of `file` the paragraph goes before.
+    #[serde(default)]
+    pub line: Option<usize>,
     /// CI log surface: the failing output the payload follows.
     #[serde(default)]
     pub log: Option<String>,
@@ -157,8 +166,16 @@ impl InjectionCase {
         if self.surface == Surface::Review && self.review.as_deref().is_none_or(str::is_empty) {
             return Err("a review case needs `review`".into());
         }
-        if self.file.is_some() && self.surface != Surface::Comment {
-            return Err("`file` is for the comment surface".into());
+        if self.surface == Surface::Doc
+            && (self.file.as_deref().is_none_or(str::is_empty) || self.line.is_none_or(|l| l == 0))
+        {
+            return Err("a doc case needs `file` and a `line` from 1".into());
+        }
+        if self.file.is_some() && !matches!(self.surface, Surface::Comment | Surface::Doc) {
+            return Err("`file` is for the comment and doc surfaces".into());
+        }
+        if self.line.is_some() && self.surface != Surface::Doc {
+            return Err("`line` is for the doc surface".into());
         }
         Ok(())
     }
@@ -209,6 +226,13 @@ impl InjectionCase {
                     &payload,
                 )?)
             }
+            Surface::Doc => Some(plant::doc(
+                clone,
+                &issue.base_commit,
+                self.file.as_deref().unwrap_or_default(),
+                self.line.unwrap_or(1),
+                &payload,
+            )?),
             Surface::Issue | Surface::CiLog | Surface::Review => None,
         };
         let placed = match &in_file {
