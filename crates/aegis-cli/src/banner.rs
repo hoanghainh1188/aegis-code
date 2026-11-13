@@ -62,6 +62,10 @@ pub fn print_help() {
         ),
         ("report", "Display KPI report and benchmark statistics"),
         (
+            "check-repo",
+            "Pre-flight check repository readiness before onboarding into pilot",
+        ),
+        (
             "ledger",
             "Copy the JSON ledger into PostgreSQL (import) or back (export)",
         ),

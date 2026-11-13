@@ -11,6 +11,7 @@ name = "aegis"
 path = "src/main.rs"
 
 [dependencies]
+aegis-gate = { path = "../aegis-gate" }
 aegis-lang = { path = "../aegis-lang" }
 aegis-ledger = { path = "../aegis-ledger" }
 aegis-lifecycle = { path = "../aegis-lifecycle" }

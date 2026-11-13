@@ -42,6 +42,7 @@ use aegis_lifecycle::{
 use aegis_provider::{ModelProvider, Provider};
 
 mod banner;
+mod check_repo;
 mod inject;
 mod kpi;
 mod ledger;
@@ -56,6 +57,7 @@ const USAGE: &str = "usage:
   aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
   aegis report --config <file> [--set <dir>]
+  aegis check-repo --config <file> [--no-sandbox] [--skip-tests]
   aegis ledger import --config <file> [--from <dir>]
   aegis ledger export --config <file> --to <dir>";
 
@@ -78,6 +80,8 @@ struct Args {
     action: Option<String>,
     from: Option<PathBuf>,
     to: Option<PathBuf>,
+    no_sandbox: bool,
+    skip_tests: bool,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -116,6 +120,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--replace" => parsed.review.replace = true,
             "--from" => parsed.from = Some(value()?.into()),
             "--to" => parsed.to = Some(value()?.into()),
+            "--no-sandbox" => parsed.no_sandbox = true,
+            "--skip-tests" => parsed.skip_tests = true,
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -277,11 +283,27 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         return Ok(true);
     }
     if ![
-        "run", "batch", "eval", "inject", "review", "report", "ledger",
+        "run",
+        "batch",
+        "eval",
+        "inject",
+        "review",
+        "report",
+        "ledger",
+        "check-repo",
     ]
     .contains(&args.command.as_str())
     {
         return Err(format!("unknown command `{}`", args.command));
+    }
+    if args.command == "check-repo" {
+        let path = args.config.as_deref().ok_or("--config is required")?;
+        let opts = check_repo::CheckRepoOptions {
+            config_path: path.to_path_buf(),
+            no_sandbox: args.no_sandbox,
+            skip_baseline_tests: args.skip_tests,
+        };
+        return check_repo::execute_check_repo(&opts).await;
     }
     // Reading and writing the ledger needs neither the model nor the fork.
     if let "review" | "report" | "ledger" = args.command.as_str() {

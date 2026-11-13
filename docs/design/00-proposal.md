@@ -183,7 +183,7 @@ Evaluated against authentic internal repositories rather than synthetic benchmar
 
 ## 9. Implementation Roadmap
 
-Five phases. Each phase closes on a measurement milestone, not a feature list; a missed milestone sends work back to the core engine before the next phase, without stopping the project ([ADR 0002](../adr/0002-full-platform-mvp-as-checkpoint.md)). Phase 3 and Phase 4 carry the AMS direction of [ADR 0011](../adr/0011-ams-direction.md).
+Five phases. Each phase closes on a measurement milestone, not a feature list; a missed milestone sends work back to the core engine before the next phase, without stopping the project ([ADR 0002](../adr/0002-full-platform-mvp-as-checkpoint.md)). Phase 3 and Phase 4 carry the AMS direction of [ADR 0011](../adr/0011-ams-direction.md), [ADR 0012](../adr/0012-triage-and-diagnostic-lane.md), and [ADR 0013](../adr/0013-ephemeral-database-sidecars.md).
 
 | Phase | Duration | Scope | Measurement Milestone | Status |
 | --- | --- | --- | --- | --- |
@@ -192,7 +192,32 @@ Five phases. Each phase closes on a measurement milestone, not a feature list; a
 | **2. Platform** | 2–3 months | TypeScript, Java, Go, C# profiles; platform service (`aegis-server`), PostgreSQL transactional queue, webhooks, dashboard, RBAC, OpenTofu IaC, on-premise & Helm bundles, developer CLI, prompt injection defense | A team uses it daily (#158); monthly cost within budget; KPIs hold at MVP level, also on an internal repository (#157) | ~95% Completed (Remaining: C# KPI uplift #448, `check-repo` #450, staging #33, internal KPI #157, pilot #158) |
 | **3. Expansion & AMS Readiness** | After Phase 2 | L1/L2 triage & diagnostic lane (#451), APM log ingestion (#452), ITSM connectors (#453), ephemeral DB sidecars & Golden Master eval (#454), controlled CVE remediation (#455), additional languages (#37), review evidence (#36). *Note: SBFL (#34) and SWEzze (#35) were evaluated and deferred as `NO-GO` by default.* | Triage labels checked against human labels on pilot tickets, counting code defects routed away from the fix loop; ADR 0005 KPIs hold on tickets from APM and ITSM intake; sidecar & Golden Master report (regressions caught, gate time and cost); one sample CVE fixed without loosening the bug-fix lane | Planned (`Phase 3 – Mở rộng`); AMS items start after the pilot (#158) |
 | **4. Enterprise AMS Scale** | After Phase 3 | Incident & Domain Memory (#456), multi-tenant isolation, SLA priority queue (`P1/P2/P3`) & MTTR reporting (#457) | MTTR and SLA on-time rate per tenant; share of tickets resolved at triage versus by PR; cost per contract against budget; acceptance rate and model calls with and without incident memory. Thresholds fixed by an ADR after the first measurement | Planned (`Phase 4 – AMS Quy mô Doanh nghiệp`); entry requires the pilot report (#158), internal-repository KPIs (#157), and #451, #453 closed |
+| **5. Autonomous Self-Healing & Prevention** | Future | Proactive maintenance: Anomaly-to-patch pipeline from APM traces, scheduled technical debt auto-pruning, continuous compliance audit | Proactive PR acceptance rate and preventive debt reduction telemetry | Conceptual Vision |
 
 Even after Phase 4, aegis covers L2/L3 code fixes and read-only diagnosis. L1 user support, data and configuration fixes, production incident response and change management stay outside it ([ADR 0011](../adr/0011-ams-direction.md)).
 
 Detailed progress is tracked on the [GitHub milestones](https://github.com/hoanghainh1188/aegis-code/milestones).
+
+### Detailed Phase Breakdown for Next-Gen AMS
+
+#### Phase 3: Expansion & AMS Readiness (`Phase 3 – Mở rộng`)
+Transition Aegis from a developer-facing CI tool to an operational platform capable of managing legacy enterprise codebases under active AMS contracts:
+- **L1/L2 Triage & Non-Code Diagnostic Lane (#451, [ADR 0012](../adr/0012-triage-and-diagnostic-lane.md)):** Adds a lightweight classification step prior to worktree creation. Distinguishes `code_bug` from `ops_or_config`, `data_issue`, or `needs_info`. For non-code incidents, synthesizes an actionable Diagnostic Report directly to the ticket without opening unwanted PRs.
+- **APM & Production Telemetry Ingestion (#452):** Ingests real-world stack traces, error frequencies, release commit SHAs, and breadcrumbs from APM platforms (Sentry, AWS CloudWatch, Datadog) using correlation IDs, overcoming sparse user-reported ticket descriptions.
+- **ITSM Connectors & SLA Integration (#453):** Bi-directional synchronization with ServiceNow and Jira Service Management (JSM), mapping enterprise severity levels (`P1`, `P2`, `P3`) and SLA response/resolution deadlines into job metadata.
+- **Ephemeral Database Sidecars & Golden Master Evaluation (#454, [ADR 0013](../adr/0013-ephemeral-database-sidecars.md)):** Enables isolated Docker service sidecars (PostgreSQL, Redis, MySQL) within a closed internal network during `aegis-gate` runs. Evaluates characterization test generation (Golden Master) on low-coverage legacy repositories to guarantee zero regression on legacy systems without unit tests.
+- **Controlled CVE & Dependency Remediation (#455):** Dedicated `cve-remediation` mode triggered by vulnerability alerts (e.g., OSV/Dependabot). Allows bounded manifest and lockfile upgrades strictly for target packages while preserving hard locks against supply-chain modification in normal bug-fix jobs.
+- **Secondary Language Ecosystems (#37) & Spec/RFC Evidence (#36):** Extends multi-language profile support to secondary ecosystems (Kotlin, PHP, etc.) and produces RFC/spec-style architectural change evidence for larger patches.
+
+#### Phase 4: Enterprise AMS Scale & Governance (`Phase 4 – AMS Quy mô Doanh nghiệp`)
+Scale Aegis across multiple client contracts with enterprise-grade isolation, institutional memory, and operational KPI reporting:
+- **Incident & Domain Memory (#456):** PostgreSQL-backed institutional memory storing postmortems, lessons learned from human review rounds (`/aegis fix`), runbooks, and client-specific domain rules. Uses lightweight extraction to index merged solutions and injects relevant historical insights into `BP3` prompt context.
+- **Multi-Tenant Isolation & Contract Quotas (#457):** Complete boundary isolation across tenants: per-client OIDC roles, dedicated monthly token/cost budgets, isolated secret scopes, and independent worktree paths.
+- **SLA-Prioritized Queue Scheduling (#457):** Upgrades PostgreSQL `FOR UPDATE SKIP LOCKED` transactional leasing to prioritize high-severity incidents (`P1 > P2 > P3`) with worker preemption and starvation prevention across tenants.
+- **AMS Operational Metrics & MTTR Dashboard (#457):** Dedicated executive and operator views measuring Mean Time to Resolve (MTTR), SLA adherence rates, ticket deflection percentages (incidents resolved at triage vs. PR merge), and per-contract margin/cost analytics.
+
+#### Phase 5: Autonomous Self-Healing & Preventive Maintenance
+Long-term evolution toward proactive software health:
+- **Anomaly-to-Patch Pipeline:** Continuously analyzes APM latency regressions and error spikes to automatically diagnose degradation and open proactive performance patches.
+- **Technical Debt & Deprecation Pruning:** Scheduled off-peak refactoring jobs addressing compiler deprecations, dead code elimination, and SonarQube technical debt clusters.
+- **Continuous Compliance & Audit Governance:** Automated policy enforcement ensuring all maintained services adhere to security frameworks (SOC2, ISO 27001) and dependency lifecycle policies.
