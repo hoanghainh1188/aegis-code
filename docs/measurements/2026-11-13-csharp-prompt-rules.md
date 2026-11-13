@@ -1,6 +1,6 @@
 # Hai quy tắc mới trong prompt cho C# và đo hồi quy (#448)
 
-Ngày đo: từ tối 2026-11-12 tới 06:10 ngày 2026-11-13. Bản dựng: nhánh `448-csharp-prompt-rules` (trên `243391a`), chỉ đổi [prompts/system.md](../../prompts/system.md). Model và trần giống [đợt đo #426](2026-11-10-csharp-rerun-kpi.md): Light `claude-haiku-5-5`, Core `claude-sonnet-5-5`, Expert `claude-opus-5-5` (effort `high`), $4 mỗi issue. Trần lượt gọi là 40, riêng typst là 80 (thí nghiệm của #156). Tổng chi tiêu: **$20.71**, trong đó typst $8.70 và scrapy $6.78.
+Ngày đo: từ tối 2026-11-12 tới 06:10 ngày 2026-11-13; 11 issue typst đo lại từ 07:30 tới 23:40 ngày 2026-11-13, cùng bản dựng. Bản dựng: nhánh `448-csharp-prompt-rules` (trên `243391a`), chỉ đổi [prompts/system.md](../../prompts/system.md). Model và trần giống [đợt đo #426](2026-11-10-csharp-rerun-kpi.md): Light `claude-haiku-5-5`, Core `claude-sonnet-5-5`, Expert `claude-opus-5-5` (effort `high`), $4 mỗi issue. Trần lượt gọi là 40, riêng typst là 80 (thí nghiệm của #156). Tổng chi tiêu: **$27.83**, trong đó typst $15.82 (gồm $1.72 của các lượt hỏng vì môi trường) và scrapy $6.78.
 
 "Được chấp nhận" ở đây vẫn là qua gate **và** qua test ẩn, chạy với `--no-pr`, không có người duyệt. Tỉ lệ chấm theo [quy tắc #424](../../eval/README.md#scoring-hidden-tests-bound-to-upstream-choices-424).
 
@@ -35,7 +35,7 @@ Prompt là phần chung, nên đợt này đo lại C# và chạy cả TypeScrip
 | TypeScript (zod), theo #424 | 4/6 (#259) | **6/6** | `zod-6027` qua cả hai lượt sau #423 |
 | Go (gin), theo #424 | 6/6 (#259) | **6/6** | 9.7 lượt gọi, #259 là 9.1 |
 | Python (scrapy), bỏ 2 lượt lỗi môi trường | 8/12 | **8/12** | đổi chỗ: thêm `7730`, mất `3778` (hết 40 lượt) |
-| Rust (typst), 7/18 issue | 2/7, trần 40 lượt | 4/7, trần 80 lượt | không so được, xem dưới |
+| Rust (typst), 18 issue | 7/18 (#145), trần 40 lượt | **10/18**, trần 80 lượt | không issue nào tụt; phần tăng chưa quy được cho prompt, xem dưới |
 
 **Đánh giá:**
 - Quy tắc 2 có tác dụng như mong đợi: cả hai lượt `NSubstitute-974` so toàn bộ kiểu trả về thay vì chỉ tham số kiểu bên trong `Task<T>`, và qua test ẩn. Ở #426 hai lượt chỉ sửa đúng dạng ví dụ và trượt.
@@ -113,10 +113,11 @@ Hai lượt này không được tính. Cả hai issue đều qua ở mọi lư�
 
 ### Rust (typst)
 
-Chỉ đo được 7/18 issue:
-- `typst-8476` tới bước test ẩn thì Docker Desktop báo `read-only file system`.
-- 10 issue sau đó dừng ngay ở bước tạo network, với $0.
-- Đợt này không có số cho các issue này.
+Đủ 18 issue, mỗi issue một lượt được tính. Lần đầu chỉ đo được 7 issue. 11 issue còn lại được đo lại trong ngày 13/11, với lý do như sau.
+
+Lượt đầu của các issue này không được tính vì lỗi môi trường, không phải lỗi của agent:
+- **Hết đĩa trên máy đo.** Docker Desktop chuyển sang `read-only file system` rồi không khởi động được. `typst-8476` hỏng ở bước test ẩn, `typst-8560` hỏng giữa chừng (`No space left on device` khi link). 9 issue khác dừng ngay ở bước tạo network, với $0. Mỗi lượt typst cần khoảng 29 GB cho thư mục làm việc tạm, cộng cache build khoảng 40 GB.
+- **API trả `503 Service Unavailable` lúc 20:20–20:45.** Năm lượt bị cắt: `typst-8703` sau 28 lượt gọi, `typst-8850` sau 9 lượt, ba issue còn lại ngay từ đầu.
 
 | Issue | [Rust rerun (#145)](2026-10-24-rust-rerun-18.md), trần 40 | #448, trần 80 |
 | --- | --- | --- |
@@ -126,9 +127,30 @@ Chỉ đo được 7/18 issue:
 | typst-7219 | hết 40 lượt | fail ($0.79, 36) |
 | typst-7541 | hết 40 lượt | **pass** ($1.45, 53) |
 | typst-7777 | hết 40 lượt | fail ($1.99, 77) |
-| typst-8372 | gate từ chối | fail ($1.36, 48) |
+| typst-8372 | fail test ẩn | fail ($1.36, 48) |
+| typst-8476 | pass | pass ($0.63, 37) |
+| typst-8560 | hết 40 lượt | **pass** ($0.62, 31) |
+| typst-8616 | pass | pass ($0.26, 21) |
+| typst-8648 | pass | pass ($1.25, 48) |
+| typst-8672 | fail test ẩn | fail ($0.57, 36) |
+| typst-8703 | hết 40 lượt | agent tự dừng ($0.87, 38) |
+| typst-8725 | pass | pass ($0.10, 9) |
+| typst-8826 | hết 40 lượt | fail ($1.20, 51) |
+| typst-8828 | fail test ẩn | fail ($0.27, 25) |
+| typst-8850 | agent tự dừng | fail ($0.17, 16) |
+| typst-8857 | pass | pass ($0.09, 12) |
 
-Không có lượt nào tụt so với lần đo cũ, nhưng không quy được phần tăng cho prompt: trần lượt gọi đã tăng từ 40 lên 80, và hai issue mới qua đều dùng hơn 40 lượt hoặc sát mức đó. Trong log test ẩn của `typst-7219` và `typst-8372` có `fatal: not a git repository`, nhưng dòng này đến từ bước dựng báo cáo HTML của typst, sau khi test đã trượt vì sai ảnh tham chiếu. Nó không phải nguyên nhân trượt.
+Số trong ngoặc là chi phí và số lượt gọi Core + Expert. Cột #145 dùng ký hiệu của báo cáo đó: `rej` ở #145 là qua gate nhưng trượt test ẩn. Bảng lần trước ghi nhầm `typst-8372` là "gate từ chối".
+
+**10/18 (56%), so với 7/18 (39%) ở #145.** Không issue nào đang qua ở #145 lại trượt ở đây. Ba issue mới qua là `3582`, `7541` và `8560`. Phần tăng này vẫn chưa quy được cho prompt, vì trần lượt gọi cũng đổi từ 40 lên 80:
+- `7541` dùng 53 lượt, nên chỉ qua được nhờ trần mới.
+- `3582` (34 lượt) và `8560` (31 lượt) qua dưới 40 lượt. Nhưng ở #145 cả hai hết 40 lượt, và mỗi issue chỉ có một lượt, nên chưa tách được tác dụng của prompt khỏi độ dao động giữa các lượt.
+
+Các lượt trượt:
+- **Năm issue qua gate nhưng trượt đúng một test ẩn:** `8672` (`link-url-svg-escape`, SVG khác bản tham chiếu), `8826` (`figure-tags-equation-only-marked-content-with-alt`, cây tag PDF), `8828` (`html-frame-position`), `8850` (`mathml-multiline-matrix-spacing`) và `8372`. Mỗi bản vá cho ra kết quả khác với bản sửa của upstream ở một ca.
+- **`typst-8703` tự dừng:** issue chỉ nêu phép kiểm PAC bị trượt trong một ảnh chụp màn hình, và agent không tái hiện được cây tag sai. Agent còn báo hai file nháp nó không xoá được bằng công cụ.
+
+Trong log test ẩn của `typst-7219`, `8372`, `8672` và `8826` có `fatal: not a git repository`. Dòng này đến từ bước dựng báo cáo HTML của typst, sau khi test đã trượt vì sai kết quả tham chiếu. Nó không phải nguyên nhân trượt.
 
 ## Lưu ý
 
