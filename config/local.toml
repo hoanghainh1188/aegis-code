@@ -63,6 +63,7 @@ conventions = """
   that file as its only file.
 """
 
+# Dependencies as PyPI had them on 2026-10-21, as in poc.toml (#465).
 [repo.overrides]
 fetch = ["sh", "-c", """uv venv -q --allow-existing .venv && python3 -c '
 import configparser
@@ -78,7 +79,7 @@ ruff = re.search(r"ruff-pre-commit\\s*\\n\\s*rev:\\s*v?([\\w.]+)", hooks)
 if ruff:
     deps.add("ruff==" + ruff.group(1))
 print("\\n".join(sorted(deps)))
-' > .venv/test-requirements.txt && uv pip install -q --python .venv/bin/python -e . -r .venv/test-requirements.txt"""]
+' > .venv/test-requirements.txt && uv pip install -q --exclude-newer 2026-10-21T00:00:00Z --python .venv/bin/python -e . -r .venv/test-requirements.txt"""]
 
 [repo.overrides.gate]
 test = ["python", "-m", "pytest", "-n", "auto", "-p", "no:cacheprovider", "-m", "not requires_internet", "scrapy", "tests", "--doctest-modules"]

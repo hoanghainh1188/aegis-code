@@ -88,6 +88,10 @@ conventions = """
 # Also the ruff that .pre-commit-config.yaml pins at that commit: .venv/bin
 # comes first on PATH, so format and lint use it, not the image's newer one,
 # whose new rules the repo never ran (#104).
+# No lock either, so ranges resolve to what PyPI had on 2026-10-21, the day
+# the eval set's scrapy issues were verified (#465): a release after it
+# (w3lib 2.6.0) failed hidden tests the patch never touched. eval/README.md
+# says when to move this date.
 [repo.overrides]
 fetch = ["sh", "-c", """uv venv -q --allow-existing .venv && python3 -c '
 import configparser
@@ -103,7 +107,7 @@ ruff = re.search(r"ruff-pre-commit\\s*\\n\\s*rev:\\s*v?([\\w.]+)", hooks)
 if ruff:
     deps.add("ruff==" + ruff.group(1))
 print("\\n".join(sorted(deps)))
-' > .venv/test-requirements.txt && uv pip install -q --python .venv/bin/python -e . -r .venv/test-requirements.txt"""]
+' > .venv/test-requirements.txt && uv pip install -q --exclude-newer 2026-10-21T00:00:00Z --python .venv/bin/python -e . -r .venv/test-requirements.txt"""]
 
 # From the measurements of #2: pytest in parallel, the venv's python on PATH.
 # Tests marked `requires_internet` cannot pass with no network and wait for

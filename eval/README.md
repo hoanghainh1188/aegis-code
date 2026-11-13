@@ -39,6 +39,12 @@ Steps 1–6 yielded 21 `scrapy` and 20 `typst` candidates. Step 7 filtered the d
 
 Scrapy validation environment: Python 3.12, `test-requirements` and `extra-deps` from `tox.ini` (excluding `google-cloud-storage` and interactive shell utilities).
 
+#### Dependency cutoff (#465)
+
+scrapy has no lockfile: the fetch step resolves the ranges in `tox.ini` against PyPI on the day of the run. A release after the set was verified can then fail hidden tests the agent's patch never touched. w3lib 2.6.0 (2026-11-05) did: a DeprecationWarning from `w3lib.encoding.html_to_unicode()` failed 25 tests in `tests/test_crawl.py` (scrapy-4466) and a changed hash failed `test_thumbnail_name` (scrapy-7597).
+
+The fetch in `config/poc.toml` and `config/local.toml` therefore passes `uv pip install --exclude-newer 2026-10-21T00:00:00Z`: packages released after the day every scrapy issue was verified (`[verified] on`) are ignored, so runs weeks apart install the same versions. Move the date only together with a re-verification of the scrapy issues (base fails, fix passes), and say in the measurement report that runs on either side of the move are not comparable.
+
 ---
 
 ### Phase 2 Expansion: TypeScript, Go, Java, C# (#155, #220, #224)
