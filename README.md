@@ -539,11 +539,13 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * 🚧 **Phase 2 – Platform Service** (~95% Completed – Final Stage):
   - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)).
   - **In Progress / Remaining:** C# KPI uplift to ≥ 35% (#448), `search_text` `\n` fix (#449), README prompt injection eval (#441), `aegis check-repo` pre-flight check (#450), staging cloud deployment via OpenTofu (#33), internal repo KPI validation (#157), and real-world team pilot (#158).
-* ⏳ **Phase 3 – Expansion & AMS Readiness** (Planned – `Phase 3 – Mở rộng`, [ADR 0011](docs/adr/0011-ams-direction.md)):
-  - **Next-Gen AMS Operations & Legacy Readiness:** L1/L2 triage & non-code diagnostic lane (#451), APM/production log ingestion from Sentry/Datadog/CloudWatch (#452), ITSM connectors for ServiceNow/JSM (#453), ephemeral DB/service sidecar in gate + Golden Master evaluation on low-test legacy repos (#454), controlled CVE/dependency remediation workflow (#455), and additional language ecosystems (#37) plus review evidence (#36).
+* ⏳ **Phase 3 – Expansion & AMS Readiness** (Planned – `Phase 3 – Mở rộng`, [ADR 0011](docs/adr/0011-ams-direction.md), [ADR 0012](docs/adr/0012-triage-and-diagnostic-lane.md), [ADR 0013](docs/adr/0013-ephemeral-database-sidecars.md)):
+  - **Next-Gen AMS Operations & Legacy Readiness:** L1/L2 triage & non-code diagnostic lane (#451), APM/production telemetry ingestion from Sentry/Datadog/CloudWatch (#452), ITSM connectors for ServiceNow/JSM and SLA severity mapping (#453), ephemeral DB/service sidecars in gate + Golden Master characterization test benchmarks on low-coverage legacy repos (#454), controlled CVE/dependency remediation workflow (#455), and additional language ecosystems (#37) plus review evidence (#36).
   - **Evaluated & Deferred:** SBFL (#34, [report](docs/measurements/2026-10-27-sbfl-evaluation.md)) and deep context compression / SWEzze (#35, [report](docs/measurements/2026-10-28-context-compression.md)) were empirically evaluated and deferred from default execution (`NO-GO` under current 40-turn / 200k-context workloads).
 * ⏳ **Phase 4 – Enterprise AMS Scale & Governance** (Planned – `Phase 4 – AMS Quy mô Doanh nghiệp`; starts after the pilot #158 and internal-repository KPIs #157, [ADR 0011](docs/adr/0011-ams-direction.md)):
-  - Incident & Domain Memory in PostgreSQL storing postmortems, review lessons, and per-repo business rules (#456); multi-tenant isolation, SLA-prioritized queue (`P1/P2/P3`), and MTTR/deflection reporting (#457).
+  - **Multi-Tenant Operations & Enterprise Memory:** PostgreSQL-backed Incident & Domain Memory storing postmortems, review round feedback, and repo business rules (#456); enterprise multi-tenant isolation, SLA-prioritized job queue (`P1 > P2 > P3`) with preemption, and executive MTTR / ticket deflection reporting (#457).
+* 🔮 **Phase 5 – Autonomous Self-Healing & Prevention** (Conceptual Vision):
+  - Proactive maintenance: Anomaly-to-patch pipeline driven by APM telemetry, scheduled off-peak technical debt pruning, and automated continuous compliance auditing.
 
 ---
 
@@ -561,6 +563,8 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [ADR 0009: Prompt Injection Threat Model](docs/adr/0009-prompt-injection-threat-model.md)
 * [ADR 0010: Docker Socket Proxy](docs/adr/0010-docker-socket-proxy.md)
 * [ADR 0011: AMS Direction (Phase 3 and Phase 4)](docs/adr/0011-ams-direction.md)
+* [ADR 0012: L1/L2 Triage and Non-Code Diagnostic Lane](docs/adr/0012-triage-and-diagnostic-lane.md)
+* [ADR 0013: Ephemeral Database Sidecars in Gate Sandbox](docs/adr/0013-ephemeral-database-sidecars.md)
 
 ### Detailed Guides & Runbooks
 * [Reviewer Guide](docs/reviewing.md) – Reading an Aegis PR, asking for review rounds, recording the verdict
