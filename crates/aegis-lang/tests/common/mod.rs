@@ -64,6 +64,13 @@ impl Workspace {
             .env("DOTNET_CLI_UI_LANGUAGE", "en")
             .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
             .env("DOTNET_NOLOGO", "1")
+            // #469: the tests of one binary build fixtures in parallel, and
+            // by default every `dotnet` build hands work to MSBuild nodes
+            // and a compiler server that outlive it and are shared between
+            // builds. Each build here runs on its own.
+            .env("MSBUILDDISABLENODEREUSE", "1")
+            .env("DOTNET_CLI_USE_MSBUILD_SERVER", "0")
+            .env("UseSharedCompilation", "false")
             .env("XDG_RUNTIME_DIR", &runtime);
         for var in INHERITED {
             cmd.env_remove(var);
@@ -76,11 +83,31 @@ impl Workspace {
         let out = self.run(argv);
         assert!(
             out.status.success(),
-            "{step} failed: {argv:?}\n{}{}",
+            "{step} failed: {argv:?}\n{}{}{}",
             String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&out.stderr),
+            self.build_output(argv)
         );
         out
+    }
+
+    /// #469: a `dotnet test` whose build fails in MSBuild itself rather
+    /// than in the compiler prints only "Build failed with exit code: 1.",
+    /// so the build is run again on its own, with its log, to show why.
+    fn build_output(&self, argv: &[String]) -> String {
+        if argv.get(..2) != Some(&["dotnet".to_string(), "test".to_string()]) {
+            return String::new();
+        }
+        let build: Vec<String> = ["dotnet", "build", "--no-restore", "-v:n"]
+            .map(String::from)
+            .to_vec();
+        let out = self.run(&build);
+        format!(
+            "\n--- {build:?} ({}) ---\n{}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
     }
 }
 
