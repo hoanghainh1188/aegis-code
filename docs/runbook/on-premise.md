@@ -145,6 +145,53 @@ Prometheus metrics listen locally at `127.0.0.1:9464/metrics`. Standard alerting
 
 ## 2. Registering Repositories
 
+### Before Registering: `aegis check-repo`
+
+The server image ships `aegis check-repo` (#450, #474), so no Rust toolchain is needed on the host. It runs in the `aegis` container and reaches the daemon through `docker-proxy`, as jobs do: the same uid, the same workspace mounts, the same sandbox images. It checks the profile, the lockfile, the daemon and the profile's sandbox image, the fetch hosts, and runs the root gate (format, lint, tests) in a `--network none` sandbox. Run it before `add-repo.sh`; every blocking item must pass.
+
+> **Caution (#487):** until #487 is fixed, the baseline format, lint and test items report a pass even when those commands fail on the base branch. Run the repo's own tests once by hand as well.
+
+From `deploy/compose/`, with the server healthy:
+
+1. Clone the repo into the workspace, owned by uid 10001 (for a private repo, clone with a token that can read it):
+
+   ```bash
+   sudo git clone --branch main https://github.com/<owner>/<name> /srv/aegis/.workspace/preflight/myrepo
+   sudo chown -R 10001:10001 /srv/aegis/.workspace/preflight/myrepo
+   ```
+
+2. Write a configuration from the mode's (`poc` or `customer-jp`), without its `[repo]` tables, and add the repo. The fork is not used by the check, but the configuration needs one:
+
+   ```bash
+   docker compose exec -T aegis sed '/^\[repo/,/^\[identity\]/{/^\[identity\]/!d}' config/poc.toml > myrepo-check.toml
+   cat >> myrepo-check.toml <<'EOF'
+
+   [repo]
+   path = ".workspace/preflight/myrepo"
+   language = "python"
+   base = "main"
+   key = "myrepo"
+
+   [repo.fork]
+   owner = "<bot>"
+   name = "<name>"
+   token_env = "UNUSED"
+   EOF
+   sudo install -D -o 10001 -g 10001 myrepo-check.toml /srv/aegis/.workspace/preflight/myrepo.toml
+   ```
+
+   Paths are relative to `/srv/aegis` in the container. A monorepo adds its `[[repo.dirs]]` ([ADR 0004](../adr/0004-multi-language-profiles.md)); a repo with its own commands adds `[repo.overrides]`, as `config/poc.toml` does for scrapy.
+
+3. Run the check:
+
+   ```bash
+   docker compose exec aegis aegis check-repo --config .workspace/preflight/myrepo.toml
+   ```
+
+   The command exits non-zero when an item blocks. `--skip-tests` leaves out the baseline gate. Remove `/srv/aegis/.workspace/preflight/myrepo*` afterwards: `add-repo.sh` clones the repo again.
+
+### Registering
+
 From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` registers a GitHub repo (#476):
 - it asks for the upstream URL, slug, default branch, language, mode, the fork, and the fork's token (read without echo);
 - it asks for the maintainers' and reviewers' emails, and the monthly budget;

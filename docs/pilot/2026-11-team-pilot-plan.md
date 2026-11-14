@@ -9,7 +9,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 | Mục | Giá trị |
 | --- | --- |
 | Máy | `<host-ssh>`: Linux x86_64 hoặc arm64, tối thiểu 4 vCPU, 16 GB RAM, 100 GB SSD, chỉ dùng cho aegis ([runbook on-premise](../runbook/on-premise.md#prerequisites)) |
-| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.10.0** |
+| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.11.0** (bản đầu tiên có `aegis check-repo` trong image server, #474) |
 | Repo | `<owner/name>` trên GitHub. Issue và lỗi CI đến qua webhook (#25) |
 | Ngôn ngữ | `<language>`. Trần lượt gọi theo profile: 80 cho Rust, 40 cho các ngôn ngữ khác ([ADR 0014](../adr/0014-per-language-call-cap.md)) |
 | Ngân sách | **$100 mỗi tháng** cho repo (#31), $4 mỗi job (`[worker] max_cost_usd`) |
@@ -21,7 +21,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 
 ## Bước 0: chuẩn bị (trước ngày triển khai)
 
-1. **Phát hành v0.10.0.** Merge PR release #442 để có tag `v0.10.0` cùng image trên GHCR. Bản v0.9.0 chưa có `aegis check-repo` (#450), trần lượt gọi theo ngôn ngữ (#471) và các quy tắc prompt của #448.
+1. **Phát hành v0.11.0.** Merge PR release của release-please để có tag `v0.11.0` cùng image trên GHCR. Từ bản này image server có `aegis check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Bản v0.9.0 còn thiếu cả trần lượt gọi theo ngôn ngữ (#471) và các quy tắc prompt của #448.
 2. **Gom 9 mục** trong [danh sách chuẩn bị của runbook](../runbook/on-premise.md#preparation-checklist). Các mục thường mất thời gian nhất vì phải chờ team khác:
    - tên DNS cùng chứng chỉ TLS, đặt sau reverse proxy;
    - một OIDC client trong SSO của team;
@@ -29,20 +29,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
    - một token được phép comment trên issue upstream;
    - quyền admin trên repo upstream để thêm webhook;
    - API key của Claude.
-3. **Kiểm tra repo bằng `aegis check-repo`.** Image server và gói client không có binary `aegis` (crate `aegis-cli`), nên phải build lệnh này từ mã nguồn tag `v0.10.0`, trên một máy có Rust và Docker. Việc đưa lệnh vào bản phát hành theo dõi ở #474:
-
-   ```bash
-   git checkout v0.10.0 && cargo build --release -p aegis-cli
-   ```
-
-   Clone `<owner/name>`, viết một config theo mẫu `config/poc.toml` với `[repo]` trỏ tới bản clone đó, rồi chạy:
-
-   ```bash
-   target/release/aegis check-repo --config pilot.toml
-   ```
-
-   Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục phải qua trước khi đăng ký repo. Nếu test của repo cần DB hoặc mạng thì repo này chưa hợp để chạy thử (xem #454).
-4. **Chọn issue cho tuần đầu.** Lấy 5–10 bug nhỏ, mô tả rõ, có cách tái hiện. Đó là loại việc aegis nhắm tới ([Proposal §1](../design/00-proposal.md#1-objectives--scope)).
+3. **Chọn issue cho tuần đầu.** Lấy 5–10 bug nhỏ, mô tả rõ, có cách tái hiện. Đó là loại việc aegis nhắm tới ([Proposal §1](../design/00-proposal.md#1-objectives--scope)).
 
 ## Bước 1: triển khai (ngày 0)
 
@@ -53,7 +40,7 @@ Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setu
    - các sandbox cần kéo về, chỉ chọn ngôn ngữ của repo;
    - API key Claude, OIDC client secret và token để comment. Ba thứ này nhập ẩn.
    Câu nào để trống thì chạy lại script sẽ được hỏi lại.
-2. `sudo ./aegis-deploy.sh 0.10.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
+2. `sudo ./aegis-deploy.sh 0.11.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
 3. Kiểm tra sau khi cài (runbook §1, bước 5): healthcheck trả về được, và đăng nhập SSO được.
 4. Chạy `backup.sh` lần đầu, rồi đặt lịch chạy hằng ngày bằng cron hoặc systemd timer ([runbook on-premise §4](../runbook/on-premise.md#4-backup--disaster-recovery)).
 
@@ -61,16 +48,23 @@ Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setu
 
 Làm theo [runbook on-premise §2](../runbook/on-premise.md#2-registering-repositories):
 
-1. `sudo ./add-repo.sh`. Script hỏi:
+1. **Kiểm tra repo bằng `aegis check-repo`** ([runbook §2, Before Registering](../runbook/on-premise.md#before-registering-aegis-check-repo)). Lệnh có sẵn trong image server và chạy trong container `aegis` qua `docker-proxy`, giống job thật. Clone `<owner/name>` vào `/srv/aegis/.workspace/preflight/`, viết config từ config của mode kèm `[repo]` trỏ tới bản clone đó, rồi chạy:
+
+   ```bash
+   docker compose exec aegis aegis check-repo --config .workspace/preflight/<slug>.toml
+   ```
+
+   Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục chặn phải qua trước khi đăng ký repo. Nếu test của repo cần DB hoặc mạng thì repo này chưa hợp để chạy thử (xem #454). Cho đến khi sửa xong #487, các mục format, lint, test vẫn báo qua cả khi chúng hỏng trên base, nên chạy test của repo bằng tay một lần.
+2. `sudo ./add-repo.sh`. Script hỏi:
    - URL của `<owner/name>`, slug, nhánh mặc định, ngôn ngữ và mode;
    - fork cùng token của fork, nhập ẩn;
    - email của người giao việc (`maintainer`) và người duyệt (`reviewer`);
    - ngân sách tháng, nhập `100`.
    Script ghi token và file repo, chạy `repo add` và `grant`, rồi in ra cách đặt webhook và đường dẫn trang ngân sách.
-2. Đặt ngân sách tháng $100 ở trang ngân sách mà script in ra (một maintainer làm việc này). Khi hết ngân sách, job bị huỷ và issue nhận được comment giải thích.
-3. Thêm webhook theo hướng dẫn script in ra: trên repo upstream cho sự kiện **Issues** và **Workflow runs**; trên fork cho **Pull request reviews**, **Pull request review comments** và **Issue comments**.
-4. **Job đầu tiên:** gắn nhãn `aegis` cho một bug nhỏ. Webhook phải trả `202`, job phải hiện trên dashboard, và issue phải nhận được comment khi job xong.
-5. Gửi [Hướng dẫn duyệt](../reviewing.md) cho người duyệt và [hướng dẫn client](../client.md) cho developer.
+3. Đặt ngân sách tháng $100 ở trang ngân sách mà script in ra (một maintainer làm việc này). Khi hết ngân sách, job bị huỷ và issue nhận được comment giải thích.
+4. Thêm webhook theo hướng dẫn script in ra: trên repo upstream cho sự kiện **Issues** và **Workflow runs**; trên fork cho **Pull request reviews**, **Pull request review comments** và **Issue comments**.
+5. **Job đầu tiên:** gắn nhãn `aegis` cho một bug nhỏ. Webhook phải trả `202`, job phải hiện trên dashboard, và issue phải nhận được comment khi job xong.
+6. Gửi [Hướng dẫn duyệt](../reviewing.md) cho người duyệt và [hướng dẫn client](../client.md) cho developer.
 
 ## Bước 3: vận hành 4 tuần
 
@@ -110,7 +104,7 @@ Nếu `<owner/name>` là repo nội bộ và khách đồng ý bằng văn bản
 
 | Rủi ro | Cách giảm |
 | --- | --- |
-| Test của repo cần DB hoặc mạng, nên không chạy được trong sandbox `--network none` | `check-repo` phát hiện ở bước 0. Chọn repo khác, hoặc chờ #454 |
+| Test của repo cần DB hoặc mạng, nên không chạy được trong sandbox `--network none` | `check-repo` phát hiện ở bước 2.1. Chọn repo khác, hoặc chờ #454 |
 | Đĩa đầy vì cache build (một repo Rust lớn cần 30–40 GB) | Kiểm tra `df -h` mỗi ngày (bản Compose không có Grafana), dọn cache build. Máy tối thiểu 100 GB SSD |
 | API model lỗi (5xx, 429) hàng loạt | Server thử lại 3 lần, giãn cách tăng dần từ 30 giây. Hết lượt thử thì job lỗi; chạy lại bằng `POST /api/v1/jobs/{id}/retry` ([runbook §4](../runbook/README.md#4-troubleshooting)) |
 | Team chỉ giao việc khó, nên tỉ lệ chấp nhận thấp | Chọn issue cùng team trong tuần đầu, và ghi độ khó của từng issue vào bảng tuần |

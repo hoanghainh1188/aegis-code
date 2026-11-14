@@ -4,7 +4,8 @@
 #   docker build -f docker/server/Dockerfile -t aegis-server .
 #
 # Next to it: aegis-aci (the agent's tools, found next to the running
-# program), aegis-docker-proxy (between aegis and the daemon, #321),
+# program), aegis (crate aegis-cli: `aegis check-repo` before a repo is
+# registered, #474, run with `docker compose exec aegis aegis check-repo`), aegis-docker-proxy (between aegis and the daemon, #321),
 # codebase-memory-mcp (the call graph), git (job checkouts) and
 # the docker client (the gate runs each step in a sandbox container,
 # Design §6–§7). The sandbox images per profile stay in docker/<profile>/
@@ -30,9 +31,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p aegis-server -p aegis-aci -p aegis-docker-proxy \
-        --features aegis-server/bedrock \
+        -p aegis-cli --features aegis-server/bedrock,aegis-cli/bedrock \
  && install -D -m 0755 target/release/aegis-server target/release/aegis-aci \
-        target/release/aegis-docker-proxy -t /out
+        target/release/aegis-docker-proxy target/release/aegis -t /out
 
 # Only the client: the daemon is the host's (docs/runbook/README.md, "Worker
 # và Docker").

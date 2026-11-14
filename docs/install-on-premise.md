@@ -263,6 +263,8 @@ If you gave the admin email in B3, `aegis-deploy.sh` granted it admin as it star
 
 ### C1. Register the repo
 
+**First, check it** (optional, recommended for a pilot): `aegis check-repo` is in the server image. It runs the repo's gate once in a sandbox and says what would stop jobs (no lockfile, no sandbox image, tests that need a network). See the [Runbook](runbook/on-premise.md#before-registering-aegis-check-repo).
+
 **From the machine** (#476), in `deploy/compose`:
 
 ```bash
