@@ -54,6 +54,15 @@ Execute from a clean repository checkout pinned to your target release tag (`git
    - `.env` file populated with host Docker socket GID and default sandbox profile image lists;
    - Initial `server.toml` (copied from `server.toml.example`).
 
+   On a terminal it then asks for the site's values still unset (#476): `public_url`, the OIDC issuer and client ID, the first admin's email, the sandboxes to pull, and the secrets `ANTHROPIC_API_KEY`, `AEGIS_OIDC_CLIENT_SECRET` and `AEGIS_GITHUB_COMMENT_TOKEN`. Secrets are read without echo and written as described in step 3. An empty answer skips a value; running the script again asks for what is still missing. For an unattended install, give the values in the environment instead (`sudo -E` keeps it) with `AEGIS_NONINTERACTIVE=1`. The variables are `AEGIS_PUBLIC_URL`, `AEGIS_OIDC_ISSUER`, `AEGIS_OIDC_CLIENT_ID`, `AEGIS_ADMIN_EMAIL`, `AEGIS_SANDBOXES`, and each secret by its name. An invalid value then stops the script.
+
+   ```bash
+   sudo -E AEGIS_NONINTERACTIVE=1 AEGIS_PUBLIC_URL=https://aegis.example.com \
+     AEGIS_ADMIN_EMAIL=admin@example.com ./install.sh
+   ```
+
+   Steps 2 and 3 are left for what you skipped and for `[modes]`.
+
 2. **Configure `server.toml`:**
    - `public_url`: Publicly accessible URL for webhooks and user dashboard;
    - `[auth.oidc]`: Enterprise OIDC Single Sign-On credentials;
@@ -99,7 +108,7 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 5. **Post-Installation Verification:**
    - Verify health: `curl http://127.0.0.1:8080/api/v1/health`
    - Access dashboard at your configured domain and log in via OIDC.
-   - Grant initial administrator privileges:
+   - Grant initial administrator privileges. `aegis-deploy.sh` does this itself for `AEGIS_ADMIN_EMAIL` in `.env`; for anyone else:
 
    ```bash
    docker compose exec aegis aegis-server --config /etc/aegis/server.toml grant admin@example.com admin
@@ -149,7 +158,14 @@ Prometheus metrics listen locally at `127.0.0.1:9464/metrics`. Standard alerting
 
 ### First Repository Checklist
 
-From `deploy/compose/`, with the server healthy. `aegis` below stands for `docker compose exec aegis aegis-server --config /etc/aegis/server.toml`; the details of each step are in [AWS Runbook Section 6](README.md#6-adding-repositories).
+From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` does steps 1–4 (#476):
+- it asks for the upstream URL, slug, default branch, language, mode, the fork, and the fork's token (read without echo);
+- it asks for the maintainers' and reviewers' emails, and the monthly budget;
+- it writes the token and the repo file, runs `repo add` and `grant`, and prints the webhook settings of step 5 with the link to the repo's budget page.
+
+Every value can come from the environment instead, as for `install.sh`. The variables are `AEGIS_REPO_URL`, `AEGIS_REPO_SLUG`, `AEGIS_REPO_BRANCH`, `AEGIS_REPO_LANGUAGE`, `AEGIS_REPO_MODE`, `AEGIS_FORK_OWNER`, `AEGIS_FORK_NAME`, `AEGIS_FORK_TOKEN`, `AEGIS_MAINTAINERS`, `AEGIS_REVIEWERS` and `AEGIS_MONTHLY_USD`. The script is for GitHub repos; a GitLab repo takes the steps below by hand.
+
+By hand, `aegis` stands for `docker compose exec aegis aegis-server --config /etc/aegis/server.toml`; the details of each step are in [AWS Runbook Section 6](README.md#6-adding-repositories).
 
 1. **Fork token:** `sudo sh -c 'umask 077; printf "%s\n" "$TOKEN" > secrets/AEGIS_TOKEN_MYREPO; chown 10001:10001 secrets/AEGIS_TOKEN_MYREPO'`. The server reads new secret files within `[secrets] refresh_s` (5 minutes); no restart needed.
 2. **Repo file:** write `myrepo.toml` (template in [AWS Runbook §6](README.md#registration-and-cloning), step 4) with `token_env = "AEGIS_TOKEN_MYREPO"`, then `sudo install -D -o 10001 -g 10001 myrepo.toml /srv/aegis/.workspace/repo-files/myrepo.toml`.

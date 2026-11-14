@@ -231,6 +231,21 @@ jobs:
       - if: needs.changes.outputs.code != 'true'
         run: echo "Skipping helm for documentation-only changes"
 
+  compose:
+    name: compose
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - if: needs.changes.outputs.code == 'true'
+        name: Shellcheck the on-premise scripts
+        run: shellcheck -x deploy/compose/*.sh deploy/compose/lib/*.sh deploy/compose/tests/*.sh
+      - if: needs.changes.outputs.code == 'true'
+        name: Test the prompts of install.sh and add-repo.sh (#476)
+        run: deploy/compose/tests/prompt_test.sh
+      - if: needs.changes.outputs.code != 'true'
+        run: echo "Skipping compose for documentation-only changes"
+
   deny:
     name: deny
     needs: changes
