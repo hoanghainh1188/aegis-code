@@ -286,6 +286,22 @@ impl Sandbox {
             .is_ok_and(|o| o.status.success() && o.stdout.trim_ascii() == b"true")
     }
 
+    /// Whether the container never started (#487). `docker run` exits 125
+    /// when it cannot create or start the container (the proxy refused it,
+    /// no such image), and a command of the container may exit 125 too: a
+    /// container with a start time ran. No container, or one that cannot
+    /// be inspected, never started.
+    pub(crate) fn never_started(&self, name: &str) -> bool {
+        match self
+            .client()
+            .args(["inspect", "--format", "{{.State.StartedAt}}", name])
+            .output()
+        {
+            Ok(o) if o.status.success() => o.stdout.trim_ascii().starts_with(b"0001-01-01"),
+            _ => true,
+        }
+    }
+
     /// Stops the container if it still runs, and removes it with its
     /// volumes (the `writable` directories). A container that is already
     /// gone is not an error. The error says why one may still be there.
@@ -483,15 +499,20 @@ mod tests {
     /// A `docker` that writes `stdout` and `stderr` and exits with `code`.
     #[cfg(unix)]
     fn fake_docker_out(name: &str, stdout: &str, stderr: &str, code: i32) -> PathBuf {
+        fake_script(
+            name,
+            &format!("printf '{stdout}'\necho '{stderr}' >&2\nexit {code}"),
+        )
+    }
+
+    /// A `docker` that runs `script`.
+    #[cfg(unix)]
+    fn fake_script(name: &str, script: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("aegis-fake-docker-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
-        std::fs::write(
-            &path,
-            format!("#!/bin/sh\nprintf '{stdout}'\necho '{stderr}' >&2\nexit {code}\n"),
-        )
-        .unwrap();
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Another test's fork may still hold the write end until it execs
         // (ETXTBSY on Linux); wait until the script runs.
@@ -550,5 +571,62 @@ mod tests {
         // Cannot tell: not out of memory.
         let gone = fake_docker("inspectgone", "No such container: n", 1);
         assert!(!fake_sandbox(gone.to_str().unwrap()).oom_killed("n"));
+    }
+
+    /// A `docker` whose `run` exits 125 with `stderr`; `inspect` answers
+    /// the container's start time with `started`, or that there is no
+    /// such container when it is empty.
+    #[cfg(unix)]
+    fn refusing_docker(name: &str, started: &str) -> PathBuf {
+        let inspect = if started.is_empty() {
+            "echo 'Error: No such object: n' >&2; exit 1".to_owned()
+        } else {
+            format!("case \"$3\" in *StartedAt*) echo '{started}';; *) echo false;; esac; exit 0")
+        };
+        let script = format!(
+            "case \"$1\" in\n\
+             run) echo 'docker: Error response from daemon: refused by aegis-docker-proxy' >&2; exit 125;;\n\
+             inspect) {inspect};;\n\
+             esac\nexit 0"
+        );
+        fake_script(name, &script)
+    }
+
+    #[cfg(unix)]
+    fn runner(docker: &Path) -> crate::Runner {
+        crate::Runner {
+            env: vec![],
+            timeout: std::time::Duration::from_secs(30),
+            cancel: crate::CancelToken::new(),
+            sandbox: Some(fake_sandbox(docker.to_str().unwrap())),
+        }
+    }
+
+    /// #487: a container that never started (refused by the proxy, an
+    /// image that is not there) is an error of the gate, not a step that
+    /// failed with exit code 125, which the base would "fail" the same way.
+    #[cfg(unix)]
+    #[test]
+    fn a_container_that_never_started_is_an_error() {
+        let dir = std::env::temp_dir().join(format!("aegis-never-started-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("step.log");
+
+        let refused = refusing_docker("refused", "");
+        let err = runner(&refused)
+            .run(&["true".into()], &dir, &log, &[])
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("did not start"), "{text}");
+        assert!(text.contains("refused by aegis-docker-proxy"), "{text}");
+
+        let created = refusing_docker("created", "0001-01-01T00:00:00Z");
+        assert!(runner(&created).run(&["true".into()], &dir, &log, &[]).is_err());
+
+        // The command itself exited 125: a result like any other.
+        let ran = refusing_docker("ran", "2026-11-14T09:00:00.123Z");
+        let out = runner(&ran).run(&["true".into()], &dir, &log, &[]).unwrap();
+        assert_eq!(out.exit, crate::Exit::Code(125));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

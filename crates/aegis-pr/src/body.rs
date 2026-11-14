@@ -410,6 +410,7 @@ mod tests {
                     duration: Duration::ZERO,
                     detail: "changed files (25) exceeded limit (20)".into(),
                     logs: vec![],
+                    fails_on_base: false,
                 },
                 StepReport {
                     name: StepName::Test,
@@ -417,6 +418,7 @@ mod tests {
                     duration: Duration::ZERO,
                     detail: String::new(),
                     logs: vec![],
+                    fails_on_base: false,
                 },
             ],
             tree: "t".into(),

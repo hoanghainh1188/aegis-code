@@ -103,6 +103,12 @@ pub struct StepReport {
     pub detail: String,
     /// Full logs of the commands it ran.
     pub logs: Vec<PathBuf>,
+    /// Passed only because the base revision fails it the same way: the
+    /// command fails there too and the patch adds no finding (format, lint,
+    /// typecheck), or the failing tests fail on the base too (#104). On a
+    /// tree with no patch, as `aegis check-repo` runs, such a step fails
+    /// (#487).
+    pub fails_on_base: bool,
 }
 
 impl StepReport {
@@ -113,6 +119,7 @@ impl StepReport {
             duration: Duration::ZERO,
             detail: String::new(),
             logs: vec![],
+            fails_on_base: false,
         }
     }
 }

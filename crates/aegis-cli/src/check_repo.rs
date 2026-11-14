@@ -19,8 +19,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use aegis_gate::{
-    AuditPolicy, CancelToken, GateRequest, Hardening, Sandbox, ScopePolicy, StepName, StepStatus,
-    WORKDIR, run_gate,
+    AuditPolicy, CancelToken, GateRequest, Hardening, Sandbox, ScopePolicy, StepName, StepReport,
+    StepStatus, WORKDIR, run_gate,
 };
 use aegis_lang::{Language, Profiles, RepoProfiles};
 use aegis_lifecycle::{RepoConfig, RunConfig};
@@ -160,9 +160,21 @@ pub struct CheckRepoOptions {
 
 /// Executes all repository pre-flight checks and outputs the report.
 pub async fn execute_check_repo(opts: &CheckRepoOptions) -> Result<bool, String> {
+    let report = check_repo(opts).await;
+    report.print_summary();
+    Ok(!report.has_blocking_failures())
+}
+
+/// Runs every check; a blocking failure early on stops the rest.
+async fn check_repo(opts: &CheckRepoOptions) -> PreflightReport {
     let start_time = Instant::now();
     let mut report = PreflightReport::default();
+    run_checks(opts, &mut report).await;
+    report.total_duration = start_time.elapsed();
+    report
+}
 
+async fn run_checks(opts: &CheckRepoOptions, report: &mut PreflightReport) {
     // 1. Config loading & profile resolution
     let run_config = match RunConfig::load(&opts.config_path) {
         Ok(c) => {
@@ -183,9 +195,7 @@ pub async fn execute_check_repo(opts: &CheckRepoOptions) -> Result<bool, String>
                 detail: format!("Failed to parse config: {e}"),
                 is_blocking: true,
             });
-            report.total_duration = start_time.elapsed();
-            report.print_summary();
-            return Ok(false);
+            return;
         }
     };
 
@@ -202,9 +212,7 @@ pub async fn execute_check_repo(opts: &CheckRepoOptions) -> Result<bool, String>
                 detail: format!("Failed to load builtin language profiles: {e}"),
                 is_blocking: true,
             });
-            report.total_duration = start_time.elapsed();
-            report.print_summary();
-            return Ok(false);
+            return;
         }
     };
 
@@ -232,21 +240,19 @@ pub async fn execute_check_repo(opts: &CheckRepoOptions) -> Result<bool, String>
                 detail: format!("Failed to resolve profile overrides: {e}"),
                 is_blocking: true,
             });
-            report.total_duration = start_time.elapsed();
-            report.print_summary();
-            return Ok(false);
+            return;
         }
     };
 
     // 2. Git repository verification
-    check_git_repo(&run_config.repo, &mut report);
+    check_git_repo(&run_config.repo, report);
 
     // 3. Lockfile and dependency manifest presence
-    check_lockfile(&run_config.repo, &mut report);
+    check_lockfile(&run_config.repo, report);
 
     // 4. Docker daemon and sandbox image availability
     let docker_available = if !opts.no_sandbox && run_config.run.sandbox {
-        check_docker_environment(&run_config, &repo_profiles, &mut report)
+        check_docker_environment(&run_config, &repo_profiles, report)
     } else {
         report.add(CheckItem {
             category: "Sandbox",
@@ -259,7 +265,7 @@ pub async fn execute_check_repo(opts: &CheckRepoOptions) -> Result<bool, String>
     };
 
     // 5. Fetch hosts verification
-    check_fetch_hosts(&repo_profiles, &mut report);
+    check_fetch_hosts(&repo_profiles, report);
 
     // 6. Baseline build and unit test execution in sandbox
     if opts.skip_baseline_tests {
@@ -275,15 +281,10 @@ pub async fn execute_check_repo(opts: &CheckRepoOptions) -> Result<bool, String>
             &run_config,
             &repo_profiles,
             docker_available && !opts.no_sandbox,
-            &mut report,
+            report,
         )
         .await;
     }
-
-    report.total_duration = start_time.elapsed();
-    report.print_summary();
-
-    Ok(!report.has_blocking_failures())
 }
 
 /// Checks that repo.path is a valid git repository and checks working tree status.
@@ -598,88 +599,23 @@ async fn run_baseline_gate(
 
     match gate_result {
         Ok(gate_report) => {
-            // Check individual step reports
-            let mut baseline_tests_passed = true;
-            let mut detected_network_err = false;
-            let mut test_failure_details = Vec::new();
-
             for step in &gate_report.steps {
                 match step.name {
-                    StepName::Format => {
-                        let status = match step.status {
-                            StepStatus::Passed => CheckStatus::Pass,
-                            StepStatus::Skipped(_) => CheckStatus::Skip,
-                            _ => CheckStatus::Warn,
-                        };
-                        report.add(CheckItem {
-                            category: "Gate",
-                            name: "Baseline Format".into(),
-                            status,
-                            detail: format!(
-                                "Status: {:?} ({:.1}s)",
-                                step.status,
-                                step.duration.as_secs_f64()
-                            ),
-                            is_blocking: false,
-                        });
-                    }
-                    StepName::Lint => {
-                        let status = match step.status {
-                            StepStatus::Passed => CheckStatus::Pass,
-                            StepStatus::Skipped(_) => CheckStatus::Skip,
-                            _ => CheckStatus::Warn,
-                        };
-                        report.add(CheckItem {
-                            category: "Gate",
-                            name: "Baseline Lint".into(),
-                            status,
-                            detail: format!(
-                                "Status: {:?} ({:.1}s)",
-                                step.status,
-                                step.duration.as_secs_f64()
-                            ),
-                            is_blocking: false,
-                        });
-                    }
-                    StepName::Test if step.status != StepStatus::Passed => {
-                        baseline_tests_passed = false;
-                        test_failure_details.push(step.detail.clone());
-                        // Scan logs for network/DB connection failure indicators
-                        for log_path in &step.logs {
-                            if let Ok(content) = std::fs::read_to_string(log_path)
-                                && scan_for_network_issues(&content)
-                            {
-                                detected_network_err = true;
-                            }
-                        }
-                    }
+                    StepName::Format => report.add(style_item("Baseline Format", step)),
+                    StepName::Lint => report.add(style_item("Baseline Lint", step)),
                     _ => {}
                 }
             }
-
-            // Report baseline test status
-            if baseline_tests_passed {
-                report.add(CheckItem {
-                    category: "Gate",
-                    name: "Baseline Unit Tests".into(),
-                    status: CheckStatus::Pass,
-                    detail: format!("Test suite passed cleanly in {:.1}s", elapsed.as_secs_f64()),
-                    is_blocking: true,
+            let test = gate_report.steps.iter().find(|s| s.name == StepName::Test);
+            report.add(test_item(test, elapsed));
+            // Scan logs for network/DB connection failure indicators
+            let detected_network_err = test
+                .filter(|t| t.status != StepStatus::Passed || t.fails_on_base)
+                .is_some_and(|t| {
+                    t.logs.iter().any(|log| {
+                        std::fs::read_to_string(log).is_ok_and(|c| scan_for_network_issues(&c))
+                    })
                 });
-            } else {
-                let detail_snippet = test_failure_details
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "Tests failed on baseline".into());
-                let short_snippet = detail_snippet.lines().next().unwrap_or("Tests failed");
-                report.add(CheckItem {
-                    category: "Gate",
-                    name: "Baseline Unit Tests".into(),
-                    status: CheckStatus::Fail,
-                    detail: format!("Baseline tests failed: {short_snippet}"),
-                    is_blocking: true,
-                });
-            }
 
             // Report external network/database dependency detection
             if detected_network_err {
@@ -754,6 +690,80 @@ async fn run_baseline_gate(
 
     // Clean up temporary work directory
     let _ = std::fs::remove_dir_all(&temp_work_dir);
+}
+
+/// The first lines of a step's detail, on one line.
+fn summary(detail: &str) -> String {
+    detail
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(4)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Format or lint on the base. The gate judges a patch by the findings it
+/// adds, so a base that fails is a warning, not a blocker; but it is not a
+/// pass either, though the gate says passed (#487).
+fn style_item(name: &str, step: &StepReport) -> CheckItem {
+    let took = step.duration.as_secs_f64();
+    let (status, detail) = match &step.status {
+        StepStatus::Passed if step.fails_on_base => (
+            CheckStatus::Warn,
+            format!(
+                "Fails on the base branch ({took:.1}s); patches are judged by the findings they add"
+            ),
+        ),
+        StepStatus::Passed => (CheckStatus::Pass, format!("Passed ({took:.1}s)")),
+        StepStatus::Skipped(why) => (CheckStatus::Skip, format!("Skipped: {why:?}")),
+        StepStatus::Failed => (
+            CheckStatus::Warn,
+            format!("Failed ({took:.1}s): {}", summary(&step.detail)),
+        ),
+    };
+    CheckItem {
+        category: "Gate",
+        name: name.into(),
+        status,
+        detail,
+        is_blocking: false,
+    }
+}
+
+/// The test suite on the base: it must pass there. A suite the gate lets
+/// through because the base fails the same tests fails here (#487): every
+/// patch would start from failing tests.
+fn test_item(test: Option<&StepReport>, elapsed: Duration) -> CheckItem {
+    let (status, detail) = match test {
+        None => (CheckStatus::Fail, "The gate ran no test step".to_owned()),
+        Some(t) if t.status == StepStatus::Passed && !t.fails_on_base => (
+            CheckStatus::Pass,
+            format!("Test suite passed cleanly in {:.1}s", elapsed.as_secs_f64()),
+        ),
+        Some(t) if t.status == StepStatus::Passed => (
+            CheckStatus::Fail,
+            format!("Tests fail on the base branch: {}", summary(&t.detail)),
+        ),
+        Some(StepReport {
+            status: StepStatus::Skipped(why),
+            ..
+        }) => (
+            CheckStatus::Fail,
+            format!("The test step did not run: {why:?}"),
+        ),
+        Some(t) => (
+            CheckStatus::Fail,
+            format!("Baseline tests failed: {}", summary(&t.detail)),
+        ),
+    };
+    CheckItem {
+        category: "Gate",
+        name: "Baseline Unit Tests".into(),
+        status,
+        detail,
+        is_blocking: true,
+    }
 }
 
 /// Scans test failure output for signatures of network or database access attempts blocked by `--network none`.
@@ -903,5 +913,187 @@ mod tests {
         assert_eq!(report2.items[0].status, CheckStatus::Pass);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// A docker for the Python profile's gate: the daemon answers, the
+    /// image is there, `ruff check` runs `lint` and `pytest` runs `test`
+    /// (shell), anything else passes. `run` is what `docker run` does
+    /// before the command; `started` is the container's start time.
+    #[cfg(unix)]
+    fn gate_docker(dir: &Path, run: &str, started: &str, lint: &str, test: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("docker");
+        let script = format!(
+            "#!/bin/sh\n\
+             case \"$1\" in\n\
+             version|info) echo 29.0.1; exit 0;;\n\
+             image|rm) exit 0;;\n\
+             inspect) case \"$3\" in *StartedAt*) {started};; *) echo false;; esac; exit 0;;\n\
+             esac\n\
+             {run}\n\
+             case \"$*\" in\n\
+             *'ruff check'*) {lint};;\n\
+             *pytest*) {test};;\n\
+             esac\n\
+             exit 0\n"
+        );
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.display().to_string()
+    }
+
+    /// A Python repo on `main` and a configuration that checks it with
+    /// `docker` in place of Docker.
+    #[cfg(unix)]
+    fn python_repo(dir: &Path, docker: &str) -> PathBuf {
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(repo.join("tests")).unwrap();
+        std::fs::write(repo.join("calc.py"), "def add(a, b):\n    return a + b\n").unwrap();
+        std::fs::write(
+            repo.join("tests/test_calc.py"),
+            "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join("requirements.txt"), "pytest\n").unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+        let pricing = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/pricing.toml");
+        let config = dir.join("check.toml");
+        std::fs::write(
+            &config,
+            format!(
+                r#"[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+[models.light]
+id = "claude-haiku-5-5"
+[models.core]
+id = "claude-sonnet-5-5"
+[models.expert]
+id = "claude-opus-5-5"
+[run]
+state_dir = "{state}"
+pricing = "{pricing}"
+step_timeout_s = 60
+sandbox = true
+docker = "{docker}"
+[budget]
+max_cost_usd = 1.0
+[repo]
+path = "{repo}"
+language = "python"
+base = "main"
+key = "calc"
+[repo.fork]
+owner = "bot"
+name = "calc"
+token_env = "UNUSED"
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"
+"#,
+                state = dir.join("state").display(),
+                pricing = pricing.display(),
+                repo = repo.display(),
+            ),
+        )
+        .unwrap();
+        config
+    }
+
+    /// The report of `check-repo` on the Python repo with a docker
+    /// built by [`gate_docker`].
+    #[cfg(unix)]
+    async fn check_with(
+        name: &str,
+        run: &str,
+        started: &str,
+        lint: &str,
+        test: &str,
+    ) -> PreflightReport {
+        let dir = std::env::temp_dir().join(format!("aegis-check-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let docker = gate_docker(&dir, run, started, lint, test);
+        let config_path = python_repo(&dir, &docker);
+        let report = check_repo(&CheckRepoOptions {
+            config_path,
+            no_sandbox: false,
+            skip_baseline_tests: false,
+        })
+        .await;
+        let _ = std::fs::remove_dir_all(&dir);
+        report
+    }
+
+    fn item<'a>(report: &'a PreflightReport, name: &str) -> &'a CheckItem {
+        report
+            .items
+            .iter()
+            .find(|i| i.name == name)
+            .unwrap_or_else(|| panic!("no item {name}: {report:#?}"))
+    }
+
+    const STARTED: &str = "echo 2026-11-14T09:00:00.1Z";
+    const PASSES: &str = "exit 0";
+    const FAILING_TEST: &str =
+        "echo 'FAILED tests/test_calc.py::test_add - assert 3 == 4'; echo '1 failed'; exit 1";
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_repo_whose_gate_passes_is_ready() {
+        let report = check_with("ready", "", STARTED, PASSES, PASSES).await;
+        assert!(!report.has_blocking_failures(), "{report:#?}");
+        assert_eq!(
+            item(&report, "Baseline Unit Tests").status,
+            CheckStatus::Pass
+        );
+        assert_eq!(item(&report, "Baseline Lint").status, CheckStatus::Pass);
+    }
+
+    /// #487: the gate lets a failure the base has through; on the base
+    /// itself, that is the failure.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tests_that_fail_on_the_base_block() {
+        let report = check_with("failing-tests", "", STARTED, PASSES, FAILING_TEST).await;
+        let tests = item(&report, "Baseline Unit Tests");
+        assert_eq!(tests.status, CheckStatus::Fail, "{report:#?}");
+        assert!(tests.detail.contains("test_add"), "{tests:?}");
+        assert!(report.has_blocking_failures());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lint_that_fails_on_the_base_is_a_warning() {
+        let report = check_with("failing-lint", "", STARTED, "echo 'E501 x'; exit 1", PASSES).await;
+        let lint = item(&report, "Baseline Lint");
+        assert_eq!(lint.status, CheckStatus::Warn, "{report:#?}");
+        assert!(!report.has_blocking_failures(), "{report:#?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn containers_that_never_start_block() {
+        let refused = "echo 'docker: Error response from daemon: refused' >&2; exit 125";
+        let report = check_with("refused", refused, "exit 1", PASSES, PASSES).await;
+        let gate = item(&report, "Baseline Gate");
+        assert_eq!(gate.status, CheckStatus::Fail, "{report:#?}");
+        assert!(gate.detail.contains("did not start"), "{gate:?}");
+        assert!(report.has_blocking_failures());
     }
 }
