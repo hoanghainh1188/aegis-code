@@ -4,6 +4,7 @@
 - Status: Accepted
 - Decider: @Nguyen Han Hoang Hai
 - Issue: #454 (Milestone: `Phase 3 – Mở rộng`, builds on [ADR 0011](0011-ams-direction.md))
+- Amendments: 2026-11-14, sidecars implemented in the gate (#490): see "Amendment (#490)" below
 
 ## Context
 
@@ -49,6 +50,19 @@ Under Aegis's existing sandbox design ([ADR 0001](0001-platform-in-rust.md), [AD
 
 5. **Golden Master Characterization Testing:**
    - In legacy repositories with low test coverage, `aegis-gate` utilizes the sidecar database to execute baseline characterization snapshots (recording database state and API response payloads before the patch) and verifies zero regression post-patch.
+
+## Amendment (#490): what the gate implements
+
+The sidecars were split out of #454 to unblock the team pilot (#158); Golden Master characterization (§5) stays in #454. Where this differs from the decision above, this section holds.
+
+1. **Configuration.** `[[repo.sidecars]]` in a run configuration, `[[settings.sidecars]]` in a registry repo file (`aegis_gate::SidecarSpec`): `name` (host name), `image`, `user` (non-root `uid:gid`), `env`, `tmpfs` (directories it writes), `ready` (an argv, not a shell string), `ready_timeout_s`, `localhost`, `test_env`, optional `memory_mb` and `cpus`. There is no `init_sql`: test suites create their schema, as in their own CI. `RunConfig::check` refuses sidecars without `run.sandbox`.
+2. **Addressing: both.** Tests reach a sidecar by its `name` on the run's internal network, through `test_env`. For legacy tests that hard-code `localhost`, `localhost = true` runs the test steps in that sidecar's network namespace (`--network container:<sidecar>`); the others stay reachable by name. One per repo.
+3. **Which steps.** Only `repro_test`, `test` and `coverage`. Format, lint, typecheck and the fetch step keep `--network none` or their own network; no step reaches the host or the Internet.
+4. **Lifecycle.** The sidecars start when the first test step of a gate run needs them, and are reused for the run, monorepo parts included. Before every test command after the first (the base, reruns, coverage) they are stopped and started again, which empties their tmpfs: each command finds fresh services, so the patched run cannot leave state the base run reads. A dropped session removes the containers and the network, on success, error and cancellation; a killed worker process leaves them, as it leaves the egress proxy.
+5. **Readiness.** The proxy has no `exec`, so `ready` runs in a short probe container of the sidecar's image, in its network namespace, every 500 ms until it exits 0. A sidecar that stops, or is not ready in `ready_timeout_s`, is a `GateError` with the end of its log.
+6. **Hardening.** Sidecars get the gate's flags (#320): no capabilities, `no-new-privileges`, limits (1 GB, 2 CPUs, 512 pids by default), a read-only root, `/tmp` and the declared directories on tmpfs owned by `user`, and no bind mount of the host. An image that must start as root to `chown` its data directory does not run; its non-root user does (`postgres:*-alpine` 70:70).
+7. **Proxy (ADR 0010).** Networks `aegis-sidecar-*` only as internal bridges; containers named `aegis-sidecar-*` only with an image in `--sidecar-image` (exact names, set by the deployment, not patterns), on their own network or a sidecar's namespace, with no bind mount; network aliases only for them; `NetworkMode: container:<x>` only when `x` is a sidecar.
+8. **Not yet.** The agent's `run_tests` does not reach the sidecars (#491). The offline bundle does not hold sidecar images; the operator loads them.
 
 ## Consequences
 

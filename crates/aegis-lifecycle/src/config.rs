@@ -200,6 +200,10 @@ pub struct RepoConfig {
     /// Patch scope limits and controls (#359).
     #[serde(default)]
     pub patch_scope: Option<crate::registry::PatchScopeConfig>,
+    /// Services the test steps reach, such as PostgreSQL (#490, ADR
+    /// 0013): `[[repo.sidecars]]`. They run only with `run.sandbox`.
+    #[serde(default)]
+    pub sidecars: Vec<aegis_gate::SidecarSpec>,
     pub fork: ForkConfig,
 }
 
@@ -262,6 +266,15 @@ impl RepoConfig {
             dir.profile_overrides()?;
         }
         Ok(())
+    }
+
+    /// The gate's sidecars (#490): none without any declared or without
+    /// the sandbox (`RunConfig::check` refuses that pair).
+    pub fn gate_sidecars(&self, run: &RunSection) -> Option<aegis_gate::Sidecars> {
+        (run.sandbox && !self.sidecars.is_empty()).then(|| aegis_gate::Sidecars {
+            docker: run.docker.clone(),
+            specs: self.sidecars.clone(),
+        })
     }
 
     /// The repo's policy for the gate's audit step (#159).
@@ -532,6 +545,14 @@ impl RunConfig {
             .audit_policy()
             .check_ids()
             .map_err(LifecycleError::Config)?;
+        aegis_gate::check_sidecars(&self.repo.sidecars)
+            .map_err(|e| LifecycleError::Config(format!("repo.sidecars: {e}")))?;
+        if !self.repo.sidecars.is_empty() && !self.run.sandbox {
+            return Err(LifecycleError::Config(
+                "repo.sidecars need run.sandbox = true: the test steps reach them on a Docker network"
+                    .into(),
+            ));
+        }
         Ok(self)
     }
 
@@ -636,6 +657,68 @@ mod tests {
 
     fn with_sonar(table: &str) -> Result<RunConfig, LifecycleError> {
         RunConfig::from_toml(&format!("{POC}\n[sonar]\n{table}"))
+    }
+
+    /// `config/poc.toml` with `sidecar` as its one `[[repo.sidecars]]`,
+    /// and `run.sandbox` as given.
+    fn with_sidecar_in(sidecar: &str, sandbox: bool) -> Result<RunConfig, LifecycleError> {
+        let mut cfg: toml::Table = toml::from_str(POC).unwrap();
+        cfg["run"]
+            .as_table_mut()
+            .unwrap()
+            .insert("sandbox".into(), sandbox.into());
+        let sidecar: toml::Table = toml::from_str(sidecar).unwrap();
+        cfg["repo"]
+            .as_table_mut()
+            .unwrap()
+            .insert("sidecars".into(), toml::Value::Array(vec![sidecar.into()]));
+        RunConfig::from_toml(&toml::to_string(&cfg).unwrap())
+    }
+
+    fn with_sidecar(sidecar: &str) -> Result<RunConfig, LifecycleError> {
+        with_sidecar_in(sidecar, true)
+    }
+
+    const POSTGRES: &str = r#"
+name = "postgres"
+image = "postgres:16-alpine"
+user = "70:70"
+env = { POSTGRES_PASSWORD = "test" }
+tmpfs = ["/var/lib/postgresql/data", "/var/run/postgresql"]
+ready = ["pg_isready", "-h", "localhost"]
+test_env = { DATABASE_URL = "postgres://postgres:test@postgres:5432/postgres" }
+"#;
+
+    #[test]
+    fn a_repo_declares_the_services_its_tests_need() {
+        let cfg = with_sidecar(POSTGRES).unwrap();
+        let [pg] = cfg.repo.sidecars.as_slice() else {
+            panic!("{:?}", cfg.repo.sidecars)
+        };
+        assert_eq!(pg.user, "70:70");
+        assert_eq!(pg.ready_timeout_s, 60);
+        assert!(!pg.localhost);
+        let sidecars = cfg.repo.gate_sidecars(&cfg.run).unwrap();
+        assert_eq!(sidecars.docker, cfg.run.docker);
+        assert_eq!(sidecars.specs.len(), 1);
+        assert!(
+            RunConfig::from_toml(POC)
+                .unwrap()
+                .repo
+                .gate_sidecars(&cfg.run)
+                .is_none()
+        );
+
+        let err = with_sidecar(&POSTGRES.replace("70:70", "0:0"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("repo.sidecars: sidecar `postgres`"), "{err}");
+        let err = with_sidecar(&format!("{POSTGRES}\nport = 5432"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("port"), "{err}");
+        let err = with_sidecar_in(POSTGRES, false).unwrap_err().to_string();
+        assert!(err.contains("need run.sandbox"), "{err}");
     }
 
     #[test]

@@ -439,6 +439,7 @@ fn work_dir_inside_the_repo_is_refused() {
         audit: Default::default(),
         scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
+        sidecars: None,
     })
     .unwrap_err();
     assert!(
@@ -627,6 +628,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             audit: Default::default(),
             scope: aegis_gate::ScopePolicy::default(),
             parts: vec![],
+            sidecars: None,
         })
     };
     #[cfg(unix)]
@@ -1148,6 +1150,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
             ..Default::default()
         },
         parts: vec![],
+        sidecars: None,
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1185,6 +1188,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
             ..Default::default()
         },
         parts: vec![],
+        sidecars: None,
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1238,6 +1242,7 @@ fn scope_enforcement_blocks_added_test_skips_when_configured() {
             ..Default::default()
         },
         parts: vec![],
+        sidecars: None,
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1288,6 +1293,7 @@ fn scope_enforcement_blocks_excessive_file_count() {
             ..Default::default()
         },
         parts: vec![],
+        sidecars: None,
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();

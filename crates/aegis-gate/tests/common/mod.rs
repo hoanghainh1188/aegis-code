@@ -247,6 +247,7 @@ impl Repo {
             audit,
             scope: aegis_gate::ScopePolicy::default(),
             parts: vec![],
+            sidecars: None,
         })
         .unwrap()
     }

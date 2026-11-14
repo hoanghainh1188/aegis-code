@@ -159,6 +159,10 @@ pub struct RepoSettings {
     /// Patch scope restrictions for gate and PR review (#359).
     #[serde(default, skip_serializing_if = "is_default_patch_scope")]
     pub patch_scope: PatchScopeConfig,
+    /// Services the test steps reach (#490): `[[sidecars]]`, as
+    /// `[[repo.sidecars]]` of a run configuration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidecars: Vec<aegis_gate::SidecarSpec>,
     pub fork: ForkConfig,
 }
 
@@ -379,6 +383,7 @@ impl Modes {
                 ignored_advisories: settings.ignored_advisories,
                 hidden_test: settings.hidden_test,
                 patch_scope: Some(settings.patch_scope),
+                sidecars: settings.sidecars,
                 fork: settings.fork,
             },
             identity: mode.identity.clone(),

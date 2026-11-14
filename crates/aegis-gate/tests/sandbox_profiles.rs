@@ -158,6 +158,7 @@ fn gate_in_container(
         audit: Default::default(),
         scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
+        sidecars: None,
     })
     .unwrap()
 }

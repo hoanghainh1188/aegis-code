@@ -39,7 +39,8 @@ services:
       - --mount-root
       - /srv/aegis/.workspace
     # With Sonar in a mode: add `--network <[sonar] network>` and
-    # `--writable-image <[sonar] image>` here (docs/runbook/on-premise.md).
+    # `--writable-image <[sonar] image>` here; for repos with sidecars,
+    # `--sidecar-image <image>` for each (docs/runbook/on-premise.md).
     user: "10001:10001"
     group_add:
       - "${DOCKER_GID:?set DOCKER_GID in .env (./install.sh does)}"

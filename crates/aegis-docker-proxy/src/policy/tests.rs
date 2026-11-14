@@ -52,13 +52,16 @@ fn step(tree: &str) -> Value {
 const STEP: &str = r#"{"Hostname":"","Domainname":"","User":"501:20","AttachStdin":false,"AttachStdout":true,"AttachStderr":true,"Tty":false,"OpenStdin":false,"StdinOnce":false,"Env":["A=B","SONAR_TOKEN"],"Cmd":["cargo","test"],"Image":"img","Volumes":{},"WorkingDir":"/work","Entrypoint":null,"Labels":{},"HostConfig":{"Binds":[],"ContainerIDFile":"","LogConfig":{"Type":"","Config":{}},"NetworkMode":"none","PortBindings":{},"RestartPolicy":{"Name":"no","MaximumRetryCount":0},"AutoRemove":false,"VolumeDriver":"","VolumesFrom":null,"ConsoleSize":[0,0],"CapAdd":null,"CapDrop":["ALL"],"CgroupnsMode":"","Dns":null,"DnsOptions":[],"DnsSearch":[],"ExtraHosts":null,"GroupAdd":null,"IpcMode":"","Cgroup":"","Links":null,"OomScoreAdj":0,"PidMode":"","Privileged":false,"PublishAllPorts":false,"ReadonlyRootfs":true,"SecurityOpt":["no-new-privileges"],"Tmpfs":{"/tmp":"rw,exec,nosuid,nodev,size=1024m"},"UTSMode":"","UsernsMode":"","ShmSize":0,"Isolation":"","CpuShares":0,"Memory":8589934592,"NanoCpus":4000000000,"CgroupParent":"","BlkioWeight":0,"BlkioWeightDevice":[],"BlkioDeviceReadBps":[],"BlkioDeviceWriteBps":[],"BlkioDeviceReadIOps":[],"BlkioDeviceWriteIOps":[],"CpuPeriod":0,"CpuQuota":0,"CpuRealtimePeriod":0,"CpuRealtimeRuntime":0,"CpusetCpus":"","CpusetMems":"","Devices":[],"DeviceCgroupRules":null,"DeviceRequests":null,"MemoryReservation":0,"MemorySwap":8589934592,"MemorySwappiness":-1,"OomKillDisable":false,"PidsLimit":4096,"Ulimits":null,"CpuCount":0,"CpuPercent":0,"IOMaximumIOps":0,"IOMaximumBandwidth":0,"Mounts":[{"Type":"volume","Target":"/home/aegis"}],"MaskedPaths":null,"ReadonlyPaths":null},"NetworkingConfig":{"EndpointsConfig":{}}}"#;
 
 fn refused(policy: &Policy, body: &Value) -> String {
-    policy.create(body).unwrap_err()
+    policy.create("aegis-gate-1-0", body).unwrap_err()
 }
 
 #[test]
 fn a_gate_step_is_rebuilt_from_what_was_checked() {
     let dirs = Dirs::new("step");
-    let out = dirs.policy().create(&step(&dirs.tree())).unwrap();
+    let out = dirs
+        .policy()
+        .create("aegis-gate-1-0", &step(&dirs.tree()))
+        .unwrap();
     let host = &out["HostConfig"];
     assert_eq!(host["Binds"], json!([format!("{}:/work", dirs.tree())]));
     assert_eq!(host["CapDrop"], json!(["ALL"]));
@@ -110,7 +113,7 @@ fn a_key_in_another_case_or_repeated_cannot_hide_from_the_check() {
     let mut body = step(&dirs.tree());
     body["HostConfig"]["capdrop"] = json!([]);
     body["HostConfig"]["readonlyrootfs"] = json!(false);
-    let out = dirs.policy().create(&body).unwrap();
+    let out = dirs.policy().create("aegis-gate-1-0", &body).unwrap();
     assert_eq!(out["HostConfig"]["CapDrop"], json!(["ALL"]));
     assert_eq!(out["HostConfig"]["ReadonlyRootfs"], json!(true));
     assert!(out["HostConfig"].get("capdrop").is_none());
@@ -272,7 +275,7 @@ fn the_user_is_a_plain_non_root_uid_and_gid() {
     }
     let mut body = step(&dirs.tree());
     body["User"] = json!("10001:10001");
-    dirs.policy().create(&body).unwrap();
+    dirs.policy().create("aegis-gate-1-0", &body).unwrap();
 }
 
 #[test]
@@ -301,7 +304,7 @@ fn a_writable_root_is_for_the_listed_images_only() {
         writable_images: vec!["sonarsource/sonar-scanner-cli".into()],
         ..dirs.policy()
     };
-    policy.create(&body).unwrap();
+    policy.create("aegis-gate-1-0", &body).unwrap();
 }
 
 #[test]
@@ -312,7 +315,9 @@ fn networks_are_none_the_fetch_steps_or_listed() {
         body["HostConfig"]["NetworkMode"] = json!(net);
         body
     };
-    dirs.policy().create(&with("aegis-fetch-42-0")).unwrap();
+    dirs.policy()
+        .create("aegis-gate-1-0", &with("aegis-fetch-42-0"))
+        .unwrap();
     // A job's tree on a network that reaches out: refused unless listed.
     for net in ["bridge", "sonar", "aegis-fetch-", "container:aegis"] {
         assert!(
@@ -324,14 +329,181 @@ fn networks_are_none_the_fetch_steps_or_listed() {
         networks: vec!["sonar".into()],
         ..dirs.policy()
     };
-    listed.create(&with("sonar")).unwrap();
+    listed.create("aegis-gate-1-0", &with("sonar")).unwrap();
     // No second endpoint, and none with settings.
     let mut body = with("aegis-fetch-42-0");
     body["NetworkingConfig"] = json!({ "EndpointsConfig": { "bridge": {} } });
     assert!(refused(&dirs.policy(), &body).contains("endpoint"));
     body["NetworkingConfig"] =
         json!({ "EndpointsConfig": { "aegis-fetch-42-0": { "Aliases": ["pypi.org"] } } });
-    assert!(refused(&dirs.policy(), &body).contains("endpoint"));
+    assert!(refused(&dirs.policy(), &body).contains("alias"));
+}
+
+/// A sidecar (#490) as `aegis_gate::Sidecars` starts one: no job tree,
+/// the service's user, its data on tmpfs, an alias on its network.
+fn sidecar(net: &str, aliases: &[&str]) -> Value {
+    let mut body: Value = serde_json::from_str(STEP).unwrap();
+    body["User"] = json!("70:70");
+    body["Image"] = json!("postgres:16-alpine");
+    body["Cmd"] = Value::Null;
+    body["HostConfig"]["Mounts"] = json!([]);
+    body["HostConfig"]["NetworkMode"] = json!(net);
+    body["HostConfig"]["Tmpfs"] = json!({
+        "/tmp": "rw,nosuid,nodev,size=64m",
+        "/var/lib/postgresql/data": "rw,nosuid,nodev,size=512m,uid=70,gid=70,mode=0700",
+    });
+    body["NetworkingConfig"] = json!({ "EndpointsConfig": { net: {
+        "IPAMConfig": null, "Links": null, "Aliases": aliases, "MacAddress": "",
+        "DriverOpts": null, "NetworkID": "", "EndpointID": "", "Gateway": "",
+        "IPAddress": "", "IPPrefixLen": 0, "DNSNames": null,
+    } } });
+    body
+}
+
+const SIDECAR: &str = "aegis-sidecar-7-0-postgres";
+const SIDECAR_NET: &str = "aegis-sidecar-7-0";
+
+fn with_sidecars(dirs: &Dirs) -> Policy {
+    Policy {
+        sidecar_images: vec!["postgres:16-alpine".into()],
+        ..dirs.policy()
+    }
+}
+
+#[test]
+fn a_sidecar_runs_an_allowed_image_on_its_own_network_with_its_alias() {
+    let dirs = Dirs::new("sidecar");
+    let policy = with_sidecars(&dirs);
+    let out = policy
+        .create(SIDECAR, &sidecar(SIDECAR_NET, &["postgres"]))
+        .unwrap();
+    assert_eq!(
+        out["NetworkingConfig"],
+        json!({ "EndpointsConfig": { SIDECAR_NET: { "Aliases": ["postgres"] } } })
+    );
+    assert_eq!(out["HostConfig"]["CapDrop"], json!(["ALL"]));
+    assert_eq!(out["User"], json!("70:70"));
+    // Its readiness probe: in its network namespace, no endpoint.
+    let probe = policy
+        .create(
+            &format!("{SIDECAR}-probe-0"),
+            &sidecar(&format!("container:{SIDECAR}"), &[]),
+        )
+        .unwrap();
+    assert!(probe.get("NetworkingConfig").is_none(), "{probe}");
+
+    // An image the deployment did not list.
+    let mut other = sidecar(SIDECAR_NET, &["postgres"]);
+    other["Image"] = json!("evil/miner");
+    assert!(
+        policy
+            .create(SIDECAR, &other)
+            .unwrap_err()
+            .contains("sidecar images")
+    );
+    assert!(
+        dirs.policy()
+            .create(SIDECAR, &sidecar(SIDECAR_NET, &["postgres"]))
+            .unwrap_err()
+            .contains("sidecar images")
+    );
+    // Not as a gate step either: no listed image, no alias.
+    let mut step_alias = step(&dirs.tree());
+    step_alias["HostConfig"]["NetworkMode"] = json!(SIDECAR_NET);
+    step_alias["NetworkingConfig"] =
+        json!({ "EndpointsConfig": { SIDECAR_NET: { "Aliases": ["postgres"] } } });
+    assert!(refused(&policy, &step_alias).contains("alias"));
+    // Nothing of the host, no other network, a plain host name, not root.
+    let mut bound = sidecar(SIDECAR_NET, &["postgres"]);
+    bound["HostConfig"]["Binds"] = json!([format!("{}:/work", dirs.tree())]);
+    assert!(
+        policy
+            .create(SIDECAR, &bound)
+            .unwrap_err()
+            .contains("mounts nothing")
+    );
+    for net in [
+        "bridge",
+        "none",
+        "aegis-fetch-1-0",
+        "container:aegis-gate-1-0",
+    ] {
+        let mut body = sidecar(net, &[]);
+        body["NetworkingConfig"] = json!({ "EndpointsConfig": {} });
+        let err = policy.create(SIDECAR, &body).unwrap_err();
+        assert!(err.contains("not allowed"), "{net}: {err}");
+    }
+    let err = policy
+        .create(SIDECAR, &sidecar(SIDECAR_NET, &["Postgres.local"]))
+        .unwrap_err();
+    assert!(err.contains("host name"), "{err}");
+    let mut root = sidecar(SIDECAR_NET, &["postgres"]);
+    root["User"] = json!("0:0");
+    assert!(
+        policy
+            .create(SIDECAR, &root)
+            .unwrap_err()
+            .contains("non-root")
+    );
+    // A sidecar keeps the hardening of every container.
+    let mut caps = sidecar(SIDECAR_NET, &["postgres"]);
+    caps["HostConfig"]["CapDrop"] = json!([]);
+    assert!(
+        policy
+            .create(SIDECAR, &caps)
+            .unwrap_err()
+            .contains("CapDrop")
+    );
+}
+
+#[test]
+fn a_test_step_joins_the_sidecars_network_or_namespace() {
+    let dirs = Dirs::new("sidecar-step");
+    let policy = with_sidecars(&dirs);
+    let with = |net: &str| {
+        let mut body = step(&dirs.tree());
+        body["HostConfig"]["NetworkMode"] = json!(net);
+        body
+    };
+    let on_net = policy.create("aegis-gate-1-3", &with(SIDECAR_NET)).unwrap();
+    assert_eq!(on_net["HostConfig"]["NetworkMode"], json!(SIDECAR_NET));
+    let in_ns = policy
+        .create("aegis-gate-1-4", &with(&format!("container:{SIDECAR}")))
+        .unwrap();
+    assert_eq!(
+        in_ns["HostConfig"]["NetworkMode"],
+        json!(format!("container:{SIDECAR}"))
+    );
+    assert!(in_ns.get("NetworkingConfig").is_none(), "{in_ns}");
+    // Only a sidecar's namespace: not another step's, not the host's.
+    for net in [
+        "container:aegis-gate-1-0",
+        "container:abc123",
+        "host",
+        "aegis-sidecar-",
+    ] {
+        assert!(
+            refused(&policy, &with(net)).contains("not allowed"),
+            "{net}"
+        );
+    }
+}
+
+#[test]
+fn sidecar_networks_are_internal() {
+    let policy = Policy::default();
+    let body = json!({ "Name": SIDECAR_NET, "Driver": "bridge", "Internal": true });
+    assert_eq!(policy.network_create(&body).unwrap(), body);
+    let open = json!({ "Name": SIDECAR_NET, "Driver": "bridge", "Internal": false });
+    assert!(
+        policy
+            .network_create(&open)
+            .unwrap_err()
+            .contains("internal")
+    );
+    policy.check_network(SIDECAR_NET).unwrap();
+    assert!(is_aegis_container(SIDECAR));
+    assert!(is_aegis_container(&format!("/{SIDECAR}-probe-3")));
 }
 
 #[test]
@@ -341,7 +513,7 @@ fn the_egress_proxy_is_on_the_bridge_with_nothing_mounted() {
     body["HostConfig"]["Binds"] = json!(null);
     body["HostConfig"]["Mounts"] = json!(null);
     body["HostConfig"]["NetworkMode"] = json!("bridge");
-    let out = dirs.policy().create(&body).unwrap();
+    let out = dirs.policy().create("aegis-gate-1-0", &body).unwrap();
     assert_eq!(out["HostConfig"]["NetworkMode"], "bridge");
 }
 

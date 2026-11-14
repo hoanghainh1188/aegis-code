@@ -6,7 +6,8 @@
 # with another entrypoint; one file on premises and on AWS.
 #
 # /etc/aegis/aegis.env: DOCKER_GID, and AEGIS_DOCKER_PROXY_ARGS (with Sonar
-# in a mode: `--network <[sonar] network> --writable-image <[sonar] image>`).
+# in a mode: `--network <[sonar] network> --writable-image <[sonar] image>`;
+# for repos with sidecars: `--sidecar-image <image>` for each, #490).
 # /etc/aegis/image.env: AEGIS_IMAGE, written by aegis-deploy.
 [Unit]
 Description=aegis-docker-proxy

@@ -570,6 +570,12 @@ async fn run_baseline_gate(
     let repo_path = cfg.repo.path.clone();
     let base_rev = cfg.repo.base.clone();
     let root_profile = root.clone();
+    let sidecars = if use_sandbox {
+        cfg.repo.gate_sidecars(&cfg.run)
+    } else {
+        None
+    };
+    let declared: Vec<String> = cfg.repo.sidecars.iter().map(|s| s.name.clone()).collect();
     let work_dir = temp_work_dir.clone();
     let timeout = Duration::from_secs(cfg.run.step_timeout_s);
     let allowed = BTreeSet::new();
@@ -595,6 +601,7 @@ async fn run_baseline_gate(
             audit: AuditPolicy::default(),
             scope: ScopePolicy::default(),
             parts: vec![],
+            sidecars,
         };
         run_gate(&gate_request)
     })
@@ -630,8 +637,7 @@ async fn run_baseline_gate(
                     category: "Isolation",
                     name: "Network & DB Isolation".into(),
                     status: CheckStatus::Fail,
-                    detail: "Detected connection refused / external DB dependency (PostgreSQL/Redis/MySQL). Ephemeral DB sidecar (#454) required."
-                        .into(),
+                    detail: network_hint(&declared),
                     is_blocking: true,
                 });
             } else {
@@ -770,6 +776,22 @@ fn test_item(test: Option<&StepReport>, elapsed: Duration) -> CheckItem {
         status,
         detail,
         is_blocking: true,
+    }
+}
+
+/// What to do about tests that could not connect: declare the services
+/// they need, or check the ones declared (#490).
+fn network_hint(declared: &[String]) -> String {
+    if declared.is_empty() {
+        "Tests could not connect to a service (PostgreSQL/Redis/MySQL or the network). \
+         Declare the services they need as `[[repo.sidecars]]` (docs/runbook/repos.md)"
+            .into()
+    } else {
+        format!(
+            "Tests could not connect to a service, with sidecars {} declared. Check their \
+             `test_env` and host names, or `localhost = true` for tests that use localhost",
+            declared.join(", ")
+        )
     }
 }
 
@@ -942,6 +964,7 @@ mod tests {
             ignored_advisories: vec![],
             hidden_test: None,
             patch_scope: None,
+            sidecars: vec![],
             fork: aegis_lifecycle::ForkConfig {
                 platform: aegis_lifecycle::ForkPlatform::GitHub,
                 owner: "owner".into(),

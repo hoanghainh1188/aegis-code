@@ -1,11 +1,13 @@
 //! `aegis-docker-proxy --listen <socket> [--upstream <socket>]
-//! --mount-root <dir>... [--network <name>]... [--writable-image <image>]...`:
+//! --mount-root <dir>... [--network <name>]... [--writable-image <image>]...
+//! [--sidecar-image <image>]...`:
 //! serves the filtered Docker API on `--listen` for aegis, passing allowed
 //! calls to the daemon on `--upstream` (`/var/run/docker.sock`). Bind
 //! mounts must come from a `--mount-root` (the workspace); `--network`
 //! adds a network containers may join with them (the Sonar scanner's), and
 //! `--writable-image` an image that may run with a writable root (the
-//! scanner's). Logs one line per refused call.
+//! scanner's), and `--sidecar-image` an image a gate run's sidecar may run
+//! (`postgres:16-alpine`, #490). Logs one line per refused call.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -13,7 +15,8 @@ use std::process::ExitCode;
 use aegis_docker_proxy::{Policy, Proxy, bind};
 
 const USAGE: &str = "usage: aegis-docker-proxy --listen <socket> [--upstream <socket>]
-       --mount-root <dir>... [--network <name>]... [--writable-image <image>]...";
+       --mount-root <dir>... [--network <name>]... [--writable-image <image>]...
+       [--sidecar-image <image>]...";
 
 const DEFAULT_UPSTREAM: &str = "/var/run/docker.sock";
 
@@ -34,6 +37,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--mount-root" => parsed.policy.mount_roots.push(value()?.into()),
             "--network" => parsed.policy.networks.push(value()?),
             "--writable-image" => parsed.policy.writable_images.push(value()?),
+            "--sidecar-image" => parsed.policy.sidecar_images.push(value()?),
             "--help" | "-h" => return Err(USAGE.into()),
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
@@ -122,6 +126,8 @@ mod tests {
             "sonar",
             "--writable-image",
             "sonarsource/sonar-scanner-cli",
+            "--sidecar-image",
+            "postgres:16-alpine",
         ])
         .unwrap();
         assert_eq!(args.listen, Some("/run/aegis-docker/docker.sock".into()));
@@ -132,6 +138,7 @@ mod tests {
                 mount_roots: vec!["/srv/aegis/.workspace".into()],
                 networks: vec!["sonar".into()],
                 writable_images: vec!["sonarsource/sonar-scanner-cli".into()],
+                sidecar_images: vec!["postgres:16-alpine".into()],
             }
         );
     }

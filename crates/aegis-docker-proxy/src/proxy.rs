@@ -124,7 +124,7 @@ impl Proxy {
         let rebuilt = if route.has_body() {
             let value: Value = serde_json::from_slice(&bytes).map_err(|e| format!("body: {e}"))?;
             let out = match &route {
-                Route::CreateContainer(_) => self.policy.create(&value)?,
+                Route::CreateContainer(name) => self.policy.create(name, &value)?,
                 Route::CreateNetwork => self.policy.network_create(&value)?,
                 Route::ConnectNetwork(net) => self.policy.connect(net, &value)?,
                 _ => unreachable!("has_body"),

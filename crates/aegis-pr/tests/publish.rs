@@ -111,6 +111,7 @@ fn gated(scratch: &Scratch, test_command: &str) -> (PathBuf, PathBuf, GateReport
         audit: Default::default(),
         scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
+        sidecars: None,
     })
     .unwrap();
     (repo, fork, report)

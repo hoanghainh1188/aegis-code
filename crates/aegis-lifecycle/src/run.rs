@@ -949,6 +949,7 @@ pub(crate) async fn gate(
         cfg.repo.audit_policy(),
         cfg.repo.scope_policy(),
     );
+    let sidecars = cfg.repo.gate_sidecars(&cfg.run);
     let report = tokio::task::spawn_blocking(move || {
         let (
             repo,
@@ -998,6 +999,7 @@ pub(crate) async fn gate(
             audit,
             scope,
             parts,
+            sidecars,
         })
     })
     .await

@@ -20,7 +20,12 @@ pub const CONTAINER_PREFIXES: &[&str] = &[
     "aegis-egress-",
     "aegis-format-",
     "aegis-lsp-",
+    "aegis-sidecar-",
 ];
+
+/// The sidecars of a gate run (#490, ADR 0013), their readiness probes,
+/// and their internal network: `aegis_gate::SIDECAR_PREFIX`.
+pub const SIDECAR_PREFIX: &str = "aegis-sidecar-";
 
 /// The fetch step's internal network (`aegis_gate::Egress`).
 pub const FETCH_NETWORK_PREFIX: &str = "aegis-fetch-";
@@ -195,6 +200,19 @@ fn is_fetch_network(name: &str) -> bool {
         .is_some_and(|rest| !rest.is_empty() && rest.chars().all(is_name_char))
 }
 
+/// A sidecar network, or a sidecar container: they share the prefix.
+fn is_sidecar(name: &str) -> bool {
+    let name = name.strip_prefix('/').unwrap_or(name);
+    name.strip_prefix(SIDECAR_PREFIX)
+        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(is_name_char))
+}
+
+/// A network a container may join by name: the fetch step's or a gate
+/// run's sidecars'. Both are internal (see [`Policy::network_create`]).
+fn is_internal_network(name: &str) -> bool {
+    is_fetch_network(name) || is_sidecar(name)
+}
+
 fn is_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-'
 }
@@ -211,11 +229,15 @@ pub struct Policy {
     /// Images that may run with a writable root file system: the Sonar
     /// scanner's.
     pub writable_images: Vec<String>,
+    /// Images a sidecar may run (#490): the services the deployment's
+    /// repos declare, such as `postgres:16-alpine`. A sidecar runs no
+    /// other image, and nothing but a sidecar gets a network alias.
+    pub sidecar_images: Vec<String>,
 }
 
 impl Policy {
-    /// The body to send for `POST /networks/create`: only the fetch step's
-    /// internal bridge networks.
+    /// The body to send for `POST /networks/create`: only internal bridge
+    /// networks, the fetch step's and the sidecars'.
     pub fn network_create(&self, body: &Value) -> Result<Value, String> {
         let obj = json::object(body, "network")?;
         let mut rest = obj.clone();
@@ -229,8 +251,10 @@ impl Policy {
         }
         let kept = json::kept(&rest, &["Name", "Driver", "Internal"], "network")?;
         let name = json::string(&kept, "Name")?;
-        if !is_fetch_network(name) {
-            return Err(format!("network {name:?} is not the fetch step's"));
+        if !is_internal_network(name) {
+            return Err(format!(
+                "network {name:?} is not the fetch step's or a gate run's sidecars'"
+            ));
         }
         if !json::bool(&kept, "Internal")? {
             return Err(format!("network {name:?} must be internal"));
@@ -257,10 +281,12 @@ impl Policy {
 
     /// Checks `GET` and `DELETE /networks/<network>`.
     pub fn check_network(&self, network: &str) -> Result<(), String> {
-        if is_fetch_network(network) {
+        if is_internal_network(network) {
             Ok(())
         } else {
-            Err(format!("network {network:?} is not the fetch step's"))
+            Err(format!(
+                "network {network:?} is not the fetch step's or a gate run's sidecars'"
+            ))
         }
     }
 }

@@ -9,6 +9,7 @@
 //! Each run gets its own `TMPDIR`; full isolation of the patched and base
 //! runs comes with the sandbox (#5).
 
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -30,6 +31,7 @@ use crate::parts::{self, GatePart};
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 use crate::sandbox::Sandbox;
 use crate::scope::{ScopePolicy, analyze_scope};
+use crate::sidecar::{SidecarSession, Sidecars, check_sidecars};
 use crate::sonar::{self, SonarStep};
 use crate::{GateError, deps};
 
@@ -93,6 +95,8 @@ pub struct GateRequest<'a> {
     /// `fetch` and `build_cache` are the rest of the repo's. Only the parts
     /// the patch changes are checked, the rest of the repo first.
     pub parts: Vec<GatePart<'a>>,
+    /// Services the test steps reach (#490, ADR 0013). Needs `sandbox`.
+    pub sidecars: Option<Sidecars>,
 }
 
 /// A repo's licenses and ignored advisories, on top of `policies/`.
@@ -196,6 +200,12 @@ impl Part<'_> {
 struct Run<'a> {
     req: &'a GateRequest<'a>,
     part: Part<'a>,
+    /// The request's sidecars once a test step needed them (#490); one
+    /// set for the whole run, reset before each test command but the first.
+    sidecars: RefCell<Option<SidecarSession>>,
+    /// The step now running reaches the sidecars: `repro_test`, `test`,
+    /// `coverage`.
+    with_sidecars: Cell<bool>,
     /// Runs Sonar, on the whole repo.
     root_runner: Runner,
     base: String,
@@ -450,9 +460,34 @@ impl<'a> Run<'a> {
         };
         std::fs::create_dir_all(&tmp).map_err(|e| GateError::io(&tmp, &e))?;
         let tmp = tmp.display().to_string();
-        self.part
-            .runner
-            .run(argv, &dir, &self.log(log), &[("TMPDIR", &tmp)])
+        let extra = [("TMPDIR", tmp.as_str())];
+        match self.sidecar_runner()? {
+            Some(runner) => runner.run(argv, &dir, &self.log(log), &extra),
+            None => self.part.runner.run(argv, &dir, &self.log(log), &extra),
+        }
+    }
+
+    /// The part's runner on the sidecars' network, when the step reaches
+    /// them: they start the first time, and are reset every time after so
+    /// each command finds fresh services.
+    fn sidecar_runner(&self) -> Result<Option<Runner>, GateError> {
+        let (Some(sidecars), Some(sandbox)) = (&self.req.sidecars, &self.part.runner.sandbox)
+        else {
+            return Ok(None);
+        };
+        if !self.with_sidecars.get() || sidecars.specs.is_empty() {
+            return Ok(None);
+        }
+        let mut session = self.sidecars.borrow_mut();
+        match session.as_ref() {
+            Some(running) => running.reset()?,
+            None => *session = Some(sidecars.start()?),
+        }
+        let sandbox = session.as_ref().map(|s| s.sandbox_for(sandbox));
+        Ok(Some(Runner {
+            sandbox,
+            ..self.part.runner.clone()
+        }))
     }
 
     /// Format, lint, typecheck: the command exits 0, or it fails on the
@@ -1423,6 +1458,10 @@ impl<'a> Run<'a> {
     }
 
     fn step(&mut self, name: StepName) -> Result<StepReport, GateError> {
+        self.with_sidecars.set(matches!(
+            name,
+            StepName::ReproTest | StepName::Test | StepName::Coverage
+        ));
         let gate = &self.part.profile.gate;
         match name {
             StepName::Scope => self.scope(),
@@ -1488,6 +1527,14 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
     }
     if let Some(sandbox) = &req.sandbox {
         sandbox.check()?;
+    }
+    if let Some(sidecars) = &req.sidecars {
+        if req.sandbox.is_none() && !sidecars.specs.is_empty() {
+            return Err(GateError::InvalidRequest(
+                "sidecars need the sandbox: the test steps reach them on a Docker network".into(),
+            ));
+        }
+        check_sidecars(&sidecars.specs).map_err(GateError::InvalidRequest)?;
     }
     let all = all_parts(req);
     check_parts(&all)?;
@@ -1563,6 +1610,8 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
     let mut run = Run {
         req,
         part: part(touched[0])?,
+        sidecars: RefCell::new(None),
+        with_sidecars: Cell::new(false),
         root_runner: runner(&req.sandbox),
         base,
         base_tree: None,
