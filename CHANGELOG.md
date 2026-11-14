@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.11.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.10.0...v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **deploy:** ship aegis check-repo in the server image ([#474](https://github.com/hoanghainh1188/aegis-code/issues/474)) ([#488](https://github.com/hoanghainh1188/aegis-code/issues/488)) ([b8349c4](https://github.com/hoanghainh1188/aegis-code/commit/b8349c48e3192ee3980c879a49de93b918eabbbd))
+
+
+### Bug Fixes
+
+* **gate:** check-repo fails a baseline the gate passes only as on the base ([#487](https://github.com/hoanghainh1188/aegis-code/issues/487)) ([#489](https://github.com/hoanghainh1188/aegis-code/issues/489)) ([b7c5146](https://github.com/hoanghainh1188/aegis-code/commit/b7c51467f35d1069deab103122c7b3039f0498e9))
+
+
+### Documentation
+
+* bring the README and the Proposal up to date ([#478](https://github.com/hoanghainh1188/aegis-code/issues/478)) ([#479](https://github.com/hoanghainh1188/aegis-code/issues/479)) ([3d8a98e](https://github.com/hoanghainh1188/aegis-code/commit/3d8a98e744a212f720d907fdccbf0ef597368e40))
+* index of the measurement reports with the current KPI ([#482](https://github.com/hoanghainh1188/aegis-code/issues/482)) ([#483](https://github.com/hoanghainh1188/aegis-code/issues/483)) ([3856f55](https://github.com/hoanghainh1188/aegis-code/commit/3856f5529025f32367818bc6c3d10bd8e5cacd8f))
+* one home for repo registration, install steps and phase status ([#480](https://github.com/hoanghainh1188/aegis-code/issues/480)) ([#481](https://github.com/hoanghainh1188/aegis-code/issues/481)) ([8533085](https://github.com/hoanghainh1188/aegis-code/commit/8533085ce1241db5748ee70066b31580cfd27b2d))
+* shorten the README's architecture section, drop unsourced figures ([#485](https://github.com/hoanghainh1188/aegis-code/issues/485)) ([#486](https://github.com/hoanghainh1188/aegis-code/issues/486)) ([a288ee7](https://github.com/hoanghainh1188/aegis-code/commit/a288ee726e487f55fd32c91391774e9e7d251180))
+
 ## [0.10.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.9.0...v0.10.0) (2026-11-14)
 
 
