@@ -127,11 +127,23 @@ sudo ./install.sh
 
 It creates `/srv/aegis/.workspace` (owned by uid 10001, the image's user), `./secrets/` with the database password and URL, the session key and the GitHub webhook secret, a `.env`, and `server.toml` from the example. It never overwrites a file, so running it again is safe.
 
-**Check:** the last lines start with `Next (docs/runbook/on-premise.md):`, and `sudo ls secrets` lists `AEGIS_DATABASE_URL AEGIS_GITHUB_WEBHOOK_SECRET AEGIS_SESSION_KEY postgres_password`.
+It then asks for the values of steps B4–B6 and B9 (#476). Have Part A at hand:
+
+| Question | From | Step it does |
+| --- | --- | --- |
+| Sandboxes to pull | Your repos' languages | B6 |
+| Public URL | A6 | B4 |
+| OIDC issuer, client ID | A4 | B4 |
+| Email of the first admin | Your SSO account. Leave it empty if your SSO does not mark emails verified (Entra ID, A4) | B9 |
+| Claude API key, OIDC client secret, comment token (typed without echo) | A5, A4, A3 | B5 |
+
+An empty answer skips that value; do its step by hand below, or run `./install.sh` again later, which asks only for what is still missing. To install without questions, give the values in the environment: see the [Runbook](runbook/on-premise.md#1-installation--setup), step 1.
+
+**Check:** the last lines start with `Next (docs/runbook/on-premise.md):`, and `sudo ls secrets` lists `AEGIS_DATABASE_URL AEGIS_GITHUB_WEBHOOK_SECRET AEGIS_SESSION_KEY postgres_password`, plus the secrets you typed.
 
 ### B4. `server.toml`
 
-Edit `server.toml`. Change only these lines:
+`install.sh` set `public_url` and `[auth.oidc]` if you answered them; check them with `sudo grep -A2 -E '^public_url|^\[auth.oidc\]' server.toml`. Otherwise, edit `server.toml`. Change only these lines:
 
 ```toml
 [auth]
@@ -148,7 +160,7 @@ The rest (`[modes] poc`, workers, budgets) can stay as it is for a first install
 
 ### B5. Secrets
 
-One file per secret in `./secrets`, owned by uid 10001 and readable only by it. Aegis refuses to start if a secret file can be read by others. This helper reads the value from your terminal, so it stays out of your shell history. Paste it into **bash** (it does not work in zsh):
+`install.sh` wrote the secrets you typed in B3. The fork token (A2) is written in C1 by `add-repo.sh`. For a secret you skipped, or for C1 on the dashboard: one file per secret in `./secrets`, owned by uid 10001 and readable only by it. Aegis refuses to start if a secret file can be read by others. This helper reads the value from your terminal, so it stays out of your shell history. Paste it into **bash** (it does not work in zsh):
 
 ```bash
 put_secret() {
@@ -166,7 +178,7 @@ put_secret AEGIS_TOKEN_WIDGET            # A2, named after the repo; used in ste
 
 ### B6. `.env`
 
-Two lines to set in `.env` (add the second):
+`install.sh` set `AEGIS_SANDBOXES` from your answer. One line to add, and the first to check, in `.env`:
 
 ```bash
 # Only the sandbox images of your repos' languages: python is always needed
@@ -226,6 +238,8 @@ For Nginx, see the [Runbook](runbook/on-premise.md#reverse-proxy-configuration-t
 
 ### B9. The first administrator
 
+If you gave the admin email in B3, `aegis-deploy.sh` granted it admin as it started (it prints `admin: <email>`). Open `https://aegis.example.internal`, sign in through your SSO, and go to the **Check**. Otherwise:
+
 1. Open `https://aegis.example.internal`. You are sent to your SSO, then back to the dashboard, signed in with no role yet.
 2. Grant admin to the email shown at the top right:
 
@@ -249,7 +263,21 @@ For Nginx, see the [Runbook](runbook/on-premise.md#reverse-proxy-configuration-t
 
 ### C1. Register the repo
 
-On the dashboard: **Admin** (the list of repos) → **Add a repo**.
+**From the machine** (#476), in `deploy/compose`:
+
+```bash
+sudo ./add-repo.sh
+```
+
+It asks for:
+- the upstream URL (`https://github.com/acme/widget`), and the slug, branch, language and mode, each with a default;
+- the fork (`acme-aegis-bot/widget`) and its token (A2, typed without echo);
+- the emails of maintainers and reviewers. People granted before their first sign-in need an email the SSO marks verified (A4); otherwise leave them empty and use C2 after they have signed in;
+- the monthly budget.
+
+It writes the token as `secrets/AEGIS_TOKEN_WIDGET` and the repo file, registers and clones the repo, grants the roles, and prints the webhook settings of C3 and the link to the repo's budget page. Then go to the **Check** below, and to C3. Without questions, the values come from the environment ([Runbook](runbook/on-premise.md#first-repository-checklist)).
+
+**Or on the dashboard:** **Admin** (the list of repos) → **Add a repo**.
 
 ![Add a repo](../assets/screenshots/install/08-add-repo.jpg)
 
@@ -272,6 +300,8 @@ From the command line instead: write the same settings as a TOML file ([template
 
 ### C2. Who may do what
 
+`add-repo.sh` did this for the emails you gave it. For anyone else:
+
 ```bash
 A="sudo docker compose exec aegis aegis-server --config /etc/aegis/server.toml"
 $A grant dev@example.com widget maintainer     # starts and cancels jobs, sets budgets
@@ -284,7 +314,7 @@ Each person signs in once first, as in B9.
 
 ### C3. The webhooks
 
-This needs admin rights on `acme/widget`. On `acme/widget` (upstream): **Settings → Webhooks → Add webhook**.
+`add-repo.sh` printed these values. This needs admin rights on `acme/widget`. On `acme/widget` (upstream): **Settings → Webhooks → Add webhook**.
 
 | Field | Value |
 | --- | --- |

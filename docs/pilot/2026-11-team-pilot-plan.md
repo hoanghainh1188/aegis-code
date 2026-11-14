@@ -1,6 +1,6 @@
 # Kế hoạch chạy thử với một team thật (#158)
 
-Trạng thái: **bản nháp**. Các ô `<…>` được điền lúc triển khai.
+Trạng thái: **bản nháp**. Các ô `<…>` được điền lúc triển khai: `install.sh` và `add-repo.sh` hỏi chúng khi chạy (#476), nên không phải sửa file nào bằng tay.
 
 Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dùng hằng ngày, chi phí tháng nằm trong ngân sách, và KPI giữ được như MVP ([ADR 0005](../adr/0005-kpi-thresholds-after-phase-1.md)). Đợt chạy thử này kiểm mốc đó trên bản on-premise ([ADR 0007](../adr/0007-on-premise-deployment.md)), không chờ AWS staging (#33).
 
@@ -48,21 +48,29 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 
 Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setup) trên `<host-ssh>`:
 
-1. `install.sh` (chạy một lần), sau đó sửa `server.toml` (`public_url`, `[auth.oidc]`) và đặt các file secret vào `./secrets/`.
-2. `aegis-deploy.sh 0.10.0`. Ở đây ghi version không có chữ `v`.
-3. Kiểm tra sau khi cài (runbook §1, bước 5): healthcheck trả về được, đăng nhập SSO được, và cấp quyền `admin` cho `<email admin>`.
+1. `sudo ./install.sh` (chạy một lần). Script hỏi:
+   - URL công khai, issuer và client ID của OIDC, email của admin đầu tiên. Email admin chỉ dùng được nếu SSO đánh dấu email là đã xác minh; với Entra ID thì để trống, đăng nhập một lần, rồi cấp quyền (hướng dẫn cài đặt, B9);
+   - các sandbox cần kéo về, chỉ chọn ngôn ngữ của repo;
+   - API key Claude, OIDC client secret và token để comment. Ba thứ này nhập ẩn.
+   Câu nào để trống thì chạy lại script sẽ được hỏi lại.
+2. `sudo ./aegis-deploy.sh 0.10.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
+3. Kiểm tra sau khi cài (runbook §1, bước 5): healthcheck trả về được, và đăng nhập SSO được.
 4. Chạy `backup.sh` lần đầu, rồi đặt lịch chạy hằng ngày bằng cron hoặc systemd timer ([runbook on-premise §4](../runbook/on-premise.md#4-backup--disaster-recovery)).
 
 ## Bước 2: đăng ký repo (ngày 0–1)
 
 Làm theo [runbook on-premise §2](../runbook/on-premise.md#2-registering-repositories):
 
-1. Đặt token của fork vào `secrets/<token_env>`, viết file repo, chạy `aegis repo add` (hoặc dùng `/admin/repos` → **Add a repo**).
-2. Cấp quyền: `maintainer` cho người giao việc, `reviewer` cho người duyệt.
-3. Đặt ngân sách tháng $100 ở `/repos/<id>/budget`, hoặc gọi `PUT /api/v1/repos/<id>/budget` với `{"monthly_usd": 100}`. Khi hết ngân sách, job bị huỷ và issue nhận được comment giải thích.
-4. Thêm webhook trên repo upstream cho sự kiện **Issues** và **Workflow runs**. Thêm webhook trên fork cho **Pull request reviews**, **Pull request review comments** và **Issue comments**.
-5. **Job đầu tiên:** gắn nhãn `aegis` cho một bug nhỏ. Webhook phải trả `202`, job phải hiện trên dashboard, và issue phải nhận được comment khi job xong.
-6. Gửi [Hướng dẫn duyệt](../reviewing.md) cho người duyệt và [hướng dẫn client](../client.md) cho developer.
+1. `sudo ./add-repo.sh`. Script hỏi:
+   - URL của `<owner/name>`, slug, nhánh mặc định, ngôn ngữ và mode;
+   - fork cùng token của fork, nhập ẩn;
+   - email của người giao việc (`maintainer`) và người duyệt (`reviewer`);
+   - ngân sách tháng, nhập `100`.
+   Script ghi token và file repo, chạy `repo add` và `grant`, rồi in ra cách đặt webhook và đường dẫn trang ngân sách.
+2. Đặt ngân sách tháng $100 ở trang ngân sách mà script in ra (một maintainer làm việc này). Khi hết ngân sách, job bị huỷ và issue nhận được comment giải thích.
+3. Thêm webhook theo hướng dẫn script in ra: trên repo upstream cho sự kiện **Issues** và **Workflow runs**; trên fork cho **Pull request reviews**, **Pull request review comments** và **Issue comments**.
+4. **Job đầu tiên:** gắn nhãn `aegis` cho một bug nhỏ. Webhook phải trả `202`, job phải hiện trên dashboard, và issue phải nhận được comment khi job xong.
+5. Gửi [Hướng dẫn duyệt](../reviewing.md) cho người duyệt và [hướng dẫn client](../client.md) cho developer.
 
 ## Bước 3: vận hành 4 tuần
 

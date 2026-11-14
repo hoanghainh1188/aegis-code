@@ -160,10 +160,11 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 * **On-Premise (Single Linux Host with Docker):** Docker Compose or systemd. First install, step by step from a blank machine to the first PR (bot, tokens, SSO client with screenshots): [docs/install-on-premise.md](docs/install-on-premise.md). Operations: [docs/runbook/on-premise.md](docs/runbook/on-premise.md), [ADR 0007](docs/adr/0007-on-premise-deployment.md). In short:
   ```bash
   cd deploy/compose
-  sudo ./install.sh                     # Prepares /srv/aegis/.workspace and ./secrets
-  # Configure ./server.toml and secrets in ./secrets/
-  sudo ./aegis-deploy.sh 0.5.0          # Release version without "v" (images are tagged 0.5.0)
+  sudo ./install.sh                     # Prepares /srv/aegis/.workspace and ./secrets, asks for URL, SSO, admin, secrets
+  sudo ./aegis-deploy.sh 0.10.0         # Release version without "v" (images are tagged 0.10.0)
+  sudo ./add-repo.sh                    # Registers a GitHub repo: asks for it, its fork and token, people, budget
   ```
+  The scripts ask only on a terminal; for unattended installs every value comes from the environment ([runbook](docs/runbook/on-premise.md#1-installation--setup)).
   Before starting, collect what the [Preparation Checklist](docs/runbook/on-premise.md#preparation-checklist) lists (SSO client, bot account, tokens, domain with TLS, model API key).
 * **Cloud Infrastructure (AWS):** Production-grade deployment with OpenTofu (EC2, RDS PostgreSQL, Secrets Manager, ALB with TLS, CloudWatch) in [deploy/tofu/](deploy/tofu/) and [docs/runbook/README.md](docs/runbook/README.md).
 * **Kubernetes:** Run worker pods with Docker-in-Docker sidecars for safe sandbox isolation ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md)).

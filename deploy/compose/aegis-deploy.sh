@@ -8,6 +8,11 @@
 # (expand/contract), so rolling back is this script with the version
 # before.
 #
+# With AEGIS_ADMIN_EMAIL in .env (install.sh asks for it, #476), that
+# person is granted admin once the server is healthy; granting it again
+# changes nothing. Before that person's first sign-in, this works only if
+# the SSO marks the email verified (docs/install-on-premise.md, A4).
+#
 # Usage: sudo ./aegis-deploy.sh [--offline] <version>
 set -euo pipefail
 
@@ -47,6 +52,12 @@ done
 sed -i.bak "s/^AEGIS_VERSION=.*/AEGIS_VERSION=$version/" .env && rm -f .env.bak
 docker compose up --detach --wait --wait-timeout 300 \
   || { docker compose logs --tail 50 aegis >&2; die "aegis $version is not healthy"; }
+if [ -n "${AEGIS_ADMIN_EMAIL:-}" ]; then
+  docker compose exec -T aegis aegis-server --config /etc/aegis/server.toml \
+    grant "$AEGIS_ADMIN_EMAIL" admin >/dev/null \
+    || die "aegis $version is healthy, but granting $AEGIS_ADMIN_EMAIL admin failed"
+  echo "admin: $AEGIS_ADMIN_EMAIL"
+fi
 if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
   echo "aegis $version healthy; roll back with: ./aegis-deploy.sh $previous"
 else
