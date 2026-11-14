@@ -65,6 +65,8 @@ protected = [
 audit = ["cargo", "deny", "--locked", "--manifest-path", "{lockfile_dir}/Cargo.toml", "--config", "{deny_config}", "check"]
 # advisory-db (git trên github.com) và index để `cargo metadata` đọc.
 audit_hosts = ["github.com", "index.crates.io", "static.crates.io"]
+# The platform's upgrade of a CVE job (#501, ADR 0015), through fetch_hosts.
+upgrade = ["cargo", "update", "--package", "{package}", "--precise", "{version}"]
 
 [sandbox]
 image = "aegis-sandbox-rust"

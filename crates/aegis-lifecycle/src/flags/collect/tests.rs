@@ -65,6 +65,7 @@ fn opened(targets: &[&str]) -> Vec<LedgerEvent> {
 
 fn issue(kind: Option<IssueKind>, body: &str) -> IssueInput {
     IssueInput {
+        cve: None,
         id: "x-1".into(),
         title: "Upload fails".into(),
         body: body.into(),

@@ -52,6 +52,8 @@ fetch_base = true
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).
 audit_hosts = ["api.osv.dev", "api.deps.dev"]
+# The platform's upgrade of a CVE job (#501, ADR 0015), through fetch_hosts.
+upgrade = ["npm", "install", "{package}@{version}", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]
 # Bản vá chạm vào là bị chặn (#83): .npmrc đổi registry mà lockfile vẫn
 # ghi registry.npmjs.org.
 protected = [

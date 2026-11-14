@@ -92,6 +92,17 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    - The deployment allows the image: the proxy's `--sidecar-image` ([On-Premise](on-premise.md#2-registering-repositories)), and the image is pulled or loaded on the machine. A run configuration declares the same as `[[repo.sidecars]]`.
    - The agent's `run_tests` reaches them too (#491), on sidecars of its own session: the agent sees the result the gate will.
 
+8. **CVE jobs (#455, [ADR 0015](../adr/0015-cve-remediation-lane.md)):** a job that raises one package to the version that fixes a security advisory. Bug-fix jobs never change a locked version (#500); this is how dependencies are upgraded.
+
+   ```bash
+   aegis cve --config <file> --package requests --version 2.32.4 --advisory GHSA-9wx4-h78v-vm56
+   ```
+
+   - The platform runs the profile's upgrade command (`cargo update --package … --precise …`, `uv lock --upgrade-package …==…`, `npm install …@… --package-lock-only`, `go get …@…`, Maven's `versions:use-dep-version`, `dotnet add package … --version …`) through the egress proxy, then the gate checks the result: the manifests and lockfiles must stay exactly as the upgrade wrote them, the package must be at the version, and the audit must no longer report the advisory.
+   - If the gate passes, the PR opens with no agent turn (one Light call writes the commit message). If it fails, typically on a breaking change, the agent adapts the code and must not touch any manifest or lockfile.
+   - A repo whose build needs another command overrides it in `[repo.overrides]` (`upgrade = ["…", "{package}", "{version}"]`), or turns it off with `upgrade = false`.
+   - Only the root of a monorepo is upgraded for now. The job's id defaults to `cve-<package>-<version>`; the PR links the advisory on osv.dev.
+
 ### RBAC and Budgets
 
 7. Grant dashboard permissions: `... grant <email> <repo-slug> maintainer|reviewer|viewer` (maintainer: start/cancel jobs, set budgets; reviewer: review PRs; viewer: read-only).

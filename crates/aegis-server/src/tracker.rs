@@ -130,6 +130,7 @@ pub async fn ticket_issue(
         .await
         .map_err(|e| Attempt::from(Unusable::from(e)))?;
     Ok(IssueInput {
+        cve: None,
         id: job.ledger_key.as_str().to_owned(),
         body: ticket.body_with_logs(),
         title: ticket.title,

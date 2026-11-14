@@ -269,6 +269,7 @@ mod tests {
 
     fn issue() -> IssueInput {
         IssueInput {
+            cve: None,
             id: "app-3-1-v1".into(),
             title: "Truncate splits runes".into(),
             body: "It cuts bytes.".into(),

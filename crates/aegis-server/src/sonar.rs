@@ -264,6 +264,7 @@ pub async fn sonar_issue(
         sonar.project_key
     );
     Ok(IssueInput {
+        cve: None,
         id: job.ledger_key.as_str().to_owned(),
         title: format!(
             "Sonar: {} new warnings in {}",

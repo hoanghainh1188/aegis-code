@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 
 use aegis_aci::{MAP_FORMAT, REDACTED_MARKER, Workspace, load_or_create_summary, redact};
 use aegis_gate::{
-    BuildCache, CLIENT_ENV, CancelToken, Egress, FetchStep, GatePart, GateReport, GateRequest,
-    Hardening, ReferenceGroup, Runner, Sandbox, SonarStep, StepName, StepStatus, WORKDIR,
-    failing_tests_with, run_gate,
+    BuildCache, CLIENT_ENV, CancelToken, DependencyPolicy, Egress, FetchStep, GatePart, GateReport,
+    GateRequest, Hardening, ReferenceGroup, Runner, Sandbox, SonarStep, StepName, StepStatus,
+    WORKDIR, failing_tests_with, run_gate,
 };
 use aegis_lang::{AllowList, ProfilePart, Profiles, RepoProfiles, ResolvedProfile};
 use aegis_ledger::{
@@ -36,6 +36,7 @@ use crate::answer::{FinalAnswer, Status, parse_answer};
 use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
 use crate::code_graph::{self, CodeGraph, ServerCalls, changed_functions};
+use crate::cve;
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -291,6 +292,22 @@ where
         body: body.text,
         ..issue.clone()
     };
+    // A CVE job (#501): nothing for Light to classify; the platform's
+    // upgrade comes first, in `work`.
+    if let Some(target) = &issue.cve {
+        target.check().map_err(LifecycleError::Config)?;
+        let profiles = cfg.repo.profiles(&platform.profiles)?;
+        return work(
+            platform,
+            ledger,
+            &profiles,
+            issue,
+            String::new(),
+            &Finish::Publish,
+            cancel,
+        )
+        .await;
+    }
     let (class, response) = match issue.kind {
         // Its source knows: nothing for Light to decide.
         Some(kind) => (
@@ -635,6 +652,22 @@ where
                 .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
         }
     }
+    // A CVE job (#501, ADR 0015): the platform raises the package; the
+    // gate checks that first, and the agent works only if it fails.
+    let (policy, prepared, first_message) = match &issue.cve {
+        None => (DependencyPolicy::Locked, None, first_message),
+        Some(target) => {
+            let root = &profiles.parts()[0];
+            let upgrade =
+                match cve::upgrade(cfg, root, tree.path(), &job_dir, target, cancel).await? {
+                    Ok(upgrade) => upgrade,
+                    Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
+                };
+            let message = cve::first_message(target, &upgrade);
+            let answer = cve::answer(target, &upgrade);
+            (DependencyPolicy::Upgrade(upgrade), Some(answer), message)
+        }
+    };
     let tools = McpTools::connect(&tool_specs(cfg, profiles, tree.path(), &job_dir)?).await?;
     let queries = cfg.codebase_memory.as_ref().map(|c| c.tools.as_slice());
     let graph = match CodeGraph::open(&tools, queries, tree.path()).await {
@@ -660,6 +693,7 @@ where
         &base,
         &job_dir,
         finish,
+        (&policy, prepared),
         cancel,
     )
     .await;
@@ -797,7 +831,7 @@ pub(crate) fn sonar_step(cfg: &RunConfig) -> Result<Option<SonarStep>, Lifecycle
 
 /// The profile's fetch command and its egress, when the gate runs in a
 /// sandbox (#66). On the machine there is no cache to fetch into.
-fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
+pub(crate) fn fetch_step(cfg: &RunConfig, profile: &ResolvedProfile) -> Option<FetchStep> {
     let command = profile.fetch.command()?.render(&[]).ok()?;
     cfg.run.sandbox.then(|| FetchStep {
         egress: Egress {
@@ -858,7 +892,10 @@ async fn fetch_base(
     )))
 }
 
-fn sandbox(cfg: &RunConfig, part: &ProfilePart) -> Result<Option<Sandbox>, LifecycleError> {
+pub(crate) fn sandbox(
+    cfg: &RunConfig,
+    part: &ProfilePart,
+) -> Result<Option<Sandbox>, LifecycleError> {
     if !cfg.run.sandbox {
         return Ok(None);
     }
@@ -915,9 +952,11 @@ pub(crate) async fn gate(
     base: &str,
     job_dir: &Path,
     answer: &FinalAnswer,
+    policy: &DependencyPolicy,
     cancel: &CancellationToken,
 ) -> Result<GateReport, LifecycleError> {
     let allowed = allowed_packages(cfg)?;
+    let dependency_policy = policy.clone();
     let root = &profiles.parts()[0];
     // Each directory's own container, fetch and cache (#71).
     let parts = profiles.parts()[1..]
@@ -1023,7 +1062,7 @@ pub(crate) async fn gate(
             scope,
             parts,
             sidecars,
-            dependency_policy: aegis_gate::DependencyPolicy::Locked,
+            dependency_policy,
         })
     })
     .await
@@ -1031,7 +1070,7 @@ pub(crate) async fn gate(
     Ok(report?)
 }
 
-struct CancelOnDrop(CancelToken);
+pub(crate) struct CancelOnDrop(pub(crate) CancelToken);
 
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
@@ -1039,7 +1078,7 @@ impl Drop for CancelOnDrop {
     }
 }
 
-struct AbortOnDrop(tokio::task::JoinHandle<()>);
+pub(crate) struct AbortOnDrop(pub(crate) tokio::task::JoinHandle<()>);
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -1200,6 +1239,9 @@ async fn drive<P, S, T>(
     base: &str,
     job_dir: &Path,
     finish: &Finish,
+    // What the patch may change in the dependencies (#500), and an answer
+    // to check before any agent turn: a CVE job's upgrade (#501).
+    (policy, prepared): (&DependencyPolicy, Option<FinalAnswer>),
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>
 where
@@ -1207,6 +1249,7 @@ where
     S: LedgerStore + Send + Sync + 'static,
     T: ServerCalls + Sync,
 {
+    let mut prepared = prepared;
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
     let mut router = Router::new(cfg.budget.rules());
@@ -1217,144 +1260,155 @@ where
     let mut first_expert_call = false;
     let mut impact_checks: usize = 0;
     let mut known_functions: BTreeSet<String> = BTreeSet::new();
-    loop {
-        let tier = router.tier();
-        let mut budget = BudgetCheck::new(
-            Arc::new(platform.prices.clone()),
-            regional,
-            limits,
-            tier,
-            Spent::from_record(ledger.record()),
-        );
-        if std::mem::take(&mut first_expert_call) && dearest_call_usd > 0.0 {
-            // New model, cold cache: the first Expert call costs more.
-            budget = budget.with_first_call_estimate(dearest_call_usd * 3.0);
-        }
-        let check = JobCheck::new(budget, router, cancel.clone()).with_impact_checks(impact_checks);
-        let seen = session.messages().len();
-        let model = model_spec(cfg, tier);
-        let outcome = run_loop(
-            &platform.provider,
-            tools,
-            &check,
-            &model,
-            session,
-            &LoopConfig::default(),
-        )
-        .await;
-        for turn in &outcome.turns {
-            let cost = ledger.model_call(tier, &turn.model, &turn.usage).await?;
-            dearest_call_usd = dearest_call_usd.max(cost);
-            ledger.tool_calls(tier, tool_calls(turn)).await?;
-        }
-        let prior_calls = check.budget.model_calls(&[]);
-        let (after_edits, decision) = fold_tools(router, prior_calls, &outcome.turns);
-        if after_edits.tier() != router.tier() {
-            // Escalated on the loop's last turn: Expert takes over from here.
-            first_expert_call = true;
-            if let Decision::Escalate(reason) = decision {
-                let calls = ledger.record().model_calls;
-                ledger.escalated(reason.to_string(), calls).await?;
-            }
-        }
-        router = after_edits;
-        session = outcome.session;
-        ledger
-            .secrets_redacted(hidden_in_tool_results(&session.messages()[seen..]))
-            .await?;
-
-        let reply = match outcome.end {
-            LoopEnd::ProviderFailed(e) => {
-                return Ok(Ending::stop(
-                    Outcome::StoppedSteps,
-                    format!("model provider failed: {e}"),
-                ));
-            }
-            LoopEnd::Stopped { reason } => match check.halt() {
-                Some(Halt::Cancelled) => {
-                    return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
-                }
-                Some(Halt::Budget(stop)) => {
-                    return Ok(Ending::stop(stop.outcome(), stop.to_string()));
-                }
-                Some(Halt::RemindTest { calls, last_test }) => {
-                    // The router counts the reminder, so the next one comes
-                    // only after more calls without a test run (#144, #156).
-                    let (next, decision) = router.observe(Signal::ModelCalls { calls });
-                    debug_assert_eq!(decision, Decision::RemindTest { calls, last_test });
-                    router = next;
-                    ledger.test_reminded(tier, calls).await?;
-                    session = session.with_user_text(test_reminder(calls, last_test));
-                    continue;
-                }
-                Some(Halt::Escalate(reason)) => {
-                    if router.tier() == Tier::Core {
-                        // Not an edit rule, which `fold_tools` already applied:
-                        // Core used its calls without a patch.
-                        let calls = ledger.record().model_calls;
-                        let (next, decision) = router.observe(Signal::ModelCalls { calls });
-                        debug_assert_eq!(decision, Decision::Escalate(reason));
-                        router = next;
-                        ledger.escalated(reason.to_string(), calls).await?;
-                    }
-                    first_expert_call = true;
-                    continue;
-                }
-                Some(Halt::CheckImpact) => {
-                    let record = ledger.record();
-                    let calls_left = limits.max_model_calls.saturating_sub(record.model_calls);
-                    let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
-                    let room = calls_left >= IMPACT_CALLS
-                        && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
-                    if !room {
-                        // Not enough budget room to act on impact notes; stop checking.
-                        impact_checks = 2;
-                        continue;
-                    }
-                    let current_functions = changed_functions(tree, base);
-                    if impact_checks == 0 || !current_functions.is_subset(&known_functions) {
-                        known_functions = current_functions;
-                        impact_checks += 1;
-                        if let Some(impact) = tools.impact(base).await {
-                            match impact {
-                                Ok(impact) => {
-                                    ledger.impact_checked(impact.files(), None).await?;
-                                    if let Some(note) = impact.note() {
-                                        session = session.with_user_text(note);
-                                    }
-                                }
-                                Err(why) => ledger.impact_checked(Vec::new(), Some(why)).await?,
-                            }
-                        }
-                    }
-                    continue;
-                }
-                None => return Ok(Ending::stop(Outcome::StoppedSteps, reason)),
-            },
-            LoopEnd::Finished { .. } => last_reply(&session),
-        };
-
-        let answer = match parse_answer(&reply) {
-            Ok(answer) => {
-                // What the agent said it did, for the job's page (#316).
+    'turns: loop {
+        let answer = 'answer: {
+            if let Some(answer) = prepared.take() {
                 let (summary, hidden) = summary_of(&answer);
                 ledger.secrets_redacted(hidden).await?;
                 ledger.answered(summary).await?;
-                answer
+                break 'answer answer;
             }
-            Err(why) if answer_retries < MAX_ANSWER_RETRIES => {
-                answer_retries += 1;
-                session = session.with_message(Message::user_text(format!(
-                    "Your final answer could not be read ({why}). Reply with only the JSON \
+            let tier = router.tier();
+            let mut budget = BudgetCheck::new(
+                Arc::new(platform.prices.clone()),
+                regional,
+                limits,
+                tier,
+                Spent::from_record(ledger.record()),
+            );
+            if std::mem::take(&mut first_expert_call) && dearest_call_usd > 0.0 {
+                // New model, cold cache: the first Expert call costs more.
+                budget = budget.with_first_call_estimate(dearest_call_usd * 3.0);
+            }
+            let check =
+                JobCheck::new(budget, router, cancel.clone()).with_impact_checks(impact_checks);
+            let seen = session.messages().len();
+            let model = model_spec(cfg, tier);
+            let outcome = run_loop(
+                &platform.provider,
+                tools,
+                &check,
+                &model,
+                session,
+                &LoopConfig::default(),
+            )
+            .await;
+            for turn in &outcome.turns {
+                let cost = ledger.model_call(tier, &turn.model, &turn.usage).await?;
+                dearest_call_usd = dearest_call_usd.max(cost);
+                ledger.tool_calls(tier, tool_calls(turn)).await?;
+            }
+            let prior_calls = check.budget.model_calls(&[]);
+            let (after_edits, decision) = fold_tools(router, prior_calls, &outcome.turns);
+            if after_edits.tier() != router.tier() {
+                // Escalated on the loop's last turn: Expert takes over from here.
+                first_expert_call = true;
+                if let Decision::Escalate(reason) = decision {
+                    let calls = ledger.record().model_calls;
+                    ledger.escalated(reason.to_string(), calls).await?;
+                }
+            }
+            router = after_edits;
+            session = outcome.session;
+            ledger
+                .secrets_redacted(hidden_in_tool_results(&session.messages()[seen..]))
+                .await?;
+
+            let reply = match outcome.end {
+                LoopEnd::ProviderFailed(e) => {
+                    return Ok(Ending::stop(
+                        Outcome::StoppedSteps,
+                        format!("model provider failed: {e}"),
+                    ));
+                }
+                LoopEnd::Stopped { reason } => match check.halt() {
+                    Some(Halt::Cancelled) => {
+                        return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
+                    }
+                    Some(Halt::Budget(stop)) => {
+                        return Ok(Ending::stop(stop.outcome(), stop.to_string()));
+                    }
+                    Some(Halt::RemindTest { calls, last_test }) => {
+                        // The router counts the reminder, so the next one comes
+                        // only after more calls without a test run (#144, #156).
+                        let (next, decision) = router.observe(Signal::ModelCalls { calls });
+                        debug_assert_eq!(decision, Decision::RemindTest { calls, last_test });
+                        router = next;
+                        ledger.test_reminded(tier, calls).await?;
+                        session = session.with_user_text(test_reminder(calls, last_test));
+                        continue 'turns;
+                    }
+                    Some(Halt::Escalate(reason)) => {
+                        if router.tier() == Tier::Core {
+                            // Not an edit rule, which `fold_tools` already applied:
+                            // Core used its calls without a patch.
+                            let calls = ledger.record().model_calls;
+                            let (next, decision) = router.observe(Signal::ModelCalls { calls });
+                            debug_assert_eq!(decision, Decision::Escalate(reason));
+                            router = next;
+                            ledger.escalated(reason.to_string(), calls).await?;
+                        }
+                        first_expert_call = true;
+                        continue 'turns;
+                    }
+                    Some(Halt::CheckImpact) => {
+                        let record = ledger.record();
+                        let calls_left = limits.max_model_calls.saturating_sub(record.model_calls);
+                        let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
+                        let room = calls_left >= IMPACT_CALLS
+                            && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
+                        if !room {
+                            // Not enough budget room to act on impact notes; stop checking.
+                            impact_checks = 2;
+                            continue 'turns;
+                        }
+                        let current_functions = changed_functions(tree, base);
+                        if impact_checks == 0 || !current_functions.is_subset(&known_functions) {
+                            known_functions = current_functions;
+                            impact_checks += 1;
+                            if let Some(impact) = tools.impact(base).await {
+                                match impact {
+                                    Ok(impact) => {
+                                        ledger.impact_checked(impact.files(), None).await?;
+                                        if let Some(note) = impact.note() {
+                                            session = session.with_user_text(note);
+                                        }
+                                    }
+                                    Err(why) => {
+                                        ledger.impact_checked(Vec::new(), Some(why)).await?
+                                    }
+                                }
+                            }
+                        }
+                        continue 'turns;
+                    }
+                    None => return Ok(Ending::stop(Outcome::StoppedSteps, reason)),
+                },
+                LoopEnd::Finished { .. } => last_reply(&session),
+            };
+
+            match parse_answer(&reply) {
+                Ok(answer) => {
+                    // What the agent said it did, for the job's page (#316).
+                    let (summary, hidden) = summary_of(&answer);
+                    ledger.secrets_redacted(hidden).await?;
+                    ledger.answered(summary).await?;
+                    answer
+                }
+                Err(why) if answer_retries < MAX_ANSWER_RETRIES => {
+                    answer_retries += 1;
+                    session = session.with_message(Message::user_text(format!(
+                        "Your final answer could not be read ({why}). Reply with only the JSON \
                      object described in the instructions."
-                )));
-                continue;
-            }
-            Err(why) => {
-                return Ok(Ending::stop(
-                    Outcome::StoppedSteps,
-                    format!("no usable final answer: {why}"),
-                ));
+                    )));
+                    continue 'turns;
+                }
+                Err(why) => {
+                    return Ok(Ending::stop(
+                        Outcome::StoppedSteps,
+                        format!("no usable final answer: {why}"),
+                    ));
+                }
             }
         };
         if answer.status == Status::Stopped {
@@ -1368,7 +1422,7 @@ where
         }
 
         let gate_started = Instant::now();
-        let report = gate(cfg, profiles, tree, base, job_dir, &answer, cancel).await?;
+        let report = gate(cfg, profiles, tree, base, job_dir, &answer, policy, cancel).await?;
         ledger
             .gate_run(gate_run(&report, gate_started.elapsed()))
             .await?;

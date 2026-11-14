@@ -154,6 +154,7 @@ impl EvalIssue {
                 known_failures: self.hidden_known_failures.clone(),
             }),
             kind: None,
+            cve: None,
         })
     }
 

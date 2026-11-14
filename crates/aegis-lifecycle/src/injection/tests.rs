@@ -221,6 +221,7 @@ fn a_doc_case_plants_in_its_file_and_a_missing_file_is_an_error() {
 
 fn eval_job() -> IssueInput {
     IssueInput {
+        cve: None,
         id: "gin-4622-x-r1".into(),
         title: "Bind fails".into(),
         body: "Steps:\n1. bind\n".into(),
