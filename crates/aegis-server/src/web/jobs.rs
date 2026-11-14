@@ -301,6 +301,9 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
         }
         LedgerEvent::SecretsRedacted { count } => row("redact secrets", format!("{count} values")),
         LedgerEvent::HiddenTests { .. } => return None,
+        // Shadow triage (#497) is measured against the review: a reviewer
+        // who saw it might judge the PR by it. Only the KPI report shows it.
+        LedgerEvent::Triaged { .. } => return None,
         LedgerEvent::Finished {
             outcome,
             wall_time_s,
@@ -570,6 +573,14 @@ mod tests {
             duration_s: 1.0,
         };
         assert!(event_row(&hidden).is_none());
+        let triaged = LedgerEvent::Triaged {
+            triage: aegis_ledger::Triage {
+                category: aegis_ledger::TriageCategory::OpsOrConfig,
+                confidence: 0.9,
+                reason: "x".into(),
+            },
+        };
+        assert!(event_row(&triaged).is_none());
         let finished = LedgerEvent::Finished {
             outcome: Outcome::PrOpened,
             wall_time_s: 90.0,

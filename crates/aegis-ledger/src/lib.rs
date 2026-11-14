@@ -11,6 +11,7 @@ mod pricing;
 mod record;
 pub mod report;
 mod store;
+mod triage;
 
 pub use error::LedgerError;
 pub use issue::{IssueLedger, MAX_CHANGES, MAX_NOTE_CHARS, MAX_TEXT_CHARS, MAX_TITLE_CHARS};
@@ -22,7 +23,8 @@ pub use pricing::{LongPrompt, ModelPrice, PriceTable};
 pub use record::{
     AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, InputFlag, IssueId,
     IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier, TokenCounts,
-    ToolCall,
+    ToolCall, Triage, TriageCategory,
 };
 pub use report::{Report, SetIssue};
 pub use store::{CopyReport, JsonFileLedger, LedgerStore, MemoryLedger, copy_ledger};
+pub use triage::{TriageRow, TriageTable};

@@ -4,6 +4,7 @@
 - Status: Accepted
 - Decider: @Nguyen Han Hoang Hai
 - Issue: #451 (Milestone: `Phase 3 – Mở rộng`, builds on [ADR 0011](0011-ams-direction.md), prerequisite for #456, #457)
+- Amendments: 2026-11-14, triage runs in shadow first (#497): see "Amendment (#497)" below
 
 ## Context
 
@@ -44,6 +45,15 @@ Previously, Aegis treated every incoming ticket as an actionable code defect: it
 4. **Telemetry & Dashboard Metrics:**
    - Emits Prometheus counter `aegis_triage_total{category="code_bug|ops_or_config|data_issue|needs_info"}`.
    - Surfaces ticket deflection rates on the Askama + htmx dashboard, measuring the percentage of AMS incidents resolved without developer intervention.
+
+## Amendment (#497): shadow triage first
+
+A misread ticket in the diagnostic lane costs more than a wasted job: a real code bug read as `ops_or_config` gets no PR. How often that happens is not known yet, so the triage runs in **shadow** before the lane (§2, §3) is turned on (#451, after the pilot #158):
+
+1. **No extra call.** The Light classification every job already makes (`aegis-lifecycle/src/light.rs`) also returns `triage` (the four categories of §1), `triage_confidence` (0–1) and `triage_reason`. A reply without them, or with them out of range, still classifies the issue; the job has no triage then. Tickets whose source sets their kind (a CI failure, Sonar) skip Light and get none.
+2. **Recorded only.** The ledger keeps a `triaged` event (`IssueRecord.triage`), and the server counts `aegis_triage_total{category}`. Every job still works on the code, opens its PR and is reviewed as before; nothing is posted to the tracker.
+3. **Not shown per job.** The job page, which reviewers read, leaves the triage out, as it does hidden test results (ADR 0005): a reviewer who saw "ops_or_config, 0.9" might judge the PR by it, and the measurement would measure that.
+4. **Measured against the jobs.** `aegis report` and the dashboard show, per category, the jobs, their PRs, accepted and rejected PRs, and jobs with no PR. A ticket read as anything but `code_bug` whose PR was accepted is a miss the lane would have made. #451 turns the lane on, per category and above a confidence, only where the pilot's table shows such misses are rare.
 
 ## Consequences
 

@@ -85,6 +85,12 @@ struct RepoLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct TriageLabels {
+    /// `code_bug`, `ops_or_config`, `data_issue`, `needs_info`.
+    category: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct QueueLabels {
     state: &'static str,
 }
@@ -108,6 +114,7 @@ pub struct Metrics {
     queue_oldest_ready_seconds: Gauge<f64, AtomicU64>,
     budget_spent_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
     budget_cap_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
+    triage: Family<TriageLabels, Counter>,
 }
 
 impl Metrics {
@@ -183,7 +190,14 @@ impl Metrics {
             "Each repo's monthly cap, in $; absent for a repo without one",
             budget_cap_usd.clone(),
         );
+        let triage = Family::default();
+        registry.register(
+            "triage",
+            "Tickets by what Light read them as needing (#497); recorded only",
+            triage.clone(),
+        );
         Self {
+            triage,
             registry,
             jobs_running,
             attempts,
@@ -197,6 +211,15 @@ impl Metrics {
             budget_spent_usd,
             budget_cap_usd,
         }
+    }
+
+    /// A ticket Light triaged (#497).
+    pub fn triaged(&self, category: aegis_ledger::TriageCategory) {
+        self.triage
+            .get_or_create(&TriageLabels {
+                category: category.as_str(),
+            })
+            .inc();
     }
 
     pub fn attempt_ended(&self, status: &str, seconds: f64) {
@@ -383,6 +406,24 @@ mod tests {
 
     fn line_of<'a>(text: &'a str, start: &str) -> Option<&'a str> {
         text.lines().find(|l| l.starts_with(start))
+    }
+
+    #[test]
+    fn triaged_tickets_count_by_category() {
+        let before = |text: &str| {
+            text.lines()
+                .find(|l| l.starts_with(r#"aegis_triage_total{category="data_issue"}"#))
+                .and_then(|l| l.rsplit(' ').next()?.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+        let n = before(&metrics().render().unwrap());
+        metrics().triaged(aegis_ledger::TriageCategory::DataIssue);
+        let text = metrics().render().unwrap();
+        assert_eq!(before(&text), n + 1, "{text}");
+        assert!(
+            text.contains("# HELP aegis_triage Tickets by what Light read"),
+            "{text}"
+        );
     }
 
     #[test]

@@ -243,6 +243,57 @@ async fn the_dashboard_matches_the_ledger_report() {
             "{value} missing from the dashboard"
         );
     }
+    // No job was triaged (#497): no triage table.
+    assert!(!page.body.contains("Triage, recorded only"));
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn the_dashboard_counts_the_shadow_triage_and_the_job_page_hides_it() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let typst = repo(s, "typst", "rust").await;
+    let triaged = LedgerEvent::Triaged {
+        triage: aegis_ledger::Triage {
+            category: aegis_ledger::TriageCategory::OpsOrConfig,
+            confidence: 0.7,
+            reason: "Reads like a timeout in the gateway.".into(),
+        },
+    };
+    let id = job(
+        s,
+        typst,
+        "typst-11",
+        Some(Outcome::PrOpened),
+        &[
+            triaged,
+            call(1.0, Tier::Core),
+            reviewed(ReviewVerdict::Accepted, 0, 2.0),
+        ],
+    )
+    .await;
+    let d = dashboard_kpis(s).await.unwrap();
+    let ops = d
+        .triage
+        .rows
+        .iter()
+        .find(|r| r.category == Some(aegis_ledger::TriageCategory::OpsOrConfig))
+        .unwrap();
+    assert_eq!((ops.jobs, ops.prs, ops.accepted), (1, 1, 1));
+
+    let app = app(s).await;
+    let page = get(&app, "/").await;
+    assert!(page.body.contains("Triage, recorded only"), "{}", page.body);
+    assert!(
+        page.body.contains("<th scope=\"row\">ops_or_config</th>"),
+        "{}",
+        page.body
+    );
+    // The job's page, which reviewers read, does not show it.
+    let job_page = get(&app, &format!("/jobs/{}", id.0)).await;
+    assert_eq!(job_page.status, StatusCode::OK);
+    assert!(!job_page.body.contains("ops_or_config"));
+    assert!(!job_page.body.contains("timeout in the gateway"));
     db.drop().await;
 }
 
