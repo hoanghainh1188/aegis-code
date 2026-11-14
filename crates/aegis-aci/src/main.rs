@@ -1,7 +1,8 @@
 //! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>] [--parts <file.toml>]
 //! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...
 //!  [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]]
-//! [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]`:
+//! [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]
+//! [--sidecars <file.toml>]`:
 //! serves the ACI tools for
 //! one repo over MCP on stdin/stdout. The overrides file holds the language
 //! part of the repo's `RepoConfig` ([`ProfileOverrides`]); the parts file
@@ -13,14 +14,17 @@
 //! in that image, as the gate's steps do: no network, the mounts read-only,
 //! the `--test-env` variables set, and within the `--sandbox-*` limits (the
 //! run's `[run.sandbox_limits]`, #320; a profile's own memory and CPUs in
-//! their place). `--test-dir` holds `run_tests`' logs.
+//! their place). `--test-dir` holds `run_tests`' logs. The sidecars file
+//! holds the repo's services (`[[sidecar]]`, as `[[repo.sidecars]]`, #491):
+//! with `--format-image`, `run_tests` reaches them as the gate's test steps
+//! do, fresh for each run, and they are removed when the session ends.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use aegis_aci::{Aci, AciServer, FormatContainer, RUN_TESTS_TIMEOUT, TestSettings};
-use aegis_gate::{Limits, Sandbox};
+use aegis_gate::{Limits, Sandbox, SidecarSpec, Sidecars, check_sidecars};
 use aegis_lang::{Language, ProfileOverrides, Profiles, RepoProfiles};
 use rmcp::ServiceExt;
 use serde::Deserialize;
@@ -29,7 +33,8 @@ const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides 
        [--parts <file.toml>]
        [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...
         [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]]
-       [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]";
+       [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]
+       [--sidecars <file.toml>]";
 
 /// How long `run_tests` waits for a test still running to stop when the
 /// client goes.
@@ -48,6 +53,7 @@ struct Args {
     test_env: Vec<(String, String)>,
     test_timeout: Option<Duration>,
     test_dir: Option<PathBuf>,
+    sidecars: Option<PathBuf>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -86,6 +92,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                 parsed.test_timeout = Some(Duration::from_secs(secs));
             }
             "--test-dir" => parsed.test_dir = Some(value()?.into()),
+            "--sidecars" => parsed.sidecars = Some(value()?.into()),
             "--sandbox-memory-mb" => parsed.limits.memory_mb = number(&flag, &value()?)?,
             "--sandbox-cpus" => parsed.limits.cpus = number(&flag, &value()?)?,
             "--sandbox-pids" => parsed.limits.pids = number(&flag, &value()?)?,
@@ -122,6 +129,14 @@ struct Part {
 struct Mount {
     host: String,
     path: String,
+}
+
+/// The `--sidecars` file (#491).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SidecarsFile {
+    #[serde(default)]
+    sidecar: Vec<SidecarSpec>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -178,24 +193,35 @@ fn build(args: Args) -> Result<Aci, String> {
         .map_err(|e| e.to_string())?
         .with_part_mounts(mounts);
     let defaults = TestSettings::default();
+    let sidecars: Vec<SidecarSpec> = match &args.sidecars {
+        Some(path) => read_toml::<SidecarsFile>(path)?.sidecar,
+        None => vec![],
+    };
+    check_sidecars(&sidecars)?;
     let mut tests = TestSettings {
         sandbox: None,
         env: args.test_env,
         timeout: args.test_timeout.unwrap_or(RUN_TESTS_TIMEOUT),
         work_dir: args.test_dir.unwrap_or(defaults.work_dir),
+        sidecars: None,
     };
     let aci = match (args.format_image, args.docker) {
         (Some(image), docker) => {
-            let container = FormatContainer::new(
-                docker.unwrap_or_else(|| "docker".into()),
-                image,
-                args.format_mounts,
-                args.limits,
-            );
+            let docker = docker.unwrap_or_else(|| "docker".into());
+            if !sidecars.is_empty() {
+                tests.sidecars = Some(Sidecars {
+                    docker: docker.clone(),
+                    specs: sidecars,
+                });
+            }
+            let container = FormatContainer::new(docker, image, args.format_mounts, args.limits);
             tests.sandbox = Some(test_sandbox(&container));
             aci.with_format_container(container)
         }
         (None, Some(_)) => return Err("--docker needs --format-image".into()),
+        (None, None) if !sidecars.is_empty() => {
+            return Err("--sidecars needs --format-image: they run in Docker".into());
+        }
         (None, None) => aci,
     };
     Ok(aci.with_test_settings(tests))

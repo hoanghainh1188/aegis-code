@@ -100,6 +100,11 @@ impl Aci {
         self.tests.run(&self.workspace, test)
     }
 
+    /// Removes the sidecars `run_tests` started (#491), if any.
+    pub fn stop_sidecars(&mut self) {
+        self.tests.stop_sidecars();
+    }
+
     /// Runs the profile's formatter in `container` (see [`FormatContainer`]).
     pub fn with_format_container(self, container: FormatContainer) -> Self {
         Self {
