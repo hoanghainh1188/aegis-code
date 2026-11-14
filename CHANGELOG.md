@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.12.0...v0.13.0) (2026-11-14)
+
+
+### Features
+
+* **gate:** bug-fixes keep every locked version; an upgrade policy for CVE jobs ([#500](https://github.com/hoanghainh1188/aegis-code/issues/500)) ([#503](https://github.com/hoanghainh1188/aegis-code/issues/503)) ([d11703e](https://github.com/hoanghainh1188/aegis-code/commit/d11703e32e5ff126d0c7ef5834c1f4f6f89d0edf))
+* **lifecycle:** CVE jobs — the platform upgrades, the agent adapts; aegis cve ([#501](https://github.com/hoanghainh1188/aegis-code/issues/501)) ([#504](https://github.com/hoanghainh1188/aegis-code/issues/504)) ([8b9ccc6](https://github.com/hoanghainh1188/aegis-code/commit/8b9ccc602ed84d74a84264328c1251f8fba55ccb))
+* **lifecycle:** shadow L1/L2 triage, recorded and measured, no diversion ([#497](https://github.com/hoanghainh1188/aegis-code/issues/497)) ([#498](https://github.com/hoanghainh1188/aegis-code/issues/498)) ([d7065a9](https://github.com/hoanghainh1188/aegis-code/commit/d7065a91fb311b0a30e7b2e10258f96c1aa9d7d4))
+* **server:** CVE jobs from the API and the jobs page ([#502](https://github.com/hoanghainh1188/aegis-code/issues/502)) ([#505](https://github.com/hoanghainh1188/aegis-code/issues/505)) ([f5ea31a](https://github.com/hoanghainh1188/aegis-code/commit/f5ea31a70c95a619b542bce7cfbc55ba6af66e84))
+
+
+### Documentation
+
+* pilot plan uses v0.13.0, with shadow triage and locked lockfiles ([#506](https://github.com/hoanghainh1188/aegis-code/issues/506)) ([#507](https://github.com/hoanghainh1188/aegis-code/issues/507)) ([cd31f4a](https://github.com/hoanghainh1188/aegis-code/commit/cd31f4ad3a4dd42512a34cf5764d111498f2f1c3))
+
 ## [0.12.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.11.0...v0.12.0) (2026-11-14)
 
 
