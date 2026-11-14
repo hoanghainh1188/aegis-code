@@ -108,7 +108,7 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 5. **Post-Installation Verification:**
    - Verify health: `curl http://127.0.0.1:8080/api/v1/health`
    - Access dashboard at your configured domain and log in via OIDC.
-   - Grant initial administrator privileges. `aegis-deploy.sh` does this itself for `AEGIS_ADMIN_EMAIL` in `.env`; for anyone else:
+   - Grant initial administrator privileges. `aegis-deploy.sh` does this itself for `AEGIS_ADMIN_EMAIL` in `.env`, before that person's first sign-in. That works only if the SSO marks the email verified (not Entra ID, [install guide A4](../install-on-premise.md#a4-an-oidc-client-in-your-sso)). Otherwise, leave `AEGIS_ADMIN_EMAIL` unset, sign in once, then:
 
    ```bash
    docker compose exec aegis aegis-server --config /etc/aegis/server.toml grant admin@example.com admin
@@ -163,7 +163,7 @@ From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` does steps
 - it asks for the maintainers' and reviewers' emails, and the monthly budget;
 - it writes the token and the repo file, runs `repo add` and `grant`, and prints the webhook settings of step 5 with the link to the repo's budget page.
 
-Every value can come from the environment instead, as for `install.sh`. The variables are `AEGIS_REPO_URL`, `AEGIS_REPO_SLUG`, `AEGIS_REPO_BRANCH`, `AEGIS_REPO_LANGUAGE`, `AEGIS_REPO_MODE`, `AEGIS_FORK_OWNER`, `AEGIS_FORK_NAME`, `AEGIS_FORK_TOKEN`, `AEGIS_MAINTAINERS`, `AEGIS_REVIEWERS` and `AEGIS_MONTHLY_USD`. The script is for GitHub repos; a GitLab repo takes the steps below by hand.
+Every value can come from the environment instead, as for `install.sh`. The variables are `AEGIS_REPO_URL`, `AEGIS_REPO_SLUG`, `AEGIS_REPO_BRANCH`, `AEGIS_REPO_LANGUAGE`, `AEGIS_REPO_MODE`, `AEGIS_FORK_OWNER`, `AEGIS_FORK_NAME`, `AEGIS_FORK_TOKEN`, `AEGIS_MAINTAINERS`, `AEGIS_REVIEWERS` and `AEGIS_MONTHLY_USD`. The script is for GitHub repos; a GitLab repo takes the steps below by hand. Its grants, like any made before someone's first sign-in, need an email the SSO marks verified.
 
 By hand, `aegis` stands for `docker compose exec aegis aegis-server --config /etc/aegis/server.toml`; the details of each step are in [AWS Runbook Section 6](README.md#6-adding-repositories).
 

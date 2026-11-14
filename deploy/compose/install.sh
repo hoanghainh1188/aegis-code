@@ -98,6 +98,9 @@ if grep -q '^# \[auth.oidc\]$' server.toml; then
   fi
 fi
 if ! grep -q '^AEGIS_ADMIN_EMAIL=.' .env; then
+  # A role granted before the first sign-in needs an email the SSO marks
+  # verified; without that (Entra ID), grant after signing in instead.
+  interactive && echo "Leave the next one empty if your SSO does not mark emails verified (Entra ID): grant admin after your first sign-in." >&2
   ask_valid AEGIS_ADMIN_EMAIL "Email of the first admin, as your SSO reports it" valid_email \
     || die "AEGIS_ADMIN_EMAIL: not an email"
   if [ -n "$AEGIS_ADMIN_EMAIL" ]; then

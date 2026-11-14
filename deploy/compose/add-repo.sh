@@ -73,6 +73,9 @@ if [ ! -e "secrets/$token_env" ]; then
   echo "secret $token_env"
 fi
 
+# Granting before someone's first sign-in needs an email the SSO marks
+# verified; without that (Entra ID), grant after they have signed in.
+interactive && echo "People granted before their first sign-in need an email the SSO marks verified (not Entra ID); else leave these empty and grant later." >&2
 ask_valid AEGIS_MAINTAINERS "Emails of maintainers, who start jobs and set budgets" emails \
   || die "AEGIS_MAINTAINERS: emails"
 ask_valid AEGIS_REVIEWERS "Emails of reviewers" emails || die "AEGIS_REVIEWERS: emails"

@@ -49,7 +49,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setup) trên `<host-ssh>`:
 
 1. `sudo ./install.sh` (chạy một lần). Script hỏi:
-   - URL công khai, issuer và client ID của OIDC, email của admin đầu tiên;
+   - URL công khai, issuer và client ID của OIDC, email của admin đầu tiên. Email admin chỉ dùng được nếu SSO đánh dấu email là đã xác minh; với Entra ID thì để trống, đăng nhập một lần, rồi cấp quyền (hướng dẫn cài đặt, B9);
    - các sandbox cần kéo về, chỉ chọn ngôn ngữ của repo;
    - API key Claude, OIDC client secret và token để comment. Ba thứ này nhập ẩn.
    Câu nào để trống thì chạy lại script sẽ được hỏi lại.

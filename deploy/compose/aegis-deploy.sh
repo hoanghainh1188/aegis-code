@@ -10,7 +10,8 @@
 #
 # With AEGIS_ADMIN_EMAIL in .env (install.sh asks for it, #476), that
 # person is granted admin once the server is healthy; granting it again
-# changes nothing.
+# changes nothing. Before that person's first sign-in, this works only if
+# the SSO marks the email verified (docs/install-on-premise.md, A4).
 #
 # Usage: sudo ./aegis-deploy.sh [--offline] <version>
 set -euo pipefail
