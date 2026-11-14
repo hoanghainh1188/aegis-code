@@ -165,6 +165,7 @@ impl Repo {
                 fetch: None,
                 build_cache: None,
             }],
+            sidecars: None,
         })
         .unwrap()
     }

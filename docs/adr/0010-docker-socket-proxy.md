@@ -38,6 +38,7 @@ Every container comes from `Hardening::args` (#320): no capabilities, `no-new-pr
      - **Bind mounts** must resolve, after following symbolic links, to a path under a `--mount-root` (the workspace). Docker follows links in mount sources, so a link in a job's tree pointing at `/` would otherwise mount the machine. Missing sources are refused because the daemon would create them.
      - **Other mounts** may only be anonymous volumes and tmpfs, with no driver or bind options: a `local` volume's options can bind any host path.
    - **Networks:** `none`, the fetch step's `aegis-fetch-*` networks (created only as internal bridges), or a network the deployment lists, with no endpoint settings. The default bridge is allowed without bind mounts: that is the egress proxy, which holds nothing of a job.
+   - **Sidecars (#490, [ADR 0013](0013-ephemeral-database-sidecars.md)):** `aegis-sidecar-*` networks, internal bridges only. A container named `aegis-sidecar-*` runs only an image the deployment lists with `--sidecar-image`, mounts nothing of the host, and is on its own network (the only containers with network aliases) or in a sidecar's network namespace (its readiness probe). A gate step may join a sidecar network or `container:aegis-sidecar-*`, and no other namespace.
    - **API versions** before 1.44 (Docker 25) are refused. Before 1.24, `start` took a `HostConfig` of its own. Before 1.41, an unset `CgroupnsMode` meant the host's namespace on cgroup v1.
    - **tmpfs** must be `nosuid,nodev`, as `Hardening::args` sets it.
 

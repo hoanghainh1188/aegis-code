@@ -9,7 +9,7 @@ use std::path::{Component, Path};
 use serde_json::{Map, Value, json};
 
 use super::json::{self, object};
-use super::{Policy, is_fetch_network};
+use super::{Policy, is_fetch_network, is_sidecar};
 
 /// Runtimes a sandbox may ask for: the default, and gVisor (#322).
 const RUNTIMES: &[&str] = &["", "runc", "runsc"];
@@ -52,12 +52,18 @@ const HOST_KEYS: &[&str] = &[
 
 impl Policy {
     /// The body to send for `POST /containers/create?name=<name>`.
-    pub fn create(&self, body: &Value) -> Result<Value, String> {
+    pub fn create(&self, name: &str, body: &Value) -> Result<Value, String> {
         let config = json::kept(object(body, "the body")?, CONFIG_KEYS, "Config")?;
         let user = user(json::string(&config, "User")?)?;
         let image = json::string(&config, "Image")?;
         if image.is_empty() {
             return Err("no Image".into());
+        }
+        // A sidecar (#490) runs a service the deployment allows, and
+        // nothing of a job or of the host is in it.
+        let sidecar = is_sidecar(name);
+        if sidecar && !self.sidecar_images.iter().any(|i| i == image) {
+            return Err(format!("image {image:?} is not one of the sidecar images"));
         }
         let host_in = config.get("HostConfig").ok_or("no HostConfig")?;
         let host = json::kept(object(host_in, "HostConfig")?, HOST_KEYS, "HostConfig")?;
@@ -80,7 +86,10 @@ impl Policy {
         let mounts = self.mounts(&host)?;
         let tmpfs = tmpfs(&host)?;
         let any_bind = !binds.is_empty() || mounts.iter().any(|m| m["Type"] == "bind");
-        let network = self.network(&host, &config, any_bind)?;
+        if sidecar && any_bind {
+            return Err("a sidecar mounts nothing of the host".into());
+        }
+        let (network, endpoint) = self.network(&host, &config, any_bind, sidecar)?;
         out_host.insert("Binds".into(), binds.into());
         out_host.insert("Mounts".into(), mounts.into());
         out_host.insert("Tmpfs".into(), tmpfs.into());
@@ -110,10 +119,12 @@ impl Policy {
             json::string(&config, "WorkingDir")?.into(),
         );
         out.insert("HostConfig".into(), Value::Object(out_host));
-        out.insert(
-            "NetworkingConfig".into(),
-            json!({ "EndpointsConfig": { network: {} } }),
-        );
+        if let Some(endpoint) = endpoint {
+            out.insert(
+                "NetworkingConfig".into(),
+                json!({ "EndpointsConfig": { network: endpoint } }),
+            );
+        }
         Ok(Value::Object(out))
     }
 
@@ -193,19 +204,27 @@ impl Policy {
         }
     }
 
-    /// `none`, the fetch step's network, or one of [`Policy::networks`].
-    /// The default bridge only without bind mounts: the egress proxy,
-    /// which reaches the registries and holds nothing of a job.
+    /// `none`, the fetch step's network, a sidecar network, the network
+    /// namespace of a sidecar (`container:<sidecar>`), or one of
+    /// [`Policy::networks`]. The default bridge only without bind mounts:
+    /// the egress proxy, which reaches the registries and holds nothing of
+    /// a job. A sidecar is only on its own network or another sidecar's
+    /// namespace (its readiness probe), and only a sidecar on its network
+    /// has aliases. The network and its endpoint settings; none for a
+    /// namespace, which takes no endpoint.
     fn network(
         &self,
         host: &Map<String, Value>,
         config: &Map<String, Value>,
         any_bind: bool,
-    ) -> Result<String, String> {
+        sidecar: bool,
+    ) -> Result<(String, Option<Value>), String> {
         let mode = json::string(host, "NetworkMode")?;
         let mode = if mode.is_empty() { "bridge" } else { mode };
         // The client names no endpoint for `--network`; any it names must
-        // be the same network, with no settings (aliases, addresses).
+        // be the same network, with no settings (addresses) but a
+        // sidecar's aliases.
+        let mut aliases: Vec<String> = vec![];
         if let Some(net) = config.get("NetworkingConfig") {
             let net = json::kept(
                 object(net, "NetworkingConfig")?,
@@ -214,23 +233,51 @@ impl Policy {
             )?;
             if let Some(endpoints) = net.get("EndpointsConfig") {
                 for (name, endpoint) in object(endpoints, "EndpointsConfig")? {
-                    if name != mode || !json::is_zero(endpoint) {
+                    let mut rest = object(endpoint, "endpoint")?.clone();
+                    if let Some(list) = rest.remove("Aliases") {
+                        let list = Map::from_iter([("Aliases".to_owned(), list)]);
+                        let names = json::strings(&list, "Aliases")?;
+                        aliases.extend(names.into_iter().map(str::to_owned));
+                    }
+                    if name != mode || !json::is_zero(&Value::Object(rest)) {
                         return Err(format!("endpoint {name:?} besides network {mode:?}"));
                     }
                 }
             }
         }
+        let namespace = mode.strip_prefix("container:").is_some_and(is_sidecar);
+        if !aliases.is_empty() && !(sidecar && is_sidecar(mode)) {
+            return Err("only a sidecar has network aliases, on its own network".into());
+        }
+        if let Some(bad) = aliases.iter().find(|a| !is_host_name(a)) {
+            return Err(format!("alias {bad:?} is not a host name"));
+        }
         let ok = match mode {
+            _ if sidecar => is_sidecar(mode) || namespace,
             "none" => true,
             "bridge" | "default" => !any_bind || self.networks.iter().any(|n| n == mode),
-            n => is_fetch_network(n) || self.networks.iter().any(|m| m == n),
+            _ if namespace => true,
+            n => is_fetch_network(n) || is_sidecar(n) || self.networks.iter().any(|m| m == n),
         };
-        if ok {
-            Ok(mode.to_owned())
-        } else {
-            Err(format!("network {mode:?} is not allowed here"))
+        if !ok {
+            return Err(format!("network {mode:?} is not allowed here"));
         }
+        let endpoint = match (namespace, aliases.is_empty()) {
+            (true, _) => None,
+            (false, true) => Some(json!({})),
+            (false, false) => Some(json!({ "Aliases": aliases })),
+        };
+        Ok((mode.to_owned(), endpoint))
     }
+}
+
+/// A sidecar's name on its network: lowercase letters, digits and `-`.
+fn is_host_name(name: &str) -> bool {
+    name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && name.len() <= 63
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// The flags `Hardening::args` always sets (#320), exactly.

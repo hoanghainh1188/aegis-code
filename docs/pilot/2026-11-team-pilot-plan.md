@@ -54,7 +54,7 @@ Làm theo [runbook on-premise §2](../runbook/on-premise.md#2-registering-reposi
    docker compose exec aegis aegis check-repo --config .workspace/preflight/<slug>.toml
    ```
 
-   Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục chặn phải qua trước khi đăng ký repo. Nếu test của repo cần DB hoặc mạng thì repo này chưa hợp để chạy thử (xem #454). Test hỏng trên base cũng chặn (#487). Format hay lint hỏng trên base chỉ là cảnh báo, vì gate chấm bản vá theo các lỗi mà bản vá thêm vào.
+   Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục chặn phải qua trước khi đăng ký repo. Nếu test của repo cần PostgreSQL, Redis hay MySQL thì khai báo chúng là sidecar trong file repo (`[[settings.sidecars]]`, [runbook repos](../runbook/repos.md#registration-and-cloning) bước 7; #490) và cho image qua proxy (`--sidecar-image`). Nếu test cần Internet thì repo này chưa hợp để chạy thử. Lưu ý: `run_tests` của agent chưa có sidecar (#491), nên chỉ gate thấy kết quả thật của test cần DB. Test hỏng trên base cũng chặn (#487). Format hay lint hỏng trên base chỉ là cảnh báo, vì gate chấm bản vá theo các lỗi mà bản vá thêm vào.
 2. `sudo ./add-repo.sh`. Script hỏi:
    - URL của `<owner/name>`, slug, nhánh mặc định, ngôn ngữ và mode;
    - fork cùng token của fork, nhập ẩn;
@@ -104,7 +104,7 @@ Nếu `<owner/name>` là repo nội bộ và khách đồng ý bằng văn bản
 
 | Rủi ro | Cách giảm |
 | --- | --- |
-| Test của repo cần DB hoặc mạng, nên không chạy được trong sandbox `--network none` | `check-repo` phát hiện ở bước 2.1. Chọn repo khác, hoặc chờ #454 |
+| Test của repo cần DB hoặc mạng, nên không chạy được trong sandbox `--network none` | `check-repo` phát hiện ở bước 2.1. DB, cache: khai báo sidecar (#490). Internet: chọn repo khác |
 | Đĩa đầy vì cache build (một repo Rust lớn cần 30–40 GB) | Kiểm tra `df -h` mỗi ngày (bản Compose không có Grafana), dọn cache build. Máy tối thiểu 100 GB SSD |
 | API model lỗi (5xx, 429) hàng loạt | Server thử lại 3 lần, giãn cách tăng dần từ 30 giây. Hết lượt thử thì job lỗi; chạy lại bằng `POST /api/v1/jobs/{id}/retry` ([runbook §4](../runbook/README.md#4-troubleshooting)) |
 | Team chỉ giao việc khó, nên tỉ lệ chấp nhận thấp | Chọn issue cùng team trong tuần đầu, và ghi độ khó của từng issue vào bảng tuần |

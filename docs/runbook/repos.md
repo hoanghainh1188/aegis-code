@@ -70,6 +70,28 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
 6. **Writing Effective Conventions:** Detail commands required to execute a **single** test and specify where reproduction tests should be authored. General language test conventions already exist in `prompts/conventions/`; repository conventions should focus on project-specific guidelines.
 
+7. **Services the tests need (#490, [ADR 0013](../adr/0013-ephemeral-database-sidecars.md)):** tests that connect to PostgreSQL, Redis or MySQL fail in the gate's `--network none` sandbox, and `aegis check-repo` reports them under "Network & DB Isolation". Declare each service in the repo file, under `[settings]`:
+
+   ```toml
+   [[settings.sidecars]]
+   name = "postgres"                      # host name on the sidecars' network
+   image = "postgres:16-alpine"           # must be in the proxy's --sidecar-image list
+   user = "70:70"                         # the image's service user, never root
+   env = { POSTGRES_PASSWORD = "test" }
+   tmpfs = ["/var/lib/postgresql/data", "/var/run/postgresql"]  # what it writes, on tmpfs
+   ready = ["pg_isready", "-h", "localhost"]                    # exits 0 once it accepts connections
+   ready_timeout_s = 60
+   test_env = { DATABASE_URL = "postgres://postgres:test@postgres:5432/postgres" }
+   # localhost = true                     # tests that connect to localhost:5432
+   ```
+
+   - Only `repro_test`, `test` and `coverage` reach the sidecars, on an internal network of their own: no step reaches the host or the Internet. Format, lint and the fetch step stay as before.
+   - Tests reach a sidecar by its `name` (`postgres:5432`), through what `test_env` gives them. For tests that hard-code `localhost`, `localhost = true` runs the test steps in that sidecar's network namespace; other sidecars are still reached by name. One sidecar per repo may have it.
+   - Each test command finds fresh services: the sidecars are stopped and started between commands, which empties their tmpfs. A test suite that needs a schema creates it, as in its own CI.
+   - The service runs as `user` with no capabilities and a read-only root. An image that must start as root (to `chown` its data directory) does not run; use its non-root user and list what it writes in `tmpfs`. Common users: `postgres:*-alpine` 70:70, `postgres:*` (Debian) 999:999, `redis:*` 999:1000, `mysql:*` 999:999.
+   - The deployment allows the image: the proxy's `--sidecar-image` ([On-Premise](on-premise.md#2-registering-repositories)), and the image is pulled or loaded on the machine. A run configuration declares the same as `[[repo.sidecars]]`.
+   - The agent's own `run_tests` does not reach the sidecars yet (#491): a test it runs that needs the database fails there, and only the gate shows its real result.
+
 ### RBAC and Budgets
 
 7. Grant dashboard permissions: `... grant <email> <repo-slug> maintainer|reviewer|viewer` (maintainer: start/cancel jobs, set budgets; reviewer: review PRs; viewer: read-only).
