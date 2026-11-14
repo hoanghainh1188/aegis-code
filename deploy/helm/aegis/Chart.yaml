@@ -3,8 +3,8 @@ name: aegis
 description: aegis-server on Kubernetes, with a Docker daemon of its own in each worker Pod (ADR 0008)
 type: application
 # Both kept by release-please (release-please-config.json).
-version: 0.9.0 # x-release-please-version
-appVersion: "0.9.0" # x-release-please-version
+version: 0.10.0 # x-release-please-version
+appVersion: "0.10.0" # x-release-please-version
 # Native sidecars: the daemon starts before the worker and stops after it
 # has drained.
 kubeVersion: ">=1.29.0-0"
