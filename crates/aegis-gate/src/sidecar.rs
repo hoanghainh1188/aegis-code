@@ -181,9 +181,10 @@ pub struct Sidecars {
     pub specs: Vec<SidecarSpec>,
 }
 
-/// Running sidecars and their network; all removed on drop.
+/// Running sidecars and their network; all removed on drop. The gate
+/// holds one per run; the ACI's `run_tests` one per session (#491).
 #[derive(Debug)]
-pub(crate) struct SidecarSession {
+pub struct SidecarSession {
     docker: String,
     network: String,
     /// Container name and spec, in the order declared.
@@ -286,7 +287,7 @@ impl Sidecars {
 
     /// Starts every sidecar on a new internal network and waits until
     /// each is ready. On an error, what was started is removed.
-    pub(crate) fn start(&self) -> Result<SidecarSession, GateError> {
+    pub fn start(&self) -> Result<SidecarSession, GateError> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let id = format!("{SIDECAR_PREFIX}{}-{n}", std::process::id());
@@ -313,7 +314,7 @@ impl Sidecars {
 impl SidecarSession {
     /// The sandbox of a test step: on the sidecars' network, or in the
     /// network namespace of the `localhost` one, with their `test_env`.
-    pub(crate) fn sandbox_for(&self, sandbox: &Sandbox) -> Sandbox {
+    pub fn sandbox_for(&self, sandbox: &Sandbox) -> Sandbox {
         let network = match self.containers.iter().find(|(_, s)| s.localhost) {
             Some((container, _)) => format!("container:{container}"),
             None => self.network.clone(),
@@ -331,7 +332,7 @@ impl SidecarSession {
 
     /// Stops and starts every sidecar, which empties its tmpfs, and waits
     /// until each is ready again.
-    pub(crate) fn reset(&self) -> Result<(), GateError> {
+    pub fn reset(&self) -> Result<(), GateError> {
         for (container, spec) in &self.containers {
             docker(&self.docker, &["stop", "--time", "5", container])
                 .and_then(|_| docker(&self.docker, &["start", container]))

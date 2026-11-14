@@ -90,7 +90,7 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    - Each test command finds fresh services: the sidecars are stopped and started between commands, which empties their tmpfs. A test suite that needs a schema creates it, as in its own CI.
    - The service runs as `user` with no capabilities and a read-only root. An image that must start as root (to `chown` its data directory) does not run; use its non-root user and list what it writes in `tmpfs`. Common users: `postgres:*-alpine` 70:70, `postgres:*` (Debian) 999:999, `redis:*` 999:1000, `mysql:*` 999:999.
    - The deployment allows the image: the proxy's `--sidecar-image` ([On-Premise](on-premise.md#2-registering-repositories)), and the image is pulled or loaded on the machine. A run configuration declares the same as `[[repo.sidecars]]`.
-   - The agent's own `run_tests` does not reach the sidecars yet (#491): a test it runs that needs the database fails there, and only the gate shows its real result.
+   - The agent's `run_tests` reaches them too (#491), on sidecars of its own session: the agent sees the result the gate will.
 
 ### RBAC and Budgets
 

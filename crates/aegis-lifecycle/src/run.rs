@@ -448,6 +448,18 @@ fn parts_file(cfg: &RunConfig, profiles: &RepoProfiles) -> Result<String, Lifecy
     toml::to_string(&file).map_err(|e| LifecycleError::Config(format!("repo.dirs: {e}")))
 }
 
+/// `repo.sidecars` as the ACI's `--sidecars` file (`[[sidecar]]`, #491).
+fn sidecars_file(cfg: &RunConfig) -> Result<String, LifecycleError> {
+    #[derive(serde::Serialize)]
+    struct File<'a> {
+        sidecar: &'a [aegis_gate::SidecarSpec],
+    }
+    toml::to_string(&File {
+        sidecar: &cfg.repo.sidecars,
+    })
+    .map_err(|e| LifecycleError::Config(format!("repo.sidecars: {e}")))
+}
+
 /// The variables the `docker` client needs to find the daemon, as `lookup`
 /// gives them, other than those every MCP server gets anyway (#278).
 fn docker_client_env(lookup: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
@@ -522,6 +534,13 @@ fn tool_specs(
             ("--sandbox-tmp-mb", limits.tmp_mb),
         ] {
             args.extend([flag.into(), n.to_string()]);
+        }
+        // `run_tests` reaches the services the gate's test steps do (#491).
+        if !cfg.repo.sidecars.is_empty() {
+            let file = job_dir.join("sidecars.toml");
+            std::fs::write(&file, sidecars_file(cfg)?)
+                .map_err(|e| LifecycleError::io(&file, &e))?;
+            args.extend(["--sidecars".into(), file.display().to_string()]);
         }
     }
     let mut specs = vec![McpServerSpec {
@@ -1582,6 +1601,41 @@ mod tests {
                 .any(|(host, inside)| inside == "/work/.venv" && host.contains("parts/py/deps")),
             "{mounts:?}"
         );
+    }
+
+    #[test]
+    fn run_tests_gets_the_sidecars_the_gate_does() {
+        // #491: the agent's `run_tests` reaches the repo's services.
+        let mut cfg = monorepo(true);
+        cfg.repo.sidecars = vec![
+            toml::from_str(
+                r#"name = "postgres"
+image = "postgres:16-alpine"
+user = "70:70"
+ready = ["pg_isready"]
+test_env = { DATABASE_URL = "postgres://postgres:5432/t" }"#,
+            )
+            .unwrap(),
+        ];
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let job_dir = cfg.run.state_dir.join("jobs/sidecars");
+        std::fs::create_dir_all(&job_dir).unwrap();
+        let aci = |cfg: &RunConfig| {
+            let specs = tool_specs(cfg, &profiles, &job_dir.join("repo"), &job_dir).unwrap();
+            specs.into_iter().find(|s| s.name == "aci").unwrap().args
+        };
+        let args = aci(&cfg);
+        let at = args.iter().position(|a| a == "--sidecars").unwrap();
+        let file = std::fs::read_to_string(&args[at + 1]).unwrap();
+        #[derive(serde::Deserialize)]
+        struct File {
+            sidecar: Vec<aegis_gate::SidecarSpec>,
+        }
+        let read: File = toml::from_str(&file).unwrap();
+        assert_eq!(read.sidecar, cfg.repo.sidecars);
+        // None declared: no flag.
+        cfg.repo.sidecars.clear();
+        assert!(!aci(&cfg).contains(&"--sidecars".to_owned()));
     }
 
     #[test]

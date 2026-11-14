@@ -34,5 +34,5 @@ pub use parts::GatePart;
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 pub use sandbox::{CLIENT_ENV, Hardening, Limits, Sandbox, WORKDIR};
 pub use scope::{ScopePolicy, ScopeViolations, analyze_scope, is_test_file};
-pub use sidecar::{SIDECAR_PREFIX, SidecarSpec, Sidecars, check_sidecars};
+pub use sidecar::{SIDECAR_PREFIX, SidecarSession, SidecarSpec, Sidecars, check_sidecars};
 pub use sonar::{Flow, FlowLocation, SonarIssue, SonarStep, TextRange, open_issues};

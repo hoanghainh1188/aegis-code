@@ -320,3 +320,234 @@ async fn a_test_of_a_part_runs_in_its_image_with_its_dependency_dirs() {
     assert!(!test.contains("/usr/local/cargo/registry"), "{test}");
     assert!(!test.contains("destination=/usr/local/cargo"), "{test}");
 }
+
+/// [`fake_docker`] that also answers `inspect`: sidecars and their
+/// containers run (#491).
+#[cfg(unix)]
+fn sidecar_docker(dir: &Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join("docker");
+    let log = dir.join("calls.log");
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{log}'\n\
+             case \"$1 $3\" in\n\
+             *State.Running*) echo true; exit 0 ;;\n\
+             *State.StartedAt*) echo 2026-11-14T09:00:00.1Z; exit 0 ;;\n\
+             *State.OOMKilled*) echo false; exit 0 ;;\n\
+             esac\n\
+             case \"$*\" in\n  'run --name aegis-gate-'*) \
+             echo 'test tests::adds_up_prices ... ok'; \
+             echo 'test result: ok. 1 passed; 0 failed'; exit 0 ;;\nesac\nexit 0\n",
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path.display().to_string()
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn run_tests_reaches_fresh_sidecars_that_go_with_the_session() {
+    let repo = Scratch::fixture("rust");
+    let bin = repo.outside().join("bin");
+    let docker = sidecar_docker(&bin);
+    let sidecars = repo.outside().join("sidecars.toml");
+    std::fs::write(
+        &sidecars,
+        "[[sidecar]]\nname = \"postgres\"\nimage = \"postgres:16-alpine\"\nuser = \"70:70\"\n\
+         tmpfs = [\"/var/lib/postgresql/data\"]\nready = [\"pg_isready\"]\n\
+         test_env = { DATABASE_URL = \"postgres://postgres:5432/t\" }\n",
+    )
+    .unwrap();
+    let mut spec = sandboxed(&repo, &docker, 60);
+    spec.args
+        .extend(["--sidecars".to_owned(), sidecars.display().to_string()]);
+    let tools = McpTools::connect(&[spec]).await.unwrap();
+    for _ in 0..2 {
+        let out = tools
+            .call("run_tests", &json!({"test": "tests::adds_up_prices"}))
+            .await;
+        assert!(!out.is_error, "{}", out.content);
+    }
+    tools.shutdown().await;
+    let log = bin.join("calls.log");
+    // The session's end removes them; the ACI does it as it exits.
+    let mut calls = String::new();
+    for _ in 0..100 {
+        calls = std::fs::read_to_string(&log).unwrap();
+        if calls.contains("network rm aegis-sidecar-") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let lines: Vec<&str> = calls.lines().collect();
+    let at = |what: &str| {
+        lines
+            .iter()
+            .position(|l| l.starts_with(what))
+            .unwrap_or_else(|| panic!("no {what:?} in\n{calls}"))
+    };
+    let tests: Vec<&&str> = lines
+        .iter()
+        .filter(|l| l.starts_with("run --name aegis-gate-"))
+        .collect();
+    assert_eq!(tests.len(), 2, "{calls}");
+    for test in &tests {
+        assert!(test.contains("--network aegis-sidecar-"), "{test}");
+        assert!(
+            test.contains("--env DATABASE_URL=postgres://postgres:5432/t"),
+            "{test}"
+        );
+    }
+    // Started before the first run, reset before the second, gone at the end.
+    assert!(at("network create --internal aegis-sidecar-") < at("run --name aegis-gate-"));
+    assert!(at("run -d --name aegis-sidecar-") < at("run --name aegis-gate-"));
+    let second = lines
+        .iter()
+        .rposition(|l| l.starts_with("run --name aegis-gate-"))
+        .unwrap();
+    let stop = at("stop --time 5 aegis-sidecar-");
+    assert!(
+        at("run --name aegis-gate-") < stop && stop < second,
+        "{calls}"
+    );
+    assert!(
+        at("rm --force --volumes aegis-sidecar-") > second,
+        "{calls}"
+    );
+    assert!(at("network rm aegis-sidecar-") > second, "{calls}");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn sidecars_need_the_sandbox() {
+    let repo = Scratch::fixture("rust");
+    std::fs::create_dir_all(repo.outside()).unwrap();
+    let sidecars = repo.outside().join("sidecars.toml");
+    std::fs::write(
+        &sidecars,
+        "[[sidecar]]\nname = \"postgres\"\nimage = \"postgres:16-alpine\"\nuser = \"70:70\"\n\
+         ready = [\"pg_isready\"]\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_aegis-aci"))
+        .args([
+            "--repo",
+            &repo.repo().display().to_string(),
+            "--language",
+            "rust",
+        ])
+        .args(["--sidecars", &sidecars.display().to_string()])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--sidecars needs --format-image"), "{err}");
+    std::fs::write(
+        &sidecars,
+        "[[sidecar]]\nname = \"pg\"\nimage = \"x\"\nuser = \"0:0\"\nready = [\"true\"]\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_aegis-aci"))
+        .args([
+            "--repo",
+            &repo.repo().display().to_string(),
+            "--language",
+            "rust",
+        ])
+        .args([
+            "--format-image",
+            "img",
+            "--sidecars",
+            &sidecars.display().to_string(),
+        ])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("non-root"), "{err}");
+}
+
+/// Needs Docker and the images `aegis-sandbox-python` and
+/// `postgres:16-alpine`; skipped otherwise unless `AEGIS_REQUIRE_DOCKER=1`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn run_tests_reaches_a_real_postgres() {
+    let images = ["aegis-sandbox-python", "postgres:16-alpine"];
+    let ready = images.iter().all(|image| {
+        std::process::Command::new("docker")
+            .args(["image", "inspect", image])
+            .output()
+            .is_ok_and(|o| o.status.success())
+    });
+    if !ready {
+        assert!(
+            std::env::var("AEGIS_REQUIRE_DOCKER").as_deref() != Ok("1"),
+            "docker or one of {images:?} is missing"
+        );
+        eprintln!("skipping: docker or one of {images:?} is missing");
+        return;
+    }
+    let repo = Scratch::fixture("python");
+    std::fs::write(
+        repo.repo().join("tests/test_db.py"),
+        "import os\nimport socket\n\n\ndef test_reaches_postgres():\n    \
+         with socket.create_connection((os.environ[\"PGHOST\"], 5432), timeout=10):\n        \
+         pass\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(repo.outside()).unwrap();
+    let sidecars = repo.outside().join("sidecars.toml");
+    std::fs::write(
+        &sidecars,
+        "[[sidecar]]\nname = \"postgres\"\nimage = \"postgres:16-alpine\"\nuser = \"70:70\"\n\
+         env = { POSTGRES_PASSWORD = \"test\" }\n\
+         tmpfs = [\"/var/lib/postgresql/data\", \"/var/run/postgresql\"]\n\
+         ready = [\"pg_isready\", \"-h\", \"localhost\"]\n\
+         test_env = { PGHOST = \"postgres\" }\n",
+    )
+    .unwrap();
+    let spec = |with_sidecars: bool| {
+        let mut args: Vec<String> = [
+            "--repo",
+            &repo.repo().display().to_string(),
+            "--language",
+            "python",
+            "--format-image",
+            "aegis-sandbox-python",
+            "--test-dir",
+            &repo.outside().join("tests").display().to_string(),
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        if with_sidecars {
+            args.extend(["--sidecars".to_owned(), sidecars.display().to_string()]);
+        } else {
+            args.extend(["--test-env".to_owned(), "PGHOST=postgres".to_owned()]);
+        }
+        McpServerSpec {
+            name: "aci".into(),
+            program: env!("CARGO_BIN_EXE_aegis-aci").to_owned(),
+            args,
+            cwd: None,
+            env: std::env::var("DOCKER_HOST")
+                .map(|h| vec![("DOCKER_HOST".to_owned(), h)])
+                .unwrap_or_default(),
+            tools: Some(vec!["run_tests".into()]),
+        }
+    };
+    let test = json!({"test": "tests/test_db.py::test_reaches_postgres"});
+    let tools = McpTools::connect(&[spec(true)]).await.unwrap();
+    for _ in 0..2 {
+        let out = tools.call("run_tests", &test).await;
+        assert!(out.content.starts_with("PASS"), "{}", out.content);
+    }
+    tools.shutdown().await;
+    let tools = McpTools::connect(&[spec(false)]).await.unwrap();
+    let out = tools.call("run_tests", &test).await;
+    tools.shutdown().await;
+    assert!(out.content.starts_with("FAIL"), "{}", out.content);
+}

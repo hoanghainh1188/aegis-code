@@ -134,13 +134,17 @@ impl AciServer {
     }
 
     /// Stops a `run_tests` call in progress and waits up to `grace` for it
-    /// to kill its container, so none outlives the session.
+    /// to kill its container and remove the sidecars, so none outlives the
+    /// session.
     pub fn stop_tests(&self, grace: Duration) {
         self.tests.cancel();
         let (done, finished) = std::sync::mpsc::channel();
         let aci = Arc::clone(&self.aci);
         std::thread::spawn(move || {
-            drop(aci.lock());
+            // The sidecars of `run_tests` (#491) go with the session.
+            aci.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .stop_sidecars();
             let _ = done.send(());
         });
         let _ = finished.recv_timeout(grace);

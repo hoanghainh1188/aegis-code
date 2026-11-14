@@ -9,7 +9,10 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, Exit, Runner, Sandbox, failing_tests_with, out_of_memory, tail};
+use aegis_gate::{
+    CancelToken, Exit, Runner, Sandbox, SidecarSession, Sidecars, failing_tests_with,
+    out_of_memory, tail,
+};
 use aegis_lang::{Placeholder, ResolvedProfile};
 
 use crate::AciError;
@@ -35,6 +38,9 @@ pub struct TestSettings {
     /// Logs and the command's `TMPDIR`; outside the repo, so a run leaves
     /// nothing in the patch.
     pub work_dir: PathBuf,
+    /// The repo's services (#491), as the gate's test steps reach them
+    /// (#490); only with `sandbox`.
+    pub sidecars: Option<Sidecars>,
 }
 
 impl Default for TestSettings {
@@ -44,6 +50,7 @@ impl Default for TestSettings {
             env: Vec::new(),
             timeout: RUN_TESTS_TIMEOUT,
             work_dir: std::env::temp_dir().join(format!("aegis-aci-tests-{}", std::process::id())),
+            sidecars: None,
         }
     }
 }
@@ -53,6 +60,9 @@ pub(crate) struct TestRunner {
     settings: TestSettings,
     cancel: CancelToken,
     runs: u32,
+    /// Started at the first run that needs them, reset before each after
+    /// it, removed by [`Self::stop_sidecars`] or on drop.
+    sidecars: Option<SidecarSession>,
 }
 
 /// What one `run_tests` call shows the agent.
@@ -75,7 +85,37 @@ impl TestRunner {
             settings,
             cancel: CancelToken::new(),
             runs: 0,
+            sidecars: None,
         }
+    }
+
+    /// Removes the sidecars, if they run. The process exits without
+    /// dropping, so the session's end calls this (`AciServer::stop_tests`).
+    pub(crate) fn stop_sidecars(&mut self) {
+        self.sidecars = None;
+    }
+
+    /// `sandbox` on the sidecars' network, with their `test_env`, when the
+    /// repo has any: as the gate's test steps, each run with fresh
+    /// services.
+    fn with_sidecars(&mut self, sandbox: Sandbox) -> Result<Sandbox, AciError> {
+        let Some(sidecars) = self
+            .settings
+            .sidecars
+            .as_ref()
+            .filter(|s| !s.specs.is_empty())
+        else {
+            return Ok(sandbox);
+        };
+        let failed = |e: aegis_gate::GateError| AciError::Tests(e.to_string());
+        match &self.sidecars {
+            Some(running) => running.reset().map_err(failed)?,
+            None => self.sidecars = Some(sidecars.start().map_err(failed)?),
+        }
+        Ok(self
+            .sidecars
+            .as_ref()
+            .map_or(sandbox.clone(), |s| s.sandbox_for(&sandbox)))
     }
 
     /// Stops a run in progress, now and for every later call.
@@ -103,30 +143,32 @@ impl TestRunner {
         let tmp = dir.join("tmp");
         std::fs::create_dir_all(&tmp).map_err(|e| AciError::io(&tmp, &e))?;
         let log = dir.join(format!("run_tests-{}.log", self.runs));
+        let sandbox = self.settings.sandbox.clone().map(|s| {
+            // Locked down as the part's formatter is (#320).
+            let hardening = workspace
+                .format_container_of(part)
+                .map_or_else(|| s.hardening.clone(), |c| c.hardening().clone());
+            match part.dir.is_empty() {
+                true => Sandbox { hardening, ..s },
+                // The part's image and dependency dirs (#198).
+                false => Sandbox {
+                    image: part.profile.image.clone(),
+                    mounts: workspace
+                        .part_mounts(&part.dir)
+                        .iter()
+                        .map(|(host, inside)| (host.into(), inside.clone()))
+                        .collect(),
+                    hardening,
+                    ..s
+                },
+            }
+        });
+        let sandbox = sandbox.map(|s| self.with_sidecars(s)).transpose()?;
         let runner = Runner {
             env: self.settings.env.clone(),
             timeout: self.settings.timeout.min(RUN_TESTS_TIMEOUT),
             cancel: self.cancel.clone(),
-            sandbox: self.settings.sandbox.clone().map(|s| {
-                // Locked down as the part's formatter is (#320).
-                let hardening = workspace
-                    .format_container_of(part)
-                    .map_or_else(|| s.hardening.clone(), |c| c.hardening().clone());
-                match part.dir.is_empty() {
-                    true => Sandbox { hardening, ..s },
-                    // The part's image and dependency dirs (#198).
-                    false => Sandbox {
-                        image: part.profile.image.clone(),
-                        mounts: workspace
-                            .part_mounts(&part.dir)
-                            .iter()
-                            .map(|(host, inside)| (host.into(), inside.clone()))
-                            .collect(),
-                        hardening,
-                        ..s
-                    },
-                }
-            }),
+            sandbox,
         };
         let tmp = tmp.display().to_string();
         let ran = runner
