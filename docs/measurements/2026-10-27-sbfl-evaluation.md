@@ -8,7 +8,7 @@
 
 ## 1. Bối cảnh & Điều kiện Tiên quyết
 
-Theo [Thiết kế §9](../../docs/design/01-architecture-detail.md#9-phụ-lục--để-dành-cho-phase-23) và Issue #34:
+Theo [Proposal §9](../design/00-proposal.md#9-implementation-roadmap) và Issue #34:
 > *"SBFL (Tarantula / Ochiai): Chấm điểm nghi ngờ cho từng hàm từ kết quả test. Cần đo coverage theo từng test; tốn công cho mỗi profile. Xem lại khi tỉ lệ định vị sai lỗi cao trong PoC."*
 
 Điều kiện kích hoạt của kỹ thuật này là: **Tỉ lệ định vị lỗi sai cao trong thực tế**.
