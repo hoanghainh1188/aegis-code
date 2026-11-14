@@ -76,4 +76,37 @@
   </div>
   {% call m::kpi_table("Week", weeks) %}{% endcall %}
 </section>
+{% if let Some(triage) = triage %}
+
+<section aria-labelledby="triage-heading" class="band">
+  <h2 id="triage-heading">Triage, recorded only</h2>
+  <div class="scroll">
+  <table class="triage">
+    <thead>
+      <tr>
+        <th scope="col">Light read the ticket as</th>
+        <th scope="col" class="num">Jobs</th>
+        <th scope="col" class="num">PRs</th>
+        <th scope="col" class="num">Accepted</th>
+        <th scope="col" class="num">Rejected</th>
+        <th scope="col" class="num">No PR</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in triage.rows %}
+      <tr>
+        <th scope="row">{{ r.label() }}</th>
+        <td class="num">{{ r.jobs }}</td>
+        <td class="num">{{ r.prs }}</td>
+        <td class="num">{{ r.accepted }}</td>
+        <td class="num">{{ r.rejected }}</td>
+        <td class="num">{{ r.no_pr }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Every job works on the code whatever Light read (#497). A ticket read as other than <code>code_bug</code> whose PR was accepted is one a diagnostic lane would have missed (ADR 0012). Jobs show no triage of their own, so reviews are not swayed by it.</p>
+</section>
+{% endif %}
 {% endblock %}

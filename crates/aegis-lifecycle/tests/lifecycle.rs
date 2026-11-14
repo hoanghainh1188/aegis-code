@@ -85,7 +85,7 @@ impl ModelProvider for Scripted {
         // A customer-jp repo's models are `jp.` profiles of the same tiers.
         let content = match request.model.trim_start_matches("jp.") {
             "light" if system.contains("You triage") => vec![ContentBlock::text(
-                r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item."}"#,
+                r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item.", "triage": "ops_or_config", "triage_confidence": 0.6, "triage_reason": "Reads like a limit set in configuration."}"#,
             )],
             "light" if system.contains("failed check") => {
                 vec![ContentBlock::text(
@@ -247,6 +247,12 @@ async fn a_bug_goes_from_issue_to_pr() {
     assert_eq!(record.gate_runs.len(), 1);
     assert!(record.gate_runs[0].passed);
     assert!(record.cost_usd > 0.0);
+    // Light read it as an operator's fix; recorded, and the job fixed the
+    // code anyway (#497).
+    let triage = record.triage.as_ref().expect("triaged");
+    assert_eq!(triage.category, aegis_ledger::TriageCategory::OpsOrConfig);
+    assert!((triage.confidence - 0.6).abs() < 1e-9);
+    assert_eq!(triage.reason, "Reads like a limit set in configuration.");
     // What the job works on and what the agent said it did (#316).
     assert_eq!(
         record.issue_title.as_deref(),

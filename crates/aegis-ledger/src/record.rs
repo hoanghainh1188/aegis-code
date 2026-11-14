@@ -76,6 +76,50 @@ pub enum IssueKind {
     Sonar,
 }
 
+/// What a ticket needs, as Light reads it (#497, ADR 0012): a code fix,
+/// or something an operator does. Recorded only for now: every job still
+/// works on the code, and the record shows how often the reading was right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageCategory {
+    CodeBug,
+    OpsOrConfig,
+    DataIssue,
+    NeedsInfo,
+}
+
+impl TriageCategory {
+    pub const ALL: [Self; 4] = [
+        Self::CodeBug,
+        Self::OpsOrConfig,
+        Self::DataIssue,
+        Self::NeedsInfo,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CodeBug => "code_bug",
+            Self::OpsOrConfig => "ops_or_config",
+            Self::DataIssue => "data_issue",
+            Self::NeedsInfo => "needs_info",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == text)
+    }
+}
+
+/// Light's triage of a ticket (#497).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Triage {
+    pub category: TriageCategory,
+    /// From 0 to 1.
+    pub confidence: f64,
+    /// One sentence, from Light: shown as text, never followed.
+    pub reason: String,
+}
+
 /// Model tier (design §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -237,6 +281,10 @@ pub enum LedgerEvent {
     Classified {
         kind: IssueKind,
     },
+    /// Light's triage of the ticket (#497), when it gave one.
+    Triaged {
+        triage: Triage,
+    },
     /// `cost_usd` is priced when the call happens, so later price changes do
     /// not rewrite history.
     ModelCall {
@@ -319,6 +367,7 @@ impl LedgerEvent {
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
             Self::Finished { wall_time_s, .. } => &[("wall_time_s", *wall_time_s)],
             Self::Reviewed(review) => &[("review_minutes", review.review_minutes)],
+            Self::Triaged { triage } => &[("triage_confidence", triage.confidence)],
         };
         match fields.iter().find(|(_, value)| !value.is_finite()) {
             Some(&(field, value)) => Err(LedgerError::NonFinite { field, value }),
@@ -384,6 +433,9 @@ pub struct IssueRecord {
     /// (#444).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_flags: Vec<InputFlag>,
+    /// What Light read the ticket as needing (#497); recorded only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<Triage>,
 }
 
 impl IssueRecord {
@@ -423,6 +475,7 @@ impl IssueRecord {
             issue_url: None,
             answer: None,
             input_flags: Vec::new(),
+            triage: None,
         }
     }
 
@@ -436,6 +489,7 @@ impl IssueRecord {
     pub fn apply(mut self, event: &LedgerEvent) -> Self {
         match event {
             LedgerEvent::Classified { kind } => self.kind = Some(*kind),
+            LedgerEvent::Triaged { triage } => self.triage = Some(triage.clone()),
             LedgerEvent::ModelCall {
                 tier,
                 model,
@@ -615,6 +669,28 @@ mod tests {
         assert_eq!(both.tokens["core"].input, 1_300);
         assert_eq!(both.tokens["expert"].input, 200);
         assert_eq!(both.wall_time_s, Some(60.0));
+    }
+
+    #[test]
+    fn a_triage_is_kept_and_read_back_as_written() {
+        let triage = Triage {
+            category: TriageCategory::DataIssue,
+            confidence: 0.7,
+            reason: "A row violates the foreign key.".into(),
+        };
+        let event = LedgerEvent::Triaged {
+            triage: triage.clone(),
+        };
+        let line = serde_json::to_string(&event).unwrap();
+        assert!(
+            line.contains(r#""event":"triaged""#) && line.contains(r#""category":"data_issue""#),
+            "{line}"
+        );
+        assert_eq!(serde_json::from_str::<LedgerEvent>(&line).unwrap(), event);
+        let record = IssueRecord::from_events(id("GH-3"), &[event]);
+        assert_eq!(record.triage, Some(triage));
+        // Records written before #497 have none.
+        assert_eq!(IssueRecord::new(id("GH-4")).triage, None);
     }
 
     #[test]

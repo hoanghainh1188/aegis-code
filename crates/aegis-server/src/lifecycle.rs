@@ -87,7 +87,11 @@ impl Drop for RunTag {
 impl LedgerStore for RunLedger {
     async fn append(&self, issue: &IssueId, event: &LedgerEvent) -> Result<(), LedgerError> {
         let run = self.runs().get(issue).copied();
-        self.pg.append_in_run(issue, event, run).await
+        self.pg.append_in_run(issue, event, run).await?;
+        if let LedgerEvent::Triaged { triage } = event {
+            crate::metrics::metrics().triaged(triage.category);
+        }
+        Ok(())
     }
 
     async fn events(&self, issue: &IssueId) -> Result<Vec<LedgerEvent>, LedgerError> {

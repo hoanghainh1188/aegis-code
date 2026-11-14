@@ -121,7 +121,13 @@ pub async fn report<S: LedgerStore>(store: &S, set: Option<&Path>) -> Result<Str
         .await
         .map_err(|e| e.to_string())?;
     let Some(dir) = set else {
-        return Ok(Report::<Language>::all(&records).to_string());
+        // Shadow triage against what the jobs did (#497), once there is any.
+        let triage = aegis_ledger::TriageTable::from_records(&records);
+        let mut text = Report::<Language>::all(&records).to_string();
+        if !triage.is_empty() {
+            text.push_str(&format!("\n{triage}"));
+        }
+        return Ok(text);
     };
     let set: Vec<SetIssue<Language>> = load_set(dir)
         .map_err(|e| e.to_string())?
@@ -280,6 +286,35 @@ mod tests {
         assert!(text.contains("## python\n1 runs, 0 PRs opened"), "{text}");
         assert!(
             text.contains("| Cache read ratio | 90% | ≥ 70% | ✔ |"),
+            "{text}"
+        );
+        // No triage in this ledger: no triage table.
+        assert!(!all.contains("## Triage"), "{all}");
+    }
+
+    #[tokio::test]
+    async fn the_report_shows_the_shadow_triage_against_the_jobs() {
+        let store = MemoryLedger::new();
+        let id = aegis_ledger::IssueId::parse("GH-9").unwrap();
+        for event in [
+            LedgerEvent::Triaged {
+                triage: aegis_ledger::Triage {
+                    category: aegis_ledger::TriageCategory::NeedsInfo,
+                    confidence: 0.4,
+                    reason: "No steps.".into(),
+                },
+            },
+            LedgerEvent::Finished {
+                outcome: aegis_ledger::Outcome::StoppedSteps,
+                wall_time_s: 3.0,
+            },
+        ] {
+            store.append(&id, &event).await.unwrap();
+        }
+        let text = report(&store, None).await.unwrap();
+        assert!(text.contains("## Triage (recorded only, #497)"), "{text}");
+        assert!(
+            text.contains("| needs_info | 1 | 0 | 0 | 0 | 1 |"),
             "{text}"
         );
     }

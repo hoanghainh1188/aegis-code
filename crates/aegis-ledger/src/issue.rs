@@ -5,7 +5,7 @@ use aegis_provider::Usage;
 use crate::{
     AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, InputFlag, IssueId,
     IssueKind, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review,
-    Tier, TokenCounts, ToolCall,
+    Tier, TokenCounts, ToolCall, Triage,
 };
 
 /// Caps on what [`IssueLedger::issue_read`] and [`IssueLedger::answered`]
@@ -61,6 +61,11 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
 
     pub async fn classified(&mut self, kind: IssueKind) -> Result<(), LedgerError> {
         self.push(LedgerEvent::Classified { kind }).await
+    }
+
+    /// Light's triage of the ticket (#497).
+    pub async fn triaged(&mut self, triage: Triage) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::Triaged { triage }).await
     }
 
     /// Records one model call from its `usage` and returns its cost in $.

@@ -310,6 +310,10 @@ where
             .await?;
     }
     ledger.classified(class.kind).await?;
+    // Recorded only (#497): the job works on the code whatever it says.
+    if let Some(triage) = class.triage.clone() {
+        ledger.triaged(triage).await?;
+    }
     let profiles = cfg.repo.profiles(&platform.profiles)?;
     if class.needs_sonar_batching() {
         return sonar_batch(platform, ledger, &profiles, issue, cancel).await;

@@ -9,7 +9,9 @@
 
 use std::collections::BTreeMap;
 
-use aegis_ledger::{ACCEPT_RATE_MIN, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN, accepted};
+use aegis_ledger::{
+    ACCEPT_RATE_MIN, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN, TriageTable, accepted,
+};
 use aegis_store::{KpiJob, KpiRecord, Page, Repo, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
@@ -42,6 +44,8 @@ pub struct Dashboard {
     pub repos: Vec<Group>,
     /// By the ISO week the job was created; jobs only.
     pub weeks: Vec<Group>,
+    /// Light's shadow triage against what the jobs did (#497).
+    pub triage: TriageTable,
 }
 
 pub(super) async fn all_repos(store: &Store) -> Result<BTreeMap<RepoId, Repo>, WebError> {
@@ -153,6 +157,7 @@ pub async fn dashboard_kpis_within(
         languages,
         repos,
         weeks,
+        triage: TriageTable::from_records(&records),
     })
 }
 
@@ -172,6 +177,8 @@ struct DashboardPage<'a> {
     reserve: String,
     total_min: u32,
     language_min: u32,
+    /// Once any job was triaged (#497).
+    triage: Option<TriageTable>,
 }
 
 /// A threshold on the 0–200 scale of the bars.
@@ -213,6 +220,7 @@ pub async fn page(
         reserve: dollars(rules.job_reserve_usd),
         total_min: bar(ACCEPT_RATE_MIN),
         language_min: bar(LANGUAGE_ACCEPT_RATE_MIN),
+        triage: (!d.triage.is_empty()).then_some(d.triage),
     })
 }
 
