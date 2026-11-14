@@ -29,7 +29,6 @@ egress_image = "python:3.12-alpine"
 [budget]
 # The model's calls are priced at $0: a $0 cap still lets them run (#233).
 max_cost_usd = 0.0
-max_model_calls = 40
 
 [identity]
 name = "aegis-bot"

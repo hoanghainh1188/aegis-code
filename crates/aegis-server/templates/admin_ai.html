@@ -15,7 +15,7 @@
     <div><dt>Provider</dt><dd>{{ c.provider }}</dd></div>
     <div><dt>Where</dt><dd class="ref">{{ c.target }}</dd></div>
     <div><dt>Key</dt><dd>{% if let Some((name, set)) = c.key %}<code>{{ name }}</code> {% if set %}<span class="check pass">set</span>{% else %}<span class="check fail">missing</span>{% endif %}{% else %}the server's AWS role{% endif %}</dd></div>
-    <div><dt>Job budget</dt><dd>{{ c.max_cost_usd }}, {{ c.max_model_calls }} model calls</dd></div>
+    <div><dt>Job budget</dt><dd>{{ c.max_cost_usd }}, {{ c.model_calls }}</dd></div>
   </dl>
   {% if let Some(g) = c.guard %}<p class="note"><strong>Guard:</strong> {{ g }}.</p>{% endif %}
   <div class="scroll">

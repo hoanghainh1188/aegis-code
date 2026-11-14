@@ -120,25 +120,36 @@ fn default_context_window() -> u64 {
 #[serde(deny_unknown_fields)]
 pub struct BudgetSection {
     pub max_cost_usd: f64,
-    pub max_model_calls: u32,
+    /// Core + Expert calls for a job. Without it, the repo's language
+    /// profile sets the cap, or else the platform's 40 (#471, ADR 0014).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_model_calls: Option<u32>,
 }
 
 impl Default for BudgetSection {
     fn default() -> Self {
-        let d = BudgetLimits::default();
         Self {
-            max_cost_usd: d.max_cost_usd,
-            max_model_calls: d.max_model_calls,
+            max_cost_usd: BudgetLimits::default().max_cost_usd,
+            max_model_calls: None,
         }
     }
 }
 
 impl BudgetSection {
-    pub fn limits(&self) -> BudgetLimits {
+    /// The caps of a job whose language profile sets `language_calls`.
+    pub fn limits(&self, language_calls: Option<u32>) -> BudgetLimits {
         BudgetLimits {
             max_cost_usd: self.max_cost_usd,
-            max_model_calls: self.max_model_calls,
+            max_model_calls: self
+                .max_model_calls
+                .or(language_calls)
+                .unwrap_or(BudgetLimits::default().max_model_calls),
         }
+    }
+
+    /// Whether `spent_usd` leaves no room under the cost cap.
+    pub fn cost_spent(&self, spent_usd: f64) -> bool {
+        self.limits(None).is_spent(spent_usd)
     }
 
     pub fn rules(&self) -> EscalationRules {
@@ -477,6 +488,14 @@ impl SonarConfig {
 }
 
 impl RunConfig {
+    /// The job's caps: `[budget]`, with the call cap of the repo's
+    /// language profile (its `language`, not a `[[repo.dirs]]` one) when
+    /// `[budget]` has none (#471).
+    pub fn budget_limits(&self, builtin: &Profiles) -> Result<BudgetLimits, LifecycleError> {
+        let profile = builtin.get(self.repo.language)?;
+        Ok(self.budget.limits(profile.budget.max_model_calls))
+    }
+
     pub fn from_toml(text: &str) -> Result<Self, LifecycleError> {
         let config: Self =
             toml::from_str(text).map_err(|e| LifecycleError::Config(e.to_string()))?;
@@ -812,6 +831,30 @@ language = "go""#,
         ] {
             assert!(with_sonar(bad).is_err(), "{bad}");
         }
+    }
+
+    /// #471: without its own `max_model_calls` a repo gets its language's
+    /// cap, then the platform's 40.
+    #[test]
+    fn the_call_cap_falls_back_to_the_language_then_to_40() {
+        let profiles = Profiles::builtin().unwrap();
+        let cfg = |language: &str, calls: &str| {
+            let text = POC
+                .replacen("[budget]\n", &format!("[budget]\n{calls}"), 1)
+                .replacen(
+                    "language = \"python\"",
+                    &format!("language = \"{language}\""),
+                    1,
+                );
+            RunConfig::from_toml(&text).unwrap()
+        };
+        let calls = |c: RunConfig| c.budget_limits(&profiles).unwrap().max_model_calls;
+        assert_eq!(calls(cfg("rust", "")), 80);
+        assert_eq!(calls(cfg("python", "")), 40);
+        assert_eq!(calls(cfg("rust", "max_model_calls = 30\n")), 30);
+        let limits = cfg("go", "").budget_limits(&profiles).unwrap();
+        assert_eq!(limits.max_cost_usd, 4.0);
+        assert_eq!(limits.max_model_calls, 40);
     }
 
     #[test]

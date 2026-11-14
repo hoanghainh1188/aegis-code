@@ -54,6 +54,17 @@ pub struct Profile {
     pub sonar: Sonar,
     #[serde(default)]
     pub prompt: Prompt,
+    #[serde(default)]
+    pub budget: ProfileBudget,
+}
+
+/// The language's own job budget (#471), taken when the run's `[budget]`
+/// does not set it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileBudget {
+    /// Core + Expert calls for a job; without it, the platform's 40.
+    pub max_model_calls: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1239,6 +1250,19 @@ mod tests {
         .unwrap();
         assert_eq!(p.sandbox.memory_mb, Some(12_288));
         assert_eq!(p.sandbox.cpus, Some(2));
+    }
+
+    /// #471: Rust's own call cap (#156); the others take the platform's.
+    #[test]
+    fn only_rust_sets_its_own_call_cap() {
+        let profiles = builtin();
+        for language in profiles.languages() {
+            let calls = profiles.get(language).unwrap().budget.max_model_calls;
+            let expected = (language == Language::Rust).then_some(80);
+            assert_eq!(calls, expected, "{language:?}");
+        }
+        let bad = format!("{}\n[budget]\nmax_cost_usd = 1.0\n", rust_text());
+        assert!(Profile::from_toml("a", &bad).is_err(), "only the call cap");
     }
 
     #[test]

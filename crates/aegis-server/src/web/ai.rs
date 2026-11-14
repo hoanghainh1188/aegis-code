@@ -53,7 +53,9 @@ struct ConfigView {
     guard: Option<&'static str>,
     tiers: Vec<TierRow>,
     max_cost_usd: String,
-    max_model_calls: u32,
+    /// The mode's call cap, or the language profile's when it sets none
+    /// (#471).
+    model_calls: String,
 }
 
 pub struct CheckView {
@@ -135,7 +137,10 @@ async fn config_view(admin: &RepoAdmin, name: &str, mode: &ModeConfig) -> Config
             tier("expert", &mode.models.expert.id, mode.models.expert.effort),
         ],
         max_cost_usd: format!("${:.2}", mode.budget.max_cost_usd),
-        max_model_calls: mode.budget.max_model_calls,
+        model_calls: mode.budget.max_model_calls.map_or_else(
+            || "the language profile's cap of model calls (40 if it sets none)".into(),
+            |n| format!("{n} model calls"),
+        ),
     }
 }
 

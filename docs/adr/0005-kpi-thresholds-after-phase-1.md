@@ -39,7 +39,7 @@ Across three rounds of engine optimization, Rust acceptance leveled at 39%. The 
 
 2. **Phase 1 is formally completed.** The initiative advances to Phase 2, commencing with #22.
 3. Achieving $\ge 40\%$ acceptance per individual language is established as a **target milestone for Phase 2**, rather than a blocker for commencing Phase 2. Per-language KPIs are tracked continuously via the operational dashboard (#28).
-4. **Retain the $4 cost ceiling and 40 model call cap** per issue (Design §5.3). Observed costs represent only ~15% of the ceiling; the 40-call budget is the primary constraint.
+4. **Retain the $4 cost ceiling and 40 model call cap** per issue (Design §5.3). Observed costs represent only ~15% of the ceiling; the 40-call budget is the primary constraint. *Amended by [ADR 0014](0014-per-language-call-cap.md): a language profile may set its own call cap, and Rust's is 80.*
 
 ## Consequences
 

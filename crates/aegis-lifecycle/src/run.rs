@@ -1184,6 +1184,7 @@ where
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
     let mut router = Router::new(cfg.budget.rules());
+    let limits = cfg.budget_limits(&platform.profiles)?;
     let mut session = session;
     let mut answer_retries = 0;
     let mut dearest_call_usd: f64 = 0.0;
@@ -1195,7 +1196,7 @@ where
         let mut budget = BudgetCheck::new(
             Arc::new(platform.prices.clone()),
             regional,
-            cfg.budget.limits(),
+            limits,
             tier,
             Spent::from_record(ledger.record()),
         );
@@ -1275,10 +1276,7 @@ where
                 }
                 Some(Halt::CheckImpact) => {
                     let record = ledger.record();
-                    let calls_left = cfg
-                        .budget
-                        .max_model_calls
-                        .saturating_sub(record.model_calls);
+                    let calls_left = limits.max_model_calls.saturating_sub(record.model_calls);
                     let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
                     let room = calls_left >= IMPACT_CALLS
                         && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);

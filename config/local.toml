@@ -41,7 +41,6 @@ TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS = ""
 # price in config/pricing.toml stops at its first call (#233).
 [budget]
 max_cost_usd = 0.0
-max_model_calls = 40
 
 [codebase_memory]
 program = "codebase-memory-mcp"

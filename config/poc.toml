@@ -44,7 +44,6 @@ tmp_mb = 1024
 
 [budget]
 max_cost_usd = 4.0
-max_model_calls = 40
 
 # Codebase-Memory (design §3.2, #185): the call graph next to the ACI.
 # Before the first gate run the platform asks it for the code linked to the

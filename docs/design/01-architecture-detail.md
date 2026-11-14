@@ -140,7 +140,7 @@ When ingesting multiple static analysis warnings:
 | **Core / Expert** | 8 turns elapsed without invoking `run_tests` (#144) | Prompt nudge injection |
 | **Expert** | Verification gate passes | PR Synthesis |
 | **Expert** | Fails gate twice | Terminate (Handoff) |
-| **Any** | Spend $> \$4$ or $> 40$ model turns | Terminate (Handoff) |
+| **Any** | Spend $> \$4$ or $> 40$ model turns (the language profile may set its own cap, [ADR 0014](../adr/0014-per-language-call-cap.md)) | Terminate (Handoff) |
 
 ---
 
