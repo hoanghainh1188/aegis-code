@@ -1023,6 +1023,7 @@ pub(crate) async fn gate(
             scope,
             parts,
             sidecars,
+            dependency_policy: aegis_gate::DependencyPolicy::Locked,
         })
     })
     .await

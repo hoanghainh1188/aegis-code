@@ -440,6 +440,7 @@ fn work_dir_inside_the_repo_is_refused() {
         scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })
     .unwrap_err();
     assert!(
@@ -629,6 +630,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             scope: aegis_gate::ScopePolicy::default(),
             parts: vec![],
             sidecars: None,
+            dependency_policy: Default::default(),
         })
     };
     #[cfg(unix)]
@@ -1151,6 +1153,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
         },
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1189,6 +1192,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
         },
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1243,6 +1247,7 @@ fn scope_enforcement_blocks_added_test_skips_when_configured() {
         },
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1294,6 +1299,7 @@ fn scope_enforcement_blocks_excessive_file_count() {
         },
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1302,5 +1308,136 @@ fn scope_enforcement_blocks_excessive_file_count() {
         scope_step.detail.contains("exceeded limit (1)"),
         "{:?}",
         scope_step.detail
+    );
+}
+
+/// A crates.io package as `Cargo.lock` locks it.
+fn left_pad(version: &str) -> String {
+    format!(
+        "\n[[package]]\nname = \"left-pad\"\nversion = \"{version}\"\n\
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+         checksum = \"{}\"\n",
+        "0".repeat(64)
+    )
+}
+
+/// The fixture with `left-pad` 1.0.0 locked on the base; its lockfile
+/// without it.
+fn with_locked_left_pad() -> (Repo, String) {
+    let repo = Repo::new("rust", &[]);
+    let lock = repo.read("Cargo.lock");
+    repo.write("Cargo.lock", &format!("{lock}{}", left_pad("1.0.0")));
+    repo.commit_base("lock left-pad");
+    (repo, lock)
+}
+
+/// The audit passes: these tests are about the policy, not advisories.
+fn rust_without_audit() -> aegis_lang::ResolvedProfile {
+    profile(
+        Language::Rust,
+        &format!("audit = [\"true\", \"{{lockfile}}\"]\n{FAKE_COVERAGE}"),
+    )
+}
+
+#[test]
+fn a_bug_fix_keeps_every_locked_version() {
+    // #500: version changes used to pass; only new packages were checked.
+    let rust = rust_without_audit();
+    let detail = |repo: &Repo| {
+        let report = repo.gate(&rust, None);
+        let deps = report.step(StepName::Dependencies).unwrap().clone();
+        assert_eq!(deps.status, StepStatus::Failed, "{report}");
+        deps.detail
+    };
+    let (repo, lock) = with_locked_left_pad();
+    repo.write("Cargo.lock", &format!("{lock}{}", left_pad("1.0.1")));
+    let bumped = detail(&repo);
+    assert!(
+        bumped.contains("Cargo.lock: `left-pad` 1.0.0 → 1.0.1")
+            && bumped.contains("CVE job (#455)"),
+        "{bumped}"
+    );
+    repo.write("Cargo.lock", &format!("{lock}{}", left_pad("0.9.0")));
+    assert!(detail(&repo).contains("`left-pad` 1.0.0 → 0.9.0"));
+    repo.write("Cargo.lock", &lock);
+    assert!(detail(&repo).contains("`left-pad` 1.0.0 is removed"));
+}
+
+#[test]
+fn a_cve_job_keeps_the_platform_s_upgrade_and_nothing_else() {
+    use aegis_gate::{DependencyPolicy, Upgrade};
+    let rust = rust_without_audit();
+    let (repo, lock) = with_locked_left_pad();
+    let upgraded = format!("{lock}{}", left_pad("1.0.1"));
+    let policy = |version: &str| {
+        DependencyPolicy::Upgrade(Upgrade {
+            // As the registry compares names.
+            package: "left_pad".into(),
+            version: version.into(),
+            files: [("Cargo.lock".to_owned(), upgraded.clone())].into(),
+        })
+    };
+    // The gate's later steps run cargo, which rewrites a lockfile that
+    // `Cargo.toml` does not back: each check writes its patch again.
+    let deps = |lockfile: &str, version: &str| {
+        repo.write("Cargo.lock", lockfile);
+        let report = repo.gate_under(&rust, policy(version));
+        report.step(StepName::Dependencies).unwrap().clone()
+    };
+
+    // The patch holds the platform's upgrade: allowed under its policy,
+    // refused as a bug-fix.
+    let ok = deps(&upgraded, "1.0.1");
+    assert_ne!(ok.status, StepStatus::Failed, "{}", ok.detail);
+    repo.write("Cargo.lock", &upgraded);
+    assert_eq!(
+        repo.gate(&rust, None)
+            .step(StepName::Dependencies)
+            .unwrap()
+            .status,
+        StepStatus::Failed
+    );
+    // The upgrade's file names another version than the job's.
+    let wrong = deps(&upgraded, "1.0.3");
+    assert!(
+        wrong
+            .detail
+            .contains("no lockfile locks `left_pad` at 1.0.3"),
+        "{}",
+        wrong.detail
+    );
+    // The agent changed the lockfile again.
+    let edited = deps(&format!("{lock}{}", left_pad("1.0.2")), "1.0.1");
+    assert_eq!(edited.status, StepStatus::Failed);
+    assert!(
+        edited
+            .detail
+            .contains("Cargo.lock: differs from the platform's upgrade"),
+        "{}",
+        edited.detail
+    );
+    // The agent undid it: no lockfile change, and still a failure.
+    let undone = deps(&format!("{lock}{}", left_pad("1.0.0")), "1.0.1");
+    assert_eq!(undone.status, StepStatus::Failed, "{}", undone.detail);
+    assert!(
+        undone
+            .detail
+            .contains("differs from the platform's upgrade"),
+        "{}",
+        undone.detail
+    );
+    // A manifest beyond the upgrade.
+    repo.replace(
+        "Cargo.toml",
+        "[dependencies]\n",
+        "[dependencies]\nleft-pad = \"1\"\n",
+    );
+    let beyond = deps(&upgraded, "1.0.1");
+    assert!(
+        beyond
+            .detail
+            .contains("Cargo.toml: changed beyond the platform's upgrade"),
+        "{}",
+        beyond.detail
     );
 }

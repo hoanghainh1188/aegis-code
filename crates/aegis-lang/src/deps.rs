@@ -88,9 +88,90 @@ pub fn new_dependency_violations(
         .collect()
 }
 
+/// A package already locked whose versions changed: bumped, downgraded,
+/// or removed (`after` empty). Bug-fix patches change none (#500).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionChange {
+    pub name: String,
+    pub before: Vec<String>,
+    pub after: Vec<String>,
+}
+
+impl fmt::Display for VersionChange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = &self.name;
+        let before = self.before.join(", ");
+        if self.after.is_empty() {
+            write!(f, "`{name}` {before} is removed")
+        } else {
+            write!(f, "`{name}` {before} → {}", self.after.join(", "))
+        }
+    }
+}
+
+/// The packages of `before` whose set of locked versions differs in
+/// `after`, by name, in name order. New packages are
+/// [`new_dependency_violations`]' to judge.
+pub fn version_changes(
+    before: &[LockedDependency],
+    after: &[LockedDependency],
+) -> Vec<VersionChange> {
+    let versions = |deps: &[LockedDependency], name: &str| -> Vec<String> {
+        let set: BTreeSet<&str> = deps
+            .iter()
+            .filter(|d| d.name == name)
+            .map(|d| d.version.as_str())
+            .collect();
+        set.into_iter().map(str::to_owned).collect()
+    };
+    let names: BTreeSet<&str> = before.iter().map(|d| d.name.as_str()).collect();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let (b, a) = (versions(before, name), versions(after, name));
+            (b != a).then(|| VersionChange {
+                name: name.to_owned(),
+                before: b,
+                after: a,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_changes_are_bumps_downgrades_and_removals_of_known_packages() {
+        let before = [
+            dep("requests", "2.32.0", PYPI),
+            dep("idna", "3.7", PYPI),
+            dep("serde", "1.0.1", PYPI),
+            dep("serde", "1.0.2", PYPI),
+            dep("gone", "1.0", PYPI),
+        ];
+        let after = [
+            dep("requests", "2.32.4", PYPI),
+            dep("idna", "3.7", PYPI),
+            dep("serde", "1.0.2", PYPI),
+            dep("serde", "1.0.1", PYPI),
+            dep("new-one", "0.1", PYPI),
+        ];
+        let changes = version_changes(&before, &after);
+        let text: Vec<String> = changes.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            text,
+            ["`gone` 1.0 is removed", "`requests` 2.32.0 → 2.32.4"]
+        );
+        assert!(version_changes(&before, &before).is_empty());
+        // Two versions of one crate, one of them bumped.
+        let bumped = [dep("serde", "1.0.1", PYPI), dep("serde", "1.0.3", PYPI)];
+        assert_eq!(
+            version_changes(&before[2..4], &bumped)[0].to_string(),
+            "`serde` 1.0.1, 1.0.2 → 1.0.1, 1.0.3"
+        );
+    }
 
     const PYPI: &str = "https://pypi.org/simple";
 

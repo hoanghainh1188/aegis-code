@@ -602,6 +602,7 @@ async fn run_baseline_gate(
             scope: ScopePolicy::default(),
             parts: vec![],
             sidecars,
+            dependency_policy: aegis_gate::DependencyPolicy::Locked,
         };
         run_gate(&gate_request)
     })

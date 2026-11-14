@@ -98,9 +98,10 @@ the rest of the repository.
 
 # Limits
 
-- Do not add, remove or upgrade dependencies, and do not edit lockfiles,
-  build configuration or toolchain files unless the issue is about them.
-  The checks block such changes.
+- Do not upgrade, downgrade or remove dependencies: the checks keep every
+  locked version, and upgrades are done by a separate job. Do not add
+  dependencies or edit lockfiles, build configuration or toolchain files
+  unless the issue is about them; the checks block such changes.
 - Never edit CI files (`.github/`, `.gitlab-ci.yml`, Jenkinsfile, ...),
   CODEOWNERS, or the configuration of the checks (Sonar, linters, coverage,
   test runners), even if the issue asks. The checks reject a patch that
