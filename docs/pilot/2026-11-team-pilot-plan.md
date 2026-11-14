@@ -9,7 +9,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 | Mục | Giá trị |
 | --- | --- |
 | Máy | `<host-ssh>`: Linux x86_64 hoặc arm64, tối thiểu 4 vCPU, 16 GB RAM, 100 GB SSD, chỉ dùng cho aegis ([runbook on-premise](../runbook/on-premise.md#prerequisites)) |
-| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.11.0** (bản đầu tiên có `aegis check-repo` trong image server, #474) |
+| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.12.0** (có `aegis check-repo` trong image server, #474, và sidecar DB cho gate và `run_tests`, #490, #491) |
 | Repo | `<owner/name>` trên GitHub. Issue và lỗi CI đến qua webhook (#25) |
 | Ngôn ngữ | `<language>`. Trần lượt gọi theo profile: 80 cho Rust, 40 cho các ngôn ngữ khác ([ADR 0014](../adr/0014-per-language-call-cap.md)) |
 | Ngân sách | **$100 mỗi tháng** cho repo (#31), $4 mỗi job (`[worker] max_cost_usd`) |
@@ -21,7 +21,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 
 ## Bước 0: chuẩn bị (trước ngày triển khai)
 
-1. **Phát hành v0.11.0.** Merge PR release của release-please để có tag `v0.11.0` cùng image trên GHCR. Từ bản này image server có `aegis check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Bản v0.9.0 còn thiếu cả trần lượt gọi theo ngôn ngữ (#471) và các quy tắc prompt của #448.
+1. **Phát hành v0.12.0.** Merge PR release của release-please để có tag `v0.12.0` cùng image trên GHCR. Từ v0.11.0, image server có `aegis check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Từ v0.12.0, test cần PostgreSQL hay Redis chạy được trong gate và trong `run_tests` của agent (sidecar, #490, #491). Bản v0.9.0 còn thiếu cả trần lượt gọi theo ngôn ngữ (#471) và các quy tắc prompt của #448.
 2. **Gom 9 mục** trong [danh sách chuẩn bị của runbook](../runbook/on-premise.md#preparation-checklist). Các mục thường mất thời gian nhất vì phải chờ team khác:
    - tên DNS cùng chứng chỉ TLS, đặt sau reverse proxy;
    - một OIDC client trong SSO của team;
@@ -40,7 +40,7 @@ Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setu
    - các sandbox cần kéo về, chỉ chọn ngôn ngữ của repo;
    - API key Claude, OIDC client secret và token để comment. Ba thứ này nhập ẩn.
    Câu nào để trống thì chạy lại script sẽ được hỏi lại.
-2. `sudo ./aegis-deploy.sh 0.11.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
+2. `sudo ./aegis-deploy.sh 0.12.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
 3. Kiểm tra sau khi cài (runbook §1, bước 5): healthcheck trả về được, và đăng nhập SSO được.
 4. Chạy `backup.sh` lần đầu, rồi đặt lịch chạy hằng ngày bằng cron hoặc systemd timer ([runbook on-premise §4](../runbook/on-premise.md#4-backup--disaster-recovery)).
 
