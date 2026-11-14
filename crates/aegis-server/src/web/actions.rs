@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Redirect};
 use serde::Deserialize;
 
 use super::{WebError, WebResult, job_for};
-use crate::api::new_job;
+use crate::api::{CreateCveJob, cve_job, new_job};
 use crate::auth::Access;
 
 /// The trackers a job may be read from, as `aegis --source` takes
@@ -99,6 +99,41 @@ pub async fn create(
     }
     let new = new_job(repo_id, &form.issue_ref, &form.source, None)
         .map_err(|why| WebError::new(StatusCode::BAD_REQUEST, why))?;
+    let job = store.create_job_by(&new, &access.actor).await?;
+    Ok(to_job(job.id, Done::Created))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCveForm {
+    repo_id: i64,
+    package: String,
+    version: String,
+    advisory: String,
+}
+
+/// A CVE job from the form on the jobs page (#502): maintainers only.
+pub async fn create_cve(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Form(form): Form<CreateCveForm>,
+) -> WebResult {
+    let repo_id = RepoId(form.repo_id);
+    if !access.can(repo_id, RepoRole::Viewer) {
+        return Err(WebError::not_found(format!("repo {}", form.repo_id)));
+    }
+    if !access.can(repo_id, RepoRole::Maintainer) {
+        return Err(WebError::new(
+            StatusCode::FORBIDDEN,
+            "you need role maintainer in this repo to create jobs",
+        ));
+    }
+    let target = CreateCveJob {
+        package: form.package,
+        version: form.version,
+        advisory: form.advisory,
+    };
+    let new =
+        cve_job(repo_id, &target).map_err(|why| WebError::new(StatusCode::BAD_REQUEST, why))?;
     let job = store.create_job_by(&new, &access.actor).await?;
     Ok(to_job(job.id, Done::Created))
 }

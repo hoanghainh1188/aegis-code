@@ -27,8 +27,8 @@ use aegis_ledger::{
     IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable,
 };
 use aegis_lifecycle::{
-    ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun, ReviewRound,
-    run_issue, run_review,
+    CveTarget, ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun,
+    ReviewRound, run_issue, run_review,
 };
 use aegis_pr::REPLY_MARKER;
 use aegis_provider::{Observed, Provider};
@@ -331,6 +331,7 @@ impl LifecycleRunner {
             (None, JobSource::Ci) => {
                 ci_issue(job, &config.repo.fork, &repo.default_branch, &github_token).await?
             }
+            (None, JobSource::Cve) => cve_issue(job)?,
             (None, _) => issue(job, &config.repo.fork.api, &github_token).await?,
         };
         let tiers = [
@@ -484,6 +485,25 @@ impl JobRunner for LifecycleRunner {
     async fn run(&self, claim: &Claim, cancel: CancellationToken) -> Attempt {
         self.attempt(claim, cancel).await.unwrap_or_else(|a| a)
     }
+}
+
+/// A CVE job (#502): its target read back from `issue_ref` and checked
+/// again, under the job's ledger key.
+fn cve_issue(job: &Job) -> Result<IssueInput, Attempt> {
+    let target = CveTarget::from_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+    Ok(IssueInput {
+        id: job.ledger_key.as_str().to_owned(),
+        title: target.title(),
+        body: format!(
+            "Security advisory {}: raise `{}` to {}.",
+            target.advisory, target.package, target.version
+        ),
+        url: target.url(),
+        base: None,
+        hidden: None,
+        kind: None,
+        cve: Some(target),
+    })
 }
 
 /// The issue of a GitHub or CLI job, under the job's ledger key. Jira and

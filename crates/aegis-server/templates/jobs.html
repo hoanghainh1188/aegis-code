@@ -24,6 +24,28 @@
       <button type="submit">Create job</button>
     </form>
   </details>
+  <details class="create">
+    <summary class="button">Raise a dependency for an advisory</summary>
+    <form action="/jobs/cve" method="post" class="inline">
+      {% include "form_guard.html" %}
+      <label>Repo
+        <select name="repo_id" required>
+          {% for c in creatable %}<option value="{{ c.value }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Package
+        <input type="text" name="package" required maxlength="214" placeholder="requests" autocomplete="off">
+      </label>
+      <label>Version
+        <input type="text" name="version" required maxlength="64" placeholder="2.32.4" autocomplete="off">
+      </label>
+      <label>Advisory
+        <input type="text" name="advisory" required maxlength="64" placeholder="GHSA-9wx4-h78v-vm56" autocomplete="off">
+      </label>
+      <button type="submit">Create CVE job</button>
+    </form>
+    <p class="note">The platform raises the package with the repo's upgrade command; the agent only adapts the code if the checks fail (ADR 0015).</p>
+  </details>
   {% endif %}
   <form class="filters" action="/jobs" method="get" hx-get="/jobs" hx-target="#jobs-table" hx-push-url="true" hx-trigger="change">
     <label>Repo
