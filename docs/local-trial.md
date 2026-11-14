@@ -140,4 +140,4 @@ sequenceDiagram
 
 ## Transitioning to Production
 
-Production deployments connect to real forges (webhooks routed to `https://<domain>/webhooks/github`), read secrets from AWS Secrets Manager or secure local files, authenticate via enterprise OIDC SSO, and register real repository URLs. For full production instructions, see [AWS Runbook: Adding Repositories](runbook/README.md#6-adding-repositories) or [On-Premise Operations Runbook](runbook/on-premise.md).
+Production deployments connect to real forges (webhooks routed to `https://<domain>/webhooks/github`), read secrets from AWS Secrets Manager or secure local files, authenticate via enterprise OIDC SSO, and register real repository URLs. For full production instructions, see [Runbook: Adding Repositories](runbook/repos.md) or [On-Premise Operations Runbook](runbook/on-premise.md).

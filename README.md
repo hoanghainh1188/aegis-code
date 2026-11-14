@@ -539,13 +539,11 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * 🚧 **Phase 2 – Platform Service** (~95% Completed – Final Stage):
   - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425, C# 50% in #448); per-language call cap ([ADR 0014](docs/adr/0014-per-language-call-cap.md)); `aegis check-repo` pre-flight check (#450); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)).
   - **In Progress / Remaining:** real-world team pilot on-premise (#158, [plan](docs/pilot/2026-11-team-pilot-plan.md)), internal repo KPI validation (#157), staging cloud deployment via OpenTofu (#33), gVisor sandbox cost measurement (#322), and shipping `aegis check-repo` with the release (#474).
-* ⏳ **Phase 3 – Expansion & AMS Readiness** (Planned – `Phase 3 – Mở rộng`, [ADR 0011](docs/adr/0011-ams-direction.md), [ADR 0012](docs/adr/0012-triage-and-diagnostic-lane.md), [ADR 0013](docs/adr/0013-ephemeral-database-sidecars.md)):
-  - **Next-Gen AMS Operations & Legacy Readiness:** L1/L2 triage & non-code diagnostic lane (#451), APM/production telemetry ingestion from Sentry/Datadog/CloudWatch (#452), ITSM connectors for ServiceNow/JSM and SLA severity mapping (#453), ephemeral DB/service sidecars in gate + Golden Master characterization test benchmarks on low-coverage legacy repos (#454), controlled CVE/dependency remediation workflow (#455), and additional language ecosystems (#37) plus review evidence (#36).
-  - **Evaluated & Deferred:** SBFL (#34, [report](docs/measurements/2026-10-27-sbfl-evaluation.md)) and deep context compression / SWEzze (#35, [report](docs/measurements/2026-10-28-context-compression.md)) were empirically evaluated and deferred from default execution (`NO-GO` under current 40-turn / 200k-context workloads).
-* ⏳ **Phase 4 – Enterprise AMS Scale & Governance** (Planned – `Phase 4 – AMS Quy mô Doanh nghiệp`; starts after the pilot #158 and internal-repository KPIs #157, [ADR 0011](docs/adr/0011-ams-direction.md)):
-  - **Multi-Tenant Operations & Enterprise Memory:** PostgreSQL-backed Incident & Domain Memory storing postmortems, review round feedback, and repo business rules (#456); enterprise multi-tenant isolation, SLA-prioritized job queue (`P1 > P2 > P3`) with preemption, and executive MTTR / ticket deflection reporting (#457).
-* 🔮 **Phase 5 – Autonomous Self-Healing & Prevention** (Conceptual Vision):
-  - Proactive maintenance: Anomaly-to-patch pipeline driven by APM telemetry, scheduled off-peak technical debt pruning, and automated continuous compliance auditing.
+* ⏳ **Phase 3 – Expansion & AMS Readiness** (Planned, `Phase 3 – Mở rộng`): triage and diagnostic lane, APM and ITSM intake, database sidecars and Golden Master, controlled CVE remediation, more languages (#451–#455, #37, #36; [ADR 0011](docs/adr/0011-ams-direction.md), [ADR 0012](docs/adr/0012-triage-and-diagnostic-lane.md), [ADR 0013](docs/adr/0013-ephemeral-database-sidecars.md)). SBFL (#34) and deep context compression (#35) were measured and deferred ([reports](docs/measurements/)).
+* ⏳ **Phase 4 – Enterprise AMS Scale & Governance** (Planned, `Phase 4 – AMS Quy mô Doanh nghiệp`): incident and domain memory, multi-tenant isolation, SLA queue and MTTR reporting (#456, #457). Starts after the pilot (#158) and the internal-repository KPIs (#157).
+* 🔮 **Phase 5 – Autonomous Self-Healing & Prevention** (Conceptual Vision).
+
+The scope and the measurement milestone of each phase are in [Proposal §9](docs/design/00-proposal.md#9-implementation-roadmap). This section is the one place that lists the open work of the current phase.
 
 ---
 
@@ -575,6 +573,7 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [Production AWS Runbook](docs/runbook/README.md) – Deployment, secret rotation, and incident triage
 * [On-Premise Install Guide](docs/install-on-premise.md) – From a blank machine to the first PR, step by step
 * [On-Premise Operations Runbook](docs/runbook/on-premise.md) – Single-machine Docker Compose and systemd management
+* [Adding Repositories](docs/runbook/repos.md) – Registering a repo, roles, budget and webhooks, on every deployment
 * [Kubernetes Operations Runbook](docs/runbook/kubernetes.md) – Helm chart: install, upgrades, rollback
 * [Team Pilot Plan](docs/pilot/2026-11-team-pilot-plan.md) – The four-week on-premise pilot of #158 (in Vietnamese)
 * [Measurement Reports](docs/measurements/) – Dated KPI and experiment reports (in Vietnamese)

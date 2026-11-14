@@ -53,16 +53,22 @@ Tokens enforce RBAC rules assigned to your user account: submitting, canceling, 
 
 ## Command Reference
 
-```bash
-aegis submit <repo> <issue>        # e.g. aegis submit typst typst/typst#123
-aegis watch <job>                  # Streams state changes; exits 0 when PR is opened
-aegis show <job>                   # Displays job metadata, run history, and termination cause
-aegis open <job>                   # Opens generated PR URL or job dashboard page in browser
-aegis list --repo <repo> --status running
-```
+| Command | Description |
+| :--- | :--- |
+| `aegis login <server>` | Log in with a personal token from `<server>/me/tokens` |
+| `aegis logout` | Remove the saved credentials |
+| `aegis whoami` | Show the signed-in user and the server |
+| `aegis repos` | List the repositories you have a role in |
+| `aegis submit <repo> <issue>` | Start a job for an issue, e.g. `aegis submit typst typst/typst#123` |
+| `aegis list [--repo <repo>] [--status <status>] [--limit <n>]` | List jobs |
+| `aegis show <job>` | Show a job, its runs and why it ended |
+| `aegis watch <job> [--every <seconds>]` | Follow a job until it ends; exits `0` when it opened a PR |
+| `aegis cancel <job>` | Cancel a queued or running job |
+| `aegis retry <job>` | Run a failed or cancelled job again |
+| `aegis review <job>` | Start a review round on the PR the job opened (#243) |
+| `aegis open <job>` | Open the job's PR, or its page on the dashboard, in the browser |
 
 - `<issue>` format: `owner/repo#12` for GitHub issues, `KEY-12` for Jira tickets. Other sources require the explicit `--source` flag: `--source gitlab` (`group/project#12`), `--source backlog`.
-- Action commands: `aegis cancel <job>`, `aegis retry <job>` (for failed or canceled jobs), `aegis review <job>` (triggers automated review round on the opened PR, #243).
 - Structured Output: Append `--json` to any command for raw machine-readable JSON output suitable for automation scripts.
 
 ---

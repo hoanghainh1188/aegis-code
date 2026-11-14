@@ -66,7 +66,7 @@ need AEGIS_FORK_NAME "Name of the fork" github_name "a GitHub repo name" "$upstr
 token_env=$(token_name "$AEGIS_REPO_SLUG")
 if [ ! -e "secrets/$token_env" ]; then
   ask_secret AEGIS_FORK_TOKEN "Token of the bot for $AEGIS_FORK_OWNER/$AEGIS_FORK_NAME"
-  [ -n "$AEGIS_FORK_TOKEN" ] || die "AEGIS_FORK_TOKEN is required: the fork's token (runbook §6, step 2)"
+  [ -n "$AEGIS_FORK_TOKEN" ] || die "AEGIS_FORK_TOKEN is required: the fork's token (docs/runbook/repos.md, step 2)"
   (umask 077; printf '%s\n' "$AEGIS_FORK_TOKEN" > "secrets/.$token_env.new")
   chown "$AEGIS_UID:$AEGIS_UID" "secrets/.$token_env.new"
   mv "secrets/.$token_env.new" "secrets/$token_env"
@@ -87,7 +87,7 @@ chown "$AEGIS_UID:$AEGIS_UID" "$REPO_FILES"
 file="$REPO_FILES/$AEGIS_REPO_SLUG.toml"
 [ -e "$file" ] && die "$file exists: the repo is registered already (repo update to change it)"
 (umask 077; cat > "$file.new" <<TOML
-# Written by add-repo.sh (#476); runbook §6 lists every key.
+# Written by add-repo.sh (#476); docs/runbook/repos.md lists every key.
 slug = "$AEGIS_REPO_SLUG"
 url = "$AEGIS_REPO_URL"
 default_branch = "$AEGIS_REPO_BRANCH"
