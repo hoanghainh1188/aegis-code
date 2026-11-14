@@ -26,7 +26,7 @@ Collect these before installing; most of them come from other teams and take lon
 | 3 | An OIDC client in your SSO (Keycloak, Entra ID, Okta, …) with redirect URI `https://<public_url>/auth/callback` | Dashboard login | `[auth.oidc] issuer`, `client_id`; secret file `AEGIS_OIDC_CLIENT_SECRET` |
 | 4 | A model: a Claude API key, AWS Bedrock access, or a local model server (Ollama / vLLM) | The agent | Secret file `ANTHROPIC_API_KEY`, or a mode file in `./modes` |
 | 5 | A bot account on GitHub/GitLab, and for each repo the fork it opens PRs in | Branches `agent/*` and PRs | `[settings.fork]` of each repo |
-| 6 | A token of the bot per repo (scopes: [AWS Runbook §6](README.md#6-adding-repositories), step 2) | Clone, push, open PRs, read CI logs | Secret file named by the repo's `token_env` |
+| 6 | A token of the bot per repo (scopes: [Adding Repositories](repos.md#prerequisites), step 2) | Clone, push, open PRs, read CI logs | Secret file named by the repo's `token_env` |
 | 7 | A token allowed to comment on upstream issues | Progress and results on the issue | Secret file `AEGIS_GITHUB_COMMENT_TOKEN` (GitLab: `AEGIS_GITLAB_COMMENT_TOKEN`) |
 | 8 | Admin rights on each upstream repo, or someone who has them | Adding the webhook | — |
 | 9 | The email of the first administrator (as your SSO reports it) | First `grant ... admin` | — |
@@ -63,20 +63,9 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 
    Steps 2 and 3 are left for what you skipped and for `[modes]`.
 
-2. **Configure `server.toml`:**
-   - `public_url`: Publicly accessible URL for webhooks and user dashboard;
-   - `[auth.oidc]`: Enterprise OIDC Single Sign-On credentials;
-   - `[modes]`: Configuration modes for onboarded repos. To use a local model (Ollama / vLLM), create a mode file in `./modes/local.toml` based on [config/local.toml](../../config/local.toml), and configure `poc = "/etc/aegis/modes/local.toml"`.
+2. **Configure `server.toml`** for what step 1 did not set: `public_url` and `[auth.oidc]` as in the [install guide, B4](../install-on-premise.md#b4-servertoml). `[modes]` names the configuration of each mode. For a local model (Ollama / vLLM), create `./modes/local.toml` from [config/local.toml](../../config/local.toml) and set `poc = "/etc/aegis/modes/local.toml"`.
 
-3. **Populate Secrets:** Place each secret as a file inside `./secrets/`, readable only by their owner (`0400` or `0600`; the command below gives `0600`), owned by uid `10001:10001` ([Secret Rotation](README.md#3-secret-rotation)):
-   - `ANTHROPIC_API_KEY`: Model API key (required for `poc` mode; not required for local models);
-   - `AEGIS_OIDC_CLIENT_SECRET`: SSO client secret;
-   - `AEGIS_GITHUB_COMMENT_TOKEN`: Token for posting comments to upstream issues;
-   - Fork tokens for onboarded repositories (named as defined in `token_env` of each repo).
-
-   ```bash
-   sudo sh -c 'umask 077; printf "%s\n" "$VALUE" > secrets/ANTHROPIC_API_KEY; chown 10001:10001 secrets/ANTHROPIC_API_KEY'
-   ```
+3. **Populate Secrets** that step 1 did not write: one file each in `./secrets/`, readable only by its owner and owned by uid `10001:10001`, as in the [install guide, B5](../install-on-premise.md#b5-secrets). They are `ANTHROPIC_API_KEY` (not needed with a local model), `AEGIS_OIDC_CLIENT_SECRET`, `AEGIS_GITHUB_COMMENT_TOKEN`, and each repo's fork token. Rotation: [Secret Rotation](README.md#3-secret-rotation).
 
 4. **Deploy Application Version:**
 
@@ -156,39 +145,29 @@ Prometheus metrics listen locally at `127.0.0.1:9464/metrics`. Standard alerting
 
 ## 2. Registering Repositories
 
-### First Repository Checklist
-
-From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` does steps 1–4 (#476):
+From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` registers a GitHub repo (#476):
 - it asks for the upstream URL, slug, default branch, language, mode, the fork, and the fork's token (read without echo);
 - it asks for the maintainers' and reviewers' emails, and the monthly budget;
-- it writes the token and the repo file, runs `repo add` and `grant`, and prints the webhook settings of step 5 with the link to the repo's budget page.
+- it writes the token and the repo file, runs `repo add` and `grant`, and prints the webhook settings with the link to the repo's budget page.
 
-Every value can come from the environment instead, as for `install.sh`. The variables are `AEGIS_REPO_URL`, `AEGIS_REPO_SLUG`, `AEGIS_REPO_BRANCH`, `AEGIS_REPO_LANGUAGE`, `AEGIS_REPO_MODE`, `AEGIS_FORK_OWNER`, `AEGIS_FORK_NAME`, `AEGIS_FORK_TOKEN`, `AEGIS_MAINTAINERS`, `AEGIS_REVIEWERS` and `AEGIS_MONTHLY_USD`. The script is for GitHub repos; a GitLab repo takes the steps below by hand. Its grants, like any made before someone's first sign-in, need an email the SSO marks verified.
+Every value can come from the environment instead, as for `install.sh`. The variables are `AEGIS_REPO_URL`, `AEGIS_REPO_SLUG`, `AEGIS_REPO_BRANCH`, `AEGIS_REPO_LANGUAGE`, `AEGIS_REPO_MODE`, `AEGIS_FORK_OWNER`, `AEGIS_FORK_NAME`, `AEGIS_FORK_TOKEN`, `AEGIS_MAINTAINERS`, `AEGIS_REVIEWERS` and `AEGIS_MONTHLY_USD`. The script is for GitHub repos; a GitLab repo is registered by hand. Its grants, like any made before someone's first sign-in, need an email the SSO marks verified.
 
-By hand, `aegis` stands for `docker compose exec aegis aegis-server --config /etc/aegis/server.toml`; the details of each step are in [AWS Runbook Section 6](README.md#6-adding-repositories).
+By hand, the steps are those of [Adding Repositories](repos.md), with these on-premise specifics, from `deploy/compose/`:
 
-1. **Fork token:** `sudo sh -c 'umask 077; printf "%s\n" "$TOKEN" > secrets/AEGIS_TOKEN_MYREPO; chown 10001:10001 secrets/AEGIS_TOKEN_MYREPO'`. The server reads new secret files within `[secrets] refresh_s` (5 minutes); no restart needed.
-2. **Repo file:** write `myrepo.toml` (template in [AWS Runbook §6](README.md#registration-and-cloning), step 4) with `token_env = "AEGIS_TOKEN_MYREPO"`, then `sudo install -D -o 10001 -g 10001 myrepo.toml /srv/aegis/.workspace/repo-files/myrepo.toml`.
-3. **Register:** `aegis repo add /srv/aegis/.workspace/repo-files/myrepo.toml`. It clones the repo with the fork token, also for public repos; a token or URL problem fails here, not later (an invalid token shows as `could not read Username for 'https://github.com'`). An admin can instead do steps 2 and 3 on the dashboard (`/admin/repos` → **Add a repo**, #330): the same checks, the fork token named in **Token: name of the secret**, the clone made in the background and its result, with the end of git's output if it failed, shown on the repo's page.
-4. **Roles:** `aegis grant <email> myrepo maintainer` for the people who start jobs, `reviewer` for those who only review.
-5. **Webhooks:** on the upstream repo, payload URL `https://<public_url>/webhooks/github`, content type `application/json`, secret from `sudo cat secrets/AEGIS_GITHUB_WEBHOOK_SECRET`, events **Issues** and **Workflow runs**. For review rounds, on the fork: **Pull request reviews**, **Pull request review comments**, **Issue comments**. GitLab: [AWS Runbook §6](README.md#webhook-configuration), step 10.
-   To check before labelling a real issue: the repo's page on the dashboard → **Connection to the forge** (#331) shows the payload URL and events, whether each secret is in the store, the repo's last webhooks (GitHub's `ping` on creating the webhook counts as connected; an ignored one says why), and **Check now** asks the forge whether the fork token may push and the comment token may comment, and whether the repo's URL is still its name. With `[web] make_webhooks = true` in `server.toml` (off by default), the same page makes both webhooks instead (#376): pick the repo or the fork, paste a token that may manage its webhooks (GitHub `admin:repo_hook`, GitLab Maintainer), and the server creates the webhook, or updates the one already pointing at it, signed with its own secret. The token is used for that request only: not kept, logged or recorded; the audit log says only that the webhook was made, with its id.
-6. **First job:** put the label `aegis` on a small, well-described bug. In the webhook's *Recent Deliveries* the response is `202`; the job appears on the dashboard within seconds, and a comment appears on the issue when it ends.
-7. **Hand over:** point reviewers to the [Reviewer Guide](../reviewing.md) and developers to [aegis](../client.md).
+- **Server commands:** `docker compose exec aegis aegis-server --config /etc/aegis/server.toml <command>`.
+- **Fork token:** a file `./secrets/<token_env>`, owner-only and owned by uid 10001. The server reads new secret files within `[secrets] refresh_s` (5 minutes); no restart is needed.
 
-### Reference
-
-Repository onboarding follows the procedure outlined in [AWS Runbook Section 6](README.md#6-adding-repositories). Replace CLI execution prefix with:
-```bash
-docker compose exec aegis aegis-server --config /etc/aegis/server.toml <command>
-```
-
-- **Repository Configuration File:** Store definition files within the workspace so the container can access them:
   ```bash
-  sudo install -o 10001 -g 10001 typst.toml /srv/aegis/.workspace/repo-files/
+  sudo sh -c 'umask 077; printf "%s\n" "$TOKEN" > secrets/AEGIS_TOKEN_MYREPO; chown 10001:10001 secrets/AEGIS_TOKEN_MYREPO'
   ```
-- **Fork Authentication:** Placed as `./secrets/<token_env>` (owner-only `0400` or `0600`, uid 10001).
-- **Webhooks:** Payload URL `https://<public_url>/webhooks/github`, secret read from `./secrets/AEGIS_GITHUB_WEBHOOK_SECRET`.
+
+- **Repo file:** in the workspace, so the container can read it:
+
+  ```bash
+  sudo install -D -o 10001 -g 10001 myrepo.toml /srv/aegis/.workspace/repo-files/myrepo.toml
+  ```
+
+- **Webhooks:** payload URL `https://<public_url>/webhooks/github`, secret from `sudo cat secrets/AEGIS_GITHUB_WEBHOOK_SECRET`.
 
 ---
 

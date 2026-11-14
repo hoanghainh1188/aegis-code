@@ -21,7 +21,7 @@ Throughout, replace:
 
 ### A1. A bot account and its fork
 
-The agent never pushes to the upstream repo. It pushes `agent/*` branches to a fork and opens PRs there; maintainers merge from the fork ([AWS Runbook §6](runbook/README.md#6-adding-repositories) describes the alternative of PRs straight into upstream).
+The agent never pushes to the upstream repo. It pushes `agent/*` branches to a fork and opens PRs there; maintainers merge from the fork ([Adding Repositories](runbook/repos.md#prerequisites) describes the alternative of PRs straight into upstream).
 
 1. Create a GitHub account for the bot, e.g. `acme-aegis-bot`, with an email your team reads.
 2. Signed in as the bot, fork `acme/widget`. Keep the fork's default branch the same as upstream's, and sync it regularly (GitHub: **Sync fork**).
@@ -40,7 +40,7 @@ Signed in as the bot: **Settings → Developer settings → Personal access toke
 
 Aegis also reads the upstream repo's issues and CI logs (*Issues* and *Actions*: Read) with this same token. For a **public** upstream, every token can read them, so the token above is enough.
 
-For a **private** upstream, one token must reach both the bot's fork and the organization's upstream, which a fine-grained token cannot (it has one resource owner). Use instead a classic token of the bot with scope `repo`, after the organization has given the bot read access to `acme/widget`; or open PRs straight into upstream (`fork` = upstream, [AWS Runbook §6](runbook/README.md#6-adding-repositories)) with a fine-grained token owned by the organization.
+For a **private** upstream, one token must reach both the bot's fork and the organization's upstream, which a fine-grained token cannot (it has one resource owner). Use instead a classic token of the bot with scope `repo`, after the organization has given the bot read access to `acme/widget`; or open PRs straight into upstream (`fork` = upstream, [Adding Repositories](runbook/repos.md#prerequisites)) with a fine-grained token owned by the organization.
 
 Keep the value for step B5. It is sent on every clone, public repos included, so an invalid token fails registration (step C1).
 
@@ -275,7 +275,7 @@ It asks for:
 - the emails of maintainers and reviewers. People granted before their first sign-in need an email the SSO marks verified (A4); otherwise leave them empty and use C2 after they have signed in;
 - the monthly budget.
 
-It writes the token as `secrets/AEGIS_TOKEN_WIDGET` and the repo file, registers and clones the repo, grants the roles, and prints the webhook settings of C3 and the link to the repo's budget page. Then go to the **Check** below, and to C3. Without questions, the values come from the environment ([Runbook](runbook/on-premise.md#first-repository-checklist)).
+It writes the token as `secrets/AEGIS_TOKEN_WIDGET` and the repo file, registers and clones the repo, grants the roles, and prints the webhook settings of C3 and the link to the repo's budget page. Then go to the **Check** below, and to C3. Without questions, the values come from the environment ([Runbook](runbook/on-premise.md#2-registering-repositories)).
 
 **Or on the dashboard:** **Admin** (the list of repos) → **Add a repo**.
 
@@ -290,13 +290,13 @@ It writes the token as `secrets/AEGIS_TOKEN_WIDGET` and the repo file, registers
 | Fork: Platform, Owner, Name | `github`, `acme-aegis-bot`, `widget` |
 | Token: name of the secret | `AEGIS_TOKEN_WIDGET` (the file from B5) |
 
-Further down, **Conventions** is free text added to the agent's instructions for this repo. Say how to run one test and where tests go; it is the setting that most improves results ([AWS Runbook §6](runbook/README.md#registration-and-cloning), step 6).
+Further down, **Conventions** is free text added to the agent's instructions for this repo. Say how to run one test and where tests go; it is the setting that most improves results ([Adding Repositories](runbook/repos.md#registration-and-cloning), step 6).
 
 Then **Add and clone**.
 
 **Check:** the repo's page shows its clone as *ready*. *Failed* shows the end of git's output: `could not read Username for 'https://github.com'` means the token was refused (A2). Fix the secret file (a changed value is read again within 5 minutes, without a restart), then **Change this repo** → **Save and fetch** to clone again.
 
-From the command line instead: write the same settings as a TOML file ([template](runbook/README.md#registration-and-cloning), step 4) and run `aegis-server ... repo add` ([Runbook](runbook/on-premise.md#first-repository-checklist), steps 2 and 3).
+From the command line instead: write the same settings as a TOML file ([template](runbook/repos.md#registration-and-cloning), step 4) and run `aegis-server ... repo add` ([Runbook](runbook/on-premise.md#2-registering-repositories)).
 
 ### C2. Who may do what
 
@@ -327,7 +327,7 @@ For review rounds (asking the agent for changes on its PR), add a second webhook
 
 **Check:** the repo's page → **Connection to the forge** shows each secret as *set*, and the upstream webhook's `ping` among the last webhooks. **Check now** confirms the fork token may push and the comment token may comment.
 
-Instead of adding the webhooks by hand, an admin can let Aegis make them from that page, with a token given once (`[web] make_webhooks = true` in `server.toml`, off by default; [Runbook](runbook/on-premise.md#first-repository-checklist), step 5).
+Instead of adding the webhooks by hand, an admin can let Aegis make them from that page, with a token given once (`[web] make_webhooks = true` in `server.toml`, off by default; [Adding Repositories](runbook/repos.md#webhook-configuration), step 9).
 
 ### C4. The first job
 

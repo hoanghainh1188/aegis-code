@@ -108,7 +108,7 @@ Every Pod serves `/metrics` on 9464. Set `metrics.serviceMonitor.enabled` with t
 
 ## 2. Registering Repositories
 
-The steps are those of the [AWS Runbook §6](README.md#6-adding-repositories), with this prefix for the CLI:
+The steps are those of [Adding Repositories](repos.md), with this prefix for the CLI:
 
 ```bash
 kubectl -n aegis-worker exec aegis-worker-0 -c aegis -- aegis-server --config /etc/aegis/server.toml <command>
