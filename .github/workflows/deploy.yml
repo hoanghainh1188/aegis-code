@@ -122,11 +122,13 @@ jobs:
           cache-from: type=gha,scope=aegis-server
           cache-to: type=gha,mode=max,scope=aegis-server
           load: ${{ env.PUBLISH != 'true' }}
-      - name: Smoke test (không root, có aegis-aci, git, docker)
+      - name: Smoke test (không root, có aegis-aci, aegis check-repo, git, docker)
         if: env.PUBLISH != 'true'
         run: |
           docker run --rm --entrypoint sh aegis-server:ci -c \
-            'test "$(id -u)" = 10001 && command -v aegis-server aegis-aci git docker'
+            'test "$(id -u)" = 10001 && for b in aegis-server aegis-aci aegis git docker; do command -v "$b" || exit 1; done'
+          # check-repo is in the image (#474): it asks for its config.
+          docker run --rm --entrypoint aegis aegis-server:ci check-repo 2>&1 | grep -- '--config is required'
 
   sandbox-images:
     name: image sandbox ${{ matrix.profile }}

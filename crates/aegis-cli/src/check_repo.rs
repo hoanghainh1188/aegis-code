@@ -436,40 +436,8 @@ fn check_docker_environment(
     report: &mut PreflightReport,
 ) -> bool {
     let docker_cmd = &cfg.run.docker;
-
-    // Verify Docker CLI and daemon
-    let version_check = Command::new(docker_cmd).arg("info").output();
-    match version_check {
-        Ok(out) if out.status.success() => {
-            report.add(CheckItem {
-                category: "Docker",
-                name: "Docker Daemon".into(),
-                status: CheckStatus::Pass,
-                detail: "Docker daemon reachable and responsive".into(),
-                is_blocking: true,
-            });
-        }
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            report.add(CheckItem {
-                category: "Docker",
-                name: "Docker Daemon".into(),
-                status: CheckStatus::Fail,
-                detail: format!("Docker daemon error: {}", stderr.trim()),
-                is_blocking: true,
-            });
-            return false;
-        }
-        Err(e) => {
-            report.add(CheckItem {
-                category: "Docker",
-                name: "Docker Daemon".into(),
-                status: CheckStatus::Fail,
-                detail: format!("Failed to invoke `{docker_cmd}`: {e}"),
-                is_blocking: true,
-            });
-            return false;
-        }
+    if !check_docker_daemon(docker_cmd, report) {
+        return false;
     }
 
     // Check profile sandbox image
@@ -504,6 +472,45 @@ fn check_docker_environment(
             false
         }
     }
+}
+
+/// Checks that `docker_cmd` reaches a daemon. `docker version` asks for
+/// `/_ping` and `/version` only, which `aegis-docker-proxy` passes (#321);
+/// `docker info` asks for `/info`, which it refuses, so inside the server
+/// image (#474) `info` would always fail.
+fn check_docker_daemon(docker_cmd: &str, report: &mut PreflightReport) -> bool {
+    let out = Command::new(docker_cmd)
+        .args(["version", "--format", "{{.Server.Version}}"])
+        .output();
+    let (status, detail) = match out {
+        Ok(out) if out.status.success() => (
+            CheckStatus::Pass,
+            format!(
+                "Docker daemon reachable (server {})",
+                String::from_utf8_lossy(&out.stdout).trim()
+            ),
+        ),
+        Ok(out) => (
+            CheckStatus::Fail,
+            format!(
+                "Docker daemon error: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        ),
+        Err(e) => (
+            CheckStatus::Fail,
+            format!("Failed to invoke `{docker_cmd}`: {e}"),
+        ),
+    };
+    let ok = status == CheckStatus::Pass;
+    report.add(CheckItem {
+        category: "Docker",
+        name: "Docker Daemon".into(),
+        status,
+        detail,
+        is_blocking: true,
+    });
+    ok
 }
 
 /// Checks whether fetch_hosts are configured for external registries.
@@ -859,6 +866,50 @@ mod tests {
             is_blocking: true,
         });
         assert!(report.has_blocking_failures());
+    }
+
+    /// A docker that answers like `aegis-docker-proxy` (#321): `version`
+    /// works, `info` is refused.
+    #[cfg(unix)]
+    fn proxied_docker(dir: &Path) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("docker");
+        std::fs::write(
+            &path,
+            "#!/bin/sh\n\
+             if [ \"$1\" = version ]; then echo 29.0.1; exit 0; fi\n\
+             echo \"Error response from daemon: refused by aegis-docker-proxy: $1\" >&2\n\
+             exit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.display().to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_daemon_check_passes_through_the_docker_proxy() {
+        let dir = std::env::temp_dir().join(format!("aegis_check_daemon_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let docker = proxied_docker(&dir);
+
+        let mut report = PreflightReport::default();
+        assert!(check_docker_daemon(&docker, &mut report));
+        assert_eq!(report.items[0].status, CheckStatus::Pass);
+        assert!(
+            report.items[0].detail.contains("29.0.1"),
+            "{:?}",
+            report.items[0]
+        );
+
+        let mut report = PreflightReport::default();
+        assert!(!check_docker_daemon(
+            &dir.join("missing").display().to_string(),
+            &mut report
+        ));
+        assert!(report.has_blocking_failures());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
