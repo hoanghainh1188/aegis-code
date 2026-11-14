@@ -62,6 +62,30 @@ impl CveTarget {
         Ok(())
     }
 
+    /// The job's `issue_ref` on the server (#502):
+    /// `cve:<advisory> <package> <version>`. None of them holds a space.
+    pub fn to_ref(&self) -> String {
+        format!("cve:{} {} {}", self.advisory, self.package, self.version)
+    }
+
+    /// The target of a [`Self::to_ref`] string, checked again: the row is
+    /// data, not trusted.
+    pub fn from_ref(text: &str) -> Result<Self, String> {
+        let bad = || format!("`{text}` is not `cve:<advisory> <package> <version>`");
+        let rest = text.strip_prefix("cve:").ok_or_else(bad)?;
+        let parts: Vec<&str> = rest.split(' ').collect();
+        let [advisory, package, version] = parts.as_slice() else {
+            return Err(bad());
+        };
+        let target = Self {
+            package: (*package).to_owned(),
+            version: (*version).to_owned(),
+            advisory: (*advisory).to_owned(),
+        };
+        target.check()?;
+        Ok(target)
+    }
+
     /// Where the advisory is described.
     pub fn url(&self) -> String {
         format!("https://osv.dev/vulnerability/{}", self.advisory)

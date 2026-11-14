@@ -291,3 +291,23 @@ async fn upgrade_of(
         .unwrap()
         .unwrap_err()
 }
+
+#[test]
+fn a_target_travels_as_its_job_s_issue_ref() {
+    let t = CveTarget {
+        package: "@scope/left-pad".into(),
+        version: "1.0.1".into(),
+        advisory: "GHSA-abcd-efgh-ijkl".into(),
+    };
+    assert_eq!(t.to_ref(), "cve:GHSA-abcd-efgh-ijkl @scope/left-pad 1.0.1");
+    assert_eq!(CveTarget::from_ref(&t.to_ref()).unwrap(), t);
+    for bad in [
+        "GHSA-1 x 1",
+        "cve:GHSA-1 x",
+        "cve:GHSA-1 x 1 extra",
+        "cve:GHSA-1  x 1",
+        "cve:GHSA-1 --config=y 1",
+    ] {
+        assert!(CveTarget::from_ref(bad).is_err(), "{bad}");
+    }
+}

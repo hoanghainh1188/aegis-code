@@ -49,7 +49,9 @@ text_enum! {
 }
 
 text_enum! {
-    /// Where the job came from.
+    /// Where the job came from. `cve`: a dependency upgrade for an
+    /// advisory (#502), its target in `issue_ref` as
+    /// `cve:<advisory> <package> <version>`.
     JobSource {
         Cli = "cli",
         Github = "github",
@@ -59,6 +61,7 @@ text_enum! {
         Sonar = "sonar",
         Ci = "ci",
         Review = "review",
+        Cve = "cve",
     }
 }
 

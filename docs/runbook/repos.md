@@ -94,9 +94,21 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
 8. **CVE jobs (#455, [ADR 0015](../adr/0015-cve-remediation-lane.md)):** a job that raises one package to the version that fixes a security advisory. Bug-fix jobs never change a locked version (#500); this is how dependencies are upgraded.
 
+   On a server, a maintainer of the repo creates it on the **Jobs** page (**Raise a dependency for an advisory**) or through the API (#502):
+
+   ```bash
+   curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"package": "requests", "version": "2.32.4", "advisory": "GHSA-9wx4-h78v-vm56"}' \
+     https://<public_url>/api/v1/repos/<repo id>/cve-jobs
+   ```
+
+   Without a server, from a run configuration:
+
    ```bash
    aegis cve --config <file> --package requests --version 2.32.4 --advisory GHSA-9wx4-h78v-vm56
    ```
+
+   The job counts against the repo's budget like any other; one job per target may be queued or running at a time.
 
    - The platform runs the profile's upgrade command (`cargo update --package … --precise …`, `uv lock --upgrade-package …==…`, `npm install …@… --package-lock-only`, `go get …@…`, Maven's `versions:use-dep-version`, `dotnet add package … --version …`) through the egress proxy, then the gate checks the result: the manifests and lockfiles must stay exactly as the upgrade wrote them, the package must be at the version, and the audit must no longer report the advisory.
    - If the gate passes, the PR opens with no agent turn (one Light call writes the commit message). If it fails, typically on a breaking change, the agent adapts the code and must not touch any manifest or lockfile.

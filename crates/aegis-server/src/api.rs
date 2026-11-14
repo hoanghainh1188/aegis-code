@@ -19,6 +19,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aegis_ledger::IssueId;
+use aegis_lifecycle::CveTarget;
 use aegis_store::{
     Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoBudget, RepoId,
     RepoRole, Run, Store, StoreError,
@@ -49,6 +50,7 @@ pub fn router(store: Store, auth: Auth) -> Router {
 pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::RepoAdmin>) -> Router {
     let api = Router::new()
         .route("/api/v1/jobs", post(create_job).get(list_jobs))
+        .route("/api/v1/repos/{id}/cve-jobs", post(create_cve_job))
         .route("/api/v1/jobs/{id}", get(job))
         .route("/api/v1/jobs/{id}/runs", get(list_runs))
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
@@ -414,6 +416,13 @@ pub(crate) fn new_job(
     if source == JobSource::Review {
         return Err("source: a review round is asked for at POST /api/v1/jobs/{id}/review".into());
     }
+    if source == JobSource::Cve {
+        return Err(
+            "source: a CVE job is asked for at POST /api/v1/repos/{id}/cve-jobs, which checks \
+             its target"
+                .into(),
+        );
+    }
     let key = ledger_key.unwrap_or_else(|| default_ledger_key(issue_ref));
     let ledger_key = IssueId::parse(key).map_err(|e| e.to_string())?;
     Ok(NewJob {
@@ -422,6 +431,50 @@ pub(crate) fn new_job(
         ledger_key,
         source,
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CreateCveJob {
+    pub(crate) package: String,
+    pub(crate) version: String,
+    pub(crate) advisory: String,
+}
+
+/// A CVE job (#502, ADR 0015) of `repo_id`: its target checked as `aegis
+/// cve` checks it, and kept as the job's `issue_ref`.
+pub(crate) fn cve_job(repo_id: RepoId, target: &CreateCveJob) -> Result<NewJob, String> {
+    let target = CveTarget {
+        package: target.package.trim().to_owned(),
+        version: target.version.trim().to_owned(),
+        advisory: target.advisory.trim().to_owned(),
+    };
+    target.check()?;
+    let issue_ref = target.to_ref();
+    let ledger_key = IssueId::parse(default_ledger_key(&issue_ref)).map_err(|e| e.to_string())?;
+    Ok(NewJob {
+        repo_id,
+        issue_ref,
+        ledger_key,
+        source: JobSource::Cve,
+    })
+}
+
+async fn create_cve_job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+    body: Result<Json<CreateCveJob>, JsonRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let Json(body) = body?;
+    let repo_id = RepoId(id);
+    if !access.can(repo_id, RepoRole::Maintainer) {
+        return Err(ApiError::forbidden(repo_id, RepoRole::Maintainer));
+    }
+    let new = cve_job(repo_id, &body).map_err(ApiError::invalid)?;
+    let job = store.create_job_by(&new, &access.actor).await?;
+    Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }
 
 /// `owner/repo#12` → `owner-repo-12-<ms>`: a ledger of its own for each

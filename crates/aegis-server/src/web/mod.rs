@@ -100,6 +100,7 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/auth/signed-out", get(oidc::signed_out))
         .route("/", get(dashboard::page))
         .route("/jobs", get(jobs::list).post(actions::create))
+        .route("/jobs/cve", post(actions::create_cve))
         .route("/jobs/{id}", get(jobs::detail))
         .route("/jobs/{id}/head", get(jobs::head))
         .route("/jobs/{id}/cancel", post(actions::cancel))

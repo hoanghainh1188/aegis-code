@@ -589,3 +589,47 @@ async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
     assert!(home.body.contains("Review rounds / PR"), "{}", home.body);
     db.drop().await;
 }
+
+#[tokio::test]
+async fn a_cve_job_is_created_from_the_jobs_page() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let typst = repo(s, "typst", "rust").await;
+    let app = app(s).await;
+    let page = get(&app, "/jobs").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("action=\"/jobs/cve\""), "{}", page.body);
+
+    let sent = post_form(
+        &app,
+        "/jobs/cve",
+        &format!(
+            "repo_id={}&package=serde_json&version=1.0.140&advisory=RUSTSEC-2099-0001",
+            typst.0
+        ),
+    )
+    .await;
+    assert_eq!(sent.status, StatusCode::SEE_OTHER, "{}", sent.body);
+    let job_page = sent.headers[header::LOCATION].to_str().unwrap().to_owned();
+    let job = get(&app, &job_page).await;
+    assert!(
+        job.body
+            .contains("cve:RUSTSEC-2099-0001 serde_json 1.0.140"),
+        "{}",
+        job.body
+    );
+
+    let bad = post_form(
+        &app,
+        "/jobs/cve",
+        &format!("repo_id={}&package=-p&version=1&advisory=A-1", typst.0),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    assert!(
+        bad.body.contains("not a plain package name"),
+        "{}",
+        bad.body
+    );
+    db.drop().await;
+}

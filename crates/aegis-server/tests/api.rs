@@ -267,3 +267,76 @@ async fn a_review_round_is_asked_for_on_the_job_that_opened_the_pr() {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     db.drop().await;
 }
+
+/// CVE jobs (#502, ADR 0015): their own route, the target checked, kept as
+/// the job's `issue_ref`; never through the plain job route.
+#[tokio::test]
+async fn a_cve_job_is_asked_for_with_a_checked_target() {
+    let Some(db) = test_db().await else { return };
+    let app = app(&db.store).await;
+    let repo_id = repo(&db.store).await;
+    let uri = format!("/api/v1/repos/{repo_id}/cve-jobs");
+    let target = json!({ "package": "serde_json", "version": "1.0.140",
+                         "advisory": "RUSTSEC-2099-0001" });
+
+    let (status, body) = call(&app, "POST", &uri, Some(target.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let job = &body["data"];
+    assert_eq!(job["source"], "cve");
+    assert_eq!(job["issue_ref"], "cve:RUSTSEC-2099-0001 serde_json 1.0.140");
+    assert_eq!(job["status"], "queued");
+    assert!(
+        job["ledger_key"]
+            .as_str()
+            .unwrap()
+            .starts_with("CVE-RUSTSEC-2099-0001-SERDE-JSON-1-0-140-"),
+        "{job}"
+    );
+    // One live job per target, as per issue.
+    let (status, _) = call(&app, "POST", &uri, Some(target)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    for (bad, field) in [
+        (
+            json!({ "package": "--config=x", "version": "1", "advisory": "A-1" }),
+            "package",
+        ),
+        (
+            json!({ "package": "x", "version": "1 2", "advisory": "A-1" }),
+            "version",
+        ),
+        (
+            json!({ "package": "x", "version": "1", "advisory": "a/../b" }),
+            "advisory",
+        ),
+    ] {
+        let (status, body) = call(&app, "POST", &uri, Some(bad)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_error(&body, "invalid");
+        assert!(
+            body["error"]["message"].as_str().unwrap().contains(field),
+            "{body}"
+        );
+    }
+    let (status, _) = call(
+        &app,
+        "POST",
+        &uri,
+        Some(json!({ "package": "x", "version": "1", "advisory": "A-1", "extra": 1 })),
+    )
+    .await;
+    assert!(status.is_client_error());
+
+    // Not as a plain job, whose issue_ref nothing would check.
+    let plain = json!({ "repo_id": repo_id, "issue_ref": "cve:A-1 x 1", "source": "cve" });
+    let (status, body) = call(&app, "POST", "/api/v1/jobs", Some(plain)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("/cve-jobs"),
+        "{body}"
+    );
+    db.drop().await;
+}
