@@ -51,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })?;
     println!("{report}");
     if !report.passed() {

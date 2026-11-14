@@ -17,11 +17,12 @@ use std::time::Duration;
 use aegis_lang::{
     DependencyTree, Placeholder, Profile, ReferenceUpdate, ResolvedProfile, SkipReason, Step,
     TestOutput, check_advisory, check_license, default_licenses, deny_config, in_dir, join_dir,
-    new_dependency_violations, osv_config, part_label, read_lockfile,
+    osv_config, part_label, read_lockfile,
 };
 
 use crate::build_cache::BuildCache;
 use crate::command::{CancelToken, Exit, Ran, Runner, out_of_memory};
+use crate::dependency_policy::DependencyPolicy;
 use crate::egress::{Egress, EgressSession};
 use crate::failures::{failing_tests_with, missed, names_test, ran_tests, selector};
 use crate::findings::new_findings;
@@ -97,6 +98,9 @@ pub struct GateRequest<'a> {
     pub parts: Vec<GatePart<'a>>,
     /// Services the test steps reach (#490, ADR 0013). Needs `sandbox`.
     pub sidecars: Option<Sidecars>,
+    /// What the patch may change in the dependencies (#500): `Locked`
+    /// for bug-fixes and review rounds, `Upgrade` for a CVE job.
+    pub dependency_policy: DependencyPolicy,
 }
 
 /// A repo's licenses and ignored advisories, on top of `policies/`.
@@ -607,6 +611,7 @@ impl<'a> Run<'a> {
             self.req.allowed,
             tree.map_or(&[], |t| t.on_change.as_slice()),
             &others,
+            &self.req.dependency_policy,
         )?;
         Ok(match checked {
             None => StepReport::skipped(name, Skip::NoDependencyChange),
@@ -865,7 +870,8 @@ impl<'a> Run<'a> {
                 }
             }
         }
-        let violations = new_dependency_violations(
+        let violations = deps::lock_problems(
+            &self.req.dependency_policy,
             &trees[0],
             &trees[1],
             self.req.allowed,

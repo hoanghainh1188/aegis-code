@@ -9,6 +9,7 @@
 
 mod build_cache;
 mod command;
+mod dependency_policy;
 mod deps;
 mod egress;
 mod error;
@@ -26,6 +27,7 @@ mod sonar;
 
 pub use build_cache::BuildCache;
 pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner, out_of_memory};
+pub use dependency_policy::{DependencyPolicy, Upgrade};
 pub use egress::{Egress, EgressSession};
 pub use error::GateError;
 pub use failures::{DID_NOT_FINISH, failing_tests, failing_tests_with};

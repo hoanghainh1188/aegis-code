@@ -114,6 +114,7 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
         scope: aegis_gate::ScopePolicy::default(),
         parts: vec![],
         sidecars: None,
+        dependency_policy: Default::default(),
     })
     .unwrap()
 }

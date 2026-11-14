@@ -166,6 +166,7 @@ impl Repo {
                 build_cache: None,
             }],
             sidecars: None,
+            dependency_policy: Default::default(),
         })
         .unwrap()
     }

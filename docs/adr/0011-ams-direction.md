@@ -6,6 +6,7 @@
 - Issue: #461 (frames #451–#457)
 - Amends: [ADR 0002](0002-full-platform-mvp-as-checkpoint.md), Decision 1 (roadmap spanned Phase 0 through Phase 3)
 - Related: [ADR 0005](0005-kpi-thresholds-after-phase-1.md), [ADR 0009](0009-prompt-injection-threat-model.md), Proposal §0, §1, §9
+- Amendments: 2026-11-14, the CVE lane (#455) starts before the pilot (§4)
 
 ## Context
 
@@ -60,6 +61,8 @@ Some of this cannot be fixed by tuning the engine:
 4. **Entry conditions.** Phase 3 AMS work starts only after the pilot with a real team (#158), since #451–#455 all depend on it. Phase 4 starts only when both of these exist:
    - **the pilot report (#158)**, compared against the Phase 2 milestone of Proposal §9: the team uses aegis daily, monthly cost is within budget, and KPIs hold at MVP level;
    - **KPIs measured on an internal repository (#157)**, compared with the thresholds of [ADR 0005](0005-kpi-thresholds-after-phase-1.md). Phase 1 numbers come from public repositories (typst, scrapy) whose fixes a model may have seen.
+
+   **Amendment 2026-11-14 (#455):** the CVE lane (#455) starts before the pilot. It does not touch the bug-fix path, which it tightens instead (#500, [ADR 0015](0015-cve-remediation-lane.md)): the pilot measures the same engine. #451–#454 keep the condition above, apart from what serves the pilot directly (#490, #497).
 
    In addition, the Phase 3 issues Phase 4 depends on must be closed: #451 for #456, and #451 and #453 for #457. If the pilot or the internal KPIs fall short, ADR 0002 applies: find the cause in the ledger and harden the core engine before adding AMS layers.
 

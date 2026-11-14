@@ -30,7 +30,10 @@ mod test_path;
 mod yarn_lock;
 
 pub use command::{CommandTemplate, Placeholder};
-pub use deps::{DependencyViolation, LockedDependency, ViolationKind, new_dependency_violations};
+pub use deps::{
+    DependencyViolation, LockedDependency, VersionChange, ViolationKind, new_dependency_violations,
+    version_changes,
+};
 pub use error::LangError;
 pub use language::Language;
 pub use lockfile::{AllowList, read_lockfile};

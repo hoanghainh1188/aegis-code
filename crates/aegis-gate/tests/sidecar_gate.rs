@@ -105,6 +105,7 @@ fn only_the_test_steps_reach_fresh_sidecars() {
             docker,
             specs: vec![postgres()],
         }),
+        dependency_policy: Default::default(),
     };
     run_gate(&request).unwrap();
 
@@ -177,6 +178,7 @@ fn sidecars_without_the_sandbox_are_refused() {
             docker: "docker".into(),
             specs: vec![postgres()],
         }),
+        dependency_policy: Default::default(),
     })
     .unwrap_err();
     assert!(
@@ -268,6 +270,7 @@ fn db_gate(root: &Path, sidecars: Option<Vec<SidecarSpec>>) -> aegis_gate::StepS
             docker: "docker".into(),
             specs,
         }),
+        dependency_policy: Default::default(),
     })
     .unwrap();
     let test = report.step(aegis_gate::StepName::Test).unwrap();

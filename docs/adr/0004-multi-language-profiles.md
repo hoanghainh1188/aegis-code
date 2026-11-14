@@ -62,6 +62,7 @@ All language-dependent behaviors are encapsulated within a **Language Profile** 
 
 ### 3. Universal Dependency Auditing and Sandboxing
 - Retains the security boundary established in #12 across all ecosystems: existing dependencies in the default branch lockfile are retained; new dependencies must appear in the repository allow-list and originate from official registries. Redirecting packages to unauthorized git URLs or rogue registries is blocked.
+- **Locked versions (#500):** a bug-fix or review-round patch changes no version of a package the base locks: a bump, a downgrade or a removal fails the dependency step, in the lockfile and in a resolved dependency tree (#80) alike. Before #500 only new packages were checked. Upgrades go through a CVE job ([ADR 0015](0015-cve-remediation-lane.md)), whose patch must keep the files the platform's upgrade wrote.
 - Dedicated lockfile parsers in `aegis-lang`.
 - **Security Advisories and License Compliance:** Rust utilizes `cargo deny` with `policies/deny.toml`. Other ecosystems leverage **`osv-scanner`** (#65) against lockfiles, enforcing license allow-lists (`policies/licenses.toml`). License lookups query deps.dev APIs during the dependency fetch phase (#66) outside the offline gate.
 

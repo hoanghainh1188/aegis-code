@@ -10,10 +10,106 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use aegis_lang::{Profile, glob_match, in_dir, join_dir, new_dependency_violations, read_lockfile};
+use aegis_lang::{
+    LockedDependency, Profile, ViolationKind, glob_match, in_dir, join_dir,
+    new_dependency_violations, read_lockfile, version_changes,
+};
 
 use crate::GateError;
+use crate::dependency_policy::{DependencyPolicy, Upgrade, same_package};
 use crate::git::{self, Change};
+
+/// Why a bug-fix cannot change a locked version, after each such change.
+const LOCKED: &str = "a bug-fix keeps the locked versions; upgrades go through a CVE job (#455)";
+
+/// What `policy` rejects in one lockfile, `before` to `after`.
+pub(crate) fn lock_problems(
+    policy: &DependencyPolicy,
+    before: &[LockedDependency],
+    after: &[LockedDependency],
+    allowed: &BTreeSet<String>,
+    official_source: &str,
+) -> Vec<String> {
+    match policy {
+        DependencyPolicy::Locked => {
+            new_dependency_violations(before, after, allowed, official_source)
+                .into_iter()
+                .map(|v| v.to_string())
+                .chain(
+                    version_changes(before, after)
+                        .into_iter()
+                        .map(|c| format!("{c}: {LOCKED}")),
+                )
+                .collect()
+        }
+        // What the upgrade pulls in comes with it; only its source is
+        // checked here, its licenses and advisories by the audit (#159).
+        DependencyPolicy::Upgrade(_) => {
+            let everything: BTreeSet<String> = after.iter().map(|d| d.name.clone()).collect();
+            new_dependency_violations(before, after, &everything, official_source)
+                .into_iter()
+                .filter(|v| v.kind == ViolationKind::UnofficialSource)
+                .map(|v| v.to_string())
+                .collect()
+        }
+    }
+}
+
+/// The CVE job's files in this part (paths from the repo root) are as the
+/// platform wrote them, every changed manifest and lockfile is one of
+/// them, and the package is at its version in one of its lockfiles.
+fn upgrade_problems(
+    upgrade: &Upgrade,
+    profile: &Profile,
+    repo: &Path,
+    dir: &str,
+    changed: &[String],
+) -> Vec<String> {
+    let deps = &profile.dependencies;
+    let mut problems = Vec::new();
+    for path in changed {
+        let shown = join_dir(dir, path);
+        let dependency_file =
+            matches_any(&deps.manifests, path) || matches_any(&deps.lockfiles, path);
+        if dependency_file && !upgrade.files.contains_key(&shown) {
+            problems.push(format!(
+                "{shown}: changed beyond the platform's upgrade of `{}`",
+                upgrade.package
+            ));
+        }
+    }
+    let mut found = false;
+    let mut lockfiles = 0;
+    for (path, expected) in upgrade
+        .files
+        .iter()
+        .filter(|(p, _)| in_dir(dir, p).is_some())
+    {
+        let now = std::fs::read_to_string(repo.join(path)).unwrap_or_default();
+        if &now != expected {
+            problems.push(format!(
+                "{path}: differs from the platform's upgrade of `{}`; the patch must keep it",
+                upgrade.package
+            ));
+            continue;
+        }
+        if matches_any(&deps.lockfiles, path) {
+            lockfiles += 1;
+            found |= read_lockfile(profile.language, file_name(path), &now).is_ok_and(|locked| {
+                locked.iter().any(|d| {
+                    same_package(&d.name, &upgrade.package) && d.version == upgrade.version
+                })
+            });
+        }
+    }
+    if lockfiles > 0 && !found {
+        problems.push(format!(
+            "no lockfile locks `{}` at {}",
+            upgrade.package, upgrade.version
+        ));
+    }
+    problems
+}
 
 fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
@@ -74,6 +170,7 @@ pub fn check(
     allowed: &BTreeSet<String>,
     tree: &[String],
     others: &Others<'_>,
+    policy: &DependencyPolicy,
 ) -> Result<Option<Result<(), String>>, GateError> {
     let shown = |path: &str| join_dir(dir, path);
     let nested: Vec<String> = changes
@@ -119,6 +216,15 @@ pub fn check(
              check cannot read: {}; declare their directory as a part of its own to change them",
             foreign.join(", ")
         ))));
+    }
+    // Before the early return below: a patch that undid the upgrade
+    // changes no lockfile, and must fail all the same.
+    let upgrade = match policy {
+        DependencyPolicy::Upgrade(u) => upgrade_problems(u, profile, repo, dir, changed),
+        DependencyPolicy::Locked => vec![],
+    };
+    if !upgrade.is_empty() {
+        return Ok(Some(Err(upgrade.join("\n"))));
     }
     let deps = &profile.dependencies;
     let lockfiles: Vec<&String> = changed
@@ -168,7 +274,7 @@ pub fn check(
             }
         };
         problems.extend(
-            new_dependency_violations(&before, &after, allowed, &deps.official_source)
+            lock_problems(policy, &before, &after, allowed, &deps.official_source)
                 .into_iter()
                 .map(|v| format!("{path}: {v}")),
         );

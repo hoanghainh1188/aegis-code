@@ -139,6 +139,7 @@ impl Repo {
             &[],
             &[],
             AuditPolicy::default(),
+            Default::default(),
         )
     }
 
@@ -154,6 +155,7 @@ impl Repo {
             &[],
             &[],
             audit,
+            Default::default(),
         )
     }
 
@@ -169,6 +171,7 @@ impl Repo {
             tests,
             &[],
             AuditPolicy::default(),
+            Default::default(),
         )
     }
 
@@ -192,10 +195,31 @@ impl Repo {
             &[],
             &groups,
             AuditPolicy::default(),
+            Default::default(),
         )
     }
 
     /// Commits what is in the tree on `main`: more of the base.
+    /// The gate under a dependency policy (#500).
+    pub fn gate_under(
+        &self,
+        profile: &ResolvedProfile,
+        policy: aegis_gate::DependencyPolicy,
+    ) -> GateReport {
+        self.gate_full(
+            profile,
+            None,
+            Duration::from_secs(600),
+            CancelToken::new(),
+            vec![],
+            None,
+            &[],
+            &[],
+            AuditPolicy::default(),
+            policy,
+        )
+    }
+
     pub fn commit_base(&self, message: &str) {
         git(&self.dir(), &["add", "-A"]);
         git(
@@ -224,6 +248,7 @@ impl Repo {
         allowed_tests: &[&str],
         reference_groups: &[ReferenceGroup],
         audit: AuditPolicy,
+        dependency_policy: aegis_gate::DependencyPolicy,
     ) -> GateReport {
         let allowed = BTreeSet::new();
         let dir = self.dir();
@@ -248,6 +273,7 @@ impl Repo {
             scope: aegis_gate::ScopePolicy::default(),
             parts: vec![],
             sidecars: None,
+            dependency_policy,
         })
         .unwrap()
     }
