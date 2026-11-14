@@ -15,6 +15,7 @@ mod checks;
 pub mod clone;
 mod code_graph;
 mod config;
+mod cve;
 mod error;
 mod eval;
 pub mod flags;
@@ -36,6 +37,7 @@ pub use config::{
     BudgetSection, DirConfig, ExtraServer, ForkConfig, ForkPlatform, IdentityConfig, LedgerBackend,
     RepoConfig, RunConfig, RunSection, SonarConfig,
 };
+pub use cve::CveTarget;
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};

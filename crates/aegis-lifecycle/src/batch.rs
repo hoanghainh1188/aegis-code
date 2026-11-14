@@ -205,6 +205,7 @@ where
                 self.base,
                 self.job_dir,
                 &answer,
+                &aegis_gate::DependencyPolicy::Locked,
                 self.cancel,
             )
             .await?;

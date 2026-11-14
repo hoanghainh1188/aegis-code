@@ -149,6 +149,7 @@ async fn a_sonar_issue_goes_from_warnings_to_one_pr() {
         return;
     }
     let issue = IssueInput {
+        cve: None,
         id: "fixture-8".into(),
         title: "Sonar warnings in the cart".into(),
         body: format!("Two new warnings.\n\n```json\n{WARNINGS}\n```\n"),
@@ -174,6 +175,7 @@ async fn a_polled_batch_goes_to_one_pr_without_triage() {
     }
     let warnings = aegis_sonar_batch::parse_search(WARNINGS).unwrap();
     let issue = IssueInput {
+        cve: None,
         id: "fixture-8".into(),
         title: "Sonar: 2 new warnings in fixture".into(),
         body: aegis_sonar_batch::issue_body("fixture", &warnings),

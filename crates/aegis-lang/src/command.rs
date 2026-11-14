@@ -31,10 +31,14 @@ pub enum Placeholder {
     OsvConfig,
     /// File the resolved dependency tree is written to (`dependencies.tree`).
     Output,
+    /// Package a CVE job raises (`dependencies.upgrade`, #501).
+    Package,
+    /// Version it raises it to (`dependencies.upgrade`).
+    Version,
 }
 
 impl Placeholder {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 10] = [
         Self::File,
         Self::Test,
         Self::Lockfile,
@@ -43,6 +47,8 @@ impl Placeholder {
         Self::DenyConfig,
         Self::OsvConfig,
         Self::Output,
+        Self::Package,
+        Self::Version,
     ];
 
     pub fn token(self) -> &'static str {
@@ -55,6 +61,8 @@ impl Placeholder {
             Self::DenyConfig => "{deny_config}",
             Self::OsvConfig => "{osv_config}",
             Self::Output => "{output}",
+            Self::Package => "{package}",
+            Self::Version => "{version}",
         }
     }
 
@@ -68,6 +76,8 @@ impl Placeholder {
             Self::DenyConfig => "deny_config",
             Self::OsvConfig => "osv_config",
             Self::Output => "output",
+            Self::Package => "package",
+            Self::Version => "version",
         }
     }
 

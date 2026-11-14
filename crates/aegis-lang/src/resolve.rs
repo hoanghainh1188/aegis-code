@@ -4,7 +4,9 @@
 
 use serde::Deserialize;
 
-use crate::profile::{check_audit, check_gate, check_image, check_repo_path, check_tree};
+use crate::profile::{
+    check_audit, check_gate, check_image, check_repo_path, check_tree, check_upgrade,
+};
 use crate::{
     CommandTemplate, Coverage, DependencyTree, FileMatch, GateSteps, LangError, Language,
     Placeholder, Profile, TestOutput,
@@ -87,6 +89,8 @@ pub struct ProfileOverrides {
     #[serde(default)]
     pub fetch_hosts: Vec<String>,
     pub audit: Option<StepOverride>,
+    /// The CVE job's upgrade command (#501), e.g. for a Gradle build.
+    pub upgrade: Option<StepOverride>,
     pub tree: Option<TreeOverride>,
     /// Required when the coverage command is overridden.
     pub coverage: Option<Coverage>,
@@ -164,6 +168,8 @@ pub struct ResolvedProfile {
     /// The profile's `fetch_hosts` and the repo's, in that order.
     pub fetch_hosts: Vec<String>,
     pub audit: Step,
+    /// Raises `{package}` to `{version}` for a CVE job (#501).
+    pub upgrade: Step,
     /// Resolved before and after the patch when it changes a file of
     /// `on_change` (#80).
     pub tree: Option<DependencyTree>,
@@ -277,6 +283,10 @@ impl Profile {
         if let Some(c) = audit.command() {
             check_audit(c).map_err(|e| invalid(format!("audit: {e}")))?;
         }
+        let upgrade = step(&self.dependencies.upgrade, &overrides.upgrade).map_err(invalid)?;
+        if let Some(c) = upgrade.command() {
+            check_upgrade(c).map_err(|e| invalid(format!("upgrade: {e}")))?;
+        }
         let tree = match &overrides.tree {
             None | Some(TreeOverride::Enabled(true)) => self.dependencies.tree.clone(),
             Some(TreeOverride::Enabled(false)) => None,
@@ -300,6 +310,7 @@ impl Profile {
             fetch,
             fetch_hosts,
             audit,
+            upgrade,
             tree,
             coverage,
             image,
@@ -398,6 +409,53 @@ mod tests {
 
     fn overrides(text: &str) -> ProfileOverrides {
         toml::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn every_profile_upgrades_a_named_package_to_a_named_version() {
+        // #501: the CVE job's upgrade.
+        for language in Language::ALL {
+            let r = Profiles::builtin()
+                .unwrap()
+                .get(language)
+                .unwrap()
+                .resolve(&ProfileOverrides::default())
+                .unwrap();
+            let c = r
+                .upgrade
+                .command()
+                .unwrap_or_else(|| panic!("{language:?}"));
+            assert!(
+                c.uses(Placeholder::Package) && c.uses(Placeholder::Version),
+                "{language:?}"
+            );
+        }
+        let r = python()
+            .resolve(&overrides(
+                "upgrade = [\"pdm\", \"update\", \"{package}=={version}\"]\n",
+            ))
+            .unwrap();
+        assert_eq!(
+            r.upgrade
+                .command()
+                .unwrap()
+                .render(&[
+                    (Placeholder::Package, "requests"),
+                    (Placeholder::Version, "2.32.4")
+                ])
+                .unwrap(),
+            ["pdm", "update", "requests==2.32.4"]
+        );
+        let off = python().resolve(&overrides("upgrade = false\n")).unwrap();
+        assert!(off.upgrade.command().is_none());
+        let err = python()
+            .resolve(&overrides("upgrade = [\"uv\", \"lock\", \"{package}\"]\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("upgrade") && err.contains("{version}"),
+            "{err}"
+        );
     }
 
     #[test]

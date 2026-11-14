@@ -153,6 +153,7 @@ fn fixed_answer() -> Vec<ContentBlock> {
 
 fn issue() -> IssueInput {
     IssueInput {
+        cve: None,
         id: "fixture-7".into(),
         title: "Cart accepts a fourth item".into(),
         body: "`cart![1, 2, 3].add(4)` returns Ok(()), expected Err(CartError::Full).".into(),

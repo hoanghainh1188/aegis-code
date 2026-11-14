@@ -36,8 +36,8 @@ use std::sync::Arc;
 use aegis_lang::Profiles;
 use aegis_ledger::{JsonFileLedger, LedgerStore, Outcome, PriceTable};
 use aegis_lifecycle::{
-    EvalIssue, IssueInput, IssueReport, LifecycleError, Platform, Replay, ReplayProvider,
-    RunConfig, run_issue,
+    CveTarget, EvalIssue, IssueInput, IssueReport, LifecycleError, Platform, Replay,
+    ReplayProvider, RunConfig, run_issue,
 };
 use aegis_provider::{ModelProvider, Provider};
 
@@ -58,6 +58,7 @@ const USAGE: &str = "usage:
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
   aegis report --config <file> [--set <dir>]
   aegis check-repo --config <file> [--no-sandbox] [--skip-tests]
+  aegis cve   --config <file> --package <name> --version <v> --advisory <id> [--id <id>]
   aegis ledger import --config <file> [--from <dir>]
   aegis ledger export --config <file> --to <dir>";
 
@@ -82,6 +83,11 @@ struct Args {
     to: Option<PathBuf>,
     no_sandbox: bool,
     skip_tests: bool,
+    /// `aegis cve` (#501): what to raise, to which version, for which
+    /// advisory.
+    package: Option<String>,
+    version: Option<String>,
+    advisory: Option<String>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -122,10 +128,55 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--to" => parsed.to = Some(value()?.into()),
             "--no-sandbox" => parsed.no_sandbox = true,
             "--skip-tests" => parsed.skip_tests = true,
+            "--package" => parsed.package = Some(value()?),
+            "--version" => parsed.version = Some(value()?),
+            "--advisory" => parsed.advisory = Some(value()?),
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
     Ok(parsed)
+}
+
+/// The job of `aegis cve` (#501): the target checked before anything
+/// runs; its id, unless given, from the package and version.
+fn cve_issue(args: &Args) -> Result<IssueInput, String> {
+    let need = |v: &Option<String>, flag: &str| v.clone().ok_or(format!("{flag} is required"));
+    let target = CveTarget {
+        package: need(&args.package, "--package")?,
+        version: need(&args.version, "--version")?,
+        advisory: need(&args.advisory, "--advisory")?,
+    };
+    target.check()?;
+    let id = args.id.clone().unwrap_or_else(|| {
+        let plain: String = format!("cve-{}-{}", target.package, target.version)
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        plain
+            .split('-')
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join("-")
+    });
+    Ok(IssueInput {
+        id,
+        title: target.title(),
+        body: format!(
+            "Security advisory {}: raise `{}` to {}.",
+            target.advisory, target.package, target.version
+        ),
+        url: target.url(),
+        base: None,
+        hidden: None,
+        kind: None,
+        cve: Some(target),
+    })
 }
 
 /// `owner/repo#number`.
@@ -265,6 +316,10 @@ fn line(report: &IssueReport) -> String {
 /// `--replay` and `--no-pr` only change how `eval` ends; `run` and `batch`
 /// always open their PR, `inject` never does.
 fn check_flags(args: &Args) -> Result<(), String> {
+    let cve_flags = args.package.is_some() || args.version.is_some() || args.advisory.is_some();
+    if cve_flags && args.command != "cve" {
+        return Err("--package, --version and --advisory are for `aegis cve`".into());
+    }
     let eval = args.command == "eval";
     let inject = args.command == "inject";
     if (args.replay && !eval && !inject) || (args.no_pr && !eval) || (args.rescore && !inject) {
@@ -291,6 +346,7 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
         "report",
         "ledger",
         "check-repo",
+        "cve",
     ]
     .contains(&args.command.as_str())
     {
@@ -370,6 +426,12 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
                 }
                 _ => return Err("give --issue, or --issue-file with --id".into()),
             };
+            let report = one(&run, issue, &cancel).await.map_err(|e| e.to_string())?;
+            println!("{}", line(&report));
+            Ok(report.pr_url.is_some())
+        }
+        "cve" => {
+            let issue = cve_issue(&args)?;
             let report = one(&run, issue, &cancel).await.map_err(|e| e.to_string())?;
             println!("{}", line(&report));
             Ok(report.pr_url.is_some())
@@ -552,6 +614,60 @@ mod tests {
         );
         assert_eq!(args.to.as_deref(), Some(Path::new("out")));
         assert!(parse_args(["ledger"].into_iter().map(String::from)).is_err());
+    }
+
+    #[test]
+    fn a_cve_job_comes_from_its_flags_checked() {
+        let args = |argv: &[&str]| parse_args(argv.iter().map(|s| s.to_string())).unwrap();
+        let issue = cve_issue(&args(&[
+            "cve",
+            "--package",
+            "@scope/left-pad",
+            "--version",
+            "1.0.1",
+            "--advisory",
+            "GHSA-abcd-efgh-ijkl",
+        ]))
+        .unwrap();
+        assert_eq!(issue.id, "cve-scope-left-pad-1.0.1");
+        assert_eq!(
+            issue.url,
+            "https://osv.dev/vulnerability/GHSA-abcd-efgh-ijkl"
+        );
+        assert_eq!(
+            issue.title,
+            "Raise @scope/left-pad to 1.0.1 (GHSA-abcd-efgh-ijkl)"
+        );
+        assert_eq!(issue.cve.unwrap().version, "1.0.1");
+        let named = cve_issue(&args(&[
+            "cve",
+            "--package",
+            "x",
+            "--version",
+            "1",
+            "--advisory",
+            "CVE-1-2",
+            "--id",
+            "mine",
+        ]))
+        .unwrap();
+        assert_eq!(named.id, "mine");
+        // Missing and unsafe values, and the flags on another command.
+        let missing = cve_issue(&args(&["cve", "--package", "x", "--version", "1"])).unwrap_err();
+        assert!(missing.contains("--advisory is required"), "{missing}");
+        let flag = cve_issue(&args(&[
+            "cve",
+            "--package",
+            "--precise",
+            "--version",
+            "1",
+            "--advisory",
+            "A-1",
+        ]))
+        .unwrap_err();
+        assert!(flag.contains("not a plain package name"), "{flag}");
+        assert!(check_flags(&args(&["run", "--package", "x"])).is_err());
+        assert!(check_flags(&args(&["cve", "--package", "x"])).is_ok());
     }
 
     #[test]

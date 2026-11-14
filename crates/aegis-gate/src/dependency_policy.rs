@@ -28,7 +28,7 @@ pub struct Upgrade {
 
 /// Package names as the ecosystems compare them: case and `-`, `_`, `.`
 /// do not matter (PEP 503; Cargo's `-`/`_`).
-pub(crate) fn same_package(a: &str, b: &str) -> bool {
+pub fn same_package(a: &str, b: &str) -> bool {
     let fold = |s: &str| -> String {
         s.chars()
             .map(|c| match c {

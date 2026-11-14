@@ -296,6 +296,7 @@ fn platform(config: RunConfig) -> Arc<Platform<Scripted, MemoryLedger>> {
 
 fn issue(id: &str, hidden: Option<HiddenTests>) -> IssueInput {
     IssueInput {
+        cve: None,
         id: id.into(),
         title: "Both carts accept a fourth item".into(),
         body: "`cart![1, 2, 3].add(4)` and `cart_of(1, 2, 3).add(4)` succeed.".into(),

@@ -263,6 +263,12 @@ pub struct Dependencies {
     /// #80): compared before and after the patch like a lockfile.
     #[serde(default)]
     pub tree: Option<DependencyTree>,
+    /// Raises `{package}` to `{version}` in the manifests and lockfiles,
+    /// changing as little else as the tool allows: the platform's upgrade
+    /// of a CVE job (#501, ADR 0015). Runs like the fetch step, through
+    /// `fetch_hosts`.
+    #[serde(default)]
+    pub upgrade: Option<CommandTemplate>,
 }
 
 /// A command that writes the resolved dependency tree to `{output}`. The
@@ -556,6 +562,14 @@ pub(crate) fn check_repo_path(path: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// `dependencies.upgrade` names the package and the version.
+pub(crate) fn check_upgrade(c: &CommandTemplate) -> Result<(), String> {
+    c.check_placeholders(
+        &[Placeholder::Package, Placeholder::Version],
+        &[Placeholder::Package, Placeholder::Version],
+    )
 }
 
 pub(crate) fn check_audit(c: &CommandTemplate) -> Result<(), String> {
