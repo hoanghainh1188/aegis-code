@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.9.0...v0.10.0) (2026-11-14)
+
+
+### Features
+
+* **cli:** add aegis check-repo pre-flight check and AMS roadmap ADRs ([#450](https://github.com/hoanghainh1188/aegis-code/issues/450)) ([#467](https://github.com/hoanghainh1188/aegis-code/issues/467)) ([cc2e020](https://github.com/hoanghainh1188/aegis-code/commit/cc2e0207c954ad4f0d117fb14222af6e36d6deb1))
+* **deploy:** ask for site values when installing and adding a repo ([#476](https://github.com/hoanghainh1188/aegis-code/issues/476)) ([#477](https://github.com/hoanghainh1188/aegis-code/issues/477)) ([1f29f55](https://github.com/hoanghainh1188/aegis-code/commit/1f29f55bfe508e6a95b408ddb999443084b9383e))
+* **eval:** injection cases in a documentation file the agent reads ([#441](https://github.com/hoanghainh1188/aegis-code/issues/441)) ([#460](https://github.com/hoanghainh1188/aegis-code/issues/460)) ([7605e6f](https://github.com/hoanghainh1188/aegis-code/commit/7605e6fe65e8705cafebf25501bdeb79c6ba7e5d))
+* **eval:** prompt injection eval set and `aegis inject` ([#361](https://github.com/hoanghainh1188/aegis-code/issues/361)) ([#440](https://github.com/hoanghainh1188/aegis-code/issues/440)) ([7274006](https://github.com/hoanghainh1188/aegis-code/commit/7274006607b8b2ec641a8a70aa04c05178876482))
+* **eval:** review rounds in the injection set, run locally without a PR ([#439](https://github.com/hoanghainh1188/aegis-code/issues/439)) ([#447](https://github.com/hoanghainh1188/aegis-code/issues/447)) ([479de92](https://github.com/hoanghainh1188/aegis-code/commit/479de92d9b90a8d2b82cd1929ff4610350776bf7))
+* **lang:** per-language default call cap, 80 for Rust ([#471](https://github.com/hoanghainh1188/aegis-code/issues/471)) ([#473](https://github.com/hoanghainh1188/aegis-code/issues/473)) ([bba0ec5](https://github.com/hoanghainh1188/aegis-code/commit/bba0ec5cbb2d96de7682939a093fd37bb7879bfe))
+* **lifecycle:** flag embedded instructions in what the job read ([#444](https://github.com/hoanghainh1188/aegis-code/issues/444)) ([#446](https://github.com/hoanghainh1188/aegis-code/issues/446)) ([4bf8dc3](https://github.com/hoanghainh1188/aegis-code/commit/4bf8dc3fad50a3ff51dbd92e25d2223f154abbaa))
+* **orchestrator:** report embedded instructions and leave them in place ([#443](https://github.com/hoanghainh1188/aegis-code/issues/443)) ([#445](https://github.com/hoanghainh1188/aegis-code/issues/445)) ([4c2d6dd](https://github.com/hoanghainh1188/aegis-code/commit/4c2d6ddc723e812ebd90b9ed683d38b6ae791ef9))
+* **prompt:** rules for a fix's new failure path and the issue's condition ([#448](https://github.com/hoanghainh1188/aegis-code/issues/448)) ([#464](https://github.com/hoanghainh1188/aegis-code/issues/464)) ([06474d4](https://github.com/hoanghainh1188/aegis-code/commit/06474d45c5fa26e4935657150d290c5dcb800005))
+
+
+### Bug Fixes
+
+* **aci:** refuse a search text with a line break inside ([#449](https://github.com/hoanghainh1188/aegis-code/issues/449)) ([#462](https://github.com/hoanghainh1188/aegis-code/issues/462)) ([243391a](https://github.com/hoanghainh1188/aegis-code/commit/243391abafdffc0dd1820bf53ec08525654f5815))
+* **eval:** resolve scrapy dependencies as of the set's verification date ([#465](https://github.com/hoanghainh1188/aegis-code/issues/465)) ([#466](https://github.com/hoanghainh1188/aegis-code/issues/466)) ([43119da](https://github.com/hoanghainh1188/aegis-code/commit/43119da2a83f20d2f24c0af9f0fad7cd082b086e))
+
+
+### Documentation
+
+* plan for the team pilot on-premise ([#158](https://github.com/hoanghainh1188/aegis-code/issues/158)) ([#475](https://github.com/hoanghainh1188/aegis-code/issues/475)) ([d195292](https://github.com/hoanghainh1188/aegis-code/commit/d195292ec6a06087a5a143829df005ada015b932))
+* record the AMS direction and Phase 4 in an ADR and the roadmap ([#463](https://github.com/hoanghainh1188/aegis-code/issues/463)) ([8fac773](https://github.com/hoanghainh1188/aegis-code/commit/8fac7737c06db812418c497da775fe29efef963e)), closes [#461](https://github.com/hoanghainh1188/aegis-code/issues/461)
+* typst at 80 model calls, measured twice ([#156](https://github.com/hoanghainh1188/aegis-code/issues/156)) ([#472](https://github.com/hoanghainh1188/aegis-code/issues/472)) ([cd62789](https://github.com/hoanghainh1188/aegis-code/commit/cd62789772d48c0c3f1063de5e63949487f77d64))
+* typst results for all 18 issues in the [#448](https://github.com/hoanghainh1188/aegis-code/issues/448) report ([#468](https://github.com/hoanghainh1188/aegis-code/issues/468)) ([d9350a6](https://github.com/hoanghainh1188/aegis-code/commit/d9350a66fdb4b9d66c8b373a1a44c2a6fce9f948))
+* update roadmap for Next-Gen AMS and Phase 2-4 milestones ([#458](https://github.com/hoanghainh1188/aegis-code/issues/458)) ([#459](https://github.com/hoanghainh1188/aegis-code/issues/459)) ([a7505df](https://github.com/hoanghainh1188/aegis-code/commit/a7505dfd37d45d39b765949e585022f385ef5668))
+
 ## [0.9.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.8.2...v0.9.0) (2026-11-11)
 
 
