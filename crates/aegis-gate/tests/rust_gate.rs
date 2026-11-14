@@ -21,6 +21,17 @@ format = "lcov"
 path = "lcov.info"
 "#;
 
+/// [`FAKE_COVERAGE`] with a lint that fails on any tree, the base too, and
+/// names no file of the patch.
+const BROKEN_LINT: &str = r#"
+[gate]
+coverage = ["sh", "-c", "echo TN: > lcov.info"]
+lint = ["sh", "-c", "echo lint broken; exit 1"]
+[coverage]
+format = "lcov"
+path = "lcov.info"
+"#;
+
 const BUG: (&str, &str, &str) = (
     "src/lib.rs",
     "self.items.len() >= MAX_ITEMS",
@@ -81,6 +92,8 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
         "{report}"
     );
     assert!(report.passed());
+    // Every step passed on the patch itself (#487).
+    assert!(report.steps.iter().all(|s| !s.fails_on_base), "{report}");
     // The base checkout is gone and the patch is untouched.
     assert!(!repo.work().join("base").exists());
     assert!(repo.dir().join("tests/fourth_item.rs").exists());
@@ -152,7 +165,24 @@ fn a_failure_the_base_already_has_does_not_fail_the_gate() {
         "{}",
         test.detail
     );
+    // It passed only because the base fails too (#487).
+    assert!(test.fails_on_base, "{report}");
     assert!(report.passed(), "{report}");
+}
+
+#[test]
+fn a_lint_the_base_fails_too_passes_and_says_so() {
+    if !ready() {
+        return;
+    }
+    let repo = Repo::new("rust", &[BUG]);
+    repo.replace(BUG.0, BUG.2, BUG.1);
+    let report = repo.gate(&profile(Language::Rust, BROKEN_LINT), None);
+    let lint = report.step(StepName::Lint).unwrap();
+    assert_eq!(lint.status, StepStatus::Passed, "{report}");
+    assert!(lint.fails_on_base, "{report}");
+    let format = report.step(StepName::Format).unwrap();
+    assert!(!format.fails_on_base, "{report}");
 }
 
 #[test]

@@ -14,6 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::GateError;
+use crate::report::tail;
 use crate::sandbox::{CLIENT_ENV, Sandbox, container_name};
 
 /// Variables a step gets from this process. Everything else, including
@@ -23,6 +24,9 @@ pub const INHERITED_ENV: &[&str] = &["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"]
 /// After the command exits, how long to wait for its output pipes to close
 /// (a daemon it started may hold them open).
 const PIPE_GRACE: Duration = Duration::from_secs(2);
+
+/// What `docker run` exits with when it cannot run the container.
+const DOCKER_RUN_FAILED: i32 = 125;
 
 const POLL: Duration = Duration::from_millis(50);
 
@@ -260,7 +264,14 @@ impl Runner {
         // during later steps; a container lives outside the process group.
         kill_group(&child);
         let mut exit = exit;
+        // `docker run` could not start the container (#487): not a result
+        // of the step. The base would "fail" the same way, so the step
+        // would pass as a failure the base has too.
+        let mut not_started = None;
         if let Some((sandbox, name)) = &container {
+            if exit == Exit::Code(DOCKER_RUN_FAILED) && sandbox.never_started(name) {
+                not_started = Some(sandbox.docker.clone());
+            }
             // A step that succeeded stays a success: what it ran may have
             // let a child go (a test of memory limits). Timed out and
             // cancelled say why already.
@@ -281,6 +292,12 @@ impl Runner {
         let deadline = Instant::now() + PIPE_GRACE;
         for pipe in pipes {
             let _ = pipe.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        }
+        if let Some(program) = not_started {
+            return Err(GateError::Spawn {
+                program,
+                message: format!("the container did not start:\n{}", tail(log)),
+            });
         }
         Ok(Ran {
             exit,

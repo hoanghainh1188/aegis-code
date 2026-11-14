@@ -344,6 +344,15 @@ fn report(name: StepName, status: StepStatus, ran: &[&Ran], detail: String) -> S
         duration: ran.iter().map(|r| r.duration).sum(),
         detail,
         logs: ran.iter().map(|r| r.log.clone()).collect(),
+        fails_on_base: false,
+    }
+}
+
+/// `step`, passed because the base revision fails it too (#487).
+fn as_on_base(step: StepReport, on_base: bool) -> StepReport {
+    StepReport {
+        fails_on_base: on_base,
+        ..step
     }
 }
 
@@ -484,7 +493,8 @@ impl<'a> Run<'a> {
         let changed: Vec<String> = self.part.changes.iter().map(|c| c.path.clone()).collect();
         let new = new_findings(&read_log(&ran.log), &read_log(&base.log), &changed);
         if new.is_empty() {
-            return Ok(report(name, StepStatus::Passed, &both, String::new()));
+            let passed = report(name, StepStatus::Passed, &both, String::new());
+            return Ok(as_on_base(passed, true));
         }
         let why = format!(
             "new findings in the changed files (the base revision fails too, without these):\n{}\n\n{}",
@@ -527,6 +537,7 @@ impl<'a> Run<'a> {
                 duration: Duration::ZERO,
                 detail: format!("patch violates scope limits: {detail}"),
                 logs: vec![],
+                fails_on_base: false,
             })
         } else {
             Ok(StepReport {
@@ -535,6 +546,7 @@ impl<'a> Run<'a> {
                 duration: Duration::ZERO,
                 detail,
                 logs: vec![],
+                fails_on_base: false,
             })
         }
     }
@@ -1043,7 +1055,8 @@ impl<'a> Run<'a> {
                 failing.len(),
                 list(&failing)
             );
-            return Ok(report(name, StepStatus::Passed, &[&patched, &base], detail));
+            let passed = report(name, StepStatus::Passed, &[&patched, &base], detail);
+            return Ok(as_on_base(passed, true));
         }
         // A test that fails once and passes on a later run is flaky, not
         // broken by the patch (#104): the new failures run again, on their
@@ -1063,7 +1076,8 @@ impl<'a> Run<'a> {
                 flaky.len(),
                 list(&flaky)
             );
-            return Ok(report(name, StepStatus::Passed, &ran, detail));
+            let passed = report(name, StepStatus::Passed, &ran, detail);
+            return Ok(as_on_base(passed, !on_base.is_empty()));
         }
         let Some(update) = self.part.profile.gate.update_references.clone() else {
             return fail(
@@ -1288,7 +1302,8 @@ impl<'a> Run<'a> {
         if still.is_empty() {
             self.references.tests.extend(names.iter().cloned());
             self.references.files.extend(written);
-            return Ok(report(name, StepStatus::Passed, &ran, detail));
+            let passed = report(name, StepStatus::Passed, &ran, detail);
+            return Ok(as_on_base(passed, !failing.is_empty()));
         }
         Ok(report(
             name,

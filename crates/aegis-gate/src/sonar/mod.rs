@@ -105,6 +105,7 @@ fn report(status: StepStatus, ran: &[Ran], detail: String) -> StepReport {
         duration: ran.iter().map(|r| r.duration).sum(),
         detail,
         logs: ran.iter().map(|r| r.log.clone()).collect(),
+        fails_on_base: false,
     }
 }
 

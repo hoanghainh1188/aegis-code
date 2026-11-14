@@ -54,7 +54,7 @@ Làm theo [runbook on-premise §2](../runbook/on-premise.md#2-registering-reposi
    docker compose exec aegis aegis check-repo --config .workspace/preflight/<slug>.toml
    ```
 
-   Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục chặn phải qua trước khi đăng ký repo. Nếu test của repo cần DB hoặc mạng thì repo này chưa hợp để chạy thử (xem #454). Cho đến khi sửa xong #487, các mục format, lint, test vẫn báo qua cả khi chúng hỏng trên base, nên chạy test của repo bằng tay một lần.
+   Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục chặn phải qua trước khi đăng ký repo. Nếu test của repo cần DB hoặc mạng thì repo này chưa hợp để chạy thử (xem #454). Test hỏng trên base cũng chặn (#487). Format hay lint hỏng trên base chỉ là cảnh báo, vì gate chấm bản vá theo các lỗi mà bản vá thêm vào.
 2. `sudo ./add-repo.sh`. Script hỏi:
    - URL của `<owner/name>`, slug, nhánh mặc định, ngôn ngữ và mode;
    - fork cùng token của fork, nhập ẩn;

@@ -174,6 +174,7 @@ pub(crate) fn merge(name: StepName, mut reports: Vec<(String, StepReport)>) -> S
                 .map(|(_, r)| r.detail.clone())
                 .unwrap_or_default()
         },
+        fails_on_base: reports.iter().any(|(_, r)| r.fails_on_base),
         logs: reports.into_iter().flat_map(|(_, r)| r.logs).collect(),
     }
 }
@@ -240,6 +241,7 @@ mod tests {
             duration: Duration::from_secs(1),
             detail: detail.into(),
             logs: vec!["a.log".into()],
+            fails_on_base: false,
         }
     }
 
