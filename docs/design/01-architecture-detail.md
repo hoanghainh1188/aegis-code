@@ -54,7 +54,7 @@ All variations between environments are encapsulated strictly in configuration f
 7. Passes $\rightarrow$ PR writer submits structured pull request. Job completes.
 8. Fails $\rightarrow$ Failure output pruned by Light model, fed back to Core model (resumes Step 5).
 9. Escalation trigger hit $\rightarrow$ Escalates to Expert model with full conversation history.
-10. Circuit breaker hit ($4 limit / 40 turns) $\rightarrow$ Terminates execution, logs cause in ledger, hands off to human engineer.
+10. Circuit breaker hit ($4 limit / 40 turns, or the language profile's cap, §5.2) $\rightarrow$ Terminates execution, logs cause in ledger, hands off to human engineer.
 
 ---
 

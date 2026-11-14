@@ -42,11 +42,11 @@ Thresholds are set in [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md).
 | :--- | :---: | :---: | :--- |
 | **Acceptance Rate** | $\ge 40\%$ total, $\ge 35\%$ per language | **50%** (Python 64%, Rust 39%) | PRs a reviewer accepts with at most 10 lines edited. |
 | **Zero Regression** | 0 | **0** | PRs that break an existing test and still reach a reviewer. |
-| **Cost per Issue** | $\le \$4$ average | **$0.55** | Model spend per issue, failed runs included. A job is stopped at $4 or 40 model calls. |
+| **Cost per Issue** | $\le \$4$ average | **$0.55** | Model spend per issue, failed runs included. A job is stopped at $4 or at its call cap: 40 model calls, 80 for Rust ([ADR 0014](docs/adr/0014-per-language-call-cap.md)). |
 | **Review Time** | $\le 15$ min | **1.8 min** | Human time to judge one PR. |
 | **Prompt Cache Reads** | $\ge 70\%$ | **92%** | Share of input tokens served from the prompt cache. |
 
-Caveats: both projects are public, so models may have seen their fixes during training; Phase 1 reviewers could see hidden test results, which shortens review time. Both are re-measured on internal repositories during the pilot (#157, #158). For the four Phase 2 profiles (TypeScript, Java, Go, C#), the KPI run (#259, [report](docs/measurements/2026-11-10-new-profiles-kpi.md)) and Java rerun (#425, [report](docs/measurements/2026-11-11-java-rerun-kpi.md)) met the ≥ 35% threshold on TypeScript, Go, and Java (50%–100% under the #424 scoring rule), while C# stands at 25% (#426, [report](docs/measurements/2026-11-10-csharp-rerun-kpi.md)) with prompt rule improvements tracked in #448.
+Caveats: both projects are public, so models may have seen their fixes during training; Phase 1 reviewers could see hidden test results, which shortens review time. Both are re-measured on internal repositories during the pilot (#157, #158). For the four Phase 2 profiles (TypeScript, Java, Go, C#), the KPI run (#259, [report](docs/measurements/2026-11-10-new-profiles-kpi.md)) and Java rerun (#425, [report](docs/measurements/2026-11-11-java-rerun-kpi.md)) met the ≥ 35% threshold on TypeScript, Go, and Java (50%–100% under the #424 scoring rule), and C# reached 50% (4/8) after two prompt rules (#448, [report](docs/measurements/2026-11-13-csharp-prompt-rules.md)). In the same run, with a cap of 80 model calls, Rust (typst) reached 56% (10/18).
 
 ---
 
@@ -66,7 +66,7 @@ sequenceDiagram
     Server->>Server: Enqueue job (PostgreSQL SKIP LOCKED)
     Server->>Agent: Worker leases job & creates Git worktree
     Agent->>Agent: AST context search & synthesize repro test (FAIL)
-    loop Edit & Verify Loop (Circuit breaker capped at $4 / 40 calls)
+    loop Edit & Verify Loop (Circuit breaker capped at $4 / call cap)
         Agent->>Agent: Synthesize patch with syntax-guarded edit
         Agent->>Sandbox: Execute 6-Step Verification Gate
         Sandbox-->>Agent: Gate Results (Format, Lint, Tests, Sonar)
@@ -106,7 +106,7 @@ The reviewer's side of this, step by step, is in the [Reviewer Guide](docs/revie
 | **Mode** | A named server configuration a repo runs under: which models, provider and region (`poc` = Claude API, `customer-jp` = Bedrock in Tokyo, or your own local-model file). |
 | **Fork** | The repository the agent pushes `agent/*` branches to and opens PRs in. Either a bot-owned fork of the upstream repo, or the upstream repo itself. |
 | **Light / Core / Expert** | The three model tiers: triage, main solving, and escalation for hard cases. |
-| **Circuit breaker** | The per-job ceiling ($4 or 40 model calls). The job stops and reports `stopped_budget` / `stopped_steps` instead of opening a PR. |
+| **Circuit breaker** | The per-job ceiling: $4, or the call cap of the repo's language profile (40 model calls; 80 for Rust, [ADR 0014](docs/adr/0014-per-language-call-cap.md)). The job stops and reports `stopped_budget` / `stopped_steps` instead of opening a PR. |
 | **Review round** | A follow-up job on an open PR, started by *Request changes* or a `/aegis fix` comment; it pushes a new commit to the same branch. |
 | **Ledger** | The per-job record of every model call, its tokens and its cost. |
 
@@ -326,7 +326,7 @@ flowchart TB
     subgraph CoreEngine["4. Issue Lifecycle & Agent Engine"]
         Lifecycle["aegis-lifecycle<br/>(End-to-End Job Coordinator)"]:::engine
         Orch["aegis-orchestrator<br/>(Agent Turn Loop · History Collapsing)"]:::engine
-        Router["aegis-router<br/>(Light / Core / Expert · $4 & 40-call Breaker)"]:::engine
+        Router["aegis-router<br/>(Light / Core / Expert · $4 & Call-Cap Breaker)"]:::engine
         Provider["aegis-provider<br/>(Claude / Bedrock / Ollama · BP1–BP4 Cache)"]:::engine
     end
 
@@ -386,7 +386,7 @@ flowchart TB
    * Prepares an isolated Git worktree per job, builds the `codebase-memory-mcp` SQLite call graph index, and orchestrates the transition from triage $\rightarrow$ agent loop $\rightarrow$ verification gate $\rightarrow$ PR creation.
 3. **Agent Execution Loop (`aegis-orchestrator`, `aegis-router`, `aegis-provider`, `aegis-ledger`):**
    * `aegis-orchestrator` manages multi-turn agent sessions, dispatches tool calls over MCP (`rmcp` child processes), and compacts older tool observations once context usage exceeds $60\%$.
-   * `aegis-router` selects the active tier (`Light` $\rightarrow$ `Core` $\rightarrow$ `Expert`) based on failure signals and enforces the economic circuit breaker ($\$4$ or 40 model calls) backed by real-time accounting in `aegis-ledger`.
+   * `aegis-router` selects the active tier (`Light` $\rightarrow$ `Core` $\rightarrow$ `Expert`) based on failure signals and enforces the economic circuit breaker ($\$4$ or the call cap) backed by real-time accounting in `aegis-ledger`.
    * `aegis-provider` serializes requests with deterministic 4-breakpoint prompt caching (`BP1`–`BP4`) and enforces regional routing policies (`ModelPolicy::JapanOnly` for `customer-jp.toml`).
 4. **Code Intelligence & Sandboxed Verification (`aegis-aci`, `aegis-lang`, `aegis-gate`):**
    * `aegis-aci` runs as an MCP tool server providing bounded code windows (`open`, `search_symbol`, `find_definition` via LSP) and syntax-guarded edits (`edit`).
@@ -424,7 +424,7 @@ flowchart TD
     
     L4 -->|Passes 6-Step Gate| PR["Open Pull Request (RCA + Golden Master + Token Ledger)"]:::pass
     L4 -->|Gate Fail < 2 times| L3
-    L4 -->|Circuit Breaker Hit: $4 limit / 40 calls / Expert 2x fail| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]:::stop
+    L4 -->|Circuit Breaker Hit: $4 limit / call cap / Expert 2x fail| Stop["CIRCUIT BREAKER: Stop & Hand off to Engineer"]:::stop
 ```
 
 </details>
@@ -440,7 +440,7 @@ flowchart TD
    * **Light (`Haiku 5.5`):** Issue classification, stack trace pruning, and log summarization.
    * **Core (`Sonnet 5.5`):** Root-cause localization, reproducing test creation, patch synthesis.
    * **Expert (`Opus 5.5`):** Complex architecture refactoring spanning $\ge 3$ files or escalated after consecutive Core failures.
-   * **Economic Circuit Breaker:** Stops execution immediately if cost exceeds $\$4$ or reaches 40 model calls (excluding Light preprocessing).
+   * **Economic Circuit Breaker:** Stops execution immediately if cost exceeds $\$4$ or reaches the call cap: 40 model calls, 80 for Rust (excluding Light preprocessing; [ADR 0014](docs/adr/0014-per-language-call-cap.md)).
 4. **Layer 4 – 6-Step Verification Gate in Docker (`aegis-gate`):**
    * Format $\rightarrow$ Lint $\rightarrow$ Repro Test (proves FAIL $\rightarrow$ PASS) $\rightarrow$ Full Test Suite $\rightarrow$ Coverage $\rightarrow$ Sonar Quality Gate.
    * Runs in network-isolated containers (`--network none`, `--cap-drop ALL`, non-root user).
@@ -455,9 +455,8 @@ flowchart TD
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **AWS (Production)** | EC2 + systemd | RDS PostgreSQL | AWS Secrets Manager | Cloud enterprise, High availability | [AWS Runbook](docs/runbook/README.md) |
 | **On-Premise Compose** | Docker Compose | Local PostgreSQL | File-based (`./secrets/`) | Internal data centers, Private clouds | [On-Premise Runbook](docs/runbook/on-premise.md) |
-| **Kubernetes** | Helm chart, Docker-in-Docker sidecar per worker | External, or in the release for a trial | Kubernetes Secrets as files | Existing clusters | [Kubernetes Runbook](docs/runbook/kubernetes.md) |
+| **Kubernetes** | Helm chart, Docker-in-Docker sidecar per worker | External, or in the release for a trial | Kubernetes Secrets as files | Existing clusters | [Kubernetes Runbook](docs/runbook/kubernetes.md), [ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md) |
 | **On-Premise systemd** | Host systemd | Dedicated Postgres | File-based (`/etc/aegis/secrets/`) | Bare-metal Linux servers | [ADR 0007](docs/adr/0007-on-premise-deployment.md) |
-| **Kubernetes** | Worker Pods | External Postgres | K8s Secrets / CSI | Cloud-native multi-tenant clusters | [ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md) |
 
 ### Monitoring & Observability
 * **Prometheus Metrics:** Exported at `:9464/metrics` (or `:8080/metrics`). Tracks job durations, gate pass rates, token consumption, and model spending.
@@ -503,7 +502,7 @@ aegis-code/
 │   ├── # 3. Issue Lifecycle & Core Agent Engine
 │   ├── aegis-lifecycle/      # End-to-end job coordinator: worktree setup, triage, agent loop, gate, escalation, PR handoff
 │   ├── aegis-orchestrator/   # Multi-turn agent loop, MCP tool dispatch (`rmcp`), and batch observation collapsing
-│   ├── aegis-router/         # Model tier selection (Light / Core / Expert), escalation matrix, and $4 / 40-call circuit breaker
+│   ├── aegis-router/         # Model tier selection (Light / Core / Expert), escalation matrix, and $4 / call-cap circuit breaker
 │   ├── aegis-provider/       # LLM backends (Claude API, AWS Bedrock `jp.*`, Ollama) and 4-breakpoint prompt caching (BP1–BP4)
 │   │
 │   ├── # 4. Code Intelligence & Sandboxed Verification
@@ -538,8 +537,8 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * ✅ **Phase 0 – Setup** (Completed): CI/CD pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
 * ✅ **Phase 1 – MVP / PoC** (Completed): Core agent loop, Rust and Python language profiles, empirical validation against 3 Core KPIs ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md), [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md)).
 * 🚧 **Phase 2 – Platform Service** (~95% Completed – Final Stage):
-  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)).
-  - **In Progress / Remaining:** C# KPI uplift to ≥ 35% (#448), `search_text` `\n` fix (#449), README prompt injection eval (#441), `aegis check-repo` pre-flight check (#450), staging cloud deployment via OpenTofu (#33), internal repo KPI validation (#157), and real-world team pilot (#158).
+  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425, C# 50% in #448); per-language call cap ([ADR 0014](docs/adr/0014-per-language-call-cap.md)); `aegis check-repo` pre-flight check (#450); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)).
+  - **In Progress / Remaining:** real-world team pilot on-premise (#158, [plan](docs/pilot/2026-11-team-pilot-plan.md)), internal repo KPI validation (#157), staging cloud deployment via OpenTofu (#33), gVisor sandbox cost measurement (#322), and shipping `aegis check-repo` with the release (#474).
 * ⏳ **Phase 3 – Expansion & AMS Readiness** (Planned – `Phase 3 – Mở rộng`, [ADR 0011](docs/adr/0011-ams-direction.md), [ADR 0012](docs/adr/0012-triage-and-diagnostic-lane.md), [ADR 0013](docs/adr/0013-ephemeral-database-sidecars.md)):
   - **Next-Gen AMS Operations & Legacy Readiness:** L1/L2 triage & non-code diagnostic lane (#451), APM/production telemetry ingestion from Sentry/Datadog/CloudWatch (#452), ITSM connectors for ServiceNow/JSM and SLA severity mapping (#453), ephemeral DB/service sidecars in gate + Golden Master characterization test benchmarks on low-coverage legacy repos (#454), controlled CVE/dependency remediation workflow (#455), and additional language ecosystems (#37) plus review evidence (#36).
   - **Evaluated & Deferred:** SBFL (#34, [report](docs/measurements/2026-10-27-sbfl-evaluation.md)) and deep context compression / SWEzze (#35, [report](docs/measurements/2026-10-28-context-compression.md)) were empirically evaluated and deferred from default execution (`NO-GO` under current 40-turn / 200k-context workloads).
@@ -566,18 +565,23 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * [ADR 0011: AMS Direction (Phase 3 and Phase 4)](docs/adr/0011-ams-direction.md)
 * [ADR 0012: L1/L2 Triage and Non-Code Diagnostic Lane](docs/adr/0012-triage-and-diagnostic-lane.md)
 * [ADR 0013: Ephemeral Database Sidecars in Gate Sandbox](docs/adr/0013-ephemeral-database-sidecars.md)
+* [ADR 0014: Per-Language Default Call Cap, 80 for Rust](docs/adr/0014-per-language-call-cap.md)
 
 ### Detailed Guides & Runbooks
+* [Proposal](docs/design/00-proposal.md) and [Architecture Specification](docs/design/01-architecture-detail.md) – Scope, the four layers, KPIs, roadmap
 * [Reviewer Guide](docs/reviewing.md) – Reading an Aegis PR, asking for review rounds, recording the verdict
 * [Developer Client Guide (`aegis`)](docs/client.md) – Submitting and monitoring jobs from terminal
 * [Local End-to-End Trial Guide](docs/local-trial.md) – Step-by-step local platform walkthrough
 * [Production AWS Runbook](docs/runbook/README.md) – Deployment, secret rotation, and incident triage
+* [On-Premise Install Guide](docs/install-on-premise.md) – From a blank machine to the first PR, step by step
 * [On-Premise Operations Runbook](docs/runbook/on-premise.md) – Single-machine Docker Compose and systemd management
 * [Kubernetes Operations Runbook](docs/runbook/kubernetes.md) – Helm chart: install, upgrades, rollback
+* [Team Pilot Plan](docs/pilot/2026-11-team-pilot-plan.md) – The four-week on-premise pilot of #158 (in Vietnamese)
+* [Measurement Reports](docs/measurements/) – Dated KPI and experiment reports (in Vietnamese)
 * [Release Operations](docs/release.md) – Release-please, GHCR container images, and offline packages
 * [Contributing & Development Conventions](CLAUDE.md) – Commit formats, branching, and pre-PR verification
 
-> *Note: All architectural specifications (ADRs), operations runbooks, and developer procedural guides across `docs/` are fully maintained in English.*
+> *Note: ADRs, design documents, runbooks and guides are in English. The measurement reports and the pilot plan are in Vietnamese.*
 
 ---
 
