@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.11.0...v0.12.0) (2026-11-14)
+
+
+### Features
+
+* **aci:** run_tests reaches the repo's sidecars ([#491](https://github.com/hoanghainh1188/aegis-code/issues/491)) ([#494](https://github.com/hoanghainh1188/aegis-code/issues/494)) ([51bd7b6](https://github.com/hoanghainh1188/aegis-code/commit/51bd7b6a994f5367674e4d4a55d31039835e6d3d))
+* **gate:** ephemeral sidecars for tests that need PostgreSQL or Redis ([#490](https://github.com/hoanghainh1188/aegis-code/issues/490)) ([#492](https://github.com/hoanghainh1188/aegis-code/issues/492)) ([ed5f2ba](https://github.com/hoanghainh1188/aegis-code/commit/ed5f2bac6a06c1df8c27a0686aab344752b6136f))
+
+
+### Documentation
+
+* pilot plan uses v0.12.0, with DB sidecars ([#495](https://github.com/hoanghainh1188/aegis-code/issues/495)) ([#496](https://github.com/hoanghainh1188/aegis-code/issues/496)) ([9c4945f](https://github.com/hoanghainh1188/aegis-code/commit/9c4945f535cd992d0f20d796c59dbebf29879de7))
+
 ## [0.11.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.10.0...v0.11.0) (2026-11-14)
 
 
