@@ -22,7 +22,6 @@ egress_image = "python:3.12-alpine"
 
 [budget]
 max_cost_usd = 2.0
-max_model_calls = 40
 
 [identity]
 name = "aegis-bot"

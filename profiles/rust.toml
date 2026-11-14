@@ -81,3 +81,8 @@ writable = ["/home/aegis", "/usr/local/cargo"]
 
 [prompt]
 conventions = "rust.md"
+
+# Trần lượt gọi Core + Expert của một job khi `[budget]` của repo không đặt
+# (#471, ADR 0014). typst-7541 chỉ qua khi trên 40 lượt, ở cả hai lần đo (#156).
+[budget]
+max_model_calls = 80

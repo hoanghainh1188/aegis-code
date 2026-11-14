@@ -139,7 +139,7 @@ Tasks begin at Core tier and escalate to Expert only under explicit triggers:
 
 **Circuit Breakers (Hand off to Human):**
 - Expert tier fails twice;
-- Total turns exceed 40;
+- Total turns exceed 40, or the cap of the repo's language profile (80 for Rust, [ADR 0014](../adr/0014-per-language-call-cap.md));
 - Cumulative token spend exceeds $4 for the issue.
 
 ---

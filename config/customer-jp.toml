@@ -33,7 +33,6 @@ ledger = "postgres"
 
 [budget]
 max_cost_usd = 4.0
-max_model_calls = 40
 
 # Codebase-Memory (#203, #266): the impact note before the first gate run,
 # as in poc.toml. The graph stays on this machine: the index is under

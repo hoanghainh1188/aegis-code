@@ -360,7 +360,11 @@ impl Modes {
             provider: mode.provider.clone(),
             models: mode.models.clone(),
             run: mode.run.clone(),
-            budget: settings.budget.unwrap_or(mode.budget),
+            // A repo budget without a call cap keeps its mode's (#471).
+            budget: settings.budget.map_or(mode.budget, |own| BudgetSection {
+                max_model_calls: own.max_model_calls.or(mode.budget.max_model_calls),
+                ..own
+            }),
             repo: RepoConfig {
                 path,
                 language,
@@ -604,8 +608,8 @@ mod tests {
     fn the_shipped_local_config_runs_free_models() {
         let local = ModeConfig::from_toml(include_str!("../../../config/local.toml")).unwrap();
         local.check(RepoMode::Poc).unwrap();
-        assert!(!local.budget.limits().is_spent(0.0));
-        assert!(local.budget.limits().is_spent(0.01));
+        assert!(!local.budget.cost_spent(0.0));
+        assert!(local.budget.cost_spent(0.01));
         assert_eq!(local.run.context_window, 32_768);
     }
 
@@ -708,6 +712,26 @@ mod tests {
         assert_eq!(internal.budget.max_cost_usd, 4.0);
         assert_eq!(customer.sonar.unwrap().project_key, "jp_app");
         assert!(internal.repo.conventions.is_none());
+    }
+
+    /// #471: a repo budget that sets only the cost keeps its mode's call
+    /// cap; with none in either, the language profile's applies later.
+    #[test]
+    fn a_repo_budget_without_a_call_cap_keeps_its_modes() {
+        let capped = POC.replacen("[budget]\n", "[budget]\nmax_model_calls = 25\n", 1);
+        let capped = Modes::new(Some(ModeConfig::from_toml(&capped).unwrap()), None).unwrap();
+        let mut own = settings();
+        own["budget"] = serde_json::json!({ "max_cost_usd": 2.0 });
+        let cfg = capped
+            .run_config(&repo("app", RepoMode::Poc, own.clone()))
+            .unwrap();
+        assert_eq!(cfg.budget.max_cost_usd, 2.0);
+        assert_eq!(cfg.budget.max_model_calls, Some(25));
+
+        let cfg = modes()
+            .run_config(&repo("app", RepoMode::Poc, own))
+            .unwrap();
+        assert_eq!(cfg.budget.max_model_calls, None);
     }
 
     #[test]

@@ -238,7 +238,7 @@ impl LifecycleRunner {
             .await
             .map_err(|e| Attempt::Infra(e.to_string()))?;
         let budget = config.budget.max_cost_usd;
-        if config.budget.limits().is_spent(spent) {
+        if config.budget.cost_spent(spent) {
             return Ok(Attempt::Ended {
                 outcome: Outcome::StoppedBudget,
                 reason: Some(format!(
