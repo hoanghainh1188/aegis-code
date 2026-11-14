@@ -621,7 +621,11 @@ mod tests {
         assert!(text.contains("refused by aegis-docker-proxy"), "{text}");
 
         let created = refusing_docker("created", "0001-01-01T00:00:00Z");
-        assert!(runner(&created).run(&["true".into()], &dir, &log, &[]).is_err());
+        assert!(
+            runner(&created)
+                .run(&["true".into()], &dir, &log, &[])
+                .is_err()
+        );
 
         // The command itself exited 125: a result like any other.
         let ran = refusing_docker("ran", "2026-11-14T09:00:00.123Z");

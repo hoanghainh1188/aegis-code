@@ -149,7 +149,7 @@ Prometheus metrics listen locally at `127.0.0.1:9464/metrics`. Standard alerting
 
 The server image ships `aegis check-repo` (#450, #474), so no Rust toolchain is needed on the host. It runs in the `aegis` container and reaches the daemon through `docker-proxy`, as jobs do: the same uid, the same workspace mounts, the same sandbox images. It checks the profile, the lockfile, the daemon and the profile's sandbox image, the fetch hosts, and runs the root gate (format, lint, tests) in a `--network none` sandbox. Run it before `add-repo.sh`; every blocking item must pass.
 
-> **Caution (#487):** until #487 is fixed, the baseline format, lint and test items report a pass even when those commands fail on the base branch. Run the repo's own tests once by hand as well.
+Tests must pass on the base branch (#487): a test that fails there blocks, even though the gate lets a patch through when the base fails the same tests. Format or lint that fails on the base is a warning: the gate judges patches by the findings they add.
 
 From `deploy/compose/`, with the server healthy:
 

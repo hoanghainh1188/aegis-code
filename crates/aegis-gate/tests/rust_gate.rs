@@ -93,10 +93,7 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
     );
     assert!(report.passed());
     // Every step passed on the patch itself (#487).
-    assert!(
-        report.steps.iter().all(|s| !s.fails_on_base),
-        "{report}"
-    );
+    assert!(report.steps.iter().all(|s| !s.fails_on_base), "{report}");
     // The base checkout is gone and the patch is untouched.
     assert!(!repo.work().join("base").exists());
     assert!(repo.dir().join("tests/fourth_item.rs").exists());
