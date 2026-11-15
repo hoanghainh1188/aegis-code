@@ -163,6 +163,11 @@ pub struct RepoSettings {
     /// `[[secrets.allow]]` with `path`, `kinds` and `reason`.
     #[serde(default, skip_serializing_if = "is_default_secrets")]
     pub secrets: aegis_gate::SecretPolicy,
+    /// Which triaged tickets get a read-only diagnosis written back instead
+    /// of a PR (#451): `[triage_lane]` with `categories` and
+    /// `min_confidence`; off by default.
+    #[serde(default, skip_serializing_if = "crate::TriageLane::is_off")]
+    pub triage_lane: crate::TriageLane,
     /// Services the test steps reach (#490): `[[sidecars]]`, as
     /// `[[repo.sidecars]]` of a run configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -392,6 +397,7 @@ impl Modes {
                 hidden_test: settings.hidden_test,
                 patch_scope: Some(settings.patch_scope),
                 secrets: settings.secrets,
+                triage_lane: settings.triage_lane,
                 sidecars: settings.sidecars,
                 fork: settings.fork,
             },

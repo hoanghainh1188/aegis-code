@@ -37,6 +37,11 @@ pub enum LifecycleError {
     #[error(transparent)]
     Tools(#[from] aegis_orchestrator::McpToolsError),
 
+    /// A model call outside the agent's loop failed (the diagnosis lane,
+    /// #451): the attempt is retried.
+    #[error("model call: {0}")]
+    Provider(#[from] aegis_provider::ProviderError),
+
     #[error("Codebase-Memory: {0}")]
     CodeGraph(String),
 

@@ -17,6 +17,9 @@ pub enum Attempt {
         reason: Option<String>,
         pr_url: Option<String>,
         patch: Option<Patch>,
+        /// The report written back to the ticket, for a job the diagnosis
+        /// lane took (#451).
+        diagnosis: Option<String>,
     },
     /// Infrastructure failed (provider, container, network, database):
     /// retried with backoff while retries remain.

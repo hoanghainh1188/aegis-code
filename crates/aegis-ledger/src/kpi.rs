@@ -33,6 +33,9 @@ pub struct Kpi {
     pub awaiting_review: usize,
     /// Runs stopped because the answer had no verifiable sources (#508).
     pub held_for_sources: usize,
+    /// Runs the diagnosis lane took (#451): a report on the ticket, no PR.
+    /// They are not attempts at a fix, so acceptance leaves them out.
+    pub diagnosed: usize,
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
@@ -96,11 +99,18 @@ impl Kpi {
                 .count(),
             awaiting_review: prs.iter().filter(|r| r.review.is_none()).count(),
             held_for_sources: finished.iter().filter(|r| r.held_for_sources).count(),
+            diagnosed: finished
+                .iter()
+                .filter(|r| r.outcome == Some(Outcome::Diagnosed))
+                .count(),
         }
     }
 
+    /// Accepted PRs over the runs that tried a fix: diagnosed ones (#451)
+    /// are left out.
     pub fn accept_rate(&self) -> Option<f64> {
-        (self.runs > 0).then(|| self.accepted as f64 / self.runs as f64)
+        let fixes = self.runs - self.diagnosed;
+        (fixes > 0).then(|| self.accepted as f64 / fixes as f64)
     }
 }
 
@@ -129,7 +139,7 @@ impl fmt::Display for Kpi {
         let rows = [
             (
                 "Accepted PRs (≤ 10 lines edited)",
-                pct(self.accepted, self.runs),
+                pct(self.accepted, self.runs - self.diagnosed),
                 "≥ 40%",
                 accept.map(|a| a >= ACCEPT_RATE_MIN),
             ),
@@ -169,6 +179,12 @@ impl fmt::Display for Kpi {
             (
                 "Hidden tests pass (eval runs)",
                 pct(self.hidden_passed, self.hidden_ran),
+                "tracked",
+                None,
+            ),
+            (
+                "Tickets diagnosed, no PR (triage lane)",
+                pct(self.diagnosed, self.runs),
                 "tracked",
                 None,
             ),

@@ -211,6 +211,10 @@ pub struct RepoConfig {
     /// kind, each with its reason: `[[repo.secrets.allow]]`.
     #[serde(default)]
     pub secrets: aegis_gate::SecretPolicy,
+    /// Which triaged tickets get a read-only diagnosis instead of the fix
+    /// loop (#451): `[repo.triage_lane]`; off by default.
+    #[serde(default)]
+    pub triage_lane: crate::TriageLane,
     /// Services the test steps reach, such as PostgreSQL (#490, ADR
     /// 0013): `[[repo.sidecars]]`. They run only with `run.sandbox`.
     #[serde(default)]
@@ -557,6 +561,10 @@ impl RunConfig {
             .check_ids()
             .map_err(LifecycleError::Config)?;
         self.repo.secrets.check().map_err(LifecycleError::Config)?;
+        self.repo
+            .triage_lane
+            .check()
+            .map_err(LifecycleError::Config)?;
         if let Some(runtime) = &self.run.sandbox_runtime {
             aegis_gate::check_runtime(runtime)
                 .map_err(|e| LifecycleError::Config(format!("run.sandbox_runtime: {e}")))?;

@@ -141,6 +141,22 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::SecretsRedacted { count }).await
     }
 
+    /// The diagnosis lane's report (#451): its category, items kept and
+    /// dropped.
+    pub async fn diagnosed(
+        &mut self,
+        category: crate::TriageCategory,
+        kept: u32,
+        dropped: u32,
+    ) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::Diagnosed {
+            category,
+            kept,
+            dropped,
+        })
+        .await
+    }
+
     /// What the check of an answer's sources found (#508).
     pub async fn sources_checked(
         &mut self,

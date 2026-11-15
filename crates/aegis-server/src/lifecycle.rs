@@ -93,6 +93,9 @@ impl LedgerStore for RunLedger {
             LedgerEvent::SecretsBlocked { place, count } => {
                 crate::metrics::metrics().secrets_blocked(place, *count);
             }
+            LedgerEvent::Diagnosed { category, .. } => {
+                crate::metrics::metrics().diagnosed(*category);
+            }
             _ => {}
         }
         Ok(())
@@ -255,6 +258,7 @@ impl LifecycleRunner {
                 )),
                 pr_url: None,
                 patch: None,
+                diagnosis: None,
             });
         }
         // An earlier attempt may have closed the ledger before its worker
@@ -270,6 +274,7 @@ impl LifecycleRunner {
                 reason: Some("ended by an earlier attempt".into()),
                 pr_url: None,
                 patch: None,
+                diagnosis: None,
             });
         }
         let github_token = if config.run.open_prs {
@@ -405,6 +410,7 @@ impl LifecycleRunner {
             reason: report.reason,
             pr_url: report.pr_url,
             patch: report.patch,
+            diagnosis: report.diagnosis,
         })
     }
 }

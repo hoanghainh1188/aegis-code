@@ -300,6 +300,17 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
             )
         }
         LedgerEvent::SecretsRedacted { count } => row("redact secrets", format!("{count} values")),
+        LedgerEvent::Diagnosed {
+            category,
+            kept,
+            dropped,
+        } => row(
+            "diagnose",
+            format!(
+                "{}: {kept} finding(s) with checked sources written back, {dropped} dropped",
+                category.as_str()
+            ),
+        ),
         LedgerEvent::SourcesChecked { cited, wrong, held } => row(
             "check sources",
             match (wrong, held) {
@@ -487,6 +498,8 @@ struct JobPage<'a> {
     input_flags: Vec<InputFlag>,
     /// The patch its PR holds (#312).
     patch: Option<PatchView>,
+    /// The report the diagnosis lane wrote back to the ticket (#451).
+    diagnosis: Option<String>,
 }
 
 #[derive(Template)]
@@ -540,6 +553,7 @@ pub async fn detail(
         answer: record.answer.clone(),
         input_flags: record.input_flags.clone(),
         patch: super::patch::of(&store, job.id).await?,
+        diagnosis: store.diagnosis(job.id).await?,
     })
 }
 

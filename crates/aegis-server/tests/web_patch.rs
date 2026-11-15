@@ -74,6 +74,7 @@ async fn opened(s: &Store, diff: &str, truncated: bool) -> JobId {
             diff: diff.into(),
             truncated,
         }),
+        diagnosis: None,
     };
     s.finish_attempt(&claim.run, "w", &end).await.unwrap();
     claim.job.id

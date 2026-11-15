@@ -83,6 +83,9 @@ pub struct IssueReport {
     pub hidden_tests_passed: Option<bool>,
     /// What the PR holds, when one was opened or updated (#312).
     pub patch: Option<aegis_store::Patch>,
+    /// The report the diagnosis lane wrote for the ticket (#451), for a job
+    /// that ended [`Outcome::Diagnosed`].
+    pub diagnosis: Option<String>,
 }
 
 /// How the work on an issue ended, before the ledger closes it.
@@ -94,6 +97,8 @@ pub(crate) struct Ending {
     pub kept: Option<Kept>,
     /// The patch of the PR opened or updated.
     pub patch: Option<aegis_store::Patch>,
+    /// The diagnosis lane's report (#451).
+    pub diagnosis: Option<String>,
 }
 
 impl Ending {
@@ -104,6 +109,7 @@ impl Ending {
             pr_url: None,
             kept: None,
             patch: None,
+            diagnosis: None,
         }
     }
 }
@@ -203,6 +209,7 @@ where
         reason: ending.reason,
         pr_url: ending.pr_url,
         patch: ending.patch,
+        diagnosis: ending.diagnosis,
         cost_usd: record.cost_usd,
         model_calls: record.model_calls,
         hidden_tests_passed: record.hidden_tests_passed,
@@ -330,9 +337,13 @@ where
             .await?;
     }
     ledger.classified(class.kind).await?;
-    // Recorded only (#497): the job works on the code whatever it says.
+    // Recorded (#497); the job works on the code whatever it says, unless
+    // the repo turned the diagnosis lane on for it (#451).
     if let Some(triage) = class.triage.clone() {
-        ledger.triaged(triage).await?;
+        ledger.triaged(triage.clone()).await?;
+        if cfg.repo.triage_lane.takes(&triage) {
+            return crate::diagnose::diagnose(platform, ledger, issue, &triage).await;
+        }
     }
     let profiles = cfg.repo.profiles(&platform.profiles)?;
     if class.needs_sonar_batching() {
@@ -1497,6 +1508,7 @@ where
                     pr_url: None,
                     kept: Some(Kept { commit, answer }),
                     patch: None,
+                    diagnosis: None,
                 });
             }
             // What the job read that speaks to an agent, for the reviewer
@@ -1521,6 +1533,7 @@ where
                     pr_url: Some(published.url),
                     kept: None,
                     patch,
+                    diagnosis: None,
                 });
             }
             let pr_url = if cfg.run.open_prs {
@@ -1554,6 +1567,7 @@ where
                 pr_url,
                 kept: None,
                 patch,
+                diagnosis: None,
             });
         }
 

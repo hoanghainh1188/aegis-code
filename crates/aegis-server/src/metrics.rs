@@ -23,6 +23,7 @@
 //! - Secrets kept from leaving the platform (#509), by `place`: `patch`
 //!   (the gate's `secrets` step failed on them) or the text they were
 //!   masked in (`commit message`, `PR`, `review reply`).
+//! - Tickets the diagnosis lane took (#451), by triage category.
 //! - `aegis_paused` (#510), read at each scrape: 1 while every agent is
 //!   paused (intake or emergency), 0 otherwise.
 
@@ -127,6 +128,7 @@ pub struct Metrics {
     triage: Family<TriageLabels, Counter>,
     paused: Gauge,
     secrets_blocked: Family<PlaceLabels, Counter>,
+    diagnosed: Family<TriageLabels, Counter>,
 }
 
 impl Metrics {
@@ -220,10 +222,17 @@ impl Metrics {
             "Secrets kept from leaving the platform (#509), by where: patch, or the text masked",
             secrets_blocked.clone(),
         );
+        let diagnosed = Family::default();
+        registry.register(
+            "diagnosed",
+            "Tickets the diagnosis lane took (#451): a read-only report, no PR",
+            diagnosed.clone(),
+        );
         Self {
             triage,
             paused,
             secrets_blocked,
+            diagnosed,
             registry,
             jobs_running,
             attempts,
@@ -239,6 +248,15 @@ impl Metrics {
         }
     }
 
+    /// A ticket the diagnosis lane took (#451).
+    pub fn diagnosed(&self, category: aegis_ledger::TriageCategory) {
+        self.diagnosed
+            .get_or_create(&TriageLabels {
+                category: category.as_str(),
+            })
+            .inc();
+    }
+
     /// A ticket Light triaged (#497).
     pub fn triaged(&self, category: aegis_ledger::TriageCategory) {
         self.triage
@@ -252,7 +270,7 @@ impl Metrics {
     /// lifecycle names; anything else counts as `other`.
     pub fn secrets_blocked(&self, place: &str, count: u32) {
         let place = match place {
-            "patch" | "commit message" | "PR" | "review reply" => place,
+            "patch" | "commit message" | "PR" | "review reply" | "diagnosis" => place,
             _ => "other",
         };
         self.secrets_blocked
@@ -454,6 +472,21 @@ mod tests {
 
     fn line_of<'a>(text: &'a str, start: &str) -> Option<&'a str> {
         text.lines().find(|l| l.starts_with(start))
+    }
+
+    #[test]
+    fn diagnosed_tickets_count_by_category() {
+        let m = Metrics::new();
+        m.diagnosed(aegis_ledger::TriageCategory::OpsOrConfig);
+        let text = m.render().unwrap();
+        assert!(
+            line_of(
+                &text,
+                r#"aegis_diagnosed_total{category="ops_or_config"} 1"#
+            )
+            .is_some(),
+            "{text}"
+        );
     }
 
     #[test]

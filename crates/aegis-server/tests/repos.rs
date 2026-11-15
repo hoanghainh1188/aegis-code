@@ -95,6 +95,7 @@ impl JobRunner for Resolving {
             reason: None,
             pr_url: Some(format!("https://github.com/me/{}/pull/1", run.repo.slug)),
             patch: None,
+            diagnosis: None,
         }
     }
 }

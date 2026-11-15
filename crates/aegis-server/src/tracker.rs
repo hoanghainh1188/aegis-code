@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::default_ledger_key;
 use crate::runner::Attempt;
-use crate::webhook::{plain_status_comment, pr_url};
+use crate::webhook::{plain_comment_with, pr_url};
 use crate::worker::JobNotifier;
 
 /// Repos read per page while polling.
@@ -297,7 +297,7 @@ pub async fn run_poller<N: JobNotifier>(
         match poll_if_due(&store, &secrets, every).await {
             Ok(refused) => {
                 for job in refused {
-                    notifier.job_ended(&job).await;
+                    notifier.job_ended(&job, None).await;
                 }
             }
             Err(e) => tracing::error!(error = %e, "polling the trackers"),
@@ -335,7 +335,7 @@ impl TrackerNotifier {
         Self { store, secrets }
     }
 
-    async fn report(&self, job: &Job) -> Result<(), String> {
+    async fn report(&self, job: &Job, diagnosis: Option<&str>) -> Result<(), String> {
         let repo = self
             .store
             .repo(job.repo_id)
@@ -348,7 +348,7 @@ impl TrackerNotifier {
             .ok_or("the repo has no tracker now")?;
         // No secret leaves for the tracker (#509): the job's reason may
         // quote what the agent or a tool said.
-        let comment = aegis_pr::masked(&plain_status_comment(job));
+        let comment = aegis_pr::masked(&plain_comment_with(job, diagnosis));
         let report = Report {
             comment: &comment,
             pr_url: pr_url(job),
@@ -361,14 +361,14 @@ impl TrackerNotifier {
 }
 
 impl JobNotifier for TrackerNotifier {
-    async fn job_ended(&self, job: &Job) {
+    async fn job_ended(&self, job: &Job, diagnosis: Option<&str>) {
         if !matches!(
             job.source,
             JobSource::Jira | JobSource::Backlog | JobSource::Jsm | JobSource::Servicenow
         ) {
             return;
         }
-        match self.report(job).await {
+        match self.report(job, diagnosis).await {
             Ok(()) => tracing::info!(job = job.id.0, "reported on the ticket"),
             Err(e) => tracing::warn!(job = job.id.0, error = %e, "reporting on the ticket"),
         }

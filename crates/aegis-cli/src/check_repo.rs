@@ -969,6 +969,7 @@ mod tests {
             hidden_test: None,
             patch_scope: None,
             secrets: Default::default(),
+            triage_lane: Default::default(),
             sidecars: vec![],
             fork: aegis_lifecycle::ForkConfig {
                 platform: aegis_lifecycle::ForkPlatform::GitHub,

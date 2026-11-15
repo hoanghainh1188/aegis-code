@@ -61,7 +61,7 @@ use events::{Kind, Skip, Wanted};
 pub use aegis_secrets::Secret;
 pub use notify::{
     COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
-    GitLabNotifier, plain_status_comment, status_comment,
+    GitLabNotifier, comment_with, plain_comment_with, plain_status_comment, status_comment,
 };
 pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 
@@ -694,7 +694,7 @@ async fn deliver(
                 hooks.config.gitlab_notifier.clone(),
             );
             // The answer does not wait for GitHub or GitLab.
-            tokio::spawn(async move { notifier.job_ended(&job).await });
+            tokio::spawn(async move { notifier.job_ended(&job, None).await });
             let why = reason
                 .clone()
                 .unwrap_or_else(|| "the repo's budget is spent".into());

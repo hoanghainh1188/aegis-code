@@ -87,6 +87,22 @@ impl ModelProvider for Scripted {
             "light" if system.contains("You triage") => vec![ContentBlock::text(
                 r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item.", "triage": "ops_or_config", "triage_confidence": 0.6, "triage_reason": "Reads like a limit set in configuration."}"#,
             )],
+            // The diagnosis lane (#451): one finding the repo shows, one
+            // made up, one step the ticket shows; nothing that holds for a
+            // ticket whose title asks for it.
+            "light" if system.contains("You diagnose") => {
+                let text = serde_json::to_string(&request.messages).unwrap();
+                vec![ContentBlock::text(if text.contains("UNSOURCED") {
+                    r#"{"findings": [{"text": "Made up", "evidence": [{"location": "etc/none.conf:1"}]}], "steps": [], "questions": []}"#
+                } else {
+                    r#"{"findings": [
+                        {"text": "The cart's limit is a constant of the code, not a setting.", "evidence": [{"location": "src/lib.rs", "excerpt": "MAX_ITEMS"}]},
+                        {"text": "The limit is read from settings.yaml.", "evidence": [{"location": "settings.yaml:3"}]}
+                      ],
+                      "steps": [{"text": "Confirm the reported call with the reporter.", "evidence": [{"location": "ticket:1", "excerpt": "add(4)"}]}],
+                      "questions": ["Which version of the cart do you run?"]}"#
+                })]
+            }
             "light" if system.contains("failed check") => {
                 vec![ContentBlock::text(
                     "repro_test failed: fourth_item_is_refused",
@@ -1454,6 +1470,128 @@ async fn a_secret_in_the_answer_never_reaches_the_pr() {
         })
         .collect();
     assert!(places.iter().any(|p| p == "PR"), "{places:?}");
+}
+
+fn with_lane(scratch: &Scratch, server: &str) -> RunConfig {
+    let mut cfg = config(scratch, server, 20);
+    cfg.repo.triage_lane = aegis_lifecycle::TriageLane {
+        categories: vec![aegis_ledger::TriageCategory::OpsOrConfig],
+        min_confidence: 0.5,
+    };
+    cfg
+}
+
+/// #451: a repo that turned the lane on for `ops_or_config` gets a
+/// read-only diagnosis for a ticket Light reads so: no Core call, no
+/// worktree, no PR, and only the findings whose sources hold.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ticket_the_lane_takes_is_diagnosed_without_a_fix() {
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let p = platform(
+        with_lane(&scratch, &server.uri()),
+        Scripted::new(vec![], vec![]),
+    );
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::Diagnosed, "{report:?}");
+    assert_eq!(report.pr_url, None);
+    let text = report.diagnosis.clone().unwrap();
+    assert!(
+        text.starts_with("**Diagnosis**: ops_or_config (confidence 0.60)"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "- The cart's limit is a constant of the code, not a setting. (`src/lib.rs`)"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("1. Confirm the reported call with the reporter. (`ticket:1`)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("- Which version of the cart do you run?"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("settings.yaml"),
+        "a source that does not hold is dropped: {text}"
+    );
+    assert!(
+        p.provider.requests_for("core").is_empty(),
+        "no fix was tried"
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "no PR"
+    );
+    assert!(
+        !scratch.0.join("state/jobs/fixture-7/repo").exists(),
+        "no worktree"
+    );
+    let events = p
+        .store
+        .events(&IssueId::parse("fixture-7").unwrap())
+        .await
+        .unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            LedgerEvent::Diagnosed {
+                kept: 2,
+                dropped: 1,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    assert_eq!(Kpi::from_records([&record]).diagnosed, 1);
+}
+
+/// #451: a diagnosis with nothing that holds is not posted; the ticket goes
+/// to a person.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_diagnosis_with_no_checked_source_is_not_posted() {
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let p = platform(
+        with_lane(&scratch, &server.uri()),
+        Scripted::new(vec![], vec![]),
+    );
+    let unsourced = IssueInput {
+        title: "UNSOURCED cart limit".into(),
+        ..issue()
+    };
+    let report = run_issue(Arc::clone(&p), unsourced, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::StoppedSteps, "{report:?}");
+    assert_eq!(report.diagnosis, None);
+    assert!(
+        report
+            .reason
+            .unwrap_or_default()
+            .contains("a person should look")
+    );
+}
+
+/// #451: below the lane's confidence the ticket goes to the fix loop.
+#[test]
+fn the_lane_needs_its_confidence() {
+    let scratch = repo_with_bug();
+    let mut cfg = with_lane(&scratch, "http://127.0.0.1:1");
+    cfg.repo.triage_lane.min_confidence = 0.9;
+    let shadow = aegis_ledger::Triage {
+        category: aegis_ledger::TriageCategory::OpsOrConfig,
+        confidence: 0.6,
+        reason: "r".into(),
+    };
+    assert!(!cfg.repo.triage_lane.takes(&shadow));
 }
 
 /// A fix's answer with `evidence` replaced (#508).

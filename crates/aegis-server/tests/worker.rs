@@ -33,6 +33,7 @@ fn pr() -> Attempt {
             diff: "diff --git a/src/lib.rs b/src/lib.rs\n-a\n+b\n".into(),
             truncated: false,
         }),
+        diagnosis: None,
     }
 }
 
@@ -137,6 +138,7 @@ fn stopped() -> Attempt {
         reason: Some("cancelled".into()),
         pr_url: None,
         patch: None,
+        diagnosis: None,
     }
 }
 
@@ -260,6 +262,7 @@ async fn ten_jobs_at_once_all_end_with_a_reason_within_the_limits() {
                         reason: Some("Expert could not pass the gate".into()),
                         pr_url: None,
                         patch: None,
+                        diagnosis: None,
                     },
                 )],
             )

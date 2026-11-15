@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_diagnoses (job_id, report) VALUES ($1, $2)\n                     ON CONFLICT (job_id) DO UPDATE SET report = EXCLUDED.report",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c49dc7ab4bdad59ee592451f676d2b6e1652cb7eb5f2827750ae111dc346345"
+}
