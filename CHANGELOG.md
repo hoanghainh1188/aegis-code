@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.14.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.13.0...v0.14.0) (2026-11-15)
+
+
+### Features
+
+* **bias:** define platform bias scope, KPI instrumentation, and eval baseline ([#511](https://github.com/hoanghainh1188/aegis-code/issues/511)) ([#528](https://github.com/hoanghainh1188/aegis-code/issues/528)) ([28c4f62](https://github.com/hoanghainh1188/aegis-code/commit/28c4f6223ff20bd43c1a9fb3a92f6a7c4b22dd4d))
+* **gate:** add sidecar timing metrics and Golden Master empirical benchmark ([#454](https://github.com/hoanghainh1188/aegis-code/issues/454)) ([#523](https://github.com/hoanghainh1188/aegis-code/issues/523)) ([a57fc54](https://github.com/hoanghainh1188/aegis-code/commit/a57fc54ef992d45664a6ab0e4163816e2343a5e4))
+* **gate:** no secret leaves in a patch or in what the platform posts ([#509](https://github.com/hoanghainh1188/aegis-code/issues/509)) ([#514](https://github.com/hoanghainh1188/aegis-code/issues/514)) ([95b00f0](https://github.com/hoanghainh1188/aegis-code/commit/95b00f012f8bd21a1006dd55399229afc85632e5))
+* **gate:** sandbox containers on a configured OCI runtime ([#519](https://github.com/hoanghainh1188/aegis-code/issues/519)) ([#520](https://github.com/hoanghainh1188/aegis-code/issues/520)) ([67dbcf1](https://github.com/hoanghainh1188/aegis-code/commit/67dbcf1ed7fb46a0d067e13cf9c39c0ff6a45396))
+* **lang:** add PHP profile and F#/VB.NET ACI grammars ([#37](https://github.com/hoanghainh1188/aegis-code/issues/37)) ([#516](https://github.com/hoanghainh1188/aegis-code/issues/516)) ([cb8d752](https://github.com/hoanghainh1188/aegis-code/commit/cb8d752cf171ab0b9d8c376c03dff9316cf89296))
+* **lifecycle:** a diagnosis instead of a PR for tickets triaged as no code change ([#451](https://github.com/hoanghainh1188/aegis-code/issues/451)) ([#522](https://github.com/hoanghainh1188/aegis-code/issues/522)) ([f2587e9](https://github.com/hoanghainh1188/aegis-code/commit/f2587e95e30670c068d68a986067977d4c281e75))
+* **lifecycle:** a fix's answer cites checked sources, or opens no PR ([#508](https://github.com/hoanghainh1188/aegis-code/issues/508)) ([#517](https://github.com/hoanghainh1188/aegis-code/issues/517)) ([fe1c6f5](https://github.com/hoanghainh1188/aegis-code/commit/fe1c6f53e621fa94b2d470506a76678645816277))
+* **server:** pause every agent at once — intake or emergency stop ([#510](https://github.com/hoanghainh1188/aegis-code/issues/510)) ([#512](https://github.com/hoanghainh1188/aegis-code/issues/512)) ([58b131d](https://github.com/hoanghainh1188/aegis-code/commit/58b131d255cabe959f8ae4e831e77e457d6a6ddd))
+* **store:** add per-repo incident and domain memory ([#456](https://github.com/hoanghainh1188/aegis-code/issues/456)) ([#531](https://github.com/hoanghainh1188/aegis-code/issues/531)) ([d4e49f0](https://github.com/hoanghainh1188/aegis-code/commit/d4e49f00506e249176f0c2dff208d9629662b1a3))
+* **store:** claim queued jobs by SLA level, with aging so none starves ([#524](https://github.com/hoanghainh1188/aegis-code/issues/524)) ([#527](https://github.com/hoanghainh1188/aegis-code/issues/527)) ([7c44620](https://github.com/hoanghainh1188/aegis-code/commit/7c44620ea4c195ef509db04875b9db9c1789897f))
+* tenants — one contract's repos, people, budget, secrets and disk kept apart ([#525](https://github.com/hoanghainh1188/aegis-code/issues/525)) ([#529](https://github.com/hoanghainh1188/aegis-code/issues/529)) ([392d111](https://github.com/hoanghainh1188/aegis-code/commit/392d1110f352275e92a9d6835ceab645e4bc26af))
+* the AMS report — MTTR, SLA on time, triage or PR, cost per contract ([#526](https://github.com/hoanghainh1188/aegis-code/issues/526)) ([#530](https://github.com/hoanghainh1188/aegis-code/issues/530)) ([f8e94cc](https://github.com/hoanghainh1188/aegis-code/commit/f8e94cc2ec2ee49749f4db715ab54e61dbab270c))
+* **tracker:** add JSM and ServiceNow ITSM connectors with SLA metadata ([#453](https://github.com/hoanghainh1188/aegis-code/issues/453)) ([#521](https://github.com/hoanghainh1188/aegis-code/issues/521)) ([ac22a6d](https://github.com/hoanghainh1188/aegis-code/commit/ac22a6d127281f2a39900404bc3b0c7b7fe021f2))
+* **tracker:** add Sentry and Datadog APM telemetry connector ([#452](https://github.com/hoanghainh1188/aegis-code/issues/452)) ([#518](https://github.com/hoanghainh1188/aegis-code/issues/518)) ([4b3f979](https://github.com/hoanghainh1188/aegis-code/commit/4b3f9798f0d4e92f02da2c80bc8036a04b47a0a9))
+
+
+### Bug Fixes
+
+* incident memory stays out of the ticket, and what it claims is true ([#456](https://github.com/hoanghainh1188/aegis-code/issues/456)) ([#532](https://github.com/hoanghainh1188/aegis-code/issues/532)) ([0ba6775](https://github.com/hoanghainh1188/aegis-code/commit/0ba67757dfd04f7eb421db4c6eb46faaa816f3c4))
+
+
+### Documentation
+
+* SpecRover review evidence deferred until median review exceeds 15 min ([#36](https://github.com/hoanghainh1188/aegis-code/issues/36)) ([#515](https://github.com/hoanghainh1188/aegis-code/issues/515)) ([abbee04](https://github.com/hoanghainh1188/aegis-code/commit/abbee04fc0b52dcabd3e9e7816eaab2b14972bb5))
+
 ## [0.13.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.12.0...v0.13.0) (2026-11-14)
 
 
