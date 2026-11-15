@@ -228,6 +228,7 @@ impl LifecycleRunner {
     async fn token_source(
         &self,
         slug: &str,
+        tenant: aegis_store::TenantId,
         config: &mut aegis_lifecycle::RunConfig,
     ) -> Result<TokenSource, Attempt> {
         let Some(connection) = &config.repo.app else {
@@ -269,6 +270,9 @@ impl LifecycleRunner {
             owner: config.repo.fork.owner.clone(),
             repo: config.repo.fork.name.clone(),
             use_: TokenUse::Publish,
+            // The app's gate gives tokens only for the tenant its
+            // installation is bound to (ADR 0017 §6).
+            holder: Some(tenant.0),
         })
     }
 
@@ -339,7 +343,9 @@ impl LifecycleRunner {
                 diagnosis: None,
             });
         }
-        let github = self.token_source(&repo.slug, &mut config).await?;
+        let github = self
+            .token_source(&repo.slug, repo.tenant_id, &mut config)
+            .await?;
         // The main branch as it is now, not as the clone last saw it; a
         // worker on a new machine makes the clone (#234).
         let read_token = match &github {

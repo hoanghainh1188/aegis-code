@@ -54,6 +54,7 @@ fn source(app: &Arc<GitHubApp>, use_: TokenUse) -> TokenSource {
         owner: "acme".into(),
         repo: "shop".into(),
         use_,
+        holder: None,
     }
 }
 
@@ -134,7 +135,9 @@ async fn a_token_ten_minutes_from_expiry_is_minted_again() {
 
     let app = app(&server);
     for _ in 0..2 {
-        app.token("acme", "shop", TokenUse::Read).await.unwrap();
+        app.token("acme", "shop", TokenUse::Read, None)
+            .await
+            .unwrap();
     }
 }
 
@@ -151,7 +154,10 @@ async fn a_refused_token_drops_the_installation_and_says_so_without_secrets() {
 
     let app = app(&server);
     for _ in 0..2 {
-        let err = app.token("acme", "shop", TokenUse::Read).await.unwrap_err();
+        let err = app
+            .token("acme", "shop", TokenUse::Read, None)
+            .await
+            .unwrap_err();
         let text = err.to_string();
         assert!(matches!(err, PrError::GitHub { status: 404, .. }), "{text}");
         assert!(text.contains("installation 7"), "{text}");
@@ -233,4 +239,58 @@ fn the_token_path_is_unchanged() {
     let github = GitHub::new("https://api.github.com", "acme", "shop", "ghp_fixed").unwrap();
     assert!(github.remote().is_ok());
     assert!(!format!("{github:?}").contains("ghp_fixed"));
+}
+
+#[tokio::test]
+async fn the_gate_is_asked_before_every_token_and_can_refuse_it() {
+    let server = MockServer::start().await;
+    installed(&server, 1).await;
+    Mock::given(method("POST"))
+        .and(path("/app/installations/7/access_tokens"))
+        .respond_with(minted("ghs_gated", TimeDelta::hours(1)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let gate: aegis_pr::Gate = {
+        let asked = Arc::clone(&asked);
+        Arc::new(move |installation, holder| {
+            asked.lock().unwrap().push((installation, holder));
+            Box::pin(async move {
+                if holder == Some(1) {
+                    Ok(())
+                } else {
+                    Err(format!("installation {installation} is not this holder's"))
+                }
+            })
+        })
+    };
+    let app = Arc::new(
+        GitHubApp::new(&server.uri(), "123456", key())
+            .unwrap()
+            .with_gate(gate),
+    );
+    assert_eq!(
+        app.token("acme", "shop", TokenUse::Read, Some(1))
+            .await
+            .unwrap(),
+        "ghs_gated"
+    );
+    // Cached for holder 1, still refused to another: the gate is asked
+    // before the cache too.
+    let err = app
+        .token("acme", "shop", TokenUse::Read, Some(2))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PrError::App(_)), "{err}");
+    assert!(err.to_string().contains("not this holder's"), "{err}");
+    assert!(
+        app.token("acme", "shop", TokenUse::Read, None)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [(7, Some(1)), (7, Some(2)), (7, None)]
+    );
 }

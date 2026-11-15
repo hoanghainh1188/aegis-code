@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -170,7 +172,18 @@ pub struct GitHubApp {
     key: AppKey,
     installations: Mutex<HashMap<(String, String), u64>>,
     tokens: Mutex<HashMap<(u64, String, TokenUse), Cached>>,
+    gate: Option<Gate>,
 }
+
+/// What the app asks before each token it gives, cached or minted (ADR
+/// 0017 §6): whether installation `installation` may serve the holder the
+/// token is for (`Some(tenant)`, or `None` when unsaid). `Err` says why
+/// not. Without a gate every token is given.
+pub type Gate = Arc<
+    dyn Fn(u64, Option<i64>) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
+>;
 
 impl fmt::Debug for GitHubApp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -200,7 +213,16 @@ impl GitHubApp {
             key,
             installations: Mutex::default(),
             tokens: Mutex::default(),
+            gate: None,
         })
+    }
+
+    /// The same app, asking `gate` before each token.
+    pub fn with_gate(self, gate: Gate) -> Self {
+        Self {
+            gate: Some(gate),
+            ..self
+        }
     }
 
     fn jwt(&self) -> Result<String, PrError> {
@@ -256,8 +278,18 @@ impl GitHubApp {
     /// A token for `owner/repo` with the permissions of `use_`, from the
     /// cache while it has more than ten minutes left, else minted:
     /// `POST /app/installations/{id}/access_tokens`, for that repo only.
-    pub async fn token(&self, owner: &str, repo: &str, use_: TokenUse) -> Result<String, PrError> {
+    /// `holder` is who the token is for (a tenant), told to the gate.
+    pub async fn token(
+        &self,
+        owner: &str,
+        repo: &str,
+        use_: TokenUse,
+        holder: Option<i64>,
+    ) -> Result<String, PrError> {
         let installation = self.installation(owner, repo).await?;
+        if let Some(gate) = &self.gate {
+            gate(installation, holder).await.map_err(PrError::App)?;
+        }
         let key = (installation, repo.to_owned(), use_);
         let fresh =
             |c: &Cached| c.expires_at - Utc::now() > chrono::TimeDelta::seconds(TOKEN_MARGIN_S);
@@ -351,6 +383,9 @@ pub enum TokenSource {
         owner: String,
         repo: String,
         use_: TokenUse,
+        /// Who the tokens are for (a tenant, ADR 0017 §6), told to the
+        /// app's gate.
+        holder: Option<i64>,
     },
 }
 
@@ -375,7 +410,8 @@ impl TokenSource {
                 owner,
                 repo,
                 use_,
-            } => app.token(owner, repo, *use_).await,
+                holder,
+            } => app.token(owner, repo, *use_, *holder).await,
         }
     }
 
@@ -385,12 +421,17 @@ impl TokenSource {
         match self {
             Self::Static(t) => Self::Static(t.clone()),
             Self::App {
-                app, owner, repo, ..
+                app,
+                owner,
+                repo,
+                holder,
+                ..
             } => Self::App {
                 app: Arc::clone(app),
                 owner: owner.clone(),
                 repo: repo.clone(),
                 use_,
+                holder: *holder,
             },
         }
     }

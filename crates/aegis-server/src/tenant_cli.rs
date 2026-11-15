@@ -9,6 +9,9 @@
 //!   admin <who> <slug>                 # an admin of its repos (roles, pauses, budgets)
 //!   revoke-admin <who> <slug>
 //!   move <repo-slug> <slug>            # a repo into the tenant; its secrets must be named for it
+//!   installations                      # the GitHub App's, with the tenant each is bound to
+//!   bind-installation <id> <slug>      # its repos' tokens only for this tenant (ADR 0017 §6)
+//!   unbind-installation <id>           # no token for it until bound again
 //! ```
 //!
 //! A repo is added straight into a tenant with `tenant = "<slug>"` in its
@@ -28,7 +31,10 @@ aegis-server --config <file> tenant <command>, the command one of:
   limits <slug> [--budget <usd>|none] [--max-jobs <n>|none]
   admin <who> <slug>
   revoke-admin <who> <slug>
-  move <repo-slug> <slug>";
+  move <repo-slug> <slug>
+  installations
+  bind-installation <id> <slug>
+  unbind-installation <id>";
 
 pub fn is_command(first: &str) -> bool {
     first == "tenant"
@@ -158,8 +164,72 @@ pub async fn run(store: &Store, args: &[String]) -> Result<String, String> {
                 t.slug
             ))
         }
+        ["installations"] => {
+            let tenants = store.tenants().await.map_err(e)?;
+            let slug_of = |id: aegis_store::TenantId| {
+                tenants
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map_or_else(|| id.0.to_string(), |t| t.slug.clone())
+            };
+            let lines: Vec<String> = store
+                .installations()
+                .await
+                .map_err(e)?
+                .into_iter()
+                .map(|i| {
+                    let state = match (i.removed, i.suspended) {
+                        (true, _) => "removed",
+                        (false, true) => "suspended",
+                        (false, false) => "installed",
+                    };
+                    format!(
+                        "{}\t{}\t{state}\t{} repos named\t{}",
+                        i.id,
+                        i.account,
+                        i.repositories.len(),
+                        i.tenant
+                            .map_or("not bound".into(), |t| format!("tenant {}", slug_of(t)))
+                    )
+                })
+                .collect();
+            Ok(if lines.is_empty() {
+                "no installation recorded yet".into()
+            } else {
+                lines.join("\n")
+            })
+        }
+        ["bind-installation", id, slug] => {
+            let id = installation_id(id)?;
+            let t = tenant(store, slug).await?;
+            store
+                .bind_installation_by(id, Some(t.id), &actor)
+                .await
+                .map_err(e)?;
+            Ok(format!(
+                "installation {id} bound to tenant `{}`: its repos' tokens are for it only",
+                t.slug
+            ))
+        }
+        ["unbind-installation", id] => {
+            let id = installation_id(id)?;
+            store
+                .bind_installation_by(id, None, &actor)
+                .await
+                .map_err(e)?;
+            Ok(format!(
+                "installation {id} is bound to no tenant: no token is minted for it"
+            ))
+        }
         _ => Err(USAGE.into()),
     }
+}
+
+fn installation_id(text: &str) -> Result<i64, String> {
+    text.parse::<i64>()
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or_else(|| format!("`{text}` is not an installation id"))
 }
 
 #[cfg(test)]

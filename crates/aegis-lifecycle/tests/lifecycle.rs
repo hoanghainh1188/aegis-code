@@ -2208,6 +2208,7 @@ async fn a_repo_on_the_app_path_and_one_on_the_token_path_open_their_prs_side_by
         owner: "me".into(),
         repo: "fixture".into(),
         use_: aegis_pr::TokenUse::Publish,
+        holder: None,
     };
     // The token the job would have had at its start: near its end by the
     // time the PR is opened.

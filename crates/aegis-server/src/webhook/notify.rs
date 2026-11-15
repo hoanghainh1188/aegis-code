@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use aegis_pr::{GitHub, GitLab, TokenSource, TokenUse, inert};
 use aegis_secrets::Secrets;
-use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store};
+use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store, TenantId};
 
 use crate::github_app::AppHandle;
 
@@ -76,10 +76,10 @@ impl GitHubNotifier {
         &self,
         owner: &str,
         repo: &str,
-        on_app: bool,
+        on_app: Option<TenantId>,
         use_: TokenUse,
     ) -> Result<Option<GitHub>, String> {
-        if on_app {
+        if let Some(tenant) = on_app {
             let handle = self
                 .app
                 .as_ref()
@@ -89,6 +89,7 @@ impl GitHubNotifier {
                 owner: owner.to_owned(),
                 repo: repo.to_owned(),
                 use_,
+                holder: Some(tenant.0),
             };
             return GitHub::with_source(handle.api(), owner, repo, source)
                 .map(Some)
@@ -102,17 +103,15 @@ impl GitHubNotifier {
             .map_err(|e| e.to_string())
     }
 
-    /// Whether the repo of `job` is on the app path.
-    async fn job_on_app(&self, job: &Job) -> bool {
-        let Some(store) = self.store.as_ref().filter(|_| self.app.is_some()) else {
-            return false;
-        };
+    /// The tenant of the repo of `job`, when it is on the app path.
+    async fn job_on_app(&self, job: &Job) -> Option<TenantId> {
+        let store = self.store.as_ref().filter(|_| self.app.is_some())?;
         match store.repo(job.repo_id).await {
-            Ok(Some(repo)) => on_app_path(&repo.config),
-            Ok(None) => false,
+            Ok(Some(repo)) => on_app_path(&repo.config).then_some(repo.tenant_id),
+            Ok(None) => None,
             Err(e) => {
                 tracing::warn!(job = job.id.0, error = %e, "reading the job's repo");
-                false
+                None
             }
         }
     }
@@ -147,7 +146,7 @@ impl GitHubNotifier {
         owner: &str,
         repo: &str,
         login: &str,
-        on_app: bool,
+        on_app: Option<TenantId>,
     ) -> Result<bool, String> {
         let github = self
             .client(owner, repo, on_app, TokenUse::Comment)
@@ -163,7 +162,14 @@ impl GitHubNotifier {
     /// Posts `text` on issue or PR `number` of `owner/repo`, if the store
     /// has the comment token (or as the app, on the app path); failures
     /// are logged.
-    pub async fn comment(&self, owner: &str, repo: &str, number: u64, text: &str, on_app: bool) {
+    pub async fn comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        text: &str,
+        on_app: Option<TenantId>,
+    ) {
         let posted = match self.client(owner, repo, on_app, TokenUse::Comment).await {
             Ok(Some(github)) => github
                 .comment_on_issue(number, text)

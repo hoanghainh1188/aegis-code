@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}GitHub App installations{% endblock %}
+{% block content %}
+<section aria-labelledby="installations-heading">
+  <p class="eyebrow">Admin · <a href="/admin/repos">Repos</a> · <a href="/admin/users">Users</a> · <a href="/admin/audit">Audit log</a> · <a href="/admin/ai">AI</a> · <a href="/admin/pause">Pause all</a></p>
+  <h1 id="installations-heading">GitHub App installations</h1>
+  {% if let Some(n) = notice %}<p class="notice">{{ n }}</p>{% endif %}
+  <p class="note">Each customer installs the app on their own org. Bind each installation to the tenant whose org it is: until then no token is minted for it, and once bound, only that tenant's repos get its tokens. A bound installation moves to another tenant only after it is unbound. The same as <code>aegis-server tenant bind-installation &lt;id&gt; &lt;tenant&gt;</code>.</p>
+  {% if rows.is_empty() %}
+  <p class="note">No installation recorded yet: they arrive with the app's <code>installation</code> events.</p>
+  {% else %}
+  <table>
+    <thead><tr><th scope="col">Installation</th><th scope="col">Account</th><th scope="col">State</th><th scope="col">Repos</th><th scope="col">Tenant</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><code>{{ r.id }}</code></td>
+        <td>{{ r.account }}</td>
+        <td>{{ r.state }}</td>
+        <td>{{ r.repos }}</td>
+        <td>
+          {% if let Some(t) = r.tenant %}
+          <form method="post" action="/admin/installations/{{ r.id }}/tenant" class="inline">
+            {% include "form_guard.html" %}
+            <code>{{ t }}</code>
+            <input type="hidden" name="tenant" value="">
+            <button type="submit" class="ghost">Unbind</button>
+          </form>
+          {% else %}
+          <form method="post" action="/admin/installations/{{ r.id }}/tenant" class="inline">
+            {% include "form_guard.html" %}
+            <label>Tenant
+              <select name="tenant" required>
+                <option value="">choose…</option>
+                {% for t in tenants %}<option value="{{ t.slug }}">{{ t.slug }} · {{ t.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <button type="submit">Bind</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}

@@ -3,7 +3,11 @@
 //! suspended or removed takes no job, says why, and so the dashboard can
 //! list installed repos not yet registered.
 
-use crate::{Store, StoreError};
+use chrono::{DateTime, Utc};
+
+use crate::audit::{self, Target};
+use crate::tx;
+use crate::{Actor, Store, StoreError, TenantId};
 
 /// Whether an installation was given all the account's repos or some.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +255,140 @@ impl Store {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+}
+
+/// An installation as the admin sees it, to bind it to a tenant.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Installation {
+    pub id: i64,
+    pub account: String,
+    pub selection: RepoSelection,
+    pub repositories: Vec<String>,
+    pub suspended: bool,
+    pub removed: bool,
+    /// `None`: not bound, no token is minted for it.
+    pub tenant: Option<TenantId>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Why no token of installation `id` is minted for `tenant`'s repo, if it
+/// is not (ADR 0017 §6): the installation is unknown, not bound, or bound
+/// to another tenant.
+pub fn binding_refusal(
+    id: i64,
+    bound: Option<Option<TenantId>>,
+    tenant: TenantId,
+) -> Option<String> {
+    match bound {
+        None => Some(format!(
+            "the GitHub App's installation {id} is not recorded yet: its `installation` event has not arrived"
+        )),
+        Some(None) => Some(format!(
+            "the GitHub App's installation {id} is not bound to a tenant: \
+             a platform admin binds it (`aegis-server tenant bind-installation {id} <tenant>`)"
+        )),
+        Some(Some(t)) if t != tenant => Some(format!(
+            "the GitHub App's installation {id} belongs to another tenant"
+        )),
+        Some(Some(_)) => None,
+    }
+}
+
+impl Store {
+    /// Every installation the app's events told, bound or not.
+    pub async fn installations(&self) -> Result<Vec<Installation>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT id, account, repository_selection, repositories, suspended, removed,
+                    tenant_id, updated_at
+             FROM github_installations ORDER BY lower(account), id LIMIT 1000"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Installation {
+                id: r.id,
+                account: r.account,
+                selection: RepoSelection::parse(&r.repository_selection)
+                    .unwrap_or(RepoSelection::Selected),
+                repositories: r.repositories,
+                suspended: r.suspended,
+                removed: r.removed,
+                tenant: r.tenant_id.map(TenantId),
+                updated_at: r.updated_at,
+            })
+            .collect())
+    }
+
+    /// The tenant installation `id` is bound to: `None` when the store does
+    /// not know it, `Some(None)` when it is not bound.
+    pub async fn installation_tenant(
+        &self,
+        id: i64,
+    ) -> Result<Option<Option<TenantId>>, StoreError> {
+        let row = sqlx::query_scalar!(
+            "SELECT tenant_id FROM github_installations WHERE id = $1",
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|t| t.map(TenantId)))
+    }
+
+    /// Binds installation `id` to `tenant`, or unbinds it (`None`),
+    /// audited `installation.tenant`. A bound installation is moved only
+    /// after unbinding it, so a slip cannot hand one tenant's org to
+    /// another.
+    pub async fn bind_installation_by(
+        &self,
+        id: i64,
+        tenant: Option<TenantId>,
+        actor: &Actor,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let work = async {
+            let was = sqlx::query_scalar!(
+                "SELECT tenant_id FROM github_installations WHERE id = $1 FOR UPDATE",
+                id
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("installation {id}")))?;
+            if let (Some(was), Some(new)) = (was, tenant)
+                && was != new.0
+            {
+                return Err(StoreError::Conflict(format!(
+                    "installation {id} is bound to tenant {was}: unbind it first"
+                )));
+            }
+            sqlx::query!(
+                "UPDATE github_installations SET tenant_id = $2, updated_at = now() WHERE id = $1",
+                id,
+                tenant.map(|t| t.0),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| match StoreError::from_db(e) {
+                StoreError::NotFound(_) => {
+                    StoreError::NotFound(format!("tenant {}", tenant.map_or(0, |t| t.0)))
+                }
+                other => other,
+            })?;
+            let target = Target {
+                repo: None,
+                job: None,
+            };
+            let detail = serde_json::json!({
+                "installation": id,
+                "tenant": tenant.map(|t| t.0),
+                "was": was,
+            });
+            audit::record(&mut tx, actor, "installation.tenant", target, detail).await?;
+            Ok::<_, StoreError>(())
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 }
 
