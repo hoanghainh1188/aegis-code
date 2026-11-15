@@ -17,6 +17,13 @@ const FORK_FIELDS: [&str; 4] = ["platform", "owner", "name", "token_env"];
 const SETTINGS_FIELDS: [&str; 2] = ["fork", "conventions"];
 /// The fork's API when its `[fork]` says none.
 const GITHUB_API: &str = "https://api.github.com";
+/// The ways to connect a repo (ADR 0017 §1): a fork with its token, or the
+/// instance's GitHub App.
+pub(super) const CONNECTIONS: [&str; 2] = ["token", "app"];
+
+fn token_path() -> String {
+    "token".into()
+}
 
 /// What the form posts; also what it shows, filled from a repo to change.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -28,9 +35,16 @@ pub struct RepoForm {
     pub language: String,
     pub mode: String,
     pub max_concurrent_jobs: String,
+    /// `token` or `app`.
+    #[serde(default = "token_path")]
+    pub connection: String,
+    #[serde(default)]
     pub fork_platform: String,
+    #[serde(default)]
     pub fork_owner: String,
+    #[serde(default)]
     pub fork_name: String,
+    #[serde(default)]
     pub token_env: String,
     #[serde(default)]
     pub conventions: String,
@@ -47,6 +61,7 @@ impl RepoForm {
             language: Language::Rust.id().into(),
             mode: "poc".into(),
             max_concurrent_jobs: "1".into(),
+            connection: token_path(),
             fork_platform: "github".into(),
             ..Self::default()
         }
@@ -72,25 +87,30 @@ impl RepoForm {
         {
             return Err(format!("other settings: set `{key}` in its field"));
         }
-        let mut fork = match settings.remove("fork") {
-            None => toml::Table::new(),
-            Some(toml::Value::Table(t)) => t,
-            Some(_) => return Err("other settings: `fork` is a table".into()),
-        };
-        if let Some(key) = FORK_FIELDS.iter().find(|k| fork.contains_key(**k)) {
-            return Err(format!(
-                "other settings: set the fork's `{key}` in its field"
-            ));
+        match self.connection.trim() {
+            "token" => {
+                if settings.contains_key("app") {
+                    return Err("other settings: `app` is for the app connection".into());
+                }
+                let fork = self.fork_table(settings.remove("fork"))?;
+                settings.insert("fork".into(), toml::Value::Table(fork));
+            }
+            "app" => {
+                if settings.contains_key("fork") {
+                    return Err("other settings: `fork` is for the token connection".into());
+                }
+                if [&self.fork_owner, &self.fork_name, &self.token_env]
+                    .iter()
+                    .any(|v| !v.trim().is_empty())
+                {
+                    return Err("the app connection has no fork: leave its fields empty".into());
+                }
+                settings
+                    .entry("app")
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+            }
+            other => return Err(format!("unknown connection `{other}`")),
         }
-        for (key, value) in [
-            ("platform", &self.fork_platform),
-            ("owner", &self.fork_owner),
-            ("name", &self.fork_name),
-            ("token_env", &self.token_env),
-        ] {
-            fork.insert(key.into(), toml::Value::String(value.trim().into()));
-        }
-        settings.insert("fork".into(), toml::Value::Table(fork));
         let conventions = self.conventions.trim();
         if !conventions.is_empty() {
             settings.insert(
@@ -115,13 +135,53 @@ impl RepoForm {
         })
     }
 
+    /// The fork's table: the fields', with what other settings add.
+    fn fork_table(&self, given: Option<toml::Value>) -> Result<toml::Table, String> {
+        let mut fork = match given {
+            None => toml::Table::new(),
+            Some(toml::Value::Table(t)) => t,
+            Some(_) => return Err("other settings: `fork` is a table".into()),
+        };
+        if let Some(key) = FORK_FIELDS.iter().find(|k| fork.contains_key(**k)) {
+            return Err(format!(
+                "other settings: set the fork's `{key}` in its field"
+            ));
+        }
+        for (key, value) in [
+            ("platform", &self.fork_platform),
+            ("owner", &self.fork_owner),
+            ("name", &self.fork_name),
+            ("token_env", &self.token_env),
+        ] {
+            fork.insert(key.into(), toml::Value::String(value.trim().into()));
+        }
+        Ok(fork)
+    }
+
     /// The form that changes `file`'s repo.
     pub fn of(file: &RepoFile) -> Result<Self, String> {
-        let fork = &file.settings.fork;
         let mut rest = settings_table(&file.settings)?;
         for key in SETTINGS_FIELDS {
             rest.remove(key);
         }
+        let Some(fork) = &file.settings.fork else {
+            // The app connection: its table, with `api` if any, stays in
+            // the other settings.
+            if rest
+                .get("app")
+                .is_some_and(|a| a.as_table().is_some_and(|t| t.is_empty()))
+            {
+                rest.remove("app");
+            }
+            return Ok(Self {
+                connection: "app".into(),
+                fork_platform: "github".into(),
+                fork_owner: String::new(),
+                fork_name: String::new(),
+                token_env: String::new(),
+                ..Self::common(file, rest)?
+            });
+        };
         let mut fork_rest = toml::Table::new();
         if fork.api != GITHUB_API {
             fork_rest.insert("api".into(), toml::Value::String(fork.api.clone()));
@@ -136,12 +196,6 @@ impl RepoForm {
             rest.insert("fork".into(), toml::Value::Table(fork_rest));
         }
         Ok(Self {
-            slug: file.slug.clone(),
-            url: file.url.clone(),
-            default_branch: file.default_branch.clone(),
-            language: file.language.id().into(),
-            mode: file.mode.clone(),
-            max_concurrent_jobs: file.max_concurrent_jobs.to_string(),
             fork_platform: match fork.platform {
                 aegis_lifecycle::ForkPlatform::GitHub => "github".into(),
                 aegis_lifecycle::ForkPlatform::GitLab => "gitlab".into(),
@@ -149,6 +203,28 @@ impl RepoForm {
             fork_owner: fork.owner.clone(),
             fork_name: fork.name.clone(),
             token_env: fork.token_env.clone(),
+            ..Self::common(file, rest)?
+        })
+    }
+
+    /// What both connections fill alike.
+    fn common(file: &RepoFile, rest: toml::Table) -> Result<Self, String> {
+        Ok(Self {
+            slug: file.slug.clone(),
+            url: file.url.clone(),
+            default_branch: file.default_branch.clone(),
+            language: file.language.id().into(),
+            mode: file.mode.clone(),
+            max_concurrent_jobs: file.max_concurrent_jobs.to_string(),
+            connection: if file.settings.app.is_some() {
+                "app".into()
+            } else {
+                token_path()
+            },
+            fork_platform: String::new(),
+            fork_owner: String::new(),
+            fork_name: String::new(),
+            token_env: String::new(),
             conventions: file.settings.conventions.clone().unwrap_or_default(),
             settings: toml::to_string(&rest).map_err(|e| e.to_string())?,
         })
@@ -161,8 +237,9 @@ fn settings_table(settings: &RepoSettings) -> Result<toml::Table, String> {
     let toml::Value::Table(mut table) = value else {
         return Err("settings are not a table".into());
     };
-    table.retain(|_, v| match v {
-        toml::Value::Table(t) => !t.is_empty(),
+    // `[app]` says the connection even when empty (ADR 0017).
+    table.retain(|k, v| match v {
+        toml::Value::Table(t) => k == "app" || !t.is_empty(),
         toml::Value::Array(a) => !a.is_empty(),
         _ => true,
     });
@@ -219,8 +296,14 @@ mod tests {
                 .into();
         f.fork_platform = "gitlab".into();
         let file = f.to_file(None).unwrap();
-        assert_eq!(file.settings.fork.token_env, "AEGIS_GITHUB_TOKEN");
-        assert_eq!(file.settings.fork.api, "https://gitlab.example/api/v4");
+        assert_eq!(
+            file.settings.fork.as_ref().unwrap().token_env,
+            "AEGIS_GITHUB_TOKEN"
+        );
+        assert_eq!(
+            file.settings.fork.as_ref().unwrap().api,
+            "https://gitlab.example/api/v4"
+        );
         assert_eq!(file.settings.allowed_packages, ["serde"]);
         assert_eq!(
             file.settings.conventions.as_deref(),
@@ -230,6 +313,54 @@ mod tests {
         assert_eq!(back.to_file(None).unwrap(), file);
         assert!(!back.settings.contains("token_env"), "{}", back.settings);
         assert!(file_toml(&file).unwrap().contains("slug = \"demo\""));
+    }
+
+    #[test]
+    fn the_app_connection_has_no_fork_and_reads_back() {
+        let mut f = RepoForm {
+            connection: "app".into(),
+            fork_owner: String::new(),
+            fork_name: String::new(),
+            token_env: String::new(),
+            ..form()
+        };
+        let file = f.to_file(None).unwrap();
+        assert!(file.settings.fork.is_none());
+        assert_eq!(file.settings.app, Some(Default::default()));
+        let back = RepoForm::of(&file).unwrap();
+        assert_eq!(back.connection, "app");
+        assert_eq!(back.to_file(None).unwrap(), file);
+        assert!(file_toml(&file).unwrap().contains("[settings.app]"));
+
+        f.settings = "[app]\napi = \"https://ghe.acme.test/api/v3\"\n".into();
+        let ghes = f.to_file(None).unwrap();
+        assert_eq!(
+            ghes.settings.app.as_ref().unwrap().api.as_deref(),
+            Some("https://ghe.acme.test/api/v3")
+        );
+        assert_eq!(RepoForm::of(&ghes).unwrap().to_file(None).unwrap(), ghes);
+
+        f.settings = String::new();
+        f.token_env = "AEGIS_GITHUB_TOKEN".into();
+        assert!(
+            f.to_file(None)
+                .unwrap_err()
+                .contains("leave its fields empty")
+        );
+        f.token_env = String::new();
+        f.settings = "[fork]\napi = \"x\"\n".into();
+        assert!(f.to_file(None).unwrap_err().contains("token connection"));
+        let mut token = form();
+        token.settings = "[app]\n".into();
+        assert!(token.to_file(None).unwrap_err().contains("app connection"));
+        token.settings = String::new();
+        token.connection = "ssh".into();
+        assert!(
+            token
+                .to_file(None)
+                .unwrap_err()
+                .contains("unknown connection")
+        );
     }
 
     #[test]

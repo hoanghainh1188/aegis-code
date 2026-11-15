@@ -343,7 +343,7 @@ async fn before_vs_after_incident_memory_improves_acceptance_and_reduces_model_c
             store: MemoryLedger::new(),
             prices: PriceTable::from_toml(PRICES).unwrap(),
             profiles: Profiles::builtin().unwrap(),
-            github_token: "t".into(),
+            github: aegis_pr::TokenSource::Static("t".into()),
         })
     };
 

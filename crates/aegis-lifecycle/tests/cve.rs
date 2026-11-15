@@ -128,7 +128,7 @@ fn platform(cfg: RunConfig, core: Vec<Vec<ContentBlock>>) -> Arc<Platform<Script
         store: MemoryLedger::new(),
         prices: PriceTable::from_toml(PRICES).unwrap(),
         profiles: Profiles::builtin().unwrap(),
-        github_token: "t".into(),
+        github: aegis_pr::TokenSource::Static("t".into()),
     })
 }
 

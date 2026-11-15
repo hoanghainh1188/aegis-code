@@ -30,7 +30,7 @@ use aegis_lifecycle::{
     CveTarget, ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun,
     ReviewRound, run_issue, run_review,
 };
-use aegis_pr::REPLY_MARKER;
+use aegis_pr::{PrError, REPLY_MARKER, TokenSource, TokenUse};
 use aegis_provider::{Observed, Provider};
 use aegis_secrets::{Secret, Secrets};
 use aegis_store::{Claim, Job, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
@@ -180,6 +180,8 @@ pub struct LifecycleRunner {
     secrets: Secrets,
     poc: Option<ModeRuntime>,
     customer_jp: Option<ModeRuntime>,
+    /// The instance's GitHub App (ADR 0017), for repos on the app path.
+    github_app: Option<Arc<crate::github_app::AppHandle>>,
 }
 
 impl LifecycleRunner {
@@ -207,6 +209,55 @@ impl LifecycleRunner {
             secrets,
             poc,
             customer_jp,
+            github_app: None,
+        })
+    }
+
+    /// With the instance's GitHub App (ADR 0017): its repos' jobs take
+    /// their tokens from it.
+    pub fn with_github_app(self, app: Option<Arc<crate::github_app::AppHandle>>) -> Self {
+        Self {
+            github_app: app,
+            ..self
+        }
+    }
+
+    /// Where `config`'s job takes its GitHub tokens: the fork's secret on
+    /// the token path (none when it opens no PR, as before), the app on
+    /// the app path, whose API root the repo then uses.
+    async fn token_source(
+        &self,
+        slug: &str,
+        config: &mut aegis_lifecycle::RunConfig,
+    ) -> Result<TokenSource, Attempt> {
+        let Some(connection) = &config.repo.app else {
+            if !config.run.open_prs {
+                return Ok(TokenSource::Static(String::new()));
+            }
+            let name = &config.repo.fork.token_env;
+            let token = self.secret(slug, "the fork's token", name).await?;
+            return Ok(TokenSource::Static(token.expose().to_owned()));
+        };
+        let handle = self.github_app.as_ref().ok_or_else(|| {
+            Attempt::Rejected(format!(
+                "repo `{slug}` is on the GitHub App path: the instance has no `[github_app]`"
+            ))
+        })?;
+        match &connection.api {
+            Some(api) if api.trim_end_matches('/') != handle.api().trim_end_matches('/') => {
+                return Err(Attempt::Rejected(format!(
+                    "repo `{slug}`: its app API `{api}` is not the instance app's `{}`",
+                    handle.api()
+                )));
+            }
+            _ => config.repo.fork.api = handle.api().to_owned(),
+        }
+        let app = handle.app().await.map_err(Attempt::Rejected)?;
+        Ok(TokenSource::App {
+            app,
+            owner: config.repo.fork.owner.clone(),
+            repo: config.repo.fork.name.clone(),
+            use_: TokenUse::Publish,
         })
     }
 
@@ -277,18 +328,13 @@ impl LifecycleRunner {
                 diagnosis: None,
             });
         }
-        let github_token = if config.run.open_prs {
-            let name = &config.repo.fork.token_env;
-            let token = self.secret(&repo.slug, "the fork's token", name).await?;
-            token.expose().to_owned()
-        } else {
-            String::new()
-        };
+        let github = self.token_source(&repo.slug, &mut config).await?;
         // The main branch as it is now, not as the clone last saw it; a
         // worker on a new machine makes the clone (#234).
-        let read_token = match &github_token {
-            t if !t.is_empty() => Some(t.clone()),
-            _ => self
+        let read_token = match &github {
+            TokenSource::App { .. } => Some(use_token(&github, TokenUse::Read).await?),
+            TokenSource::Static(t) if !t.is_empty() => Some(t.clone()),
+            TokenSource::Static(_) => self
                 .secrets
                 .get_or_load(&config.repo.fork.token_env)
                 .await
@@ -311,7 +357,10 @@ impl LifecycleRunner {
             sonar.token = Some(self.secret(&repo.slug, "Sonar's token", name).await?);
         }
         let round = match job.source {
-            JobSource::Review => Some(self.review_round(job, &config, &github_token).await?),
+            JobSource::Review => {
+                let token = use_token(&github, TokenUse::ReviewEdits).await?;
+                Some(self.review_round(job, &config, &token).await?)
+            }
             _ => None,
         };
         let mut issue = match (&round, job.source) {
@@ -319,11 +368,18 @@ impl LifecycleRunner {
                 // The issue the PR is for, read as its job read it.
                 let fork = &config.repo.fork;
                 let read = match root.source {
-                    JobSource::Gitlab => gitlab_issue(root, fork, &github_token).await?,
-                    JobSource::Ci => {
-                        ci_issue(root, fork, &repo.default_branch, &github_token).await?
+                    JobSource::Gitlab => {
+                        let token = use_token(&github, TokenUse::Read).await?;
+                        gitlab_issue(root, fork, &token).await?
                     }
-                    _ => issue(root, &fork.api, &github_token).await?,
+                    JobSource::Ci => {
+                        let token = use_token(&github, TokenUse::Ci).await?;
+                        ci_issue(root, fork, &repo.default_branch, &token).await?
+                    }
+                    _ => {
+                        let token = use_token(&github, TokenUse::Read).await?;
+                        issue(root, &fork.api, &token).await?
+                    }
                 };
                 IssueInput {
                     id: job.ledger_key.as_str().to_owned(),
@@ -336,13 +392,18 @@ impl LifecycleRunner {
             ) => ticket_issue(job, &repo, &self.secrets).await?,
             (None, JobSource::Sonar) => sonar_issue(job, &repo, &self.store, &self.secrets).await?,
             (None, JobSource::Gitlab) => {
-                gitlab_issue(job, &config.repo.fork, &github_token).await?
+                let token = use_token(&github, TokenUse::Read).await?;
+                gitlab_issue(job, &config.repo.fork, &token).await?
             }
             (None, JobSource::Ci) => {
-                ci_issue(job, &config.repo.fork, &repo.default_branch, &github_token).await?
+                let token = use_token(&github, TokenUse::Ci).await?;
+                ci_issue(job, &config.repo.fork, &repo.default_branch, &token).await?
             }
             (None, JobSource::Cve) => cve_issue(job)?,
-            (None, _) => issue(job, &config.repo.fork.api, &github_token).await?,
+            (None, _) => {
+                let token = use_token(&github, TokenUse::Read).await?;
+                issue(job, &config.repo.fork.api, &token).await?
+            }
         };
         if round.is_none() && !matches!(job.source, JobSource::Cve | JobSource::Sonar) {
             enrich_with_apm(&repo, &self.secrets, &mut issue).await;
@@ -366,11 +427,11 @@ impl LifecycleRunner {
             store: self.ledger.clone(),
             prices: runtime.prices.clone(),
             profiles: self.profiles.clone(),
-            github_token,
+            github,
         });
         let _tag = self.ledger.tag(job.ledger_key.clone(), claim.run.id);
         let fork = platform.config.repo.fork.clone();
-        let token = platform.github_token.clone();
+        let token = platform.github.clone();
         type Run = std::pin::Pin<
             Box<dyn Future<Output = Result<aegis_lifecycle::IssueReport, LifecycleError>> + Send>,
         >;
@@ -418,6 +479,20 @@ impl LifecycleRunner {
             diagnosis: report.diagnosis,
         })
     }
+}
+
+/// A token of `source` for `use_`, asked for now: the fixed one on the
+/// token path, a fresh installation token on the app path. GitHub out of
+/// reach is the infrastructure's; a refusal (the app not installed, the
+/// repo taken off it) is the job's.
+async fn use_token(source: &TokenSource, use_: TokenUse) -> Result<String, Attempt> {
+    source.for_use(use_).token().await.map_err(|e| match &e {
+        PrError::Http(_) => Attempt::Infra(e.to_string()),
+        PrError::GitHub { status, .. } if *status == 0 || *status == 429 || *status >= 500 => {
+            Attempt::Infra(e.to_string())
+        }
+        _ => Attempt::Rejected(e.to_string()),
+    })
 }
 
 impl LifecycleRunner {

@@ -172,10 +172,51 @@ pub struct RepoSettings {
     /// `[[repo.sidecars]]` of a run configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sidecars: Vec<aegis_gate::SidecarSpec>,
-    pub fork: ForkConfig,
+    /// The token path (ADR 0017 §1): the fork, or the upstream repo itself,
+    /// with the secret of its token. Exactly one of `fork` and `app`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<ForkConfig>,
+    /// The app path: the instance's GitHub App, no secret here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<crate::AppConnection>,
 }
 
 impl RepoSettings {
+    /// The forge the repo is on: GitLab only through a GitLab fork.
+    pub fn platform(&self) -> crate::ForkPlatform {
+        self.fork
+            .as_ref()
+            .map_or(crate::ForkPlatform::GitHub, |f| f.platform)
+    }
+
+    /// Where the agent pushes and opens PRs for the repo at `url`, with
+    /// the app connection on the app path: exactly one of `fork` and
+    /// `app`, the app path only for a GitHub repo's HTTPS URL.
+    pub fn connection(
+        &self,
+        url: &str,
+    ) -> Result<(ForkConfig, Option<crate::AppConnection>), String> {
+        match (&self.fork, &self.app) {
+            (Some(fork), None) => Ok((fork.clone(), None)),
+            (None, Some(app)) => {
+                let (owner, name) = crate::upstream_of(url).ok_or_else(|| {
+                    format!("app: `{url}` is not a GitHub repo's https://<host>/<owner>/<repo> URL")
+                })?;
+                let fork = ForkConfig {
+                    platform: crate::ForkPlatform::GitHub,
+                    owner,
+                    name,
+                    api: app.api.clone().unwrap_or_else(crate::config::default_api),
+                    token_env: String::new(),
+                    push_to_local: None,
+                };
+                Ok((fork, Some(app.clone())))
+            }
+            (Some(_), Some(_)) => Err("name `fork` or `app`, not both".into()),
+            (None, None) => Err("needs `fork` (a token) or `app` (the GitHub App)".into()),
+        }
+    }
+
     pub fn issue_trust_policy(&self) -> IssueTrustPolicy {
         self.issue_trust.policy()
     }
@@ -358,6 +399,9 @@ impl RepoRun {
 pub struct Modes {
     pub poc: Option<ModeConfig>,
     pub customer_jp: Option<ModeConfig>,
+    /// Whether the instance has a GitHub App (`[github_app]`, ADR 0017):
+    /// without one, a repo on the app path is refused at registration.
+    pub github_app: bool,
 }
 
 impl Modes {
@@ -370,7 +414,16 @@ impl Modes {
         if let Some(jp) = &customer_jp {
             jp.check(RepoMode::CustomerJp)?;
         }
-        Ok(Self { poc, customer_jp })
+        Ok(Self {
+            poc,
+            customer_jp,
+            github_app: false,
+        })
+    }
+
+    /// The same modes, on an instance that has a GitHub App or not.
+    pub fn with_github_app(self, github_app: bool) -> Self {
+        Self { github_app, ..self }
     }
 
     fn mode(&self, mode: RepoMode) -> Result<&ModeConfig, LifecycleError> {
@@ -392,6 +445,7 @@ impl Modes {
     pub fn run_config(&self, repo: &Repo) -> Result<RunConfig, LifecycleError> {
         self.build(
             &repo.slug,
+            &repo.url,
             &repo.default_branch,
             &repo.language,
             repo.mode,
@@ -400,9 +454,11 @@ impl Modes {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build(
         &self,
         slug: &str,
+        url: &str,
         default_branch: &str,
         language: &str,
         mode: RepoMode,
@@ -428,6 +484,7 @@ impl Modes {
             }
             poll.check().map_err(|e| in_repo(e.to_string()))?;
         }
+        let (fork, app) = settings.connection(url).map_err(in_repo)?;
         let mut overrides = settings.overrides;
         if let Some(image) = settings.image {
             overrides.insert("image".into(), toml::Value::String(image));
@@ -463,7 +520,8 @@ impl Modes {
                 secrets: settings.secrets,
                 triage_lane: settings.triage_lane,
                 sidecars: settings.sidecars,
-                fork: settings.fork,
+                fork,
+                app,
             },
             identity: mode.identity.clone(),
             codebase_memory: mode.codebase_memory.clone(),
@@ -492,6 +550,12 @@ impl Modes {
     /// now (a `customer-jp` repo needs a `customer-jp` mode that passes
     /// the guard).
     pub fn check_spec(&self, spec: &RepoSpec) -> Result<(NewRepo, RunConfig), LifecycleError> {
+        if spec.settings.app.is_some() && !self.github_app {
+            return Err(LifecycleError::Config(format!(
+                "repo `{}`: `app` needs the instance's GitHub App, `[github_app]` in server.toml",
+                spec.slug
+            )));
+        }
         let new = NewRepo {
             slug: spec.slug.clone(),
             url: spec.url.clone(),
@@ -508,6 +572,7 @@ impl Modes {
         }
         let config = self.build(
             &new.slug,
+            &new.url,
             &new.default_branch,
             &new.language,
             new.mode,
@@ -599,7 +664,7 @@ impl Modes {
             &path,
             &new.url,
             &new.default_branch,
-            auth(spec.settings.fork.platform, token),
+            auth(spec.settings.platform(), token),
         )
         .await?;
         match store.create_repo_in_by(&new, tenant_of(spec), actor).await {
@@ -629,7 +694,7 @@ impl Modes {
             &config.repo.path,
             &new.url,
             &new.default_branch,
-            auth(spec.settings.fork.platform, token),
+            auth(spec.settings.platform(), token),
         )
         .await?;
         Ok(store.update_repo_by(&new, actor).await?)
@@ -712,6 +777,92 @@ mod tests {
         serde_json::json!({
             "fork": { "owner": "me", "name": "app", "token_env": "GITHUB_TOKEN" }
         })
+    }
+
+    #[test]
+    fn a_repo_on_the_app_path_pushes_to_itself_with_no_secret() {
+        let shop = repo("shop", RepoMode::Poc, serde_json::json!({"app": {}}));
+        let config = modes().run_config(&shop).unwrap();
+        let fork = &config.repo.fork;
+        assert_eq!((fork.owner.as_str(), fork.name.as_str()), ("me", "shop"));
+        assert_eq!(fork.api, "https://api.github.com");
+        assert!(fork.token_env.is_empty() && fork.push_to_local.is_none());
+        assert_eq!(config.repo.app, Some(crate::AppConnection::default()));
+
+        let ghes = repo(
+            "shop",
+            RepoMode::Poc,
+            serde_json::json!({"app": {"api": "https://ghe.acme.test/api/v3"}}),
+        );
+        let config = modes().run_config(&ghes).unwrap();
+        assert_eq!(config.repo.fork.api, "https://ghe.acme.test/api/v3");
+
+        // The token path is as it was.
+        let token = modes()
+            .run_config(&repo("app", RepoMode::Poc, settings()))
+            .unwrap();
+        assert_eq!(token.repo.fork.token_env, "GITHUB_TOKEN");
+        assert_eq!(token.repo.app, None);
+    }
+
+    #[test]
+    fn a_repo_names_fork_or_app_exactly_once() {
+        let both = serde_json::json!({
+            "app": {},
+            "fork": { "owner": "me", "name": "app", "token_env": "T" }
+        });
+        for (config, says) in [(both, "not both"), (serde_json::json!({}), "needs `fork`")] {
+            let err = modes()
+                .run_config(&repo("app", RepoMode::Poc, config))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(says), "{err}");
+        }
+        let mut gitlab = repo("app", RepoMode::Poc, serde_json::json!({"app": {}}));
+        gitlab.url = "https://gitlab.example/group/sub/app".into();
+        let err = modes().run_config(&gitlab).unwrap_err().to_string();
+        assert!(err.contains("not a GitHub repo"), "{err}");
+    }
+
+    #[test]
+    fn the_app_path_is_refused_on_an_instance_without_an_app() {
+        let spec = |settings: serde_json::Value| RepoSpec {
+            slug: "shop".into(),
+            url: "https://github.com/me/shop".into(),
+            default_branch: "main".into(),
+            language: Language::Python,
+            mode: RepoMode::Poc,
+            max_concurrent_jobs: 1,
+            settings: serde_json::from_value(settings).unwrap(),
+            tenant: None,
+        };
+        let on_app = spec(serde_json::json!({"app": {}}));
+        let err = modes().check_spec(&on_app).unwrap_err().to_string();
+        assert!(err.contains("[github_app]"), "{err}");
+        assert!(modes().with_github_app(true).check_spec(&on_app).is_ok());
+        assert!(modes().check_spec(&spec(settings())).is_ok());
+    }
+
+    #[test]
+    fn an_upstream_is_read_from_a_plain_https_url_only() {
+        let got = |u: &str| crate::upstream_of(u);
+        assert_eq!(
+            got("https://github.com/acme/shop.git"),
+            Some(("acme".into(), "shop".into()))
+        );
+        assert_eq!(
+            got("https://ghe.acme.test/acme/shop/"),
+            Some(("acme".into(), "shop".into()))
+        );
+        for bad in [
+            "http://github.com/acme/shop",
+            "git@github.com:acme/shop.git",
+            "https://github.com/acme",
+            "https://github.com/acme/shop/tree/main",
+            "https://github.com/../shop",
+        ] {
+            assert_eq!(got(bad), None, "{bad}");
+        }
     }
 
     fn repo(slug: &str, mode: RepoMode, config: serde_json::Value) -> Repo {
@@ -807,6 +958,7 @@ mod tests {
             let by_hand = Modes {
                 poc: None,
                 customer_jp: Some(jp),
+                github_app: false,
             };
             let customer = repo("customer", RepoMode::CustomerJp, settings());
             assert!(by_hand.run_config(&customer).is_err(), "{why}");

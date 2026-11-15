@@ -212,6 +212,12 @@ fn fork_token(config: &RunConfig) -> Result<String, String> {
     if !config.run.open_prs {
         return Ok(String::new());
     }
+    if config.repo.app.is_some() {
+        return Err(
+            "repo.app: the GitHub App path runs on the server; the CLI needs repo.fork.token_env"
+                .into(),
+        );
+    }
     let token_env = &config.repo.fork.token_env;
     std::env::var(token_env).map_err(|_| format!("set {token_env} to a token for the fork"))
 }
@@ -252,7 +258,7 @@ fn finish_platform<P, S>(
         provider,
         prices,
         profiles: Profiles::builtin().map_err(|e| e.to_string())?,
-        github_token,
+        github: aegis_pr::TokenSource::Static(github_token),
     })
 }
 
@@ -263,7 +269,10 @@ async fn fetch(run: &Run, issue_ref: &str) -> Result<IssueInput, String> {
         &owner,
         &name,
         number,
-        Some(&run.github_token),
+        match &run.github {
+            aegis_pr::TokenSource::Static(token) => Some(token.as_str()),
+            aegis_pr::TokenSource::App { .. } => None,
+        },
     )
     .await
     .map_err(|e| e.to_string())

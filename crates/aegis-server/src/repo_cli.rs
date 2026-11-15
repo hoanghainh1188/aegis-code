@@ -150,9 +150,14 @@ impl RepoFile {
     }
 }
 
-/// The fork's token for cloning a private repo, when the store has it.
-async fn read_token(secrets: &Secrets, spec: &RepoSpec) -> Result<Option<String>, String> {
-    fork_token(secrets, &spec.settings.fork.token_env).await
+/// The token for cloning a private repo: the fork's, when the store has
+/// it, or the app's (ADR 0017).
+async fn read_token(
+    secrets: &Secrets,
+    app: Option<&crate::github_app::AppHandle>,
+    spec: &RepoSpec,
+) -> Result<Option<String>, String> {
+    crate::github_app::read_token(secrets, app, &spec.settings, &spec.url).await
 }
 
 /// The secret `name`, a fork's `token_env`, when the store has it; the
@@ -192,6 +197,7 @@ pub async fn run(
     store: &Store,
     modes: &Modes,
     secrets: &Secrets,
+    app: Option<&crate::github_app::AppHandle>,
     args: &[String],
 ) -> Result<String, String> {
     let actor = Actor::cli();
@@ -199,7 +205,7 @@ pub async fn run(
     match args.as_slice() {
         [verb @ ("add" | "update"), file] => {
             let spec = RepoFile::load(Path::new(file))?.spec_in(store).await?;
-            let token = read_token(secrets, &spec).await?;
+            let token = read_token(secrets, app, &spec).await?;
             let token = token.as_deref();
             let repo = if *verb == "add" {
                 modes.add(store, &spec, token, &actor).await

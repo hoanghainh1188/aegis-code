@@ -198,7 +198,7 @@ fn platform_priced(
         store: MemoryLedger::new(),
         prices: PriceTable::from_toml(prices).unwrap(),
         profiles: Profiles::builtin().unwrap(),
-        github_token: "t".into(),
+        github: aegis_pr::TokenSource::Static("t".into()),
     })
 }
 
@@ -773,7 +773,7 @@ async fn a_bug_goes_to_pr_with_its_ledger_in_postgres() {
         store: db.store.ledger(),
         prices: PriceTable::from_toml(PRICES).unwrap(),
         profiles: Profiles::builtin().unwrap(),
-        github_token: "t".into(),
+        github: aegis_pr::TokenSource::Static("t".into()),
     });
 
     let report = run_issue(Arc::clone(&p), issue(), CancellationToken::new())
@@ -1928,7 +1928,7 @@ async fn a_dry_run_replays_the_upstream_fix_without_a_model_or_a_pr() {
         store: MemoryLedger::new(),
         prices: PriceTable::from_toml(PRICES).unwrap(),
         profiles: Profiles::builtin().unwrap(),
-        github_token: String::new(),
+        github: aegis_pr::TokenSource::Static(String::new()),
     });
     p.provider
         .start(Replay::of(&eval, &p.config.repo.path).unwrap());
@@ -2133,4 +2133,112 @@ async fn two_repos_with_different_modes_run_side_by_side() {
     let only_poc = Modes::new(modes.poc.clone(), None).unwrap();
     assert!(only_poc.repo_run(&db.store, b.id).await.is_err());
     db.drop().await;
+}
+
+/// A fresh token at each mint: `ghs_1`, `ghs_2`…, each nine minutes from
+/// expiry, so a token minted earlier is never good enough to reuse.
+struct Minting(std::sync::atomic::AtomicU32);
+
+impl wiremock::Respond for Minting {
+    fn respond(&self, _: &wiremock::Request) -> wiremock::ResponseTemplate {
+        let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        wiremock::ResponseTemplate::new(201).set_body_json(json!({
+            "token": format!("ghs_{n}"),
+            "expires_at": (chrono::Utc::now() + chrono::TimeDelta::minutes(9)).to_rfc3339(),
+        }))
+    }
+}
+
+fn app_key() -> aegis_pr::AppKey {
+    use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
+    use base64::Engine;
+    let pair = aws_lc_rs::rsa::KeyPair::generate(aws_lc_rs::rsa::KeySize::Rsa2048).unwrap();
+    let der = AsDer::<Pkcs8V1Der>::as_der(&pair).unwrap();
+    let pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+        base64::engine::general_purpose::STANDARD.encode(der.as_ref())
+    );
+    aegis_pr::AppKey::from_pem(&pem).unwrap()
+}
+
+/// "Xong khi" of #539: a repo on the app path opens its PR in the repo
+/// itself with an installation token minted when the PR is opened, not
+/// one from the job's start (a job can outlive a token's hour), while a
+/// repo on the token path runs beside it as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repo_on_the_app_path_and_one_on_the_token_path_open_their_prs_side_by_side() {
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    if !tools_ready() {
+        return;
+    }
+    let (on_app, on_token) = (repo_with_bug(), repo_with_bug());
+    let app_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/me/fixture/installation"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": 9})))
+        .expect(1)
+        .mount(&app_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/app/installations/9/access_tokens"))
+        .and(body_partial_json(json!({
+            "repositories": ["fixture"],
+            "permissions": {"contents": "write", "pull_requests": "write"},
+        })))
+        .respond_with(Minting(std::sync::atomic::AtomicU32::new(0)))
+        .mount(&app_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/me/fixture/pulls"))
+        .and(header("authorization", "Bearer ghs_2"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "number": 4, "html_url": "https://github.com/me/fixture/pull/4"
+        })))
+        .expect(1)
+        .mount(&app_server)
+        .await;
+    let token_server = github().await;
+
+    let mut app_config = config(&on_app, &app_server.uri(), 20);
+    app_config.repo.app = Some(aegis_lifecycle::AppConnection::default());
+    let app = Arc::new(aegis_pr::GitHubApp::new(&app_server.uri(), "123", app_key()).unwrap());
+    let source = aegis_pr::TokenSource::App {
+        app,
+        owner: "me".into(),
+        repo: "fixture".into(),
+        use_: aegis_pr::TokenUse::Publish,
+    };
+    // The token the job would have had at its start: near its end by the
+    // time the PR is opened.
+    assert_eq!(source.token().await.unwrap(), "ghs_1");
+    let on_app_platform = Arc::new(Platform {
+        github: source,
+        ..Arc::into_inner(platform(app_config, to_pr())).unwrap()
+    });
+    let on_token_platform = platform(config(&on_token, &token_server.uri(), 20), to_pr());
+
+    let (ra, rb) = tokio::join!(
+        tokio::spawn({
+            let p = Arc::clone(&on_app_platform);
+            async move { run(&p, CancellationToken::new()).await }
+        }),
+        tokio::spawn({
+            let p = Arc::clone(&on_token_platform);
+            async move { run(&p, CancellationToken::new()).await }
+        }),
+    );
+    let (ra, rb) = (ra.unwrap(), rb.unwrap());
+    assert_eq!(ra.outcome, Outcome::PrOpened, "{ra:?}");
+    assert_eq!(
+        ra.pr_url.as_deref(),
+        Some("https://github.com/me/fixture/pull/4")
+    );
+    assert_eq!(rb.outcome, Outcome::PrOpened, "{rb:?}");
+    assert_eq!(
+        rb.pr_url.as_deref(),
+        Some("https://github.com/me/fixture/pull/3")
+    );
+    assert_eq!(fork_refs(&on_app), "refs/heads/agent/fixture-7");
+    assert_eq!(fork_refs(&on_token), "refs/heads/agent/fixture-7");
 }

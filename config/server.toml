@@ -115,3 +115,13 @@ max_rounds = 3
 # GitLab Maintainer. The token is used for that request and dropped, never
 # kept, logged or audited. Off unless turned on.
 make_webhooks = false
+
+# The instance's GitHub App (ADR 0017): repos with [settings.app] take
+# tokens from it, minted per use, instead of a fork and a PAT. Left out,
+# the instance runs as before and refuses repos on the app path. The key
+# and the app's webhook secret live in [secrets] with the others.
+# [github_app]
+# app_id = 123456          # or client_id = "Iv23…", GitHub's preferred issuer
+# api = "https://api.github.com"
+# private_key_env = "AEGIS_GITHUB_APP_PRIVATE_KEY"
+# webhook_secret_env = "AEGIS_GITHUB_APP_WEBHOOK_SECRET"

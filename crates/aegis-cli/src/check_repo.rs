@@ -971,6 +971,7 @@ mod tests {
             secrets: Default::default(),
             triage_lane: Default::default(),
             sidecars: vec![],
+            app: None,
             fork: aegis_lifecycle::ForkConfig {
                 platform: aegis_lifecycle::ForkPlatform::GitHub,
                 owner: "owner".into(),

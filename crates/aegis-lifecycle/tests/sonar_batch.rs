@@ -211,7 +211,7 @@ async fn one_pr(issue: IssueInput) -> Vec<Request> {
         store: MemoryLedger::new(),
         prices: PriceTable::from_toml(PRICES).unwrap(),
         profiles: Profiles::builtin().unwrap(),
-        github_token: "t".into(),
+        github: aegis_pr::TokenSource::Static("t".into()),
     });
     let report = run_issue(Arc::clone(&p), issue, CancellationToken::new())
         .await

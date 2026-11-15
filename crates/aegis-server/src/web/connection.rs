@@ -198,7 +198,11 @@ async fn page(
             "Internal server error",
         )
     })?;
-    let fork = &file.settings.fork;
+    let (fork, app) = file
+        .settings
+        .connection(&repo.url)
+        .map_err(|e| WebError::new(axum::http::StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    let fork = &fork;
     let forge = forge_of(fork.platform);
     let mut secrets = Vec::new();
     for (name, purpose) in [
@@ -215,6 +219,11 @@ async fn page(
             "comments on the repo's issues; checks who asks for a review round",
         ),
     ] {
+        // On the app path the fork row has no secret: the app's tokens
+        // are minted per use (ADR 0017).
+        if name.is_empty() && app.is_some() {
+            continue;
+        }
         secrets.push(SecretRow {
             name: name.to_owned(),
             purpose,
@@ -349,7 +358,8 @@ pub async fn make_webhooks(
     }
     let file =
         RepoFile::of(&repo).map_err(|_| bad("the repo's settings do not read as a repo file"))?;
-    let fork = &file.settings.fork;
+    let (fork, _) = file.settings.connection(&repo.url).map_err(bad)?;
+    let fork = &fork;
     let forge = forge_of(fork.platform);
     // The token and the secret go to the forge the server is configured
     // with, never to an API root a repo's settings name.
@@ -499,12 +509,31 @@ pub(super) async fn run_checks(admin: &RepoAdmin, repo: &Repo) -> Vec<CheckRow> 
     let Ok(file) = RepoFile::of(repo) else {
         return vec![fail("Repo", "its settings do not read as a repo file")];
     };
-    let fork = &file.settings.fork;
+    let (fork, app) = match file.settings.connection(&repo.url) {
+        Ok(c) => c,
+        Err(e) => return vec![fail("Repo", e)],
+    };
+    let fork = &fork;
     let forge = forge_of(fork.platform);
     let mut rows = Vec::new();
 
     const FORK: &str = "Fork token";
-    match token(admin, &fork.token_env).await {
+    if app.is_some() {
+        rows.push(match &admin.github_app {
+            Some(_) => pass(
+                "GitHub App",
+                format!(
+                    "pushes `agent/*` to `{}` with the app's tokens, minted per use",
+                    fork.path()
+                ),
+            ),
+            None => fail(
+                "GitHub App",
+                "the instance has no `[github_app]` in server.toml",
+            ),
+        });
+    } else {
+        match token(admin, &fork.token_env).await {
         None => rows.push(fail(
             FORK,
             format!("the secret store has no `{}`", fork.token_env),
@@ -537,7 +566,7 @@ pub(super) async fn run_checks(admin: &RepoAdmin, repo: &Repo) -> Vec<CheckRow> 
             )),
         },
     }
-
+    }
     const COMMENT: &str = "Comment token";
     const URL: &str = "Repo URL";
     let api = match fork.platform {

@@ -37,8 +37,8 @@ mod untrusted;
 pub use answer::{FinalAnswer, ReviewReply, Status, SuspiciousInput, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
-    BudgetSection, DirConfig, ExtraServer, ForkConfig, ForkPlatform, IdentityConfig, LedgerBackend,
-    RepoConfig, RunConfig, RunSection, SonarConfig,
+    AppConnection, BudgetSection, DirConfig, ExtraServer, ForkConfig, ForkPlatform, IdentityConfig,
+    LedgerBackend, RepoConfig, RunConfig, RunSection, SonarConfig, upstream_of,
 };
 pub use cve::CveTarget;
 pub use diagnose::TriageLane;

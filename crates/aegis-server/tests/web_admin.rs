@@ -383,6 +383,7 @@ async fn an_admin_adds_a_repo_follows_its_clone_and_changes_it() {
                 "default_branch",
                 "language",
                 "mode",
+                "connection",
                 "max_concurrent_jobs",
                 "fork_platform",
                 "fork_owner",

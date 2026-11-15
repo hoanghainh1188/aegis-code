@@ -18,6 +18,15 @@ impl Forge {
         }
     }
 
+    /// Where the agent's branch is pushed, with a token asked for now
+    /// (ADR 0017): what a push on the app path needs.
+    pub async fn remote_now(&self) -> Result<Remote, PrError> {
+        match self {
+            Self::GitHub(github) => github.remote_now().await,
+            Self::GitLab(gitlab) => gitlab.remote(),
+        }
+    }
+
     /// Comments on PR or MR `number` (#254). The caller makes `body` inert.
     pub async fn comment_on_request(&self, number: u64, body: &str) -> Result<(), PrError> {
         match self {
