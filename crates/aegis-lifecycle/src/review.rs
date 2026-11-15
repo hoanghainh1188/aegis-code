@@ -278,6 +278,7 @@ mod tests {
             hidden: None,
             kind: None,
             source: Some("github".into()),
+            memory: String::new(),
         }
     }
 

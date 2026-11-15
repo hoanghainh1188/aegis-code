@@ -92,6 +92,9 @@ pub struct WebhookConfig {
     pub gitlab_notifier: Option<GitLabNotifier>,
     /// The largest body read from a delivery; beyond, 413.
     pub max_body_bytes: usize,
+    /// The modes' configurations, for the Light model that extracts a
+    /// merged PR's memory (#456); `None`: the ledger's summary is kept.
+    pub modes: Option<Arc<aegis_lifecycle::Modes>>,
 }
 
 impl WebhookConfig {
@@ -110,7 +113,13 @@ impl WebhookConfig {
             burst: 60,
             per_minute: 120,
             max_body_bytes: max_body_from_env(),
+            modes: None,
         }
+    }
+
+    /// With the modes whose Light model extracts merged PRs' memory (#456).
+    pub fn with_modes(self, modes: Option<Arc<aegis_lifecycle::Modes>>) -> Self {
+        Self { modes, ..self }
     }
 }
 
@@ -750,7 +759,15 @@ pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
 /// agent PR is merged (#456).
 async fn pr_merged(hooks: &Hooks, source: WebhookSource, delivery: &str, pr_url: &str) -> Handled {
     let actor = aegis_store::Actor::webhook(source.as_str());
-    match crate::memory::extract_and_store_merged_pr(&hooks.store, pr_url, None, &actor).await {
+    let modes = hooks.config.modes.as_deref();
+    let extracted = crate::memory::extract_and_store_merged_pr(
+        &hooks.store,
+        pr_url,
+        modes,
+        &hooks.config.secrets,
+        &actor,
+    );
+    match extracted.await {
         Ok(saved) if saved.is_empty() => ignored(delivery, "no job opened this pull request"),
         Ok(saved) => {
             let repo_id = saved[0].repo_id;
@@ -765,7 +782,7 @@ async fn pr_merged(hooks: &Hooks, source: WebhookSource, delivery: &str, pr_url:
                         "pr_url": pr_url,
                     }),
                 ),
-                WebhookOutcome::Queued,
+                WebhookOutcome::Recorded,
                 Some(format!("recorded {count} memory entries from {pr_url}")),
                 Some(repo_id),
             );

@@ -306,6 +306,7 @@ fn issue(id: &str, hidden: Option<HiddenTests>) -> IssueInput {
         hidden,
         kind: None,
         source: Some("github".into()),
+        memory: String::new(),
     }
 }
 

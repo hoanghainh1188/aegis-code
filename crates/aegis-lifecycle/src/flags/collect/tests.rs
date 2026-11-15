@@ -74,6 +74,7 @@ fn issue(kind: Option<IssueKind>, body: &str) -> IssueInput {
         hidden: None,
         kind,
         source: None,
+        memory: String::new(),
     }
 }
 

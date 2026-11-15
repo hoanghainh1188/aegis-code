@@ -6,10 +6,9 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use sqlx::Row;
-use sqlx::postgres::PgRow;
 
 use crate::audit::{self, Actor, Target};
+use crate::tx;
 use crate::{JobId, Page, PageOf, RepoId, Store, StoreError};
 
 const MAX_SOURCE_REF_CHARS: usize = 256;
@@ -94,22 +93,38 @@ pub struct RepoMemory {
     pub updated_at: DateTime<Utc>,
 }
 
-fn decode_row(row: &PgRow) -> Result<RepoMemory, StoreError> {
-    let kind_raw: String = row.try_get("kind")?;
-    let job_id: Option<i64> = row.try_get("job_id")?;
-    Ok(RepoMemory {
-        id: MemoryId(row.try_get("id")?),
-        repo_id: RepoId(row.try_get("repo_id")?),
-        kind: MemoryKind::decode("repo_memories.kind", &kind_raw)?,
-        source_ref: row.try_get("source_ref")?,
-        title: row.try_get("title")?,
-        summary: row.try_get("summary")?,
-        paths: row.try_get("paths")?,
-        keywords: row.try_get("keywords")?,
-        job_id: job_id.map(JobId),
-        created_at: row.try_get("created_at")?,
-        updated_at: row.try_get("updated_at")?,
-    })
+struct MemoryRow {
+    id: i64,
+    repo_id: i64,
+    kind: String,
+    source_ref: String,
+    title: String,
+    summary: String,
+    paths: Vec<String>,
+    keywords: String,
+    job_id: Option<i64>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<MemoryRow> for RepoMemory {
+    type Error = StoreError;
+
+    fn try_from(row: MemoryRow) -> Result<Self, StoreError> {
+        Ok(RepoMemory {
+            id: MemoryId(row.id),
+            repo_id: RepoId(row.repo_id),
+            kind: MemoryKind::decode("repo_memories.kind", &row.kind)?,
+            source_ref: row.source_ref,
+            title: row.title,
+            summary: row.summary,
+            paths: row.paths,
+            keywords: row.keywords,
+            job_id: row.job_id.map(JobId),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
 }
 
 fn validate_non_empty(
@@ -168,52 +183,68 @@ impl Store {
             .collect();
 
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            "INSERT INTO repo_memories (
-                 repo_id, kind, source_ref, title, summary, paths, keywords, job_id
-             )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET
-                 title = EXCLUDED.title,
-                 summary = EXCLUDED.summary,
-                 paths = EXCLUDED.paths,
-                 keywords = EXCLUDED.keywords,
-                 job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),
-                 updated_at = now()
-             RETURNING id, repo_id, kind, source_ref, title, summary, paths,
-                       keywords, job_id, created_at, updated_at",
-        )
-        .bind(entry.repo_id.0)
-        .bind(entry.kind.as_str())
-        .bind(&source_ref)
-        .bind(&title)
-        .bind(&summary)
-        .bind(&paths)
-        .bind(&keywords)
-        .bind(entry.job_id.map(|j| j.0))
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(StoreError::from_db)?;
-
-        let saved = decode_row(&row)?;
-        audit::record(
-            &mut tx,
-            actor,
-            "memory.upsert",
-            Target {
-                repo: Some(entry.repo_id),
-                job: entry.job_id,
-            },
-            json!({
-                "memory_id": saved.id.0,
-                "kind": saved.kind.as_str(),
-                "source_ref": saved.source_ref,
-                "title": saved.title,
-            }),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(saved)
+        let work = async {
+            // A memory names only a job of its own repo (#525: never another
+            // tenant's).
+            if let Some(job) = entry.job_id {
+                let owner = sqlx::query_scalar!("SELECT repo_id FROM jobs WHERE id = $1", job.0)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                if owner != Some(entry.repo_id.0) {
+                    return Err(StoreError::Invalid {
+                        field: "job_id",
+                        message: format!("job {} is not a job of repo {}", job.0, entry.repo_id.0),
+                    });
+                }
+            }
+            let saved: RepoMemory = sqlx::query_as!(
+                MemoryRow,
+                "INSERT INTO repo_memories (
+                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id
+                 )
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET
+                     title = EXCLUDED.title,
+                     summary = EXCLUDED.summary,
+                     paths = EXCLUDED.paths,
+                     keywords = EXCLUDED.keywords,
+                     job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),
+                     updated_at = now()
+                 RETURNING id, repo_id, kind, source_ref, title, summary, paths,
+                           keywords, job_id, created_at, updated_at",
+                entry.repo_id.0,
+                entry.kind.as_str(),
+                source_ref,
+                title,
+                summary,
+                &paths,
+                keywords,
+                entry.job_id.map(|j| j.0),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?
+            .try_into()?;
+            audit::record(
+                &mut tx,
+                actor,
+                "memory.upsert",
+                Target {
+                    repo: Some(entry.repo_id),
+                    job: entry.job_id,
+                },
+                json!({
+                    "memory_id": saved.id.0,
+                    "kind": saved.kind.as_str(),
+                    "source_ref": saved.source_ref,
+                    "title": saved.title,
+                }),
+            )
+            .await?;
+            Ok::<_, StoreError>(saved)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 
     /// Lists memories for `repo_id`, newest first (`id DESC`), optionally
@@ -224,7 +255,8 @@ impl Store {
         kind: Option<MemoryKind>,
         page: Page,
     ) -> Result<PageOf<RepoMemory>, StoreError> {
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            MemoryRow,
             "SELECT id, repo_id, kind, source_ref, title, summary, paths,
                     keywords, job_id, created_at, updated_at
                FROM repo_memories
@@ -233,15 +265,18 @@ impl Store {
                 AND ($3::bigint IS NULL OR id < $3)
               ORDER BY id DESC
               LIMIT $4",
+            repo_id.0,
+            kind.map(MemoryKind::as_str),
+            page.cursor(),
+            page.fetch(),
         )
-        .bind(repo_id.0)
-        .bind(kind.map(MemoryKind::as_str))
-        .bind(page.cursor())
-        .bind(page.fetch())
         .fetch_all(&self.pool)
         .await?;
 
-        let items = rows.iter().map(decode_row).collect::<Result<Vec<_>, _>>()?;
+        let items = rows
+            .into_iter()
+            .map(RepoMemory::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(PageOf::new(items, page, |m| m.id.0))
     }
 
@@ -254,38 +289,38 @@ impl Store {
         actor: &Actor,
     ) -> Result<bool, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let deleted = sqlx::query(
-            "DELETE FROM repo_memories
-              WHERE id = $1 AND repo_id = $2
-          RETURNING kind, source_ref",
-        )
-        .bind(id.0)
-        .bind(repo_id.0)
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        let Some(row) = deleted else {
-            return Ok(false);
-        };
-        let kind: String = row.try_get("kind")?;
-        let source_ref: String = row.try_get("source_ref")?;
-        audit::record(
-            &mut tx,
-            actor,
-            "memory.delete",
-            Target {
-                repo: Some(repo_id),
-                job: None,
-            },
-            json!({
-                "memory_id": id.0,
-                "kind": kind,
-                "source_ref": source_ref,
-            }),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(true)
+        let work = async {
+            let Some(row) = sqlx::query!(
+                "DELETE FROM repo_memories
+                  WHERE id = $1 AND repo_id = $2
+              RETURNING kind, source_ref",
+                id.0,
+                repo_id.0,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            else {
+                return Ok(tx::Done::Discard(false));
+            };
+            audit::record(
+                &mut tx,
+                actor,
+                "memory.delete",
+                Target {
+                    repo: Some(repo_id),
+                    job: None,
+                },
+                json!({
+                    "memory_id": id.0,
+                    "kind": row.kind,
+                    "source_ref": row.source_ref,
+                }),
+            )
+            .await?;
+            Ok::<_, StoreError>(tx::Done::Commit(true))
+        }
+        .await;
+        tx::end(tx, work).await
     }
 
     /// Recalls up to `limit` relevant historical lessons for `repo_id` matching
@@ -300,20 +335,24 @@ impl Store {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            MemoryRow,
             "SELECT id, repo_id, kind, source_ref, title, summary, paths,
                     keywords, job_id, created_at, updated_at
                FROM repo_memories
               WHERE repo_id = $1
               ORDER BY updated_at DESC, id DESC
               LIMIT $2",
+            repo_id.0,
+            MAX_RECALL_CANDIDATES,
         )
-        .bind(repo_id.0)
-        .bind(MAX_RECALL_CANDIDATES)
         .fetch_all(&self.pool)
         .await?;
 
-        let candidates = rows.iter().map(decode_row).collect::<Result<Vec<_>, _>>()?;
+        let candidates = rows
+            .into_iter()
+            .map(RepoMemory::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rank_memories(candidates, query_title, query_body, limit))
     }
 }

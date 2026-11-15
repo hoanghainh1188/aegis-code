@@ -39,6 +39,7 @@ fn config() -> WebhookConfig {
         notifier: None,
         gitlab_notifier: None,
         max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+        modes: None,
     }
 }
 
@@ -211,6 +212,7 @@ async fn a_delivery_over_the_limit_is_refused_and_queues_nothing() {
         db.store.clone(),
         WebhookConfig {
             max_body_bytes: 4 * 1024,
+            modes: None,
             ..config()
         },
     );

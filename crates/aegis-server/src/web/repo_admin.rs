@@ -73,6 +73,11 @@ impl RepoAdmin {
     }
 
     /// The modes' configuration the server loaded.
+    /// The modes, shared with the webhooks (#456).
+    pub fn shared_modes(&self) -> Arc<Modes> {
+        Arc::clone(&self.modes)
+    }
+
     pub(super) fn modes(&self) -> &Modes {
         &self.modes
     }

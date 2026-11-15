@@ -177,6 +177,7 @@ fn cve_issue(args: &Args) -> Result<IssueInput, String> {
         kind: None,
         cve: Some(target),
         source: Some("cve".into()),
+        memory: String::new(),
     })
 }
 

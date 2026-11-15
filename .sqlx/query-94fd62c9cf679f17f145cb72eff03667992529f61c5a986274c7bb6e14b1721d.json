@@ -1,0 +1,149 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, repo_id, kind, source_ref, title, summary, paths,\n                    keywords, job_id, created_at, updated_at\n               FROM repo_memories\n              WHERE repo_id = $1\n              ORDER BY updated_at DESC, id DESC\n              LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "repo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "repo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "source_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "source_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "paths",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "paths"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "keywords",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "keywords"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "job_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "94fd62c9cf679f17f145cb72eff03667992529f61c5a986274c7bb6e14b1721d"
+}

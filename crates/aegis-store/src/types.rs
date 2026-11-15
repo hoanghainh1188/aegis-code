@@ -90,7 +90,8 @@ text_enum! {
 }
 
 text_enum! {
-    /// What became of a webhook delivery (#331).
+    /// What became of a webhook delivery (#331). `recorded`: no job, but a
+    /// merged agent PR's memory was recorded (#456).
     WebhookOutcome {
         Queued = "queued",
         AlreadyLive = "already_live",
@@ -100,6 +101,7 @@ text_enum! {
         Ping = "ping",
         Malformed = "malformed",
         BadSignature = "bad_signature",
+        Recorded = "recorded",
     }
 }
 

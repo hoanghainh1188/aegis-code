@@ -209,6 +209,7 @@ pub async fn ticket_issue(
         hidden: None,
         kind: None,
         source: Some(job.source.as_str().to_owned()),
+        memory: String::new(),
     })
 }
 

@@ -261,3 +261,84 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
         .unwrap();
     assert!(!deleted_again);
 }
+
+/// A memory names only a job of its own repo: never another repo's, so
+/// never another tenant's (#525). Refused before anything is written.
+#[tokio::test]
+async fn a_memory_cannot_name_another_repos_job() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let repo = |slug: &'static str| NewRepo {
+        slug: slug.into(),
+        url: format!("https://github.com/acme/{slug}"),
+        default_branch: "main".into(),
+        language: "rust".into(),
+        mode: RepoMode::Poc,
+        max_concurrent_jobs: 2,
+        config: serde_json::json!({}),
+    };
+    let mine = s.create_repo(&repo("mine")).await.unwrap();
+    let theirs = s.create_repo(&repo("theirs")).await.unwrap();
+    let their_job = s
+        .create_job(&aegis_store::NewJob {
+            repo_id: theirs.id,
+            issue_ref: "acme/theirs#1".into(),
+            ledger_key: aegis_ledger::IssueId::parse("theirs-1").unwrap(),
+            source: aegis_store::JobSource::Github,
+            priority: None,
+            sla_deadline: None,
+        })
+        .await
+        .unwrap();
+    let entry = |job| NewRepoMemory {
+        repo_id: mine.id,
+        kind: MemoryKind::Runbook,
+        source_ref: "runbooks/restart".into(),
+        title: "Restart the worker".into(),
+        summary: "Drain, then restart.".into(),
+        paths: vec![],
+        keywords: String::new(),
+        job_id: job,
+    };
+    let refused = s
+        .upsert_repo_memory_by(&entry(Some(their_job.id)), &Actor::cli())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            &refused,
+            aegis_store::StoreError::Invalid {
+                field: "job_id",
+                ..
+            }
+        ),
+        "{refused}"
+    );
+    let missing = s
+        .upsert_repo_memory_by(&entry(Some(aegis_store::JobId(9999))), &Actor::cli())
+        .await;
+    assert!(missing.is_err(), "a job that does not exist is refused too");
+    let none = s
+        .list_repo_memories(mine.id, None, Page::first(10))
+        .await
+        .unwrap();
+    assert!(none.items.is_empty(), "nothing written");
+    assert!(
+        s.upsert_repo_memory_by(&entry(None), &Actor::cli())
+            .await
+            .is_ok()
+    );
+    // Deleting a memory of another repo finds nothing and records nothing.
+    let saved = s
+        .list_repo_memories(mine.id, None, Page::first(1))
+        .await
+        .unwrap()
+        .items
+        .remove(0);
+    assert!(
+        !s.delete_repo_memory_by(theirs.id, saved.id, &Actor::cli())
+            .await
+            .unwrap()
+    );
+    db.drop().await;
+}

@@ -365,6 +365,15 @@ fn prompt(issue: &IssueInput, files: &[(String, String)]) -> String {
             defang(body)
         ));
     }
+    // Lessons from the repo's history (#456) are hints, not sources: a
+    // finding still cites a line of the ticket or of a file above.
+    if !issue.memory.is_empty() {
+        text.push_str(&issue.memory);
+        text.push_str(
+            "\nThe memory above is a hint from past work, not a source: cite only the \
+             ticket or the files.\n",
+        );
+    }
     text
 }
 

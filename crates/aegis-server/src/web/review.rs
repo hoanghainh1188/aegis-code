@@ -257,19 +257,9 @@ pub async fn submit(
         .record_review(&job, review, form.replace.is_some(), &access.actor)
         .await
     {
-        Ok(_) => {
-            if matches!(
-                review.verdict,
-                ReviewVerdict::Accepted | ReviewVerdict::AcceptedWithEdits
-            ) && let Some(pr_url) = job.pr_url.as_deref()
-                && let Err(e) =
-                    crate::memory::extract_and_store_merged_pr(&store, pr_url, None, &access.actor)
-                        .await
-            {
-                tracing::warn!(job = id, error = %e, "extracting repo memory on review accept");
-            }
-            Ok(Redirect::to(&format!("/jobs/{id}")).into_response())
-        }
+        // An accepted review is not a merge: the memory of a merged PR is
+        // recorded when the forge says it was merged (#456).
+        Ok(_) => Ok(Redirect::to(&format!("/jobs/{id}")).into_response()),
         Err(StoreError::Conflict(_)) => {
             let why = "this PR already has a review; check \"replace existing review\" to update"
                 .to_owned();
