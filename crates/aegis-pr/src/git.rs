@@ -41,12 +41,23 @@ pub struct Identity {
 /// Where the agent's branch is pushed: the fork over HTTPS, or a local
 /// bare repo (tests, dry runs). Built only through the checked
 /// constructors.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Remote {
     url: String,
     token: Option<String>,
     /// Who the token is sent as.
     user: &'static str,
+}
+
+/// Never the token (ADR 0017 §3): only whether there is one.
+impl std::fmt::Debug for Remote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Remote")
+            .field("url", &self.url)
+            .field("token", &self.token.as_ref().map(|_| "…"))
+            .field("user", &self.user)
+            .finish()
+    }
 }
 
 fn plain_name(s: &str) -> bool {

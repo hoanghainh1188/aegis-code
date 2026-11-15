@@ -17,6 +17,11 @@ pub enum PrError {
     #[error("GitHub API {status}: {message}")]
     GitHub { status: u16, message: String },
 
+    /// The GitHub App path (ADR 0017): its key, its installation, its
+    /// token source. Never carries a token or the key.
+    #[error("GitHub App: {0}")]
+    App(String),
+
     #[error("cannot reach GitHub: {0}")]
     Http(String),
 

@@ -13,6 +13,7 @@
 
 mod access;
 mod actions;
+mod app;
 mod body;
 mod branch;
 mod commit_message;
@@ -31,6 +32,7 @@ use aegis_gate::GateReport;
 
 pub use access::RepoAccess;
 pub use actions::{FailedJob, FailedRun};
+pub use app::{AppKey, GitHubApp, TokenSource, TokenUse};
 pub use body::{
     AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, Evidence, InputFlagNote,
     PrContent, gate_line, inert, render,
