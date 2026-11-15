@@ -325,7 +325,7 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
         LedgerEvent::HiddenTests { .. } => return None,
         // Shadow triage (#497) is measured against the review: a reviewer
         // who saw it might judge the PR by it. Only the KPI report shows it.
-        LedgerEvent::Triaged { .. } => return None,
+        LedgerEvent::Triaged { .. } | LedgerEvent::TicketMeta(_) => return None,
         LedgerEvent::Finished {
             outcome,
             wall_time_s,

@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::LifecycleError;
 use crate::untrusted::defang;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IssueInput {
     /// Ledger id and branch name part (`agent/<id>`).
     pub id: String,
@@ -27,6 +27,9 @@ pub struct IssueInput {
     /// A CVE job (#501): the platform raises this package first, and the
     /// agent only adapts the code if the checks fail.
     pub cve: Option<crate::CveTarget>,
+    /// Normalized ticket intake source (`github`, `gitlab`, `jira`, `jsm`,
+    /// `servicenow`, `backlog`, `ci`, `sonar`, `cve`, `eval`, `cli`) (#511).
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +106,7 @@ impl IssueInput {
             hidden: None,
             kind: None,
             cve: None,
+            source: Some("github".into()),
         })
     }
 
@@ -126,6 +130,7 @@ impl IssueInput {
             hidden: None,
             kind: None,
             cve: None,
+            source: Some("gitlab".into()),
         })
     }
 
@@ -205,6 +210,7 @@ impl IssueInput {
             base: None,
             hidden: None,
             kind: Some(IssueKind::CiFailure),
+            source: Some("ci".into()),
         }
     }
 
@@ -222,6 +228,7 @@ impl IssueInput {
             hidden: None,
             kind: None,
             cve: None,
+            source: Some("cli".into()),
         })
     }
 
@@ -276,6 +283,7 @@ mod tests {
             base: None,
             hidden: None,
             kind: None,
+            source: None,
         };
         let text = issue.first_message("s", true);
         assert_eq!(text.matches("</issue>").count(), 1, "{text}");

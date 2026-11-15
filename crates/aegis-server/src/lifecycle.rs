@@ -347,6 +347,10 @@ impl LifecycleRunner {
         if round.is_none() && !matches!(job.source, JobSource::Cve | JobSource::Sonar) {
             enrich_with_apm(&repo, &self.secrets, &mut issue).await;
         }
+        // Preserve the PostgreSQL queue's canonical intake source (#511).
+        if round.is_none() {
+            issue.source = Some(job.source.as_str().to_owned());
+        }
         let tiers = [
             (&config.models.light, "light"),
             (&config.models.core, "core"),
@@ -517,6 +521,7 @@ fn cve_issue(job: &Job) -> Result<IssueInput, Attempt> {
         hidden: None,
         kind: None,
         cve: Some(target),
+        source: Some("cve".into()),
     })
 }
 

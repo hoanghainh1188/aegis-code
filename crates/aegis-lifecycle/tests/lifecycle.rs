@@ -178,6 +178,7 @@ fn issue() -> IssueInput {
         base: None,
         hidden: None,
         kind: None,
+        source: Some("github".into()),
     }
 }
 

@@ -120,6 +120,266 @@ pub struct Triage {
     pub reason: String,
 }
 
+/// Natural language of an intake ticket (#511).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TicketLanguage {
+    En,
+    Ja,
+    Vi,
+    Other,
+}
+
+impl TicketLanguage {
+    pub const ALL: [Self; 4] = [Self::En, Self::Ja, Self::Vi, Self::Other];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::Ja => "ja",
+            Self::Vi => "vi",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|lang| lang.as_str() == text)
+    }
+}
+
+impl fmt::Display for TicketLanguage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Strip fenced code blocks and URLs before checking natural-language scripts
+/// so code identifiers or URLs do not skew classification.
+fn strip_code_and_urls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_fence = false;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        for word in line.split_whitespace() {
+            if word.starts_with("http://") || word.starts_with("https://") {
+                continue;
+            }
+            out.push_str(word);
+            out.push(' ');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn is_kana(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{309F}' | '\u{30A0}'..='\u{30FF}' | '\u{FF65}'..='\u{FF9F}')
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}')
+}
+
+/// Characters distinct to Vietnamese orthography (excludes shared Western
+/// European diacritics like `á`/`é`/`ê`/`ó` to prevent false positives on names).
+fn is_vietnamese_marker(c: char) -> bool {
+    matches!(
+        c,
+        'ă' | 'Ă'
+            | 'đ'
+            | 'Đ'
+            | 'ơ'
+            | 'Ơ'
+            | 'ư'
+            | 'Ư'
+            | 'ả'
+            | 'Ả'
+            | 'ã'
+            | 'Ã'
+            | 'ạ'
+            | 'Ạ'
+            | 'ằ'
+            | 'Ằ'
+            | 'ẳ'
+            | 'Ẳ'
+            | 'ẵ'
+            | 'Ẵ'
+            | 'ắ'
+            | 'Ắ'
+            | 'ặ'
+            | 'Ặ'
+            | 'ầ'
+            | 'Ầ'
+            | 'ẩ'
+            | 'Ẩ'
+            | 'ẫ'
+            | 'Ẫ'
+            | 'ấ'
+            | 'Ấ'
+            | 'ậ'
+            | 'Ậ'
+            | 'ẻ'
+            | 'Ẻ'
+            | 'ẽ'
+            | 'Ẽ'
+            | 'ẹ'
+            | 'Ẹ'
+            | 'ề'
+            | 'Ề'
+            | 'ể'
+            | 'Ể'
+            | 'ễ'
+            | 'Ễ'
+            | 'ế'
+            | 'Ế'
+            | 'ệ'
+            | 'Ệ'
+            | 'ỉ'
+            | 'Ỉ'
+            | 'ĩ'
+            | 'Ĩ'
+            | 'ị'
+            | 'Ị'
+            | 'ỏ'
+            | 'Ỏ'
+            | 'õ'
+            | 'Õ'
+            | 'ọ'
+            | 'Ọ'
+            | 'ồ'
+            | 'Ồ'
+            | 'ổ'
+            | 'Ổ'
+            | 'ỗ'
+            | 'Ỗ'
+            | 'ố'
+            | 'Ố'
+            | 'ộ'
+            | 'Ộ'
+            | 'ờ'
+            | 'Ờ'
+            | 'ở'
+            | 'Ở'
+            | 'ỡ'
+            | 'Ỡ'
+            | 'ớ'
+            | 'Ớ'
+            | 'ợ'
+            | 'Ợ'
+            | 'ủ'
+            | 'Ủ'
+            | 'ũ'
+            | 'Ũ'
+            | 'ụ'
+            | 'Ụ'
+            | 'ừ'
+            | 'Ừ'
+            | 'ử'
+            | 'Ử'
+            | 'ữ'
+            | 'Ữ'
+            | 'ứ'
+            | 'Ứ'
+            | 'ự'
+            | 'Ự'
+            | 'ỷ'
+            | 'Ỷ'
+            | 'ỹ'
+            | 'Ỹ'
+            | 'ỵ'
+            | 'Ỵ'
+    )
+}
+
+/// Deterministic, zero-cost detector of the ticket's prose language (#511).
+pub fn detect_ticket_language(title: &str, body: &str) -> TicketLanguage {
+    let combined = format!("{title}\n{body}");
+    let stripped = strip_code_and_urls(&combined);
+    let sample = if stripped.trim().is_empty() {
+        combined.as_str()
+    } else {
+        stripped.as_str()
+    };
+
+    let mut kana = 0usize;
+    let mut cjk = 0usize;
+    let mut vi_markers = 0usize;
+    let mut non_ascii_alpha = 0usize;
+    let mut total_alpha = 0usize;
+
+    for ch in sample.chars() {
+        if !ch.is_alphabetic() {
+            continue;
+        }
+        total_alpha += 1;
+        if is_kana(ch) {
+            kana += 1;
+        } else if is_cjk(ch) {
+            cjk += 1;
+        } else if is_vietnamese_marker(ch) {
+            vi_markers += 1;
+        }
+        if !ch.is_ascii() {
+            non_ascii_alpha += 1;
+        }
+    }
+
+    if kana >= 2 || (kana >= 1 && cjk >= 2) {
+        TicketLanguage::Ja
+    } else if vi_markers >= 2 {
+        TicketLanguage::Vi
+    } else if non_ascii_alpha >= 5 && total_alpha > 0 && non_ascii_alpha * 5 > total_alpha {
+        TicketLanguage::Other
+    } else {
+        TicketLanguage::En
+    }
+}
+
+/// Categorical dimensions recorded per run for bias analysis (#511).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TicketMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub programming_language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_language: Option<TicketLanguage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+}
+
+impl TicketMeta {
+    pub fn is_empty(&self) -> bool {
+        self.programming_language.is_none()
+            && self.ticket_source.is_none()
+            && self.ticket_language.is_none()
+            && self.repo.is_none()
+    }
+
+    /// Overlay any present fields in `other` onto `self`.
+    pub fn merged_with(&self, other: &Self) -> Self {
+        Self {
+            programming_language: other
+                .programming_language
+                .clone()
+                .or_else(|| self.programming_language.clone()),
+            ticket_source: other
+                .ticket_source
+                .clone()
+                .or_else(|| self.ticket_source.clone()),
+            ticket_language: other.ticket_language.or(self.ticket_language),
+            repo: other.repo.clone().or_else(|| self.repo.clone()),
+        }
+    }
+}
+
 /// Model tier (design §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -373,6 +633,8 @@ pub enum LedgerEvent {
     /// Untrusted text the job read that reads like an instruction to an AI
     /// agent, found by the platform (#444).
     InputFlagged(InputFlag),
+    /// Intake dimensions recorded for bias tracking (#511).
+    TicketMeta(TicketMeta),
 }
 
 impl LedgerEvent {
@@ -391,7 +653,8 @@ impl LedgerEvent {
             | Self::Escalated { .. }
             | Self::IssueRead { .. }
             | Self::Answered(_)
-            | Self::InputFlagged(_) => &[],
+            | Self::InputFlagged(_)
+            | Self::TicketMeta(_) => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
@@ -482,6 +745,9 @@ pub struct IssueRecord {
     /// What Light read the ticket as needing (#497); recorded only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triage: Option<Triage>,
+    /// Intake metadata dimensions used for bias analysis (#511).
+    #[serde(default, skip_serializing_if = "TicketMeta::is_empty")]
+    pub ticket_meta: TicketMeta,
 }
 
 impl IssueRecord {
@@ -527,6 +793,7 @@ impl IssueRecord {
             answer: None,
             input_flags: Vec::new(),
             triage: None,
+            ticket_meta: TicketMeta::default(),
         }
     }
 
@@ -589,6 +856,9 @@ impl IssueRecord {
             }
             LedgerEvent::Answered(answer) => self.answer = Some(answer.clone()),
             LedgerEvent::InputFlagged(flag) => self.input_flags.push(flag.clone()),
+            LedgerEvent::TicketMeta(meta) => {
+                self.ticket_meta = self.ticket_meta.merged_with(meta);
+            }
         }
         self
     }
@@ -847,5 +1117,78 @@ mod tests {
         assert_eq!(value["event"], "gate_run");
         assert_eq!(value["failed_step"], "clippy");
         assert_eq!(serde_json::from_value::<LedgerEvent>(value).unwrap(), event);
+    }
+
+    #[test]
+    fn ticket_language_detection_handles_en_ja_vi_and_mixed_code() {
+        assert_eq!(
+            detect_ticket_language("Null pointer on empty cart", "Calling add() panics."),
+            TicketLanguage::En
+        );
+        assert_eq!(
+            detect_ticket_language(
+                "ログイン画面でタイムアウトが発生する",
+                "本番環境のみで再現します。"
+            ),
+            TicketLanguage::Ja
+        );
+        assert_eq!(
+            detect_ticket_language(
+                "Lỗi tính tổng giỏ hàng khi mã giảm giá rỗng",
+                "Khách hàng báo bị sai số tiền."
+            ),
+            TicketLanguage::Vi
+        );
+        // Single Western European accent or code snippets must stay English.
+        assert_eq!(
+            detect_ticket_language(
+                "Author Sofía reported panic in parser",
+                "```rust\nlet café = 1;\n```\nExpected Ok(())"
+            ),
+            TicketLanguage::En
+        );
+        // Substantial Cyrillic prose classifies as Other.
+        assert_eq!(
+            detect_ticket_language("Ошибка при обработке", "Сервер возвращает ошибку 500"),
+            TicketLanguage::Other
+        );
+    }
+
+    #[test]
+    fn ticket_meta_folds_and_preserves_backwards_compatibility() {
+        let mut r = IssueRecord::from_events(
+            id("JIRA-1"),
+            &[LedgerEvent::TicketMeta(TicketMeta {
+                programming_language: Some("rust".into()),
+                ticket_source: Some("jira".into()),
+                ticket_language: Some(TicketLanguage::Ja),
+                repo: Some("acme/app".into()),
+            })],
+        );
+        // Partial subsequent event updates only specified fields.
+        r = r.apply(&LedgerEvent::TicketMeta(TicketMeta {
+            ticket_source: Some("jsm".into()),
+            ..TicketMeta::default()
+        }));
+        assert_eq!(r.ticket_meta.programming_language.as_deref(), Some("rust"));
+        assert_eq!(r.ticket_meta.ticket_source.as_deref(), Some("jsm"));
+        assert_eq!(r.ticket_meta.ticket_language, Some(TicketLanguage::Ja));
+        assert_eq!(r.ticket_meta.repo.as_deref(), Some("acme/app"));
+
+        // Legacy IssueRecord JSON without `ticket_meta` still deserializes cleanly.
+        let legacy = json!({
+            "issue_id": "LEGACY-1",
+            "kind": null,
+            "outcome": null,
+            "tiers_used": [],
+            "model_calls": 0,
+            "tokens": {},
+            "cost_usd": 0.0,
+            "gate_runs": [],
+            "wall_time_s": null,
+            "review": null
+        });
+        let decoded: IssueRecord = serde_json::from_value(legacy).unwrap();
+        assert!(decoded.ticket_meta.is_empty());
     }
 }

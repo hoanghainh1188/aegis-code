@@ -235,6 +235,7 @@ fn eval_job() -> IssueInput {
             known_failures: Vec::new(),
         }),
         kind: None,
+        source: Some("eval".into()),
     }
 }
 

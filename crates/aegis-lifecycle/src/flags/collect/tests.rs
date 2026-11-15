@@ -73,6 +73,7 @@ fn issue(kind: Option<IssueKind>, body: &str) -> IssueInput {
         base: None,
         hidden: None,
         kind,
+        source: None,
     }
 }
 

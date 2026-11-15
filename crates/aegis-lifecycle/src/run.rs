@@ -276,6 +276,27 @@ fn summary_of(answer: &FinalAnswer) -> (AnswerSummary, u32) {
     };
     (summary, count(hidden))
 }
+fn ticket_meta(cfg: &RunConfig, issue: &IssueInput) -> aegis_ledger::TicketMeta {
+    let source = issue
+        .source
+        .clone()
+        .or_else(|| issue.cve.as_ref().map(|_| "cve".to_owned()))
+        .or_else(|| match issue.kind {
+            Some(IssueKind::Sonar) => Some("sonar".to_owned()),
+            Some(IssueKind::CiFailure) => Some("ci".to_owned()),
+            _ => None,
+        });
+    aegis_ledger::TicketMeta {
+        programming_language: Some(cfg.repo.language.to_string().to_ascii_lowercase()),
+        ticket_source: source,
+        ticket_language: Some(aegis_ledger::detect_ticket_language(
+            &issue.title,
+            &issue.body,
+        )),
+        repo: (!cfg.repo.key.is_empty()).then(|| cfg.repo.key.clone()),
+    }
+}
+
 async fn prepare_and_work<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
@@ -297,6 +318,7 @@ where
         .await?;
     // What the job works on, for its page (#316).
     ledger.issue_read(&title.text, &issue.url).await?;
+    ledger.ticket_meta(ticket_meta(cfg, issue)).await?;
     let issue = &IssueInput {
         title: title.text,
         body: body.text,
@@ -385,6 +407,7 @@ where
         .secrets_redacted(count(title.count() + body.count() + in_notes))
         .await?;
     ledger.issue_read(&title.text, &issue.url).await?;
+    ledger.ticket_meta(ticket_meta(cfg, issue)).await?;
     let issue = &IssueInput {
         title: title.text,
         body: body.text,

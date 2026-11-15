@@ -636,3 +636,136 @@ async fn a_cve_job_is_created_from_the_jobs_page() {
     );
     db.drop().await;
 }
+
+#[tokio::test]
+async fn the_dashboard_breaks_down_ticket_sources_languages_and_bias_alerts() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let rust = repo(s, "acme-rust", "rust").await;
+    let accepted = reviewed(ReviewVerdict::Accepted, 0, 2.0);
+    // 5 English GitHub jobs accepted; 5 Japanese Jira jobs stopped at budget -> triggers alerts.
+    for i in 1..=5 {
+        let j = s
+            .create_job(&NewJob {
+                repo_id: rust,
+                issue_ref: format!("acme/r#{i}"),
+                ledger_key: IssueId::parse(format!("EN-{i}")).unwrap(),
+                source: JobSource::Github,
+                priority: None,
+                sla_deadline: None,
+            })
+            .await
+            .unwrap();
+        let ledger = s.ledger();
+        ledger
+            .append(
+                &j.ledger_key,
+                &LedgerEvent::TicketMeta(aegis_ledger::TicketMeta {
+                    programming_language: Some("rust".into()),
+                    ticket_language: Some(aegis_ledger::TicketLanguage::En),
+                    ticket_source: Some("github".into()),
+                    repo: Some("acme-rust".into()),
+                }),
+            )
+            .await
+            .unwrap();
+        ledger
+            .append(&j.ledger_key, &call(0.4, Tier::Core))
+            .await
+            .unwrap();
+        ledger
+            .append(
+                &j.ledger_key,
+                &LedgerEvent::Finished {
+                    outcome: Outcome::PrOpened,
+                    wall_time_s: 10.0,
+                },
+            )
+            .await
+            .unwrap();
+        ledger.append(&j.ledger_key, &accepted).await.unwrap();
+        s.end_job(j.id, JobEnd::Done(Outcome::PrOpened))
+            .await
+            .unwrap();
+    }
+    for i in 1..=5 {
+        let j = s
+            .create_job(&NewJob {
+                repo_id: rust,
+                issue_ref: format!("ACME-{i}"),
+                ledger_key: IssueId::parse(format!("JA-{i}")).unwrap(),
+                source: JobSource::Jira,
+                priority: None,
+                sla_deadline: None,
+            })
+            .await
+            .unwrap();
+        let ledger = s.ledger();
+        ledger
+            .append(
+                &j.ledger_key,
+                &LedgerEvent::TicketMeta(aegis_ledger::TicketMeta {
+                    programming_language: Some("rust".into()),
+                    ticket_language: Some(aegis_ledger::TicketLanguage::Ja),
+                    ticket_source: Some("jira".into()),
+                    repo: Some("acme-rust".into()),
+                }),
+            )
+            .await
+            .unwrap();
+        ledger
+            .append(&j.ledger_key, &call(1.2, Tier::Expert))
+            .await
+            .unwrap();
+        ledger
+            .append(
+                &j.ledger_key,
+                &LedgerEvent::Finished {
+                    outcome: Outcome::StoppedBudget,
+                    wall_time_s: 30.0,
+                },
+            )
+            .await
+            .unwrap();
+        s.end_job(j.id, JobEnd::Done(Outcome::StoppedBudget))
+            .await
+            .unwrap();
+    }
+
+    let app = app(s).await;
+    let page = get(&app, "/").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("By ticket source"), "{}", page.body);
+    assert!(
+        page.body.contains("<th scope=\"row\">github</th>"),
+        "{}",
+        page.body
+    );
+    assert!(
+        page.body.contains("<th scope=\"row\">jira</th>"),
+        "{}",
+        page.body
+    );
+    assert!(page.body.contains("By ticket language"), "{}", page.body);
+    assert!(
+        page.body.contains("<th scope=\"row\">en</th>"),
+        "{}",
+        page.body
+    );
+    assert!(
+        page.body.contains("<th scope=\"row\">ja</th>"),
+        "{}",
+        page.body
+    );
+    assert!(
+        page.body.contains("Bias investigation flags (#511)"),
+        "{}",
+        page.body
+    );
+    assert!(
+        page.body.contains("low-accept, high-stop, high-cost"),
+        "{}",
+        page.body
+    );
+    db.drop().await;
+}

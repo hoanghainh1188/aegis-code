@@ -208,6 +208,7 @@ pub async fn ticket_issue(
         base: None,
         hidden: None,
         kind: None,
+        source: Some(job.source.as_str().to_owned()),
     })
 }
 
