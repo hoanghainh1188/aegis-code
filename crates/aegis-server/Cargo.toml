@@ -40,6 +40,8 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 bedrock = ["aegis-provider/bedrock"]
 
 [dev-dependencies]
+aws-lc-rs = "1.18.2"
+base64 = "0.22.1"
 aegis-gate = { path = "../aegis-gate" }
 aegis-secrets = { path = "../aegis-secrets" }
 aegis-store = { path = "../aegis-store", features = ["testing"] }

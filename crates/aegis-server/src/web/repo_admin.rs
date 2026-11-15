@@ -84,6 +84,11 @@ impl RepoAdmin {
         }
     }
 
+    /// The instance's GitHub App, shared with the webhooks (ADR 0017).
+    pub fn github_app(&self) -> Option<Arc<crate::github_app::AppHandle>> {
+        self.github_app.clone()
+    }
+
     /// The modes' configuration the server loaded.
     /// The modes, shared with the webhooks (#456).
     pub fn shared_modes(&self) -> Arc<Modes> {
@@ -133,6 +138,10 @@ struct FormPage<'a> {
     modes: [&'static str; 2],
     platforms: [&'static str; 2],
     connections: [&'static str; 2],
+    /// Repos the GitHub App is installed on and no repo is registered
+    /// for, as clone URLs with the same URL encoded for a query (ADR 0017
+    /// §5).
+    installed: Vec<(String, String)>,
 }
 
 impl FormPage<'_> {
@@ -150,6 +159,7 @@ fn form_page(
     repo: Option<&Repo>,
     form: &RepoForm,
     error: Option<(StatusCode, &str)>,
+    installed: Vec<(String, String)>,
 ) -> WebResult {
     let page = render(&FormPage {
         nonce: nonce.as_str(),
@@ -161,6 +171,7 @@ fn form_page(
         modes: MODES,
         platforms: PLATFORMS,
         connections: super::repo_form::CONNECTIONS,
+        installed,
     })?;
     Ok(match error {
         Some((status, _)) => (status, page).into_response(),
@@ -188,15 +199,56 @@ fn refusal(e: LifecycleError) -> Result<(StatusCode, String), WebError> {
     }
 }
 
+/// What a link from the list of installed repos fills the form with.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct Prefill {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    connection: Option<String>,
+}
+
 pub async fn new_form(
+    State(store): State<Store>,
     Extension(nonce): Extension<Nonce>,
     Extension(access): Extension<Access>,
     Extension(me): Extension<Me>,
     Extension(admin): RepoAdminExt,
+    axum::extract::Query(prefill): axum::extract::Query<Prefill>,
 ) -> WebResult {
     admin_only(&access)?;
-    editing(admin)?;
-    form_page(&nonce, &me, None, &RepoForm::blank(), None)
+    let admin = editing(admin)?;
+    let mut form = RepoForm::blank();
+    if let Some(url) = prefill.url.filter(|u| u.len() <= 512) {
+        form.slug = aegis_lifecycle::upstream_of(&url)
+            .map(|(_, name)| name)
+            .unwrap_or_default();
+        form.url = url;
+    }
+    if let Some(c) = prefill
+        .connection
+        .filter(|c| super::repo_form::CONNECTIONS.contains(&c.as_str()))
+    {
+        form.connection = c;
+    }
+    let installed = match &admin.github_app {
+        Some(app) => {
+            let web = web_root(app.api());
+            store
+                .installed_unregistered()
+                .await?
+                .into_iter()
+                .map(|r| {
+                    let url = format!("{web}/{r}");
+                    let query = openidconnect::url::form_urlencoded::byte_serialize(url.as_bytes())
+                        .collect();
+                    (url, query)
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    form_page(&nonce, &me, None, &form, None, installed)
 }
 
 pub async fn create(
@@ -219,6 +271,7 @@ pub async fn create(
                 None,
                 &form,
                 Some((StatusCode::BAD_REQUEST, &why)),
+                Vec::new(),
             );
         }
     };
@@ -226,7 +279,7 @@ pub async fn create(
         Ok(repo) => repo,
         Err(e) => {
             let (status, why) = refusal(e)?;
-            return form_page(&nonce, &me, None, &form, Some((status, &why)));
+            return form_page(&nonce, &me, None, &form, Some((status, &why)), Vec::new());
         }
     };
     clone_in_background(&store, &admin, &repo).await?;
@@ -259,7 +312,7 @@ pub async fn edit_form(
     let form = RepoFile::of(&repo)
         .and_then(|f| RepoForm::of(&f))
         .map_err(|e| bad_repo(&repo, e))?;
-    form_page(&nonce, &me, Some(&repo), &form, None)
+    form_page(&nonce, &me, Some(&repo), &form, None, Vec::new())
 }
 
 pub async fn update(
@@ -279,14 +332,21 @@ pub async fn update(
         Ok(spec) => spec,
         Err(why) => {
             let refused = Some((StatusCode::BAD_REQUEST, why.as_str()));
-            return form_page(&nonce, &me, Some(&repo), &form, refused);
+            return form_page(&nonce, &me, Some(&repo), &form, refused, Vec::new());
         }
     };
     let updated = match admin.modes.update_by(&store, &spec, &access.actor).await {
         Ok(repo) => repo,
         Err(e) => {
             let (status, why) = refusal(e)?;
-            return form_page(&nonce, &me, Some(&repo), &form, Some((status, &why)));
+            return form_page(
+                &nonce,
+                &me,
+                Some(&repo),
+                &form,
+                Some((status, &why)),
+                Vec::new(),
+            );
         }
     };
     clone_in_background(&store, &admin, &updated).await?;
@@ -404,5 +464,34 @@ pub fn settings_of(repo: &Repo) -> String {
             "# not a repo file: {why}\n# as stored:\n{}",
             serde_json::to_string_pretty(&repo.config).unwrap_or_default()
         ),
+    }
+}
+
+/// The web root of a GitHub API root: `https://api.github.com` →
+/// `https://github.com`, GHES' `https://<host>/api/v3` → `https://<host>`.
+fn web_root(api: &str) -> String {
+    let api = api.trim_end_matches('/');
+    if let Some(host) = api.strip_prefix("https://api.") {
+        return format!("https://{host}");
+    }
+    api.strip_suffix("/api/v3").unwrap_or(api).to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_web_root_of_an_api_root() {
+        assert_eq!(
+            super::web_root("https://api.github.com"),
+            "https://github.com"
+        );
+        assert_eq!(
+            super::web_root("https://api.github.com/"),
+            "https://github.com"
+        );
+        assert_eq!(
+            super::web_root("https://ghe.acme.test/api/v3"),
+            "https://ghe.acme.test"
+        );
     }
 }

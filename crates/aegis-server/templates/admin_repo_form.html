@@ -6,6 +6,15 @@
   <h1 id="form-heading">{% if let Some(r) = repo %}Change {{ r.slug }}{% else %}Add a repo{% endif %}</h1>
   <p class="note">Checked against its mode's configuration as <code>aegis-server repo {% if repo.is_some() %}update{% else %}add{% endif %}</code> checks it. Its clone is made after, in the background; the repo's page shows how it goes.</p>
   {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
+  {% if !installed.is_empty() %}
+  <aside aria-labelledby="installed-heading" class="installed">
+    <h2 id="installed-heading">Installed, not registered</h2>
+    <p class="note">The GitHub App is installed on these repos; registering one still takes its language, mode and limits.</p>
+    <ul>
+      {% for (url, query) in installed %}<li><a href="/admin/repos/new?connection=app&amp;url={{ query }}">{{ url }}</a></li>{% endfor %}
+    </ul>
+  </aside>
+  {% endif %}
   <form method="post" action="{{ self.action() }}">
     {% include "form_guard.html" %}
     <fieldset>

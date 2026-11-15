@@ -40,6 +40,7 @@ fn config() -> WebhookConfig {
         gitlab_notifier: None,
         max_body_bytes: DEFAULT_MAX_BODY_BYTES,
         modes: None,
+        app: None,
     }
 }
 

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO github_installations (id, account, repository_selection, repositories)\n             VALUES ($1, $2, $3, $4)\n             ON CONFLICT (id) DO UPDATE SET\n                 account = EXCLUDED.account,\n                 repository_selection = EXCLUDED.repository_selection,\n                 repositories = ARRAY(\n                     SELECT DISTINCT r FROM unnest(github_installations.repositories || $4::text[]) AS r\n                     WHERE r <> ALL($5::text[])\n                     ORDER BY r),\n                 updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cd6ffaf9f04dbbef9675e73b93d501e2056eb45fade59b22240d484ef7a5d24a"
+}

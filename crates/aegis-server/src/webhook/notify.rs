@@ -5,9 +5,13 @@
 //! other sources are not reported.
 
 use aegis_ledger::Outcome;
-use aegis_pr::{GitHub, GitLab, inert};
+use std::sync::Arc;
+
+use aegis_pr::{GitHub, GitLab, TokenSource, TokenUse, inert};
 use aegis_secrets::Secrets;
-use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus};
+use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store};
+
+use crate::github_app::AppHandle;
 
 use crate::lifecycle::parse_issue_ref;
 use crate::worker::JobNotifier;
@@ -33,6 +37,15 @@ pub struct GitHubNotifier {
     api: String,
     /// Where [`COMMENT_TOKEN_ENV`] is read, at each comment.
     secrets: Secrets,
+    /// The instance's GitHub App (ADR 0017 §4), for repos on the app path…
+    app: Option<Arc<AppHandle>>,
+    /// …told apart by their settings, read here for a job's end.
+    store: Option<Store>,
+}
+
+/// Whether a repo with these settings is on the app path (ADR 0017).
+pub fn on_app_path(config: &serde_json::Value) -> bool {
+    config.get("app").is_some_and(|a| !a.is_null())
 }
 
 impl GitHubNotifier {
@@ -40,6 +53,67 @@ impl GitHubNotifier {
         Self {
             api: api.to_owned(),
             secrets,
+            app: None,
+            store: None,
+        }
+    }
+
+    /// With the instance's GitHub App: repos on the app path are
+    /// commented on and asked about as the app, from their settings in
+    /// `store`.
+    pub fn with_app(self, app: Option<Arc<AppHandle>>, store: Store) -> Self {
+        Self {
+            app,
+            store: Some(store),
+            ..self
+        }
+    }
+
+    /// A client of `owner/repo` for `use_`: the app's on the app path, the
+    /// comment token's otherwise; `Ok(None)` when the token path has no
+    /// comment token.
+    async fn client(
+        &self,
+        owner: &str,
+        repo: &str,
+        on_app: bool,
+        use_: TokenUse,
+    ) -> Result<Option<GitHub>, String> {
+        if on_app {
+            let handle = self
+                .app
+                .as_ref()
+                .ok_or("the repo is on the GitHub App path and the instance has no [github_app]")?;
+            let source = TokenSource::App {
+                app: handle.app().await?,
+                owner: owner.to_owned(),
+                repo: repo.to_owned(),
+                use_,
+            };
+            return GitHub::with_source(handle.api(), owner, repo, source)
+                .map(Some)
+                .map_err(|e| e.to_string());
+        }
+        let Some(token) = self.secrets.get(COMMENT_TOKEN_ENV) else {
+            return Ok(None);
+        };
+        GitHub::new(&self.api, owner, repo, token.expose())
+            .map(Some)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Whether the repo of `job` is on the app path.
+    async fn job_on_app(&self, job: &Job) -> bool {
+        let Some(store) = self.store.as_ref().filter(|_| self.app.is_some()) else {
+            return false;
+        };
+        match store.repo(job.repo_id).await {
+            Ok(Some(repo)) => on_app_path(&repo.config),
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!(job = job.id.0, error = %e, "reading the job's repo");
+                false
+            }
         }
     }
 
@@ -66,14 +140,19 @@ impl GitHubNotifier {
 
 impl GitHubNotifier {
     /// Whether `login` may write to `owner/repo` (#244), asked with the
-    /// comment token; `Err` when there is no token or GitHub fails.
-    pub async fn can_write(&self, owner: &str, repo: &str, login: &str) -> Result<bool, String> {
-        let token = self
-            .secrets
-            .get(COMMENT_TOKEN_ENV)
+    /// comment token, or as the app for a repo on the app path; `Err` when
+    /// there is no token or GitHub fails.
+    pub async fn can_write(
+        &self,
+        owner: &str,
+        repo: &str,
+        login: &str,
+        on_app: bool,
+    ) -> Result<bool, String> {
+        let github = self
+            .client(owner, repo, on_app, TokenUse::Comment)
+            .await?
             .ok_or_else(|| format!("no secret {COMMENT_TOKEN_ENV} to check the sender's rights"))?;
-        let github =
-            GitHub::new(&self.api, owner, repo, token.expose()).map_err(|e| e.to_string())?;
         let permission = github.permission(login).await.map_err(|e| e.to_string())?;
         Ok(matches!(
             permission.as_str(),
@@ -82,13 +161,16 @@ impl GitHubNotifier {
     }
 
     /// Posts `text` on issue or PR `number` of `owner/repo`, if the store
-    /// has the comment token; failures are logged.
-    pub async fn comment(&self, owner: &str, repo: &str, number: u64, text: &str) {
-        let Some(token) = self.secrets.get(COMMENT_TOKEN_ENV) else {
-            return;
-        };
-        let posted = match GitHub::new(&self.api, owner, repo, token.expose()) {
-            Ok(github) => github.comment_on_issue(number, text).await.map(drop),
+    /// has the comment token (or as the app, on the app path); failures
+    /// are logged.
+    pub async fn comment(&self, owner: &str, repo: &str, number: u64, text: &str, on_app: bool) {
+        let posted = match self.client(owner, repo, on_app, TokenUse::Comment).await {
+            Ok(Some(github)) => github
+                .comment_on_issue(number, text)
+                .await
+                .map(drop)
+                .map_err(|e| e.to_string()),
+            Ok(None) => return,
             Err(e) => Err(e),
         };
         if let Err(e) = posted {
@@ -102,18 +184,18 @@ impl JobNotifier for GitHubNotifier {
         if job.source != JobSource::Github {
             return;
         }
-        let Some(token) = self.secrets.get(COMMENT_TOKEN_ENV) else {
-            return;
-        };
         let Ok((owner, repo, number)) = parse_issue_ref(&job.issue_ref) else {
             tracing::warn!(job = job.id.0, "not an issue to comment on");
             return;
         };
-        let posted = match GitHub::new(&self.api, &owner, &repo, token.expose()) {
-            Ok(github) => github
+        let on_app = self.job_on_app(job).await;
+        let posted = match self.client(&owner, &repo, on_app, TokenUse::Comment).await {
+            Ok(Some(github)) => github
                 .comment_on_issue(number, &comment_with(job, diagnosis))
                 .await
-                .map(|_| ()),
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Ok(None) => return,
             Err(e) => Err(e),
         };
         match posted {

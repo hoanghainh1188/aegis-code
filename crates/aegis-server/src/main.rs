@@ -197,7 +197,9 @@ async fn run(args: Args) -> Result<(), String> {
             .with_github_app(github_app(&config, &secrets)?);
         let notifier = Arc::new((
             (
-                GitHubNotifier::from_secrets(&secrets).await?,
+                GitHubNotifier::from_secrets(&secrets)
+                    .await?
+                    .with_app(github_app(&config, &secrets)?, store.clone()),
                 GitLabNotifier::from_secrets(&secrets).await?,
             ),
             TrackerNotifier::new(store.clone(), secrets.clone()),

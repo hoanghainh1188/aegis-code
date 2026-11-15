@@ -91,7 +91,8 @@ text_enum! {
 
 text_enum! {
     /// What became of a webhook delivery (#331). `recorded`: no job, but a
-    /// merged agent PR's memory was recorded (#456).
+    /// merged agent PR's memory was recorded (#456). `installation`: the
+    /// GitHub App's installation changed (#540).
     WebhookOutcome {
         Queued = "queued",
         AlreadyLive = "already_live",
@@ -102,6 +103,7 @@ text_enum! {
         Malformed = "malformed",
         BadSignature = "bad_signature",
         Recorded = "recorded",
+        Installation = "installation",
     }
 }
 

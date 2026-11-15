@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT r AS \"repo!\"\n               FROM github_installations, unnest(repositories) AS r\n               WHERE NOT removed AND NOT suspended\n                 AND NOT EXISTS (\n                     SELECT 1 FROM repos\n                     WHERE right(lower(regexp_replace(url, '(\\.git)?/*$', '')), length(r) + 1) = '/' || r)\n               ORDER BY 1\n               LIMIT 500",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repo!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4ed6da8a932342bdb107d1597d315e478900cfd7e3354d53258a8502d62b3905"
+}

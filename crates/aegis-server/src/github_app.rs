@@ -37,6 +37,11 @@ impl AppHandle {
         })
     }
 
+    /// The name of the app webhook's secret in the store.
+    pub fn webhook_secret_env(&self) -> &str {
+        &self.section.webhook_secret_env
+    }
+
     /// The app's API root, the default of repos that name none.
     pub fn api(&self) -> &str {
         &self.section.api
