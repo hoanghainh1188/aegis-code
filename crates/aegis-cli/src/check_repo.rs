@@ -848,7 +848,8 @@ fn build_sandbox(cfg: &RunConfig, root: &aegis_lang::ResolvedProfile, temp_dir: 
         env: cfg.run.sandbox_env.clone().into_iter().collect(),
         network: None,
         read_only_mounts: true,
-        hardening: Hardening::new(cfg.run.sandbox_limits, &root.profile.sandbox),
+        hardening: Hardening::new(cfg.run.sandbox_limits, &root.profile.sandbox)
+            .with_runtime(cfg.run.sandbox_runtime.clone()),
     }
 }
 

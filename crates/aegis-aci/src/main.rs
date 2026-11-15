@@ -1,6 +1,7 @@
 //! `aegis-aci --repo <dir> --language <id> [--overrides <file.toml>] [--parts <file.toml>]
 //! [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...
-//!  [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]]
+//!  [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]
+//!  [--sandbox-runtime <name>]]
 //! [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]
 //! [--sidecars <file.toml>]`:
 //! serves the ACI tools for
@@ -14,7 +15,8 @@
 //! in that image, as the gate's steps do: no network, the mounts read-only,
 //! the `--test-env` variables set, and within the `--sandbox-*` limits (the
 //! run's `[run.sandbox_limits]`, #320; a profile's own memory and CPUs in
-//! their place). `--test-dir` holds `run_tests`' logs. The sidecars file
+//! their place), on `--sandbox-runtime` when given (the run's `[run]
+//! sandbox_runtime`, #519). `--test-dir` holds `run_tests`' logs. The sidecars file
 //! holds the repo's services (`[[sidecar]]`, as `[[repo.sidecars]]`, #491):
 //! with `--format-image`, `run_tests` reaches them as the gate's test steps
 //! do, fresh for each run, and they are removed when the session ends.
@@ -32,7 +34,8 @@ use serde::Deserialize;
 const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides <file.toml>]
        [--parts <file.toml>]
        [--format-image <image> [--docker <program>] [--format-mount <host>:<path>]...
-        [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]]
+        [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]
+        [--sandbox-runtime <name>]]
        [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]
        [--sidecars <file.toml>]";
 
@@ -50,6 +53,8 @@ struct Args {
     docker: Option<String>,
     format_mounts: Vec<(String, String)>,
     limits: Limits,
+    /// The OCI runtime of the containers (#519); `None` is the daemon's.
+    runtime: Option<String>,
     test_env: Vec<(String, String)>,
     test_timeout: Option<Duration>,
     test_dir: Option<PathBuf>,
@@ -97,6 +102,11 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--sandbox-cpus" => parsed.limits.cpus = number(&flag, &value()?)?,
             "--sandbox-pids" => parsed.limits.pids = number(&flag, &value()?)?,
             "--sandbox-tmp-mb" => parsed.limits.tmp_mb = number(&flag, &value()?)?,
+            "--sandbox-runtime" => {
+                let runtime = value()?;
+                aegis_gate::check_runtime(&runtime)?;
+                parsed.runtime = Some(runtime);
+            }
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
@@ -214,7 +224,8 @@ fn build(args: Args) -> Result<Aci, String> {
                     specs: sidecars,
                 });
             }
-            let container = FormatContainer::new(docker, image, args.format_mounts, args.limits);
+            let container = FormatContainer::new(docker, image, args.format_mounts, args.limits)
+                .with_runtime(args.runtime);
             tests.sandbox = Some(test_sandbox(&container));
             aci.with_format_container(container)
         }
@@ -281,4 +292,27 @@ async fn main() -> ExitCode {
     // Exit now: returning would wait for a tool still running on a
     // blocking thread (a formatter) after the client has gone.
     std::process::exit(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Result<Args, String> {
+        parse_args(list.iter().map(|a| (*a).to_owned()))
+    }
+
+    #[test]
+    fn the_sandbox_runtime_is_taken_only_when_it_is_a_runtime_name() {
+        assert_eq!(args(&[]).unwrap().runtime, None);
+        assert_eq!(
+            args(&["--sandbox-runtime", "runsc"])
+                .unwrap()
+                .runtime
+                .as_deref(),
+            Some("runsc")
+        );
+        assert!(args(&["--sandbox-runtime", "--privileged"]).is_err());
+        assert!(args(&["--sandbox-runtime"]).is_err());
+    }
 }

@@ -36,7 +36,7 @@ pub use failures::{DID_NOT_FINISH, failing_tests, failing_tests_with};
 pub use gate::{AuditPolicy, FetchStep, GateRequest, ReferenceGroup, Repro, run_gate};
 pub use parts::GatePart;
 pub use report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
-pub use sandbox::{CLIENT_ENV, Hardening, Limits, Sandbox, WORKDIR};
+pub use sandbox::{CLIENT_ENV, Hardening, Limits, Sandbox, WORKDIR, check_runtime};
 pub use scope::{ScopePolicy, ScopeViolations, analyze_scope, is_test_file};
 pub use secret_scan::{SecretException, SecretFinding, SecretPolicy, SecretScan, scan_patch};
 pub use sidecar::{SIDECAR_PREFIX, SidecarSession, SidecarSpec, Sidecars, check_sidecars};

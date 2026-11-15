@@ -78,6 +78,34 @@ pub struct Hardening {
     /// Mount the image read-only. Off only for the Sonar scanner, whose
     /// image is not one of ours and which runs no code of the patch.
     pub read_only_rootfs: bool,
+    /// The OCI runtime the daemon starts the container with (#519), the
+    /// run's `[run] sandbox_runtime`: `runsc` (gVisor), `kata`, `sysbox`…
+    /// `None` is the daemon's default (`runc`). Checked by
+    /// [`check_runtime`].
+    pub runtime: Option<String>,
+}
+
+/// A runtime name as the daemon's `runtimes` config names one: 1–64 of
+/// `a-z`, `0-9`, `.`, `_`, `-`, starting with a letter or a digit, so it
+/// can be neither empty nor read as another flag of `docker run`.
+pub fn check_runtime(name: &str) -> Result<(), String> {
+    let ok = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "sandbox runtime `{name}`: 1-64 of a-z, 0-9, `.`, `_`, `-`, starting with a \
+             letter or a digit (`runsc`, `kata`, `sysbox-runc`)"
+        ))
+    }
 }
 
 impl Default for Hardening {
@@ -86,6 +114,7 @@ impl Default for Hardening {
             limits: Limits::default(),
             writable: Vec::new(),
             read_only_rootfs: true,
+            runtime: None,
         }
     }
 }
@@ -101,7 +130,14 @@ impl Hardening {
             },
             writable: profile.writable.clone(),
             read_only_rootfs: true,
+            runtime: None,
         }
+    }
+
+    /// This hardening on `runtime`, the run's `[run] sandbox_runtime`
+    /// (#519); `None` keeps the daemon's default.
+    pub fn with_runtime(self, runtime: Option<String>) -> Self {
+        Self { runtime, ..self }
     }
 
     /// The flags of `docker run` that confine the container, on `network`
@@ -131,6 +167,9 @@ impl Hardening {
         ]
         .map(str::to_owned)
         .to_vec();
+        if let Some(runtime) = &self.runtime {
+            out.extend(["--runtime".to_owned(), runtime.clone()]);
+        }
         if self.read_only_rootfs {
             out.extend([
                 "--read-only".to_owned(),
@@ -353,6 +392,57 @@ mod tests {
             "--env GATE_X=1 --env SONAR_TOKEN aegis-sandbox-rust cargo test",
         ] {
             assert!(text.contains(expected), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_runtime_is_passed_only_when_one_is_set() {
+        let default = Hardening::default().args("none").join(" ");
+        assert!(!default.contains("--runtime"), "{default}");
+        let gvisor = Hardening::default()
+            .with_runtime(Some("runsc".into()))
+            .args("none")
+            .join(" ");
+        assert!(
+            gvisor.contains("--network none --cap-drop ALL")
+                && gvisor.contains("--runtime runsc --read-only"),
+            "{gvisor}"
+        );
+        let sandbox = Sandbox {
+            docker: "docker".into(),
+            image: "img".into(),
+            mounts: vec![],
+            env: vec![],
+            network: None,
+            read_only_mounts: true,
+            hardening: Hardening::default().with_runtime(Some("kata".into())),
+        };
+        let argv = sandbox.wrap("n", &["true".into()], Path::new("/w"), &[]);
+        let at = argv.iter().position(|a| a == "--runtime").unwrap();
+        assert_eq!(argv[at + 1], "kata");
+        assert!(
+            at < argv.iter().position(|a| a == "img").unwrap(),
+            "before the image"
+        );
+    }
+
+    #[test]
+    fn runtime_names_cannot_be_empty_flags_or_odd() {
+        for ok in ["runc", "runsc", "kata", "sysbox-runc", "kata.qemu", "io_x2"] {
+            assert!(check_runtime(ok).is_ok(), "{ok}");
+        }
+        let long = "r".repeat(65);
+        for bad in [
+            "",
+            "-it",
+            "--privileged",
+            "Runsc",
+            "runsc --privileged",
+            "a/b",
+            "ü",
+            &long,
+        ] {
+            assert!(check_runtime(bad).is_err(), "{bad:?}");
         }
     }
 

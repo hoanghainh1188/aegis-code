@@ -36,6 +36,8 @@ pub struct FormatContainer {
     pub mounts: Vec<(String, String)>,
     /// The run's `[run.sandbox_limits]` (#320).
     pub limits: Limits,
+    /// The run's `[run] sandbox_runtime` (#519); `None` is the daemon's.
+    pub runtime: Option<String>,
     /// `limits` with what the profile of `image` sets, and where its tools
     /// write ([`Self::for_profile`]).
     hardening: Hardening,
@@ -53,6 +55,7 @@ impl FormatContainer {
             image,
             mounts,
             limits,
+            runtime: None,
             hardening: Hardening {
                 limits,
                 ..Hardening::default()
@@ -60,9 +63,17 @@ impl FormatContainer {
         }
     }
 
+    /// On `runtime` (#519), as the gate's containers are.
+    pub fn with_runtime(mut self, runtime: Option<String>) -> Self {
+        self.hardening = self.hardening.with_runtime(runtime.clone());
+        self.runtime = runtime;
+        self
+    }
+
     /// Locked down as the gate's containers of `profile` are.
     fn for_profile(mut self, profile: &ResolvedProfile) -> Self {
-        self.hardening = Hardening::new(self.limits, &profile.profile.sandbox);
+        self.hardening = Hardening::new(self.limits, &profile.profile.sandbox)
+            .with_runtime(self.runtime.clone());
         self
     }
 
@@ -152,6 +163,7 @@ impl Workspace {
                 self.part_mounts(&part.dir).to_vec(),
                 root.limits,
             )
+            .with_runtime(root.runtime.clone())
             .for_profile(&part.profile),
         })
     }

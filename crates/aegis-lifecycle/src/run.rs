@@ -559,6 +559,9 @@ fn tool_specs(
         ] {
             args.extend([flag.into(), n.to_string()]);
         }
+        if let Some(runtime) = &cfg.run.sandbox_runtime {
+            args.extend(["--sandbox-runtime".into(), runtime.clone()]);
+        }
         // `run_tests` reaches the services the gate's test steps do (#491).
         if !cfg.repo.sidecars.is_empty() {
             let file = job_dir.join("sidecars.toml");
@@ -930,7 +933,8 @@ pub(crate) fn sandbox(
         env: cfg.run.sandbox_env.clone().into_iter().collect(),
         network: None,
         read_only_mounts: true,
-        hardening: Hardening::new(cfg.run.sandbox_limits, &profile.profile.sandbox),
+        hardening: Hardening::new(cfg.run.sandbox_limits, &profile.profile.sandbox)
+            .with_runtime(cfg.run.sandbox_runtime.clone()),
     }))
 }
 
@@ -1775,6 +1779,44 @@ test_env = { DATABASE_URL = "postgres://postgres:5432/t" }"#,
             ),
             "{args}"
         );
+    }
+
+    #[test]
+    fn the_runs_sandbox_runtime_reaches_the_gate_and_the_aci() {
+        // #519: unset, nothing changes; set, every container of the repo's
+        // code runs on it.
+        let mut cfg = monorepo(true);
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let root = &profiles.parts()[0];
+        let aci_args = |cfg: &RunConfig, name: &str| {
+            let job_dir = cfg.run.state_dir.join(format!("jobs/{name}"));
+            std::fs::create_dir_all(&job_dir).unwrap();
+            tool_specs(cfg, &profiles, &job_dir.join("repo"), &job_dir)
+                .unwrap()
+                .into_iter()
+                .find(|s| s.name == "aci")
+                .unwrap()
+                .args
+                .join(" ")
+        };
+        assert_eq!(
+            sandbox(&cfg, root).unwrap().unwrap().hardening.runtime,
+            None
+        );
+        assert!(!aci_args(&cfg, "default").contains("--sandbox-runtime"));
+
+        cfg.run.sandbox_runtime = Some("runsc".into());
+        let gate = sandbox(&cfg, root).unwrap().unwrap().hardening;
+        assert_eq!(gate.runtime.as_deref(), Some("runsc"));
+        assert!(aci_args(&cfg, "gvisor").contains("--sandbox-runtime runsc"));
+    }
+
+    #[test]
+    fn a_runtime_that_could_be_a_flag_is_refused_on_load() {
+        let mut cfg = monorepo(true);
+        cfg.run.sandbox_runtime = Some("--privileged".into());
+        let err = cfg.check().unwrap_err().to_string();
+        assert!(err.contains("run.sandbox_runtime"), "{err}");
     }
 
     #[test]
