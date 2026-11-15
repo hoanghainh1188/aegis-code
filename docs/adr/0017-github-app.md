@@ -1,9 +1,9 @@
 # ADR 0017 – GitHub App: One Installation Instead of a Bot, a Fork and Tokens per Repo
 
 - Date: 2026-11-15
-- Status: Proposed
+- Status: Accepted
 - Decider: @Nguyen Han Hoang Hai
-- Issue: #536 (Milestone: `Phase 2 – Platform`)
+- Issue: #536 (Milestone: `Phase 2 – Platform`), split into #538 (token source), #539 (config, jobs), #540 (webhook, comments), #541 (tenants), #542 (deploy, docs)
 - Related: [ADR 0003](0003-platform-service-architecture.md) §4 (webhooks), [ADR 0007](0007-on-premise-deployment.md), [ADR 0009](0009-prompt-injection-threat-model.md), #30 (secret store), #158 (pilot), #244 (review rounds), #525 (tenants)
 
 ## Context
@@ -100,11 +100,11 @@ One app serves every tenant: each customer installs the operator's app on their 
 
 Each part is its own issue and PR; none changes the token path:
 
-1. `aegis-pr`: app JWT, installation lookup, scoped installation tokens with cache, and the token source used by `GitHub`, `Remote` and clone.
-2. `aegis-lifecycle` / `aegis-server`: `[github_app]` in `server.toml`, `[settings.app]` in repo settings, jobs take tokens from the source per use.
-3. `aegis-server` webhook: two-secret verification and provenance, `installation*` events, `github_installations`, comments and `can_write` with the app.
-4. Tenants: binding installations to tenants (with or after #525).
-5. Deploy and docs: `install.sh` generates the app webhook secret; an [app manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) so creating the app is one click with the right permissions and events; runbook checklist with the app path (items 5–8 become "install the app; add the default-branch ruleset").
+1. #538 `aegis-pr`: app JWT, installation lookup, scoped installation tokens with cache, and the token source used by `GitHub`, `Remote` and clone.
+2. #539 `aegis-lifecycle` / `aegis-server`: `[github_app]` in `server.toml`, `[settings.app]` in repo settings, jobs take tokens from the source per use.
+3. #540 `aegis-server` webhook: two-secret verification and provenance, `installation*` events, `github_installations`, comments and `can_write` with the app.
+4. #541 Tenants: binding installations to tenants (with or after #525).
+5. #542 Deploy and docs: `install.sh` generates the app webhook secret; an [app manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) so creating the app is one click with the right permissions and events; runbook checklist with the app path (items 5–8 become "install the app; add the default-branch ruleset").
 
 ## Consequences
 
