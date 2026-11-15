@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::maven_tree::{self, GRADLE_TREE, MAVEN_TREE};
 use crate::profile::glob_match;
 use crate::{DependencyViolation, LangError, Language, LockedDependency, Profile};
-use crate::{go_lock, maven_lock, npm_lock, nuget_lock, python_lock};
+use crate::{go_lock, maven_lock, npm_lock, nuget_lock, php_lock, python_lock};
 use crate::{pnpm_lock, yarn_lock};
 
 /// MSBuild files that can add packages or package sources.
@@ -73,6 +73,7 @@ pub fn read_lockfile(
         (Language::Python, name) if glob_match("requirements*.txt", name) => {
             python_lock::requirements(name, text)
         }
+        (Language::Php, "composer.lock") => php_lock::composer_lock(text),
         _ => Err(LangError::UnsupportedLockfile {
             language,
             file: file_name.to_owned(),

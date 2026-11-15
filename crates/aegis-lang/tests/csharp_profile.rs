@@ -269,3 +269,34 @@ fn adding_a_package_or_feed_is_blocked() {
     assert_eq!(v.len(), 1);
     assert_eq!(v[0].kind, ViolationKind::UnofficialSource);
 }
+
+#[test]
+fn detects_and_parses_fsharp_and_vbnet_in_dotnet_profile() {
+    let profiles = Profiles::builtin().unwrap();
+    assert_eq!(profiles.detect(["App.fsproj"]), vec![Language::CSharp]);
+    assert_eq!(profiles.detect(["App.vbproj"]), vec![Language::CSharp]);
+    assert_eq!(
+        profiles.language_of(Path::new("src/Lib.fs")),
+        Some(Language::CSharp)
+    );
+    assert_eq!(
+        profiles.language_of(Path::new("src/Lib.vb")),
+        Some(Language::CSharp)
+    );
+
+    let fs_proj = r#"<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" Version="8.0.400" />
+  </ItemGroup>
+</Project>"#;
+    let fs_deps = read_lockfile(Language::CSharp, "App.fsproj", fs_proj).unwrap();
+    assert!(fs_deps.iter().any(|d| d.name == "fsharp.core"));
+
+    let vb_proj = r#"<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>"#;
+    let vb_deps = read_lockfile(Language::CSharp, "App.vbproj", vb_proj).unwrap();
+    assert!(vb_deps.iter().any(|d| d.name == "newtonsoft.json"));
+}

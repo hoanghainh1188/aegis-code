@@ -35,6 +35,8 @@ mod tests {
             "src/__tests__/parse.ts",
             "packages/zod/src/string.test.ts",
             "src/Polly.Core.Tests/Retry/RetryTests.cs",
+            "src/Cart.Tests/CartTests.fs",
+            "tests/Unit/CartTest.php",
             "tests/src/report",
         ] {
             assert!(is_test_path(path), "{path}");

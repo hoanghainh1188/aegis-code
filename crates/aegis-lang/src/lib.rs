@@ -19,6 +19,7 @@ mod maven_tree;
 mod npm_lock;
 mod nuget_lock;
 mod parts;
+mod php_lock;
 mod pnpm_lock;
 mod policy;
 mod profile;

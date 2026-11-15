@@ -149,11 +149,30 @@ mod tests {
             (Language::Java, "class A { void f( }"),
             (Language::CSharp, "class A { void F( }"),
             (Language::Go, "package x\nfunc ( {"),
+            (Language::Php, "<?php\nfunction f( {"),
         ] {
             assert!(
                 !syntax_errors(language, broken).unwrap().is_empty(),
                 "{language}"
             );
         }
+        assert!(
+            !syntax_errors_in(
+                Language::CSharp,
+                Some(Path::new("Lib.fs")),
+                "let add (a: int = a + 1\n"
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            !syntax_errors_in(
+                Language::CSharp,
+                Some(Path::new("Lib.vb")),
+                "Public Class A\n  Public Sub F(\nEnd Class\n"
+            )
+            .unwrap()
+            .is_empty()
+        );
     }
 }

@@ -19,10 +19,13 @@ pub(crate) enum Grammar {
     JavaScript,
     Java,
     CSharp,
+    FSharp,
+    VbNet,
+    Php,
 }
 
 impl Grammar {
-    const COUNT: usize = 8;
+    const COUNT: usize = 11;
 
     /// Grammar for a file of `language`; without a path, the language's
     /// main grammar. `None` while the language has no grammar yet.
@@ -41,7 +44,12 @@ impl Grammar {
                 _ => Self::TypeScript,
             }),
             Language::Java => Some(Self::Java),
-            Language::CSharp => Some(Self::CSharp),
+            Language::CSharp => Some(match ext.as_deref() {
+                Some("fs" | "fsx" | "fsi") => Self::FSharp,
+                Some("vb") => Self::VbNet,
+                _ => Self::CSharp,
+            }),
+            Language::Php => Some(Self::Php),
         }
     }
 
@@ -55,6 +63,9 @@ impl Grammar {
             Self::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
             Self::Java => tree_sitter_java::LANGUAGE.into(),
             Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+            Self::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+            Self::VbNet => tree_sitter_vb_dotnet::LANGUAGE.into(),
+            Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
         }
     }
 
@@ -69,6 +80,9 @@ impl Grammar {
             Self::JavaScript => include_str!("../../../profiles/queries/javascript.scm"),
             Self::Java => include_str!("../../../profiles/queries/java.scm"),
             Self::CSharp => include_str!("../../../profiles/queries/csharp.scm"),
+            Self::FSharp => include_str!("../../../profiles/queries/fsharp.scm"),
+            Self::VbNet => include_str!("../../../profiles/queries/vbnet.scm"),
+            Self::Php => include_str!("../../../profiles/queries/php.scm"),
         }
     }
 
@@ -105,6 +119,9 @@ mod tests {
         Grammar::JavaScript,
         Grammar::Java,
         Grammar::CSharp,
+        Grammar::FSharp,
+        Grammar::VbNet,
+        Grammar::Php,
     ];
 
     #[test]
@@ -134,6 +151,20 @@ mod tests {
             Language::ALL
                 .iter()
                 .all(|l| Grammar::for_file(*l, None).is_some())
+        );
+    }
+
+    #[test]
+    fn picks_dotnet_and_php_grammars_by_extension() {
+        let dotnet = |p: &str| Grammar::for_file(Language::CSharp, Some(Path::new(p)));
+        assert_eq!(dotnet("Program.cs"), Some(Grammar::CSharp));
+        assert_eq!(dotnet("Library.fs"), Some(Grammar::FSharp));
+        assert_eq!(dotnet("Script.fsx"), Some(Grammar::FSharp));
+        assert_eq!(dotnet("Module.fsi"), Some(Grammar::FSharp));
+        assert_eq!(dotnet("Module.vb"), Some(Grammar::VbNet));
+        assert_eq!(
+            Grammar::for_file(Language::Php, Some(Path::new("src/Cart.php"))),
+            Some(Grammar::Php)
         );
     }
 }

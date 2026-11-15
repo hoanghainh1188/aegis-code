@@ -1,0 +1,42 @@
+{
+  "_readme": [
+    "Minimal composer.lock fixture for aegis-lang tests"
+  ],
+  "content-hash": "0123456789abcdef0123456789abcdef",
+  "packages": [
+    {
+      "name": "symfony/console",
+      "version": "v7.1.0",
+      "notification-url": "https://packagist.org/downloads/",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/symfony/console.git",
+        "reference": "0000000000000000000000000000000000000000"
+      },
+      "dist": {
+        "type": "zip",
+        "url": "https://api.github.com/repos/symfony/console/zipball/0000000000000000000000000000000000000000",
+        "reference": "0000000000000000000000000000000000000000"
+      },
+      "type": "library"
+    }
+  ],
+  "packages-dev": [
+    {
+      "name": "phpunit/phpunit",
+      "version": "11.3.1",
+      "notification-url": "https://packagist.org/downloads/",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/sebastianbergmann/phpunit.git",
+        "reference": "1111111111111111111111111111111111111111"
+      },
+      "dist": {
+        "type": "zip",
+        "url": "https://api.github.com/repos/sebastianbergmann/phpunit/zipball/1111111111111111111111111111111111111111",
+        "reference": "1111111111111111111111111111111111111111"
+      },
+      "type": "library"
+    }
+  ]
+}

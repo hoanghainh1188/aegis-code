@@ -75,7 +75,10 @@ fn is_public(language: Language, symbol: &Symbol) -> bool {
         Language::Rust => signature.starts_with("pub ") || signature.starts_with("pub("),
         Language::Python => !symbol.name.starts_with('_'),
         Language::Go => symbol.name.starts_with(|c: char| c.is_uppercase()),
-        Language::Java | Language::CSharp => signature.split_whitespace().any(|w| w == "public"),
+        Language::Java | Language::CSharp | Language::Php => {
+            signature.split_whitespace().any(|w| w == "public")
+                || matches!(language, Language::Php) && symbol.container.is_none()
+        }
         Language::TypeScript => signature.starts_with("export"),
     }
 }
