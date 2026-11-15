@@ -13,16 +13,18 @@ pub enum Language {
     Java,
     Go,
     CSharp,
+    Php,
 }
 
 impl Language {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Rust,
         Self::Python,
         Self::TypeScript,
         Self::Java,
         Self::Go,
         Self::CSharp,
+        Self::Php,
     ];
 
     /// Identifier used in config files and `profiles/<id>.toml`.
@@ -34,6 +36,7 @@ impl Language {
             Self::Java => "java",
             Self::Go => "go",
             Self::CSharp => "csharp",
+            Self::Php => "php",
         }
     }
 }

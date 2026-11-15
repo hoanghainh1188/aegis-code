@@ -397,6 +397,7 @@ fn check_lockfile(repo: &RepoConfig, report: &mut PreflightReport) {
         Language::Java => vec!["pom.xml", "build.gradle", "gradle.lockfile"],
         Language::TypeScript => vec!["package-lock.json", "pnpm-lock.yaml", "yarn.lock"],
         Language::CSharp => vec!["packages.lock.json"],
+        Language::Php => vec!["composer.lock"],
     };
 
     let mut found = None;

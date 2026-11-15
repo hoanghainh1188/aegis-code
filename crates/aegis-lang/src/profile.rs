@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::{CommandTemplate, LangError, Language, Placeholder};
 
 /// Profiles shipped with the platform, one per [`Language`].
-const BUILTIN: [(&str, &str); 6] = [
+const BUILTIN: [(&str, &str); 7] = [
     (
         "profiles/rust.toml",
         include_str!("../../../profiles/rust.toml"),
@@ -33,6 +33,10 @@ const BUILTIN: [(&str, &str); 6] = [
     (
         "profiles/csharp.toml",
         include_str!("../../../profiles/csharp.toml"),
+    ),
+    (
+        "profiles/php.toml",
+        include_str!("../../../profiles/php.toml"),
     ),
 ];
 
@@ -198,6 +202,8 @@ pub enum TestOutput {
     /// `dotnet test`: VSTest's `Failed <name> [<time>]` and
     /// Microsoft.Testing.Platform's `failed <name> (<time>)`.
     Dotnet,
+    /// PHPUnit: numbered `1) Class::method` entries under `FAILURES!` / `ERRORS!`.
+    Phpunit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -337,7 +343,7 @@ pub struct Prompt {
 
 /// `prompts/conventions/<name>`, the files a profile's `[prompt]
 /// conventions` may name.
-const CONVENTIONS: [(&str, &str); 6] = [
+const CONVENTIONS: [(&str, &str); 7] = [
     (
         "rust.md",
         include_str!("../../../prompts/conventions/rust.md"),
@@ -358,6 +364,10 @@ const CONVENTIONS: [(&str, &str); 6] = [
     (
         "csharp.md",
         include_str!("../../../prompts/conventions/csharp.md"),
+    ),
+    (
+        "php.md",
+        include_str!("../../../prompts/conventions/php.md"),
     ),
 ];
 

@@ -1,0 +1,55 @@
+# Language profile PHP (ADR 0004, #37). Lệnh là mảng argv, không qua shell.
+# Placeholder: `{file}` ở edit.format, `{test}` ở gate.repro_test,
+# `{lockfile}` / `{licenses}` / `{osv_config}` ở audit.
+# RepoConfig ghi đè từng lệnh bằng lệnh CI của chính repo.
+
+language = "php"
+display_name = "PHP"
+
+[detect]
+markers = ["composer.json", "composer.lock", "phpunit.xml", "phpunit.xml.dist"]
+extensions = ["php"]
+
+[aci]
+lsp = ["phpactor", "language-server"]
+
+[edit]
+format = ["php-cs-fixer", "fix", "--quiet", "{file}"]
+
+[gate]
+format = ["php-cs-fixer", "fix", "--dry-run", "--diff", "."]
+lint = ["phpstan", "analyse", "--no-progress"]
+repro_test = ["vendor/bin/phpunit", "--filter", "{test}"]
+# PHPUnit prints `OK (1 test, ...)` or `Tests: 1, Assertions: ...` when tests
+# run, and `No tests executed!` when `--filter` matches nothing.
+repro_ran = 'OK \([1-9][0-9]* tests?|Tests:\s*[1-9]'
+test = ["vendor/bin/phpunit"]
+test_output = "phpunit"
+coverage = ["vendor/bin/phpunit", "--coverage-cobertura", "coverage.xml"]
+
+[coverage]
+format = "cobertura"
+path = "coverage.xml"
+
+[dependencies]
+manifests = ["composer.json"]
+lockfiles = ["composer.lock"]
+official_source = "https://packagist.org"
+fetch = ["composer", "install", "--no-interaction", "--no-progress", "--no-scripts"]
+fetch_hosts = ["repo.packagist.org", "packagist.org", "api.github.com", "codeload.github.com"]
+dirs = ["vendor"]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
+upgrade = ["composer", "update", "{package}", "--with", "{package}:{version}", "--no-interaction", "--no-scripts"]
+protected = ["auth.json"]
+
+[sandbox]
+image = "aegis-sandbox-php"
+cache_dirs = ["vendor", "/home/aegis/.cache/composer"]
+writable = ["/home/aegis"]
+
+[sonar.properties]
+"sonar.php.coverage.reportPaths" = "coverage.xml"
+
+[prompt]
+conventions = "php.md"

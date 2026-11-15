@@ -324,7 +324,8 @@ pub fn insert_comment(text: &str, at: usize, language: Language, payload: &str) 
         | Language::TypeScript
         | Language::Java
         | Language::Go
-        | Language::CSharp => "//",
+        | Language::CSharp
+        | Language::Php => "//",
     };
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let lines: Vec<&str> = text.lines().collect();

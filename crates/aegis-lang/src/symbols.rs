@@ -707,4 +707,113 @@ record Point(int x, int y) { int sum() { return x + y; } }
             assert!(has_symbol_query(language), "{language}");
         }
     }
+
+    #[test]
+    fn finds_fsharp_definitions_and_containers() {
+        let fs = r#"
+module Example.Shop
+
+type Money = { Amount: int }
+
+type IPriced =
+    interface
+        abstract member Total : unit -> int
+    end
+
+type Cart() =
+    member this.Add(x: int) = x + 1
+
+let add a b = a + b
+"#;
+        let all = symbols_in(Language::CSharp, Some(std::path::Path::new("Shop.fs")), fs).unwrap();
+        assert_eq!(find(&all, "Example.Shop").kind, SymbolKind::Module);
+        assert_eq!(find(&all, "Money").kind, SymbolKind::Struct);
+        assert_eq!(find(&all, "IPriced").kind, SymbolKind::Interface);
+        assert_eq!(find(&all, "Cart").kind, SymbolKind::Class);
+        assert_eq!(find(&all, "Add").kind, SymbolKind::Method);
+        assert_eq!(find(&all, "Add").container.as_deref(), Some("Cart"));
+        assert_eq!(find(&all, "add").kind, SymbolKind::Function);
+    }
+
+    #[test]
+    fn finds_vbnet_definitions_and_containers() {
+        let vb = r#"
+Namespace Example.Shop
+    Public Interface IPriced
+        Function Total() As Integer
+    End Interface
+
+    Public Class Cart
+        Public Property Count As Integer
+        Public Function Add(x As Integer) As Integer
+            Return x + 1
+        End Function
+    End Class
+End Namespace
+"#;
+        let all = symbols_in(Language::CSharp, Some(std::path::Path::new("Shop.vb")), vb).unwrap();
+        assert_eq!(find(&all, "Example.Shop").kind, SymbolKind::Module);
+        assert_eq!(find(&all, "IPriced").kind, SymbolKind::Interface);
+        assert_eq!(find(&all, "Cart").kind, SymbolKind::Class);
+        assert_eq!(find(&all, "Count").kind, SymbolKind::Variable);
+        assert_eq!(find(&all, "Add").kind, SymbolKind::Method);
+        assert_eq!(find(&all, "Add").container.as_deref(), Some("Cart"));
+    }
+
+    #[test]
+    fn finds_php_definitions_and_containers() {
+        let php = r#"<?php
+
+namespace Example\Shop;
+
+interface Priced
+{
+    public function total(): int;
+}
+
+trait HasItems
+{
+    public function countItems(): int
+    {
+        return 0;
+    }
+}
+
+enum Color: string
+{
+    case Red = 'red';
+}
+
+class Cart implements Priced
+{
+    public const MAX_ITEMS = 10;
+    private array $items = [];
+
+    public function total(): int
+    {
+        return 0;
+    }
+}
+
+function helper(int $x): int
+{
+    return $x + 1;
+}
+"#;
+        let all = symbols(Language::Php, php).unwrap();
+        assert_eq!(find(&all, r"Example\Shop").kind, SymbolKind::Module);
+        assert_eq!(find(&all, "Priced").kind, SymbolKind::Interface);
+        assert_eq!(find(&all, "HasItems").kind, SymbolKind::Trait);
+        assert_eq!(find(&all, "Color").kind, SymbolKind::Enum);
+        assert_eq!(find(&all, "Cart").kind, SymbolKind::Class);
+        assert_eq!(find(&all, "MAX_ITEMS").kind, SymbolKind::Constant);
+        assert_eq!(find(&all, "items").kind, SymbolKind::Variable);
+        assert_eq!(find(&all, "helper").kind, SymbolKind::Function);
+        let totals: Vec<_> = all
+            .iter()
+            .filter(|s| s.name == "total" && s.kind == SymbolKind::Method)
+            .map(|s| s.container.as_deref())
+            .collect();
+        assert_eq!(totals, vec![Some("Priced"), Some("Cart")]);
+    }
 }

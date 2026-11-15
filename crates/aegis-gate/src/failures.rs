@@ -5,6 +5,7 @@
 mod dotnet;
 mod go_test;
 mod js;
+mod phpunit;
 mod surefire;
 
 use std::collections::BTreeSet;
@@ -68,6 +69,7 @@ pub fn failing_tests_with(
         TestOutput::Surefire => surefire::failing(output),
         TestOutput::JestVitest => js::failing(output),
         TestOutput::Dotnet => dotnet::failing(output),
+        TestOutput::Phpunit => phpunit::failing(output),
     }
 }
 
@@ -81,6 +83,7 @@ pub(crate) fn names_test(format: TestOutput, id: &str, test: &str) -> bool {
         TestOutput::Surefire => surefire::names(id, test),
         TestOutput::JestVitest => js::names(id, test),
         TestOutput::Dotnet => dotnet::names(id, test),
+        TestOutput::Phpunit => phpunit::names(id, test),
     }
 }
 
@@ -102,6 +105,7 @@ pub(crate) fn selector(format: TestOutput, ids: &BTreeSet<String>) -> Option<Str
         TestOutput::Surefire => surefire::selector(ids),
         TestOutput::JestVitest => js::selector(ids),
         TestOutput::Dotnet => dotnet::selector(ids),
+        TestOutput::Phpunit => phpunit::selector(ids),
     }
 }
 
@@ -117,6 +121,7 @@ pub(crate) fn ran_nothing(format: TestOutput, output: &str) -> bool {
         TestOutput::Libtest => ran_tests(format, output).is_some_and(|ran| ran.is_empty()),
         TestOutput::GoTest => go_test::ran_nothing(output),
         TestOutput::Dotnet => dotnet::ran_nothing(output),
+        TestOutput::Phpunit => phpunit::ran_nothing(output),
         TestOutput::Pytest | TestOutput::Surefire | TestOutput::JestVitest => false,
     }
 }
@@ -170,7 +175,8 @@ pub fn ran_tests(format: TestOutput, output: &str) -> Option<BTreeSet<String>> {
         | TestOutput::GoTest
         | TestOutput::Surefire
         | TestOutput::JestVitest
-        | TestOutput::Dotnet => None,
+        | TestOutput::Dotnet
+        | TestOutput::Phpunit => None,
     }
 }
 

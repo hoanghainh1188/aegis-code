@@ -13,8 +13,8 @@ language = "csharp"
 display_name = "C# / .NET"
 
 [detect]
-markers = ["*.sln", "*.slnx", "*.csproj", "Directory.Build.props", "global.json"]
-extensions = ["cs"]
+markers = ["*.sln", "*.slnx", "*.csproj", "*.fsproj", "*.vbproj", "Directory.Build.props", "global.json"]
+extensions = ["cs", "fs", "fsx", "fsi", "vb"]
 
 [aci]
 lsp = ["csharp-ls"]
