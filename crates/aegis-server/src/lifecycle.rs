@@ -252,6 +252,17 @@ impl LifecycleRunner {
             }
             _ => config.repo.fork.api = handle.api().to_owned(),
         }
+        // An installation suspended or removed: no job, with the reason
+        // its connection page gives too (ADR 0017 §5).
+        let (owner, name) = (&config.repo.fork.owner, &config.repo.fork.name);
+        let state = self
+            .store
+            .app_on_repo(owner, name)
+            .await
+            .map_err(|e| Attempt::Infra(e.to_string()))?;
+        if let Some(why) = state.and_then(|s| s.refusal(&format!("{owner}/{name}"))) {
+            return Err(Attempt::Rejected(format!("repo `{slug}`: {why}")));
+        }
         let app = handle.app().await.map_err(Attempt::Rejected)?;
         Ok(TokenSource::App {
             app,

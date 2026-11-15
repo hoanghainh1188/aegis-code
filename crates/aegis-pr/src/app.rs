@@ -216,6 +216,13 @@ impl GitHubApp {
         }
     }
 
+    /// Drops all that is known of installation `id`: its repos and their
+    /// tokens. For an `installation*` event (ADR 0017 §5).
+    pub fn forget_installation(&self, id: u64) {
+        lock(&self.installations).retain(|_, i| *i != id);
+        lock(&self.tokens).retain(|(i, _, _), _| *i != id);
+    }
+
     /// The installation of the app on `owner/repo`, from the cache or
     /// `GET /repos/{owner}/{repo}/installation` with the app's JWT.
     pub async fn installation(&self, owner: &str, repo: &str) -> Result<u64, PrError> {

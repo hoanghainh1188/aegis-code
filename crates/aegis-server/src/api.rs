@@ -53,6 +53,9 @@ pub fn router(store: Store, auth: Auth) -> Router {
 pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::RepoAdmin>) -> Router {
     // A merged PR's memory is extracted by its mode's Light model (#456).
     let modes = repo_admin.as_ref().map(crate::web::RepoAdmin::shared_modes);
+    let github_app = repo_admin
+        .as_ref()
+        .and_then(crate::web::RepoAdmin::github_app);
     let api = Router::new()
         .route("/api/v1/jobs", post(create_job).get(list_jobs))
         .route("/api/v1/repos/{id}/cve-jobs", post(create_cve_job))
@@ -96,7 +99,9 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
             "/webhooks",
             crate::webhook::router(
                 store.clone(),
-                crate::webhook::WebhookConfig::from_env().with_modes(modes),
+                crate::webhook::WebhookConfig::from_env()
+                    .with_modes(modes)
+                    .with_github_app(github_app),
             ),
         )
         .layer(TimeoutLayer::with_status_code(

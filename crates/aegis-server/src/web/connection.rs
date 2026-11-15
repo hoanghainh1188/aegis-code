@@ -304,7 +304,7 @@ pub async fn check(
     admin_only(&access)?;
     let admin = editing(admin)?;
     let repo = repo_of(&store, id).await?;
-    let checks = run_checks(&admin, &repo).await;
+    let checks = run_checks(&store, &admin, &repo).await;
     tracing::info!(repo = %repo.slug, by = %access.actor.name, "repo connection checked");
     page(
         &store,
@@ -505,7 +505,7 @@ fn plain_url(url: &str) -> String {
 }
 
 /// The checks against the forge's API, each said plainly.
-pub(super) async fn run_checks(admin: &RepoAdmin, repo: &Repo) -> Vec<CheckRow> {
+pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) -> Vec<CheckRow> {
     let Ok(file) = RepoFile::of(repo) else {
         return vec![fail("Repo", "its settings do not read as a repo file")];
     };
@@ -519,18 +519,28 @@ pub(super) async fn run_checks(admin: &RepoAdmin, repo: &Repo) -> Vec<CheckRow> 
 
     const FORK: &str = "Fork token";
     if app.is_some() {
-        rows.push(match &admin.github_app {
-            Some(_) => pass(
-                "GitHub App",
-                format!(
-                    "pushes `agent/*` to `{}` with the app's tokens, minted per use",
-                    fork.path()
+        const APP: &str = "GitHub App";
+        let full = fork.path();
+        rows.push(match (&admin.github_app, store.app_on_repo(&fork.owner, &fork.name).await) {
+            (None, _) => fail(APP, "the instance has no `[github_app]` in server.toml"),
+            (Some(_), Err(e)) => {
+                tracing::warn!(repo = %repo.slug, error = %e, "reading the app's installations");
+                skip(APP, "its installations could not be read")
+            }
+            (Some(_), Ok(state)) => match state.as_ref().and_then(|s| s.refusal(&full)) {
+                Some(why) => fail(APP, format!("{why}: no job runs until it is back")),
+                None if state.is_none() => pass(
+                    APP,
+                    format!(
+                        "pushes `agent/*` to `{full}` with the app's tokens, minted per use; \
+                         no installation event recorded yet"
+                    ),
                 ),
-            ),
-            None => fail(
-                "GitHub App",
-                "the instance has no `[github_app]` in server.toml",
-            ),
+                None => pass(
+                    APP,
+                    format!("installed: pushes `agent/*` to `{full}` with tokens minted per use"),
+                ),
+            },
         });
     } else {
         match token(admin, &fork.token_env).await {

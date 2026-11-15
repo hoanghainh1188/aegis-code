@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO github_installations (id, account, repository_selection, repositories)\n             VALUES ($1, $2, $3, $4)\n             ON CONFLICT (id) DO UPDATE SET\n                 account = EXCLUDED.account,\n                 repository_selection = EXCLUDED.repository_selection,\n                 repositories = EXCLUDED.repositories,\n                 suspended = false,\n                 removed = false,\n                 updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0262f79df19ca1cca8740173216dc5a654003914923fb0fbb4135618b41fc3b5"
+}

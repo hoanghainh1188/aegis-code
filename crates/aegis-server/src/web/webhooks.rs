@@ -26,7 +26,10 @@ pub(crate) struct WebhookRow {
 /// reason the server gave; `None` when there is nothing to do.
 fn hint(outcome: WebhookOutcome, reason: &str) -> Option<&'static str> {
     match outcome {
-        WebhookOutcome::Queued | WebhookOutcome::Ping | WebhookOutcome::Recorded => None,
+        WebhookOutcome::Queued
+        | WebhookOutcome::Ping
+        | WebhookOutcome::Recorded
+        | WebhookOutcome::Installation => None,
         WebhookOutcome::AlreadyLive => {
             Some("The issue already has a queued or running job: follow that one.")
         }
@@ -80,6 +83,7 @@ impl From<WebhookEvent> for WebhookRow {
             WebhookOutcome::Malformed => "not understood",
             WebhookOutcome::BadSignature => "bad signature",
             WebhookOutcome::Recorded => "memory recorded",
+            WebhookOutcome::Installation => "app installation recorded",
         };
         let reason = e.reason.unwrap_or_default();
         Self {
@@ -95,6 +99,7 @@ impl From<WebhookEvent> for WebhookRow {
                     | WebhookOutcome::Duplicate
                     | WebhookOutcome::Ping
                     | WebhookOutcome::Recorded
+                    | WebhookOutcome::Installation
             ),
             hint: hint(e.outcome, &reason),
             reason,

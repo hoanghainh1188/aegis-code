@@ -33,6 +33,7 @@
 //! URL and path and the issue or run number are read from it.
 
 mod events;
+mod installation;
 mod notify;
 mod verify;
 
@@ -61,7 +62,8 @@ use events::{Kind, Skip, Wanted};
 pub use aegis_secrets::Secret;
 pub use notify::{
     COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
-    GitLabNotifier, comment_with, plain_comment_with, plain_status_comment, status_comment,
+    GitLabNotifier, comment_with, on_app_path, plain_comment_with, plain_status_comment,
+    status_comment,
 };
 pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 
@@ -95,6 +97,37 @@ pub struct WebhookConfig {
     /// The modes' configurations, for the Light model that extracts a
     /// merged PR's memory (#456); `None`: the ledger's summary is kept.
     pub modes: Option<Arc<aegis_lifecycle::Modes>>,
+    /// The instance's GitHub App (ADR 0017 §5): its webhook's secret is a
+    /// second one `POST /github` verifies with, and its repos are asked
+    /// about and commented on as the app.
+    pub app: Option<Arc<crate::github_app::AppHandle>>,
+}
+
+/// Which webhook a GitHub delivery came from, by the secret that verified
+/// it (ADR 0017 §5), never by what it says: a repo's own webhook, or the
+/// GitHub App's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    RepoWebhook,
+    App,
+}
+
+impl Via {
+    /// The path a repo with `config` takes its deliveries from.
+    fn of(config: &serde_json::Value) -> Self {
+        if on_app_path(config) {
+            Self::App
+        } else {
+            Self::RepoWebhook
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::RepoWebhook => "the repo's own webhook",
+            Self::App => "the GitHub App's webhook",
+        }
+    }
 }
 
 impl WebhookConfig {
@@ -114,7 +147,13 @@ impl WebhookConfig {
             per_minute: 120,
             max_body_bytes: max_body_from_env(),
             modes: None,
+            app: None,
         }
+    }
+
+    /// With the instance's GitHub App (ADR 0017).
+    pub fn with_github_app(self, app: Option<Arc<crate::github_app::AppHandle>>) -> Self {
+        Self { app, ..self }
     }
 
     /// With the modes whose Light model extracts merged PRs' memory (#456).
@@ -186,6 +225,12 @@ struct Hooks {
 /// theirs, [`WebhookConfig::max_body_bytes`].
 pub fn router(store: Store, config: WebhookConfig) -> Router {
     let limit = Arc::new(RateLimit::new(config.burst, config.per_minute));
+    let config = WebhookConfig {
+        notifier: config
+            .notifier
+            .map(|n| n.with_app(config.app.clone(), store.clone())),
+        ..config
+    };
     Router::new()
         .route("/github", post(github))
         .route("/gitlab", post(gitlab))
@@ -238,23 +283,31 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 /// The checks before the body is read; the delivery ID and event when
 /// they pass. A delivery that does not verify with the secret as read last
 /// is checked again with the secret read now, if it changed (rotation).
-async fn admit<'a>(
+///
+/// Each of `secrets` (its name, and what verifying with it says) is
+/// checked, in constant time each; exactly one must verify. One the store
+/// does not have is left out; none there at all, 404.
+async fn admit<'a, T: Copy>(
     hooks: &Hooks,
     source: WebhookSource,
-    secret_name: &str,
+    secrets_named: &[(&str, T)],
     verified: impl Fn(&Secret) -> bool,
     headers: &'a HeaderMap,
     id_header: &str,
     event_header: &str,
-) -> Result<(&'a str, &'a str), Refusal> {
+) -> Result<(&'a str, &'a str, T), Refusal> {
     let secrets = &hooks.config.secrets;
-    let Some(secret) = secrets.get(secret_name) else {
+    let present: Vec<(&str, T, Secret)> = secrets_named
+        .iter()
+        .filter_map(|(name, tag)| secrets.get(name).map(|s| (*name, *tag, s)))
+        .collect();
+    if present.is_empty() {
         return Err(refuse(
             StatusCode::NOT_FOUND,
             "not_found",
             "webhook not configured",
         ));
-    };
+    }
     if !hooks.limit.take() {
         return Err(refuse(
             StatusCode::TOO_MANY_REQUESTS,
@@ -262,9 +315,30 @@ async fn admit<'a>(
             "too many deliveries",
         ));
     }
-    if !verified(&secret) {
-        let rotated = secrets.refresh_after_auth_failure(secret_name).await;
-        if !rotated.as_ref().is_some_and(&verified) {
+    // Every secret is checked, so the time taken does not say which one.
+    let mut matched: Vec<T> = present
+        .iter()
+        .filter(|(_, _, secret)| verified(secret))
+        .map(|(_, tag, _)| *tag)
+        .collect();
+    if matched.is_empty() {
+        for (name, tag, _) in &present {
+            let rotated = secrets.refresh_after_auth_failure(name).await;
+            if rotated.as_ref().is_some_and(&verified) {
+                matched.push(*tag);
+            }
+        }
+    }
+    if matched.len() > 1 {
+        tracing::error!("webhook delivery verifies with two secrets: give each webhook its own");
+        return Err(refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "misconfigured",
+            "the server's webhook secrets are not distinct",
+        ));
+    }
+    let Some(tag) = matched.pop() else {
+        {
             tracing::warn!("webhook delivery with a bad signature");
             // Nothing it says is trusted: not its ID, event or repo.
             record(
@@ -286,9 +360,9 @@ async fn admit<'a>(
                 "bad signature",
             ));
         }
-    }
+    };
     match (header(headers, id_header), header(headers, event_header)) {
-        (Some(id), Some(event)) => Ok((id, event)),
+        (Some(id), Some(event)) => Ok((id, event, tag)),
         _ => Err(refuse(
             StatusCode::BAD_REQUEST,
             "bad_request",
@@ -323,21 +397,27 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
         Err(refusal) => return refusal.into_response(),
     };
     let signature = header(&headers, "x-hub-signature-256");
+    let mut secrets_named = vec![(GITHUB_SECRET_ENV, Via::RepoWebhook)];
+    if let Some(app) = &hooks.config.app {
+        secrets_named.push((app.webhook_secret_env(), Via::App));
+    }
     let admitted = admit(
         &hooks,
         WebhookSource::Github,
-        GITHUB_SECRET_ENV,
+        &secrets_named,
         |s| verify::github(s.expose().as_bytes(), &body, signature),
         &headers,
         "x-github-delivery",
         "x-github-event",
     )
     .await;
-    let (id, event) = match admitted {
+    let (id, event, via) = match admitted {
         Ok(admitted) => admitted,
         Err(refusal) => return refusal.into_response(),
     };
-    let handled = if event == "ping" {
+    let handled = if installation::is_event(event) {
+        installation::handle(&hooks, via, id, event, &body).await
+    } else if event == "ping" {
         // Sent by GitHub when the webhook is made (#331): the way is open.
         Handled::new(
             answer(StatusCode::OK, json!({ "status": "pong" })),
@@ -347,7 +427,7 @@ async fn github(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
         )
     } else {
         let wanted = events::github(event, &body, &hooks.config.label);
-        deliver(&hooks, WebhookSource::Github, id, event, wanted).await
+        deliver(&hooks, WebhookSource::Github, Some(via), id, event, wanted).await
     };
     handled
         .log(&hooks, WebhookSource::Github, id, event, &body)
@@ -363,19 +443,19 @@ async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
     let admitted = admit(
         &hooks,
         WebhookSource::Gitlab,
-        GITLAB_TOKEN_ENV,
+        &[(GITLAB_TOKEN_ENV, ())],
         |s| verify::gitlab(s.expose().as_bytes(), token),
         &headers,
         "x-gitlab-event-uuid",
         "x-gitlab-event",
     )
     .await;
-    let (id, event) = match admitted {
+    let (id, event, ()) = match admitted {
         Ok(admitted) => admitted,
         Err(refusal) => return refusal.into_response(),
     };
     let wanted = events::gitlab(event, &body, &hooks.config.label);
-    let handled = deliver(&hooks, WebhookSource::Gitlab, id, event, wanted).await;
+    let handled = deliver(&hooks, WebhookSource::Gitlab, None, id, event, wanted).await;
     handled
         .log(&hooks, WebhookSource::Gitlab, id, event, &body)
         .await
@@ -521,6 +601,7 @@ fn issue_trust_policy(config: &serde_json::Value) -> IssueTrustPolicy {
 async fn deliver(
     hooks: &Hooks,
     source: WebhookSource,
+    via: Option<Via>,
     delivery: &str,
     event: &str,
     wanted: Result<Wanted, Skip>,
@@ -537,6 +618,7 @@ async fn deliver(
         return review_round(
             hooks,
             source,
+            via,
             delivery,
             event,
             &wanted.issue_ref,
@@ -546,7 +628,7 @@ async fn deliver(
         .await;
     }
     if let Kind::PrMerged { pr_url } = &wanted.kind {
-        return pr_merged(hooks, source, delivery, pr_url).await;
+        return pr_merged(hooks, source, via, delivery, pr_url).await;
     }
     let repo = match hooks.store.repo_by_remote(&wanted.repo_url).await {
         Ok(Some(repo)) => repo,
@@ -554,6 +636,13 @@ async fn deliver(
         Err(StoreError::Conflict(why)) => return ignored(delivery, &why),
         Err(e) => return internal(delivery, &e),
     };
+    if let Some(skip) = off_path(hooks, via, &repo).await {
+        return match skip {
+            Ok(why) => ignored_in(delivery, &why, Some(repo.id)),
+            Err(e) => internal(delivery, &e),
+        };
+    }
+    let on_app = via == Some(Via::App);
     if let Kind::Issue { author } = &wanted.kind {
         let policy = issue_trust_policy(&repo.config);
         if policy == IssueTrustPolicy::Collaborators {
@@ -596,7 +685,7 @@ async fn deliver(
                             Some(repo.id),
                         );
                     };
-                    notifier.can_write(owner, name, login).await
+                    notifier.can_write(owner, name, login, on_app).await
                 }
                 (_, None) => {
                     tracing::info!(delivery, repo = %repo.slug, "issue labeled but author is unknown");
@@ -735,6 +824,36 @@ async fn deliver(
     }
 }
 
+/// Why a GitHub delivery verified as `via` makes nothing for `repo`, if
+/// it does not (ADR 0017 §5): it came from the other path's webhook, or the
+/// repo is on the app path and the app's installation on it was
+/// suspended, removed or not given it. `Err`: the store failed.
+async fn off_path(
+    hooks: &Hooks,
+    via: Option<Via>,
+    repo: &aegis_store::Repo,
+) -> Option<Result<String, StoreError>> {
+    let via = via?;
+    let path = Via::of(&repo.config);
+    if via != path {
+        return Some(Ok(format!(
+            "delivered by {}, but the repo takes {}",
+            via.name(),
+            path.name()
+        )));
+    }
+    if path != Via::App {
+        return None;
+    }
+    let (owner, name) = owner_and_name(&repo.url)?;
+    match hooks.store.app_on_repo(owner, name).await {
+        Ok(state) => state
+            .and_then(|s| s.refusal(&format!("{owner}/{name}")))
+            .map(Ok),
+        Err(e) => Some(Err(e)),
+    }
+}
+
 /// The project path of a GitLab repo URL: what follows the host, without
 /// `.git` (`https://gitlab.com/group/sub/app` → `group/sub/app`).
 pub(crate) fn project_path(url: &str) -> Option<&str> {
@@ -757,7 +876,34 @@ pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
 
 /// Extracts `merged_pr` and `review_lesson` repository memories when an
 /// agent PR is merged (#456).
-async fn pr_merged(hooks: &Hooks, source: WebhookSource, delivery: &str, pr_url: &str) -> Handled {
+async fn pr_merged(
+    hooks: &Hooks,
+    source: WebhookSource,
+    via: Option<Via>,
+    delivery: &str,
+    pr_url: &str,
+) -> Handled {
+    // Counted from the webhook of the path its repo is on only, so a repo
+    // with both webhooks does not record a PR twice.
+    if via.is_some() {
+        let repo = match hooks.store.job_by_pr_url(pr_url).await {
+            Ok(Some(job)) => hooks.store.repo(job.repo_id).await,
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        };
+        match repo {
+            Ok(Some(repo)) => {
+                if let Some(skip) = off_path(hooks, via, &repo).await {
+                    return match skip {
+                        Ok(why) => ignored_in(delivery, &why, Some(repo.id)),
+                        Err(e) => internal(delivery, &e),
+                    };
+                }
+            }
+            Ok(None) => {}
+            Err(e) => return internal(delivery, &e),
+        }
+    }
     let actor = aegis_store::Actor::webhook(source.as_str());
     let modes = hooks.config.modes.as_deref();
     let extracted = crate::memory::extract_and_store_merged_pr(
@@ -800,9 +946,11 @@ async fn pr_merged(hooks: &Hooks, source: WebhookSource, delivery: &str, pr_url:
 /// it is found by the PR's URL, the sender must be able to write to the
 /// job's repo, and the store queues the round, within the PR's rounds.
 /// A refused round is told on the PR.
+#[allow(clippy::too_many_arguments)]
 async fn review_round(
     hooks: &Hooks,
     source: WebhookSource,
+    via: Option<Via>,
     delivery: &str,
     event: &str,
     issue_ref: &str,
@@ -819,6 +967,13 @@ async fn review_round(
         Ok(None) => return ignored(delivery, "repository not registered"),
         Err(e) => return internal(delivery, &e),
     };
+    if let Some(skip) = off_path(hooks, via, &repo).await {
+        return match skip {
+            Ok(why) => ignored_in(delivery, &why, Some(repo.id)),
+            Err(e) => internal(delivery, &e),
+        };
+    }
+    let on_app = via == Some(Via::App);
     let ignored = |delivery: &str, why: &str| ignored_in(delivery, why, Some(repo.id));
     let allowed = match source {
         WebhookSource::Gitlab => {
@@ -838,7 +993,7 @@ async fn review_round(
             let Some((owner, name)) = owner_and_name(&repo.url) else {
                 return ignored(delivery, "the repository's URL names no owner and name");
             };
-            notifier.can_write(owner, name, sender).await
+            notifier.can_write(owner, name, sender, on_app).await
         }
     };
     match allowed {
@@ -882,7 +1037,7 @@ async fn review_round(
                     &hooks.config.notifier,
                     crate::lifecycle::parse_issue_ref(issue_ref),
                 ) {
-                    n.comment(&owner, &name, number, &text).await;
+                    n.comment(&owner, &name, number, &text, on_app).await;
                 }
             }
         }
