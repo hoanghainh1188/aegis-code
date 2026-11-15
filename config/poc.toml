@@ -23,6 +23,11 @@ step_timeout_s = 1800
 # Gate steps in docker/<profile> images, --network none (#5); dependencies
 # come from the fetch step behind the egress proxy (#66).
 sandbox = true
+# The OCI runtime of the containers that run the repo's code (#519): unset is
+# the daemon's default (runc). `runsc` runs them under gVisor, a user-space
+# kernel between the code and the host's (#322); the daemon must list it in
+# its `runtimes`, and the Docker proxy allows only runc and runsc.
+# sandbox_runtime = "runsc"
 
 # tldextract (scrapy's cookie middleware) downloads the Public Suffix List on
 # first use; with no network it logs a warning into whichever test runs

@@ -66,6 +66,13 @@ pub struct RunSection {
     /// a profile's `sandbox.memory_mb` and `sandbox.cpus` go in their place.
     #[serde(default)]
     pub sandbox_limits: aegis_gate::Limits,
+    /// The OCI runtime of every container that runs the repo's code (#519):
+    /// the gate's steps, `run_tests`, the formatter. `runsc` for gVisor;
+    /// the daemon must know it (`runtimes` in its `daemon.json`), and the
+    /// Docker proxy allows only `runc` and `runsc` (ADR 0010). Unset is the
+    /// daemon's default.
+    #[serde(default)]
+    pub sandbox_runtime: Option<String>,
     /// Image the egress proxy of the fetch step runs in; any with Python 3.
     #[serde(default = "default_egress_image")]
     pub egress_image: String,
@@ -550,6 +557,10 @@ impl RunConfig {
             .check_ids()
             .map_err(LifecycleError::Config)?;
         self.repo.secrets.check().map_err(LifecycleError::Config)?;
+        if let Some(runtime) = &self.run.sandbox_runtime {
+            aegis_gate::check_runtime(runtime)
+                .map_err(|e| LifecycleError::Config(format!("run.sandbox_runtime: {e}")))?;
+        }
         aegis_gate::check_sidecars(&self.repo.sidecars)
             .map_err(|e| LifecycleError::Config(format!("repo.sidecars: {e}")))?;
         if !self.repo.sidecars.is_empty() && !self.run.sandbox {
