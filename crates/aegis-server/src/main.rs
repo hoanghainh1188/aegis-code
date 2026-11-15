@@ -157,7 +157,8 @@ async fn run(args: Args) -> Result<(), String> {
         .with_budget(config.budget_rules())
         .await
         .map_err(|e| format!("[budget]: {e}"))?
-        .with_max_review_rounds(config.reviews.max_rounds);
+        .with_max_review_rounds(config.reviews.max_rounds)
+        .with_sla_aging(std::time::Duration::from_secs(config.worker.sla_aging_s));
     let shutdown = on_shutdown_signal();
     let mut parts: JoinSet<Result<(), String>> = JoinSet::new();
     let refresh = secrets::keep_fresh(

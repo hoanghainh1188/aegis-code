@@ -87,6 +87,11 @@ poll_s = 5
 drain_s = 600
 # First wait after an infrastructure failure; doubles, at most 3 retries.
 retry_base_s = 30
+# Queued jobs are claimed by SLA level (#524): P1, P2, P3 (from an ITSM
+# ticket, #453), then jobs with none, the sooner deadline first. Each this
+# long a job has waited lifts it one level, so no job waits for ever behind
+# newer P1s. Without SLAs the queue is first in, first out.
+sla_aging_s = 3600
 
 [trackers]
 # The Jira/Backlog filters of the repos (`tracker` in their settings) are

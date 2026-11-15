@@ -18,6 +18,8 @@
 //! - The queue, read from the database at each scrape: ready, waiting
 //!   (backoff) and running jobs, and how long the oldest ready one waited.
 //!   Every process reports the same queue; alerts take the max.
+//! - Ready jobs by SLA level (`P1`, `P2`, `P3`, `none`, #524), and how long
+//!   the oldest of each has waited.
 //! - Each repo's monthly budget (#31), read at each scrape too: what it
 //!   spent this month and its cap, when it has one.
 //! - Secrets kept from leaving the platform (#509), by `place`: `patch`
@@ -102,6 +104,11 @@ struct PlaceLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct PriorityLabels {
+    priority: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct QueueLabels {
     state: &'static str,
 }
@@ -123,6 +130,8 @@ pub struct Metrics {
     provider_call_seconds: Family<TierLabels, Histogram>,
     queue_jobs: Family<QueueLabels, Gauge>,
     queue_oldest_ready_seconds: Gauge<f64, AtomicU64>,
+    queue_ready_by_priority: Family<PriorityLabels, Gauge>,
+    queue_oldest_ready_by_priority: Family<PriorityLabels, Gauge<f64, AtomicU64>>,
     budget_spent_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
     budget_cap_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
     triage: Family<TriageLabels, Counter>,
@@ -192,6 +201,18 @@ impl Metrics {
             "How long the oldest ready job has waited since it was due",
             queue_oldest_ready_seconds.clone(),
         );
+        let queue_ready_by_priority = Family::default();
+        registry.register(
+            "queue_ready_by_priority",
+            "Ready jobs by SLA level: P1, P2, P3, none (#524)",
+            queue_ready_by_priority.clone(),
+        );
+        let queue_oldest_ready_by_priority = Family::default();
+        registry.register(
+            "queue_oldest_ready_by_priority_seconds",
+            "How long the oldest ready job of each SLA level has waited since it was due",
+            queue_oldest_ready_by_priority.clone(),
+        );
         let budget_spent_usd = Family::default();
         registry.register(
             "repo_budget_spent_usd",
@@ -243,6 +264,8 @@ impl Metrics {
             provider_call_seconds,
             queue_jobs,
             queue_oldest_ready_seconds,
+            queue_ready_by_priority,
+            queue_oldest_ready_by_priority,
             budget_spent_usd,
             budget_cap_usd,
         }
@@ -299,6 +322,17 @@ impl Metrics {
                 .set(count);
         }
         self.queue_oldest_ready_seconds.set(stats.oldest_ready_s);
+        for level in &stats.by_priority {
+            let labels = PriorityLabels {
+                priority: level.priority,
+            };
+            self.queue_ready_by_priority
+                .get_or_create(&labels)
+                .set(level.ready);
+            self.queue_oldest_ready_by_priority
+                .get_or_create(&labels)
+                .set(level.oldest_ready_s);
+        }
     }
 
     fn paused(&self, paused: bool) {
@@ -582,6 +616,46 @@ mod tests {
             " 1",
         );
         assert!(text.ends_with("# EOF\n"));
+    }
+
+    #[test]
+    fn the_queue_reports_each_sla_level() {
+        let m = Metrics::new();
+        m.queue(&aegis_store::QueueStats {
+            ready: 3,
+            waiting: 0,
+            running: 1,
+            oldest_ready_s: 90.0,
+            by_priority: aegis_store::PRIORITY_LEVELS
+                .iter()
+                .map(|&priority| aegis_store::PriorityStats {
+                    priority,
+                    ready: i64::from(priority == "P1") * 2 + i64::from(priority == "none"),
+                    oldest_ready_s: if priority == "P1" { 90.0 } else { 0.0 },
+                })
+                .collect(),
+        });
+        let text = m.render().unwrap();
+        assert!(
+            line_of(&text, r#"aegis_queue_ready_by_priority{priority="P1"} 2"#).is_some(),
+            "{text}"
+        );
+        assert!(
+            line_of(&text, r#"aegis_queue_ready_by_priority{priority="P3"} 0"#).is_some(),
+            "{text}"
+        );
+        assert!(
+            line_of(&text, r#"aegis_queue_ready_by_priority{priority="none"} 1"#).is_some(),
+            "{text}"
+        );
+        assert!(
+            line_of(
+                &text,
+                r#"aegis_queue_oldest_ready_by_priority_seconds{priority="P1"} 90"#
+            )
+            .is_some(),
+            "{text}"
+        );
     }
 
     #[test]
