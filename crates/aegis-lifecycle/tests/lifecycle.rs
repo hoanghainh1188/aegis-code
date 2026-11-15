@@ -179,6 +179,7 @@ fn issue() -> IssueInput {
         hidden: None,
         kind: None,
         source: Some("github".into()),
+        memory: String::new(),
     }
 }
 

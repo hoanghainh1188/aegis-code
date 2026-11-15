@@ -477,7 +477,7 @@ async fn repo_memories_api_and_merged_pr_extraction_work_end_to_end() {
     .await
     .unwrap();
 
-    let extracted = aegis_server::memory::extract_and_store_merged_pr(
+    let extracted = aegis_server::memory::extract_and_store(
         &db.store,
         pr_url,
         None,

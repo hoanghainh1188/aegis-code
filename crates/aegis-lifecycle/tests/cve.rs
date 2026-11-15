@@ -148,6 +148,7 @@ fn cve_issue(package: &str, version: &str) -> IssueInput {
         kind: None,
         cve: Some(target),
         source: Some("cve".into()),
+        memory: String::new(),
     }
 }
 

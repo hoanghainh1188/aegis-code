@@ -279,5 +279,6 @@ pub async fn sonar_issue(
         hidden: None,
         kind: Some(IssueKind::Sonar),
         source: Some("sonar".into()),
+        memory: String::new(),
     })
 }

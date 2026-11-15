@@ -523,6 +523,7 @@ fn cve_issue(job: &Job) -> Result<IssueInput, Attempt> {
         kind: None,
         cve: Some(target),
         source: Some("cve".into()),
+        memory: String::new(),
     })
 }
 

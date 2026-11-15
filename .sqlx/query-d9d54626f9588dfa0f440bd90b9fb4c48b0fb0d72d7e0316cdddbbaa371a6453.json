@@ -1,0 +1,155 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO repo_memories (\n                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id\n                 )\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                 ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET\n                     title = EXCLUDED.title,\n                     summary = EXCLUDED.summary,\n                     paths = EXCLUDED.paths,\n                     keywords = EXCLUDED.keywords,\n                     job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),\n                     updated_at = now()\n                 RETURNING id, repo_id, kind, source_ref, title, summary, paths,\n                           keywords, job_id, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "repo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "repo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "source_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "source_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "paths",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "paths"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "keywords",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "keywords"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "job_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d9d54626f9588dfa0f440bd90b9fb4c48b0fb0d72d7e0316cdddbbaa371a6453"
+}

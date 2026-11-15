@@ -236,6 +236,7 @@ fn eval_job() -> IssueInput {
         }),
         kind: None,
         source: Some("eval".into()),
+        memory: String::new(),
     }
 }
 

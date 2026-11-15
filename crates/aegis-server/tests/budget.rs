@@ -365,6 +365,7 @@ async fn a_webhook_job_refused_for_the_budget_is_told_on_the_issue() {
         burst: 10,
         per_minute: 60,
         max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+        modes: None,
         notifier: Some(GitHubNotifier::new(
             &github_api.uri(),
             Secrets::fixed([(COMMENT_TOKEN_ENV, "comment-token")]),

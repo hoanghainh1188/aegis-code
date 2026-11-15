@@ -374,6 +374,7 @@ async fn before_vs_after_incident_memory_improves_acceptance_and_reduces_model_c
         hidden: None,
         kind: None,
         source: Some("github".into()),
+        memory: String::new(),
     };
     let rep_no_1 = run_issue(Arc::clone(&p_no_1), issue_no_1, CancellationToken::new())
         .await
@@ -404,6 +405,7 @@ async fn before_vs_after_incident_memory_improves_acceptance_and_reduces_model_c
         hidden: None,
         kind: None,
         source: Some("github".into()),
+        memory: String::new(),
     };
     let rep_no_2 = run_issue(Arc::clone(&p_no_2), issue_no_2, CancellationToken::new())
         .await
@@ -435,6 +437,7 @@ async fn before_vs_after_incident_memory_improves_acceptance_and_reduces_model_c
         hidden: None,
         kind: None,
         source: Some("github".into()),
+        memory: String::new(),
     }
     .with_memories(&lessons);
 
@@ -467,6 +470,7 @@ async fn before_vs_after_incident_memory_improves_acceptance_and_reduces_model_c
         hidden: None,
         kind: None,
         source: Some("github".into()),
+        memory: String::new(),
     }
     .with_memories(&lessons);
 
