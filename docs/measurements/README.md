@@ -54,6 +54,7 @@ Các KPI còn lại ở Phase 1 ([eval-kpi](2026-10-24-eval-kpi.md)): không PR 
 | 10-27 | [sbfl-evaluation](2026-10-27-sbfl-evaluation.md) (#34) | SBFL (Tarantula, Ochiai): hoãn, không bật mặc định |
 | 10-28 | [context-compression](2026-10-28-context-compression.md) (#35) | Nén context nâng cao: không làm, context chưa từng vượt 40% cửa sổ |
 | 10-29 | [early-stop](2026-10-29-early-stop.md) (#273) | Dừng sớm lượt không tiến triển: không thêm, mọi quy tắc đơn giản đều làm mất PR tốt |
+| 11-15 | [spec-review-evidence](2026-11-15-spec-review-evidence.md) (#36) | Bằng chứng review kiểu SpecRover: không làm, duyệt Phase 1 chỉ 1.7 phút/PR |
 
 ## Prompt injection
 
