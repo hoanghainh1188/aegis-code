@@ -123,7 +123,7 @@ pub(crate) fn site_url(url: &str) -> Result<&str, TrackerError> {
 }
 
 /// The name of a secret, as the secret store takes it.
-fn token_env(name: &str) -> Result<(), TrackerError> {
+pub(crate) fn token_env(name: &str) -> Result<(), TrackerError> {
     let ok = !name.is_empty()
         && name.len() <= 128
         && name

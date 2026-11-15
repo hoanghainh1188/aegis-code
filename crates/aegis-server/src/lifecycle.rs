@@ -41,7 +41,7 @@ use tracing::Instrument;
 use crate::metrics::JobObserver;
 use crate::runner::{Attempt, JobRunner};
 use crate::sonar::sonar_issue;
-use crate::tracker::ticket_issue;
+use crate::tracker::{enrich_with_apm, ticket_issue};
 
 /// The Postgres ledger, with each event tied to the run of its job that is
 /// writing it at the moment.
@@ -309,7 +309,7 @@ impl LifecycleRunner {
             JobSource::Review => Some(self.review_round(job, &config, &github_token).await?),
             _ => None,
         };
-        let issue = match (&round, job.source) {
+        let mut issue = match (&round, job.source) {
             (Some((root, _)), _) => {
                 // The issue the PR is for, read as its job read it.
                 let fork = &config.repo.fork;
@@ -338,6 +338,9 @@ impl LifecycleRunner {
             (None, JobSource::Cve) => cve_issue(job)?,
             (None, _) => issue(job, &config.repo.fork.api, &github_token).await?,
         };
+        if round.is_none() && !matches!(job.source, JobSource::Cve | JobSource::Sonar) {
+            enrich_with_apm(&repo, &self.secrets, &mut issue).await;
+        }
         let tiers = [
             (&config.models.light, "light"),
             (&config.models.core, "core"),

@@ -15,6 +15,7 @@
 //! Tokens are not in the configuration: `token_env` names the secret, the
 //! caller reads it from its secret store.
 
+mod apm;
 mod backlog;
 mod config;
 mod error;
@@ -22,6 +23,7 @@ mod http;
 mod jira;
 mod ticket;
 
+pub use apm::{ApmClient, ApmConfig, DatadogConfig, SentryConfig, Telemetry, TelemetryQuery};
 pub use config::{BacklogConfig, Deployment, JiraConfig, TrackerConfig};
 pub use error::TrackerError;
 pub use ticket::{Log, Ticket, checked_key};

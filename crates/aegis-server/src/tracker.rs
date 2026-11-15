@@ -20,7 +20,9 @@ use aegis_secrets::Secrets;
 use aegis_store::{
     Delivered, Job, JobSource, NewDelivery, NewJob, Page, Repo, Store, StoreError, WebhookSource,
 };
-use aegis_tracker::{Report, Tracker, TrackerConfig, TrackerError};
+use aegis_tracker::{
+    ApmClient, ApmConfig, Report, TelemetryQuery, Tracker, TrackerConfig, TrackerError,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::api::default_ledger_key;
@@ -79,6 +81,63 @@ pub fn tracker_config(repo: &Repo) -> Result<Option<TrackerConfig>, Unusable> {
         Some(value) => serde_json::from_value(value.clone())
             .map(Some)
             .map_err(|e| Unusable::Config(format!("repo `{}`: tracker: {e}", repo.slug))),
+    }
+}
+
+/// `repo`'s APM connector from its settings, `None` when it has none.
+pub fn apm_config(repo: &Repo) -> Result<Option<ApmConfig>, Unusable> {
+    match repo.config.get("apm") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|e| Unusable::Config(format!("repo `{}`: apm: {e}", repo.slug))),
+    }
+}
+
+/// Enriches `issue.body` with production telemetry from the repository's
+/// configured APM provider (#452). Fails soft: a missing secret or transient
+/// APM error is logged and leaves `issue` untouched.
+pub async fn enrich_with_apm(repo: &Repo, secrets: &Secrets, issue: &mut IssueInput) {
+    let config = match apm_config(repo) {
+        Ok(Some(c)) => c,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!(repo = %repo.slug, error = %e, "ignoring invalid apm config");
+            return;
+        }
+    };
+    let Ok(Some(token)) = secrets.get_or_load(config.token_env()).await else {
+        tracing::warn!(repo = %repo.slug, secret = %config.token_env(), "missing apm token secret");
+        return;
+    };
+    let app_key = match config.app_key_env() {
+        Some(name) => match secrets.get_or_load(name).await {
+            Ok(Some(k)) => Some(k),
+            _ => {
+                tracing::warn!(repo = %repo.slug, secret = %name, "missing apm app key secret");
+                return;
+            }
+        },
+        None => None,
+    };
+    let client = match ApmClient::new(
+        &config,
+        token.expose(),
+        app_key.as_ref().map(|k| k.expose()),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(repo = %repo.slug, error = %e, "apm client config rejected");
+            return;
+        }
+    };
+    let query = TelemetryQuery::from_ticket(&issue.title, &issue.body);
+    match client.fetch(&query).await {
+        Ok(Some(telemetry)) => issue.body.push_str(&telemetry.to_markdown()),
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(repo = %repo.slug, issue = %issue.id, error = %e, "apm telemetry fetch failed");
+        }
     }
 }
 

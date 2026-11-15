@@ -53,7 +53,7 @@ impl Ticket {
     }
 }
 
-fn longest_run(text: &str, c: char) -> usize {
+pub(crate) fn longest_run(text: &str, c: char) -> usize {
     let (mut best, mut run) = (0, 0);
     for x in text.chars() {
         run = if x == c { run + 1 } else { 0 };
