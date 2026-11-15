@@ -305,6 +305,7 @@ fn issue(id: &str, hidden: Option<HiddenTests>) -> IssueInput {
         base: None,
         hidden,
         kind: None,
+        source: Some("github".into()),
     }
 }
 

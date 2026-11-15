@@ -155,6 +155,7 @@ impl EvalIssue {
             }),
             kind: None,
             cve: None,
+            source: Some("eval".into()),
         })
     }
 

@@ -176,6 +176,7 @@ fn cve_issue(args: &Args) -> Result<IssueInput, String> {
         hidden: None,
         kind: None,
         cve: Some(target),
+        source: Some("cve".into()),
     })
 }
 

@@ -158,6 +158,7 @@ async fn a_sonar_issue_goes_from_warnings_to_one_pr() {
         base: None,
         hidden: None,
         kind: None,
+        source: Some("github".into()),
     };
     let requests = one_pr(issue).await;
     assert!(
@@ -184,6 +185,7 @@ async fn a_polled_batch_goes_to_one_pr_without_triage() {
         base: None,
         hidden: None,
         kind: Some(IssueKind::Sonar),
+        source: Some("sonar".into()),
     };
     let requests = one_pr(issue).await;
     assert!(

@@ -10,6 +10,7 @@
     <div><dt>Review time / PR</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">≤ 15 min</dd></div>
     <div><dt>Cache read</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
     <div><dt>Escalated to Expert</dt><dd>{{ total.expert }}</dd><dd class="threshold">tracked</dd></div>
+    <div><dt>Stopped without PR</dt><dd>{{ total.stopped }}</dd><dd class="threshold">investigate &gt; 30%</dd></div>
     <div><dt>Diagnosed, no PR</dt><dd>{{ total.diagnosed }}</dd><dd class="threshold">triage lane</dd></div>
     <div><dt>Held: no verifiable sources</dt><dd>{{ total.held_for_sources }}</dd><dd class="threshold">tracked</dd></div>
     <div><dt>Awaiting review</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">PRs without review</dd></div>
@@ -70,6 +71,55 @@
   <h2 id="repo-heading">By repo</h2>
   {% call m::kpi_table("Repo", repos) %}{% endcall %}
 </section>
+
+<section aria-labelledby="source-heading" class="band">
+  <h2 id="source-heading">By ticket source</h2>
+  {% call m::kpi_table("Source", ticket_sources) %}{% endcall %}
+</section>
+{% if !ticket_languages.is_empty() %}
+
+<section aria-labelledby="ticket-lang-heading" class="band">
+  <h2 id="ticket-lang-heading">By ticket language</h2>
+  {% call m::kpi_table("Ticket language", ticket_languages) %}{% endcall %}
+</section>
+{% endif %}
+{% if !bias_alerts.is_empty() %}
+
+<section aria-labelledby="bias-heading" class="band">
+  <h2 id="bias-heading">Bias investigation flags (#511)</h2>
+  <div class="scroll">
+  <table class="kpi">
+    <thead>
+      <tr>
+        <th scope="col">Dimension</th>
+        <th scope="col">Group</th>
+        <th scope="col" class="num">Runs</th>
+        <th scope="col" class="num">Accepted</th>
+        <th scope="col" class="num">Stopped</th>
+        <th scope="col" class="num">Mean cost</th>
+        <th scope="col" class="num">Triage miss</th>
+        <th scope="col">Flags</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in bias_alerts %}
+      <tr>
+        <th scope="row">{{ r.dimension }}</th>
+        <td>{{ r.group }}</td>
+        <td class="num">{{ r.runs }}</td>
+        <td class="num">{{ r.accept }}</td>
+        <td class="num">{{ r.stopped }}</td>
+        <td class="num">{{ r.cost }}</td>
+        <td class="num">{{ r.triage_miss }}</td>
+        <td class="bad">{{ r.flags }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Flags appear once a slice reaches 5 finished attempts (ADR 0016).</p>
+</section>
+{% endif %}
 
 <section aria-labelledby="week-heading" class="band">
   <div class="band-head">

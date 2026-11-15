@@ -147,6 +147,7 @@ fn cve_issue(package: &str, version: &str) -> IssueInput {
         hidden: None,
         kind: None,
         cve: Some(target),
+        source: Some("cve".into()),
     }
 }
 

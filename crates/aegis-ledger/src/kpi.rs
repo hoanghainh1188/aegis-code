@@ -36,6 +36,12 @@ pub struct Kpi {
     /// Runs the diagnosis lane took (#451): a report on the ticket, no PR.
     /// They are not attempts at a fix, so acceptance leaves them out.
     pub diagnosed: usize,
+    /// Fix attempts that stopped because the dollar budget was reached.
+    pub stopped_budget: usize,
+    /// Fix attempts that stopped at the step/call cap or because no PR could open.
+    pub stopped_steps: usize,
+    /// Fix attempts where Expert failed repeatedly.
+    pub stopped_expert_fail: usize,
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
@@ -103,6 +109,18 @@ impl Kpi {
                 .iter()
                 .filter(|r| r.outcome == Some(Outcome::Diagnosed))
                 .count(),
+            stopped_budget: finished
+                .iter()
+                .filter(|r| r.outcome == Some(Outcome::StoppedBudget))
+                .count(),
+            stopped_steps: finished
+                .iter()
+                .filter(|r| r.outcome == Some(Outcome::StoppedSteps))
+                .count(),
+            stopped_expert_fail: finished
+                .iter()
+                .filter(|r| r.outcome == Some(Outcome::StoppedExpertFail))
+                .count(),
         }
     }
 
@@ -111,6 +129,31 @@ impl Kpi {
     pub fn accept_rate(&self) -> Option<f64> {
         let fixes = self.runs - self.diagnosed;
         (fixes > 0).then(|| self.accepted as f64 / fixes as f64)
+    }
+
+    /// Fix attempts that stopped without opening a PR (#511).
+    pub fn stopped(&self) -> usize {
+        self.stopped_budget + self.stopped_steps + self.stopped_expert_fail
+    }
+
+    /// Stop rate over fix attempts (`runs - diagnosed`).
+    pub fn stop_rate(&self) -> Option<f64> {
+        let fixes = self.runs - self.diagnosed;
+        (fixes > 0).then(|| self.stopped() as f64 / fixes as f64)
+    }
+
+    fn stopped_summary(&self) -> String {
+        let fixes = self.runs - self.diagnosed;
+        if fixes == 0 {
+            return "—".into();
+        }
+        format!(
+            "{} ({} budget, {} steps, {} expert)",
+            pct(self.stopped(), fixes),
+            self.stopped_budget,
+            self.stopped_steps,
+            self.stopped_expert_fail
+        )
     }
 }
 
@@ -173,6 +216,12 @@ impl fmt::Display for Kpi {
             (
                 "Runs that went to Expert",
                 pct(self.expert_runs, self.runs),
+                "tracked",
+                None,
+            ),
+            (
+                "Stopped without PR",
+                self.stopped_summary(),
                 "tracked",
                 None,
             ),
@@ -288,6 +337,16 @@ mod tests {
             (5, 4, 3, 2)
         );
         assert_eq!(kpi.accept_rate(), Some(0.4));
+        assert_eq!(
+            (
+                kpi.stopped_budget,
+                kpi.stopped_steps,
+                kpi.stopped_expert_fail
+            ),
+            (1, 0, 0)
+        );
+        assert_eq!(kpi.stopped(), 1);
+        assert_eq!(kpi.stop_rate(), Some(0.2));
         assert_eq!(kpi.mean_cost_usd, Some(2.4));
         assert_eq!(kpi.mean_review_minutes, Some(10.0));
         assert_eq!(kpi.cache_read_ratio, Some(0.75));
@@ -296,6 +355,12 @@ mod tests {
         assert!(text.starts_with("5 runs, 4 PRs opened, 3 reviewed, 1 awaiting review"));
         assert!(
             text.contains("| Accepted PRs (≤ 10 lines edited) | 40% (2/5) | ≥ 40% | ✔ |"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "| Stopped without PR | 20% (1/5) (1 budget, 0 steps, 0 expert) | tracked | — |"
+            ),
             "{text}"
         );
         assert!(text.contains("| Cost per issue, failures included | $2.40 | ≤ $4 | ✔ |"));

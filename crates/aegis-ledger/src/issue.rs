@@ -5,7 +5,7 @@ use aegis_provider::Usage;
 use crate::{
     AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, InputFlag, IssueId,
     IssueKind, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Outcome, PriceTable, Review,
-    Tier, TokenCounts, ToolCall, Triage,
+    TicketMeta, Tier, TokenCounts, ToolCall, Triage,
 };
 
 /// Caps on what [`IssueLedger::issue_read`] and [`IssueLedger::answered`]
@@ -189,6 +189,15 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
             url: capped(url, MAX_TEXT_CHARS),
         })
         .await
+    }
+
+    /// Records intake metadata dimensions for bias tracking (#511); no-op
+    /// when every field is empty.
+    pub async fn ticket_meta(&mut self, meta: TicketMeta) -> Result<(), LedgerError> {
+        if meta.is_empty() {
+            return Ok(());
+        }
+        self.push(LedgerEvent::TicketMeta(meta)).await
     }
 
     /// The agent's final answer (#316), its text already redacted, each

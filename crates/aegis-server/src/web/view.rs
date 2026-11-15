@@ -67,6 +67,8 @@ pub struct KpiRow {
     pub accept_class: &'static str,
     /// Bar length in the chart's 0–200 units.
     pub accept_bar: u32,
+    /// Runs that stopped before opening a PR (budget, step cap, or Expert failure).
+    pub stopped: String,
     pub broke_tests: usize,
     pub cost: String,
     pub cost_class: &'static str,
@@ -95,14 +97,16 @@ impl KpiRow {
     /// or a language's (ADR 0005).
     pub fn new(label: impl Into<String>, kpi: &Kpi, accept_min: f64) -> Self {
         let accept = kpi.accept_rate();
+        let fix_attempts = kpi.runs.saturating_sub(kpi.diagnosed);
         Self {
             label: label.into(),
             runs: kpi.runs,
             prs_opened: kpi.prs_opened,
             awaiting_review: kpi.awaiting_review,
-            accept: pct(kpi.accepted, kpi.runs - kpi.diagnosed),
+            accept: pct(kpi.accepted, fix_attempts),
             accept_class: class(accept.map(|a| a >= accept_min)),
             accept_bar: accept.map_or(0, |a| (a * 200.0).round() as u32),
+            stopped: pct(kpi.stopped(), fix_attempts),
             broke_tests: kpi.broke_tests,
             cost: kpi.mean_cost_usd.map_or("—".into(), dollars),
             cost_class: class(kpi.mean_cost_usd.map(|c| c <= COST_PER_ISSUE_MAX)),
