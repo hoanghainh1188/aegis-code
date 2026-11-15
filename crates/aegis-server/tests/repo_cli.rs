@@ -92,7 +92,7 @@ token_env = "AEGIS_TEST_FORK_TOKEN"
 
 async fn run(store: &Store, modes: &Modes, args: &[&str]) -> Result<String, String> {
     let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
-    repo_cli::run(store, modes, &Secrets::none(), &args).await
+    repo_cli::run(store, modes, &Secrets::none(), None, &args).await
 }
 
 async fn actions(store: &Store) -> Vec<String> {
@@ -150,7 +150,7 @@ async fn a_repo_is_added_cloned_updated_and_shown_by_command() {
     let shown = run(s, &modes, &["show", "demo"]).await.unwrap();
     let back: repo_cli::RepoFile = serde_json::from_str(&shown).unwrap();
     assert_eq!(back.max_concurrent_jobs, 3);
-    assert_eq!(back.settings.fork.owner, "aegis-bot");
+    assert_eq!(back.settings.fork.as_ref().unwrap().owner, "aegis-bot");
     let listed = run(s, &modes, &["list"]).await.unwrap();
     assert!(listed.starts_with("demo\tpoc\tgo\tmain\t"), "{listed}");
 

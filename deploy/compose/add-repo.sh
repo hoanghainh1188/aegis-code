@@ -2,8 +2,10 @@
 # Registers one GitHub repo with a running aegis (#476,
 # docs/runbook/on-premise.md §2), as root, in deploy/compose:
 #
-# - asks for the repo, its fork and the fork's token (read without echo);
-# - writes the token to ./secrets/AEGIS_TOKEN_<SLUG> unless it is there;
+# - asks for the repo and how it is connected (ADR 0017): `token`, its
+#   fork and the fork's token (read without echo), written to
+#   ./secrets/AEGIS_TOKEN_<SLUG> unless it is there; or `app`, the
+#   instance's GitHub App (`[github_app]` in server.toml), no secret;
 # - writes the repo file to the workspace and runs `repo add`, which
 #   clones the repo with the token;
 # - grants the maintainers and reviewers their roles;
@@ -11,7 +13,7 @@
 #
 # Each value can come from the environment instead: AEGIS_REPO_URL,
 # AEGIS_REPO_SLUG, AEGIS_REPO_BRANCH, AEGIS_REPO_LANGUAGE, AEGIS_REPO_MODE,
-# AEGIS_FORK_OWNER, AEGIS_FORK_NAME, AEGIS_FORK_TOKEN, AEGIS_MAINTAINERS,
+# AEGIS_CONNECTION (token or app), AEGIS_FORK_OWNER, AEGIS_FORK_NAME, AEGIS_FORK_TOKEN, AEGIS_MAINTAINERS,
 # AEGIS_REVIEWERS (emails, separated by spaces or commas) and
 # AEGIS_MONTHLY_USD. AEGIS_NONINTERACTIVE=1, or no terminal: nothing is
 # asked, and a value missing from the environment stops the script.
@@ -43,6 +45,7 @@ github_name() { [[ $1 =~ ^[A-Za-z0-9._-]+$ ]]; }
 branch_name() { [[ $1 =~ ^[A-Za-z0-9._/-]+$ ]] && [[ $1 != */ ]]; }
 language() { [[ $1 =~ ^(python|rust|go|typescript|java|csharp)$ ]]; }
 mode() { [[ $1 =~ ^(poc|customer-jp)$ ]]; }
+connection() { [[ $1 =~ ^(token|app)$ ]]; }
 amount() { [[ $1 =~ ^[0-9]+(\.[0-9]{1,2})?$ ]]; }
 emails() {
   local e
@@ -59,6 +62,14 @@ need AEGIS_REPO_BRANCH "Default branch" branch_name "a branch name" main
 need AEGIS_REPO_LANGUAGE "Language (python, rust, go, typescript, java, csharp)" language \
   "python, rust, go, typescript, java or csharp"
 need AEGIS_REPO_MODE "Mode (poc, customer-jp)" mode "poc or customer-jp" poc
+# The app path when the instance has a GitHub App (ADR 0017).
+if grep -q '^\[github_app\]' server.toml; then default_connection=app; else default_connection=token; fi
+need AEGIS_CONNECTION "Connection (token: a fork and its token; app: the GitHub App)" connection \
+  "token or app" "$default_connection"
+if [ "$AEGIS_CONNECTION" = app ]; then
+  grep -q '^\[github_app\]' server.toml \
+    || die "AEGIS_CONNECTION=app needs [github_app] in server.toml (docs/adr/0017-github-app.md)"
+else
 need AEGIS_FORK_OWNER "Owner of the fork the bot opens PRs in" github_name \
   "a GitHub user or organisation" "$upstream_owner"
 need AEGIS_FORK_NAME "Name of the fork" github_name "a GitHub repo name" "$upstream_name"
@@ -71,6 +82,7 @@ if [ ! -e "secrets/$token_env" ]; then
   chown "$AEGIS_UID:$AEGIS_UID" "secrets/.$token_env.new"
   mv "secrets/.$token_env.new" "secrets/$token_env"
   echo "secret $token_env"
+fi
 fi
 
 # Granting before someone's first sign-in needs an email the SSO marks
@@ -86,6 +98,12 @@ mkdir -p "$REPO_FILES"
 chown "$AEGIS_UID:$AEGIS_UID" "$REPO_FILES"
 file="$REPO_FILES/$AEGIS_REPO_SLUG.toml"
 [ -e "$file" ] && die "$file exists: the repo is registered already (repo update to change it)"
+if [ "$AEGIS_CONNECTION" = app ]; then
+  connection_toml='[settings.app]'
+else
+  connection_toml=$(printf '[settings.fork]\nowner = "%s"\nname = "%s"\ntoken_env = "%s"' \
+    "$AEGIS_FORK_OWNER" "$AEGIS_FORK_NAME" "$token_env")
+fi
 (umask 077; cat > "$file.new" <<TOML
 # Written by add-repo.sh (#476); docs/runbook/repos.md lists every key.
 slug = "$AEGIS_REPO_SLUG"
@@ -95,10 +113,7 @@ language = "$AEGIS_REPO_LANGUAGE"
 mode = "$AEGIS_REPO_MODE"
 max_concurrent_jobs = 1
 
-[settings.fork]
-owner = "$AEGIS_FORK_OWNER"
-name = "$AEGIS_FORK_NAME"
-token_env = "$token_env"
+$connection_toml
 TOML
 )
 chown "$AEGIS_UID:$AEGIS_UID" "$file.new"
@@ -124,6 +139,16 @@ for email in ${AEGIS_REVIEWERS//,/ }; do
 done
 
 public_url=$(sed -n 's/^public_url = "\(.*\)"$/\1/p' server.toml)
+if [ "$AEGIS_CONNECTION" = app ]; then
+  where="the GitHub App: its agent/* branches and PRs go to $AEGIS_REPO_URL itself
+(the app must be installed on $upstream_owner with this repo before the first job)"
+  pr_events="Pull request reviews, Pull request review comments and Issue comments on the repo too"
+else
+  where="the fork $AEGIS_FORK_OWNER/$AEGIS_FORK_NAME"
+  pr_events="On the fork $AEGIS_FORK_OWNER/$AEGIS_FORK_NAME, the same with Pull request
+     reviews, Pull request review comments and Issue comments"
+fi
+echo "Connected through $where."
 cat <<NEXT
 
 Next (docs/runbook/on-premise.md §2):
@@ -132,8 +157,7 @@ Next (docs/runbook/on-premise.md §2):
        Content type application/json
        Secret       sudo cat $HERE/secrets/AEGIS_GITHUB_WEBHOOK_SECRET
        Events       Issues, Workflow runs
-     On the fork $AEGIS_FORK_OWNER/$AEGIS_FORK_NAME, the same with Pull request
-     reviews, Pull request review comments and Issue comments.
+     $pr_events.
 NEXT
 if [ -n "$AEGIS_MONTHLY_USD" ] && [ -n "$id" ]; then
   echo "  2. Monthly budget: \$$AEGIS_MONTHLY_USD on $public_url/repos/$id/budget (a maintainer)."

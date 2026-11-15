@@ -44,6 +44,55 @@ pub struct ServerConfig {
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
+    /// The instance's GitHub App (ADR 0017); without it the instance runs
+    /// as v0.14.0 and refuses repos on the app path.
+    #[serde(default)]
+    pub github_app: Option<GithubAppSection>,
+}
+
+/// `[github_app]` (ADR 0017 §3): the app's id, its API root, and the names
+/// of its secrets in the store; never a secret itself.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GithubAppSection {
+    /// The app's id, or its client id (GitHub's preferred JWT issuer):
+    /// exactly one.
+    #[serde(default)]
+    pub app_id: Option<u64>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// The API root; GitHub Enterprise Server's `https://<host>/api/v3`.
+    #[serde(default = "default_github_api")]
+    pub api: String,
+    #[serde(default = "default_app_key_env")]
+    pub private_key_env: String,
+    #[serde(default = "default_app_webhook_env")]
+    pub webhook_secret_env: String,
+}
+
+fn default_github_api() -> String {
+    "https://api.github.com".into()
+}
+
+fn default_app_key_env() -> String {
+    "AEGIS_GITHUB_APP_PRIVATE_KEY".into()
+}
+
+fn default_app_webhook_env() -> String {
+    "AEGIS_GITHUB_APP_WEBHOOK_SECRET".into()
+}
+
+impl GithubAppSection {
+    /// The JWT's issuer: the app id or the client id.
+    pub fn issuer(&self) -> Result<String, String> {
+        match (&self.app_id, &self.client_id) {
+            (Some(id), None) => Ok(id.to_string()),
+            (None, Some(id)) if !id.trim().is_empty() => Ok(id.trim().to_owned()),
+            (None, Some(_)) => Err("github_app: client_id is empty".into()),
+            (Some(_), Some(_)) => Err("github_app: name app_id or client_id, not both".into()),
+            (None, None) => Err("github_app: needs app_id or client_id".into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -331,6 +380,14 @@ impl ServerConfig {
         if w.poll_s == 0 {
             return Err("worker: poll_s must be at least 1".into());
         }
+        if let Some(app) = &config.github_app {
+            app.issuer()?;
+            for name in [&app.private_key_env, &app.webhook_secret_env] {
+                if name.trim().is_empty() {
+                    return Err("github_app: a secret's name is empty".into());
+                }
+            }
+        }
         if config.metrics.listen == config.api.listen {
             return Err(format!(
                 "metrics: listen must not be the API's address ({}): /metrics is \
@@ -390,6 +447,41 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_github_app_names_one_issuer_and_secret_names_only() {
+        assert_eq!(ServerConfig::from_toml("").unwrap().github_app, None);
+        let app = ServerConfig::from_toml("[github_app]\napp_id = 123456\n")
+            .unwrap()
+            .github_app
+            .unwrap();
+        assert_eq!(app.issuer().unwrap(), "123456");
+        assert_eq!(app.api, "https://api.github.com");
+        assert_eq!(app.private_key_env, "AEGIS_GITHUB_APP_PRIVATE_KEY");
+        assert_eq!(app.webhook_secret_env, "AEGIS_GITHUB_APP_WEBHOOK_SECRET");
+        let by_client = ServerConfig::from_toml(
+            "[github_app]\nclient_id = \"Iv23abc\"\napi = \"https://ghe.acme.test/api/v3\"\n",
+        )
+        .unwrap()
+        .github_app
+        .unwrap();
+        assert_eq!(by_client.issuer().unwrap(), "Iv23abc");
+        for (bad, says) in [
+            ("[github_app]\n", "app_id or client_id"),
+            ("[github_app]\napp_id = 1\nclient_id = \"x\"\n", "not both"),
+            (
+                "[github_app]\napp_id = 1\nprivate_key_env = \" \"\n",
+                "empty",
+            ),
+            (
+                "[github_app]\napp_id = 1\nprivate_key = \"-----BEGIN\"\n",
+                "unknown field",
+            ),
+        ] {
+            let err = ServerConfig::from_toml(bad).unwrap_err();
+            assert!(err.contains(says), "{bad}: {err}");
+        }
+    }
 
     #[test]
     fn the_example_configuration_loads() {

@@ -22,7 +22,7 @@ use super::admin::admin_only;
 use super::repo_form::{RepoForm, file_toml};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::Access;
-use crate::repo_cli::{RepoFile, fork_token};
+use crate::repo_cli::RepoFile;
 
 /// What adding and changing repos from the pages needs: the modes'
 /// configuration a repo is checked against and cloned under, and the
@@ -41,6 +41,9 @@ pub struct RepoAdmin {
     pub(super) ai_checks: Arc<std::sync::Mutex<HashMap<&'static str, Instant>>>,
     /// `[web] make_webhooks` (#376).
     pub(super) make_webhooks: bool,
+    /// The instance's GitHub App (ADR 0017), for cloning repos on the app
+    /// path.
+    pub(super) github_app: Option<Arc<crate::github_app::AppHandle>>,
 }
 
 impl RepoAdmin {
@@ -60,6 +63,15 @@ impl RepoAdmin {
             ),
             ai_checks: Arc::default(),
             make_webhooks: false,
+            github_app: None,
+        }
+    }
+
+    /// With the instance's GitHub App (ADR 0017).
+    pub fn with_github_app(self, app: Option<Arc<crate::github_app::AppHandle>>) -> Self {
+        Self {
+            github_app: app,
+            ..self
         }
     }
 
@@ -120,6 +132,7 @@ struct FormPage<'a> {
     languages: Vec<&'static str>,
     modes: [&'static str; 2],
     platforms: [&'static str; 2],
+    connections: [&'static str; 2],
 }
 
 impl FormPage<'_> {
@@ -147,6 +160,7 @@ fn form_page(
         languages: Language::ALL.iter().map(|l| l.id()).collect(),
         modes: MODES,
         platforms: PLATFORMS,
+        connections: super::repo_form::CONNECTIONS,
     })?;
     Ok(match error {
         Some((status, _)) => (status, page).into_response(),
@@ -307,7 +321,13 @@ async fn clone_in_background(
 /// the token should git have echoed it.
 async fn make_clone(admin: &RepoAdmin, repo: &Repo) -> Result<(), String> {
     let file = RepoFile::of(repo)?;
-    let token = fork_token(&admin.secrets, &file.settings.fork.token_env).await?;
+    let token = crate::github_app::read_token(
+        &admin.secrets,
+        admin.github_app.as_deref(),
+        &file.settings,
+        &repo.url,
+    )
+    .await?;
     admin
         .modes
         .clone_repo(repo, token.as_deref())

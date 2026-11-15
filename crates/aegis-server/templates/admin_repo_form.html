@@ -40,8 +40,17 @@
       </div>
     </fieldset>
     <fieldset>
+      <legend>Connection</legend>
+      <label>How the platform reaches the repo
+        <select name="connection" aria-describedby="connection-help">
+          {% for c in connections %}<option value="{{ c }}"{% if *c == form.connection %} selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select>
+      </label>
+      <p class="note" id="connection-help"><code>token</code>: a fork (or the repo itself) and the secret of its token, below. <code>app</code>: the instance's GitHub App installed on the repo; the agent's <code>agent/*</code> branches and PRs go to the repo itself and the fields below stay empty.</p>
+    </fieldset>
+    <fieldset>
       <legend>Fork</legend>
-      <p class="note">Where the agent pushes and opens pull requests.</p>
+      <p class="note">Where the agent pushes and opens pull requests, on the <code>token</code> connection.</p>
       <div class="row">
         <label>Platform
           <select name="fork_platform">
@@ -49,14 +58,14 @@
           </select>
         </label>
         <label>Owner
-          <input type="text" name="fork_owner" value="{{ form.fork_owner }}" required maxlength="255" autocomplete="off">
+          <input type="text" name="fork_owner" value="{{ form.fork_owner }}" maxlength="255" autocomplete="off">
         </label>
         <label>Name
-          <input type="text" name="fork_name" value="{{ form.fork_name }}" required maxlength="255" autocomplete="off">
+          <input type="text" name="fork_name" value="{{ form.fork_name }}" maxlength="255" autocomplete="off">
         </label>
       </div>
       <label>Token: name of the secret
-        <input type="text" name="token_env" value="{{ form.token_env }}" required maxlength="128" pattern="[A-Za-z_][A-Za-z0-9_]*" placeholder="AEGIS_GITHUB_TOKEN" autocomplete="off" aria-describedby="token-help">
+        <input type="text" name="token_env" value="{{ form.token_env }}" maxlength="128" pattern="[A-Za-z_][A-Za-z0-9_]*" placeholder="AEGIS_GITHUB_TOKEN" autocomplete="off" aria-describedby="token-help">
       </label>
       <p class="note" id="token-help">The name the token has in the secret store, never the token itself.</p>
     </fieldset>

@@ -57,15 +57,16 @@ pub struct Platform<P, S> {
     pub store: S,
     pub prices: PriceTable,
     pub profiles: Profiles,
-    /// For the fork: push and open PRs.
-    pub github_token: String,
+    /// For the fork: push and open PRs. A fixed token on the token path; on
+    /// the app path a fresh installation token at each use (ADR 0017).
+    pub github: aegis_pr::TokenSource,
 }
 
 impl<P, S> std::fmt::Debug for Platform<P, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Platform")
             .field("repo", &self.config.repo.key)
-            .field("github_token", &"<redacted>")
+            .field("github", &self.github)
             .finish_non_exhaustive()
     }
 }
@@ -453,7 +454,7 @@ async fn fetch_head<P, S>(
     round: &ReviewRound,
 ) -> Result<String, LifecycleError> {
     let cfg = &platform.config;
-    let remote = fork_remote(platform)?;
+    let remote = fork_remote(platform).await?;
     let (clone, branch) = (cfg.repo.path.clone(), round.pull.head_ref.clone());
     let url = remote.url().to_owned();
     let auth = remote

@@ -26,6 +26,8 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
    **GitLab Forks (#252):** In `[settings.fork]`, specify `platform = "gitlab"` and configure `api` as the instance API root (`https://gitlab.com/api/v4` or self-hosted); `owner` is the namespace (including subgroups), `name` is the project slug. The agent pushes branches over HTTPS (token authenticated via user `oauth2`) and opens **merge requests** (draft when `draft_prs = true`). Token requires scopes `api` and `write_repository` (plus `read_repository` for private repos). GitLab issues (labeled `aegis`) and broken CI pipelines on the default branch (#253) trigger automated repair jobs. **Review rounds on MRs (#254):** Comments containing `/aegis fix` by project members with Developer role or higher trigger repair cycles on the agent's branch.
 
+   **GitHub App instead of a fork and a token ([ADR 0017](../adr/0017-github-app.md), #539):** on an instance with `[github_app]` in `server.toml` (`app_id` or `client_id`; the app's private key in the secret store as `AEGIS_GITHUB_APP_PRIVATE_KEY`), a GitHub repo may name `[settings.app]` instead of `[settings.fork]`: exactly one of the two. It names no secret, the app must be installed on the repo, and the agent's `agent/*` branches and PRs go to the repo itself (the *Direct Upstream* model, written by the app). Each use takes its own installation token, for that repo only, with only that use's permissions, minted when it is needed: a job longer than a token's hour still pushes. `api` in `[settings.app]` is only for a GitHub Enterprise Server root and must match the app's. Webhooks and issue comments still work as on the token path until #540 moves them to the app; repos on `[settings.fork]` keep working unchanged.
+
 3. **Issue Comments:** Configured globally via `AEGIS_GITHUB_COMMENT_TOKEN` with *Issues* Write permission on upstream repositories. For GitLab, set `AEGIS_GITLAB_COMMENT_TOKEN`. For GitHub Enterprise or self-hosted GitLab, configure container environment variables `AEGIS_GITHUB_API` / `AEGIS_GITLAB_API`.
 
 ### Registration and Cloning
@@ -51,6 +53,8 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    owner = "acme-aegis-bot"
    name = "typst"
    token_env = "AEGIS_TOKEN_TYPST"
+   # Or, with the instance's GitHub App, instead of [settings.fork]:
+   # [settings.app]
    ```
 
    Copy file to host workspace (e.g. `/srv/aegis/.workspace/repo-files/typst.toml`), then execute:

@@ -7,6 +7,7 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod github_app;
 pub mod lifecycle;
 pub mod logs;
 pub mod memory;

@@ -7,9 +7,9 @@ use aegis_gate::GateReport;
 use aegis_lang::{CoverageFormat, RepoProfiles};
 use aegis_ledger::{InputFlag, IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
-    CommitInput, Cost, Forge, GitHub, GitLab, Identity, InputFlagNote, PrContent, Remote, abandon,
-    cobertura_lines, cobertura_percent, lcov_lines, lcov_percent, push_eval_base, push_gated,
-    push_gated_onto, render, write_commit_message,
+    CommitInput, Cost, Forge, GitHub, GitLab, Identity, InputFlagNote, PrContent, Remote,
+    TokenSource, abandon, cobertura_lines, cobertura_percent, lcov_lines, lcov_percent,
+    push_eval_base, push_gated, push_gated_onto, render, write_commit_message,
 };
 use aegis_provider::ModelProvider;
 
@@ -125,7 +125,7 @@ where
         });
     }
     let forge = fork_forge(platform)?;
-    let remote = fork_remote(platform)?;
+    let remote = fork_remote(platform).await?;
     let identity = Identity {
         name: cfg.identity.name.clone(),
         email: cfg.identity.email.clone(),
@@ -194,25 +194,38 @@ where
 }
 
 /// The fork's forge: a GitHub repository or a GitLab project (#252),
-/// reached with `token`.
-pub fn fork_forge_of(fork: &ForkConfig, token: &str) -> Result<Forge, LifecycleError> {
-    Ok(match fork.platform {
-        ForkPlatform::GitHub => {
-            Forge::GitHub(GitHub::new(&fork.api, &fork.owner, &fork.name, token)?)
+/// reached with tokens from `source`: a GitLab project only with a fixed
+/// token, a GitHub repo with either.
+pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, LifecycleError> {
+    Ok(match (fork.platform, source) {
+        (ForkPlatform::GitHub, _) => Forge::GitHub(GitHub::with_source(
+            &fork.api,
+            &fork.owner,
+            &fork.name,
+            source.clone(),
+        )?),
+        (ForkPlatform::GitLab, TokenSource::Static(token)) => {
+            Forge::GitLab(GitLab::new(&fork.api, &fork.path(), token)?)
         }
-        ForkPlatform::GitLab => Forge::GitLab(GitLab::new(&fork.api, &fork.path(), token)?),
+        (ForkPlatform::GitLab, TokenSource::App { .. }) => {
+            return Err(LifecycleError::Config(
+                "the GitHub App does not reach a GitLab project".into(),
+            ));
+        }
     })
 }
 
 fn fork_forge<P, S>(platform: &Platform<P, S>) -> Result<Forge, LifecycleError> {
-    fork_forge_of(&platform.config.repo.fork, &platform.github_token)
+    fork_forge_of(&platform.config.repo.fork, &platform.github)
 }
 
-/// Where the agent's branches are: the fork, or a local bare repo.
-pub(crate) fn fork_remote<P, S>(platform: &Platform<P, S>) -> Result<Remote, LifecycleError> {
+/// Where the agent's branches are: the fork, or a local bare repo. Its
+/// token is asked for now, right before the push or fetch it is for: an
+/// app token minted at the start of a long job would have expired.
+pub(crate) async fn fork_remote<P, S>(platform: &Platform<P, S>) -> Result<Remote, LifecycleError> {
     Ok(match &platform.config.repo.fork.push_to_local {
         Some(path) => Remote::local(path)?,
-        None => fork_forge(platform)?.remote()?,
+        None => fork_forge(platform)?.remote_now().await?,
     })
 }
 
@@ -253,7 +266,7 @@ where
             .await?;
     }
     let commit_message = masked(ledger, "commit message", &message.text).await?;
-    let remote = fork_remote(platform)?;
+    let remote = fork_remote(platform).await?;
     let identity = Identity {
         name: cfg.identity.name.clone(),
         email: cfg.identity.email.clone(),

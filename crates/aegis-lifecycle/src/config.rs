@@ -219,7 +219,44 @@ pub struct RepoConfig {
     /// 0013): `[[repo.sidecars]]`. They run only with `run.sandbox`.
     #[serde(default)]
     pub sidecars: Vec<aegis_gate::SidecarSpec>,
+    /// Where the agent pushes and opens PRs. On the app path (ADR 0017)
+    /// the upstream repo itself, with no `token_env`.
     pub fork: ForkConfig,
+    /// Set on the app path (`[settings.app]`, ADR 0017): tokens come from
+    /// the instance's GitHub App, minted per use, instead of
+    /// `fork.token_env`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<AppConnection>,
+}
+
+/// A repo connected through the instance's GitHub App (`[settings.app]`,
+/// ADR 0017 §1): no secret, only the API root when it is not the
+/// instance's.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppConnection {
+    /// GitHub Enterprise Server's API root; the instance's app `api` when
+    /// left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<String>,
+}
+
+/// `owner` and `name` of a GitHub repo's HTTPS URL
+/// (`https://github.com/acme/shop`, `.git` allowed), plain names only.
+pub fn upstream_of(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("https://")?;
+    let mut parts = rest.trim_end_matches('/').split('/');
+    let (_host, owner, name) = (parts.next()?, parts.next()?, parts.next()?);
+    let name = name.strip_suffix(".git").unwrap_or(name);
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s != "."
+            && s != ".."
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+    };
+    (parts.next().is_none() && plain(owner) && plain(name))
+        .then(|| (owner.to_owned(), name.to_owned()))
 }
 
 /// A directory of the repo with its own language profile (#71).
@@ -358,7 +395,7 @@ impl ForkConfig {
     }
 }
 
-fn default_api() -> String {
+pub(crate) fn default_api() -> String {
     "https://api.github.com".into()
 }
 
@@ -549,6 +586,11 @@ impl RunConfig {
             sonar.check()?;
         }
         let fork = &self.repo.fork;
+        if self.repo.app.is_some() && fork.platform != ForkPlatform::GitHub {
+            return Err(LifecycleError::Config(
+                "repo.app: the GitHub App connects GitHub repos only".into(),
+            ));
+        }
         if fork.platform == ForkPlatform::GitLab && fork.api == default_api() {
             return Err(LifecycleError::Config(
                 "repo.fork.api: a GitLab fork needs its instance's API root \
