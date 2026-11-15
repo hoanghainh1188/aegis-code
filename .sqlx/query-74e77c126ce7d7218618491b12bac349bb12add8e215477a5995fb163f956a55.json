@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE repos\n                 SET url = $2, default_branch = $3, language = $4, mode = $5,\n                     max_concurrent_jobs = $6, config = $7\n                 WHERE slug = $1\n                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+  "query": "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config, tenant_id)\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id",
   "describe": {
     "columns": [
       {
@@ -101,6 +101,17 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "tenant_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "tenant_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -111,7 +122,8 @@
         "Text",
         "Text",
         "Int4",
-        "Jsonb"
+        "Jsonb",
+        "Int8"
       ]
     },
     "nullable": [
@@ -123,8 +135,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "cfed9e4475e1b0e4c540eb1316aac42fcd2f7896719526aeaa10885bd3d94e15"
+  "hash": "74e77c126ce7d7218618491b12bac349bb12add8e215477a5995fb163f956a55"
 }

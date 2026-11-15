@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, slug, monthly_budget_usd, tenant_month_spent(id, $1) AS \"spent!\"\n           FROM tenants WHERE monthly_budget_usd IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "monthly_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "monthly_budget_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "spent!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "3d8020351e0096f545541928587459949b8c095f910a8b7b7b30ac6e6835768a"
+}

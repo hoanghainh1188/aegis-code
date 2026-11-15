@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tenant_id FROM tenant_admins WHERE user_id = $1 ORDER BY tenant_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenant_admins",
+            "name": "tenant_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3c27bce963aa1fe884ecea438642b8fc8045949381a1c2ba4b09b748626ffe8d"
+}

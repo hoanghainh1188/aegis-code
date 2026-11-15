@@ -24,6 +24,15 @@ const ROLES: [&str; 3] = ["viewer", "reviewer", "maintainer"];
 /// The webhooks shown on a repo's page.
 const SHOWN_WEBHOOKS: u32 = 20;
 
+/// For a page of one repo (#525): its tenant's admins too.
+pub(crate) fn repo_admin_only(access: &Access, repo: RepoId) -> Result<(), WebError> {
+    if access.administers(repo) {
+        Ok(())
+    } else {
+        Err(WebError::not_found("page"))
+    }
+}
+
 pub(crate) fn admin_only(access: &Access) -> Result<(), WebError> {
     if access.is_admin() {
         Ok(())
@@ -65,12 +74,19 @@ pub async fn repos(
     Extension(me): Extension<Me>,
     Extension(admin): RepoAdminExt,
 ) -> WebResult {
-    admin_only(&access)?;
+    if !access.administers_any() {
+        return Err(WebError::not_found("page"));
+    }
     render(&ReposPage {
         nonce: nonce.as_str(),
         me: &me,
-        repos: all_repos(&store).await?.into_values().collect(),
-        can_edit: admin.is_some(),
+        repos: all_repos(&store)
+            .await?
+            .into_values()
+            .filter(|r| access.administers(r.id))
+            .collect(),
+        // Adding repos takes the modes and the secrets: the platform's.
+        can_edit: admin.is_some() && access.is_admin(),
         paused: store
             .paused_repos()
             .await?
@@ -149,8 +165,8 @@ pub async fn repo(
     Path(id): Path<i64>,
     Query(q): Query<RepoQuery>,
 ) -> WebResult {
-    admin_only(&access)?;
     let repo = repo_of(&store, id).await?;
+    repo_admin_only(&access, repo.id)?;
     let repo_id = repo.id;
     let members = store.repo_members(repo_id).await?;
     // A fixed message per word, never the request's own text.
@@ -180,7 +196,7 @@ pub async fn repo(
         notice,
         settings,
         clone,
-        can_edit: admin.is_some(),
+        can_edit: admin.is_some() && access.is_admin(),
         webhooks: webhooks::rows(&store, repo_id, SHOWN_WEBHOOKS).await?,
         pause: store.repo_pause(repo_id).await?.map(PauseView::from),
     })
@@ -198,8 +214,8 @@ pub async fn grant(
     Path(id): Path<i64>,
     Form(form): Form<GrantForm>,
 ) -> WebResult {
-    admin_only(&access)?;
     let repo = repo_of(&store, id).await?;
+    repo_admin_only(&access, repo.id)?;
     let role = RepoRole::parse(&form.role).ok_or_else(|| {
         WebError::new(
             StatusCode::BAD_REQUEST,
@@ -224,8 +240,8 @@ pub async fn revoke(
     Path(id): Path<i64>,
     Form(form): Form<RevokeForm>,
 ) -> WebResult {
-    admin_only(&access)?;
     let repo = repo_of(&store, id).await?;
+    repo_admin_only(&access, repo.id)?;
     let who = form.who.trim();
     store
         .set_repo_role(kind_of(who), who, repo.id, None, &access.actor)
@@ -249,8 +265,8 @@ pub async fn pause(
     Path(id): Path<i64>,
     Form(form): Form<PauseForm>,
 ) -> WebResult {
-    admin_only(&access)?;
     let repo = repo_of(&store, id).await?;
+    repo_admin_only(&access, repo.id)?;
     store
         .pause_repo_by(
             repo.id,
@@ -268,8 +284,8 @@ pub async fn resume(
     Extension(access): Extension<Access>,
     Path(id): Path<i64>,
 ) -> WebResult {
-    admin_only(&access)?;
     let repo = repo_of(&store, id).await?;
+    repo_admin_only(&access, repo.id)?;
     store.resume_repo_by(repo.id, &access.actor).await?;
     Ok(Redirect::to(&format!("/admin/repos/{id}?done=resumed")).into_response())
 }

@@ -236,6 +236,7 @@ fn spec(scratch: &Scratch, github_api: &str) -> RepoSpec {
         mode: RepoMode::Poc,
         max_concurrent_jobs: 1,
         settings,
+        tenant: None,
     }
 }
 

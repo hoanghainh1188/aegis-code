@@ -12,6 +12,8 @@ use crate::{RepoId, Store, StoreError};
 pub struct KpiJob {
     pub repo_id: RepoId,
     pub repo_slug: String,
+    /// Its repo's tenant, by slug (#525).
+    pub tenant: String,
     /// As the repo was registered; the dashboard lowercases it.
     pub language: String,
     /// Ticket origin (`cli`, `github`, `jira`, `jsm`, ...; lowercased).
@@ -60,6 +62,7 @@ impl Store {
                       CASE WHEN s.ledger_key IS NULL THEN r.record END AS "record?",
                       s.ledger_key IS NOT NULL AS "stale!",
                       j.repo_id AS "repo_id?", p.slug AS "slug?", p.language AS "language?",
+                      t.slug AS "tenant?",
                       j.source AS "source?",
                       j.created_at AS "created_at?",
                       root.ledger_key AS "review_of?", j.review_round AS "review_round?"
@@ -68,6 +71,7 @@ impl Store {
                LEFT JOIN issue_records r ON r.ledger_key = k.ledger_key
                LEFT JOIN jobs j ON j.ledger_key = k.ledger_key
                LEFT JOIN repos p ON p.id = j.repo_id
+               LEFT JOIN tenants t ON t.id = p.tenant_id
                LEFT JOIN jobs root ON root.id = j.review_of
                WHERE ($1::bigint[] IS NULL OR j.repo_id = ANY($1))
                  AND EXISTS (SELECT 1 FROM ledger_events e WHERE e.ledger_key = k.ledger_key)
@@ -109,6 +113,7 @@ impl Store {
                 ) => Some(KpiJob {
                     repo_id: RepoId(repo_id),
                     repo_slug,
+                    tenant: row.tenant.unwrap_or_else(|| "default".into()),
                     language,
                     source,
                     created_at,

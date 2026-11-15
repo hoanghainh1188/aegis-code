@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tenant_admins (tenant_id, user_id) VALUES ($1, $2)\n                     ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28990b8f9ce5bcbd9bf3b02e237b57560f78e3f101e8c39903451bd5501e9c4b"
+}

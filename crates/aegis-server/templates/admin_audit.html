@@ -12,6 +12,12 @@
         {% for r in repos %}<option value="{{ r.value }}"{% if r.selected %} selected{% endif %}>{{ r.label }}</option>{% endfor %}
       </select>
     </label>
+    <label>Tenant
+      <select name="tenant_id">
+        <option value="">any</option>
+        {% for t in tenants %}<option value="{{ t.value }}"{% if t.selected %} selected{% endif %}>{{ t.label }}</option>{% endfor %}
+      </select>
+    </label>
     <label>Who
       <input type="text" name="actor" value="{{ actor }}" maxlength="320" placeholder="name@example.com" autocomplete="off">
     </label>

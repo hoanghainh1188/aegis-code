@@ -279,6 +279,64 @@ pub struct RepoSpec {
     pub mode: RepoMode,
     pub max_concurrent_jobs: u32,
     pub settings: RepoSettings,
+    /// The contract it is registered in (#525); `None` is the default
+    /// tenant. An update keeps the repo's tenant.
+    pub tenant: Option<aegis_store::Tenant>,
+}
+
+/// Where the repos of `tenant` live under a mode's `state_dir` (#525):
+/// the default tenant's where they always did, another's under
+/// `tenants/<id>`, clones, jobs, maps and caches alike.
+pub fn tenant_state_dir(
+    state_dir: &std::path::Path,
+    tenant: aegis_store::TenantId,
+) -> std::path::PathBuf {
+    if tenant == aegis_store::TenantId::DEFAULT {
+        state_dir.to_path_buf()
+    } else {
+        state_dir.join("tenants").join(tenant.0.to_string())
+    }
+}
+
+/// The names of the secrets a repo's settings read: every string under a
+/// key ending in `_env` (`token_env`, `app_key_env`…).
+fn secret_names(config: &serde_json::Value, out: &mut Vec<String>) {
+    match config {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                match value {
+                    serde_json::Value::String(name) if key.ends_with("_env") => {
+                        out.push(name.clone());
+                    }
+                    other => secret_names(other, out),
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|v| secret_names(v, out)),
+        _ => {}
+    }
+}
+
+/// A repo of a tenant other than the default reads only secrets named for
+/// that tenant (#525): `ACME_FORK_TOKEN` for `acme`, so no contract can
+/// name another's.
+pub fn check_tenant_secrets(
+    tenant: &aegis_store::Tenant,
+    config: &serde_json::Value,
+) -> Result<(), LifecycleError> {
+    let Some(prefix) = tenant.secret_prefix() else {
+        return Ok(());
+    };
+    let mut names = Vec::new();
+    secret_names(config, &mut names);
+    match names.iter().find(|n| !n.starts_with(&prefix)) {
+        Some(name) => Err(LifecycleError::Config(format!(
+            "secret `{name}`: a repo of tenant `{}` reads only secrets whose names start with \
+             `{prefix}`",
+            tenant.slug
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// A registered repo with the configuration its jobs run with.
@@ -338,6 +396,7 @@ impl Modes {
             &repo.language,
             repo.mode,
             &repo.config,
+            repo.tenant_id,
         )
     }
 
@@ -348,6 +407,7 @@ impl Modes {
         language: &str,
         mode: RepoMode,
         config: &serde_json::Value,
+        tenant: aegis_store::TenantId,
     ) -> Result<RunConfig, LifecycleError> {
         let in_repo = |e: String| LifecycleError::Config(format!("repo `{slug}`: {e}"));
         let mode = self.mode(mode)?;
@@ -372,11 +432,15 @@ impl Modes {
         if let Some(image) = settings.image {
             overrides.insert("image".into(), toml::Value::String(image));
         }
-        let path = mode.run.state_dir.join("repos").join(slug);
+        let state_dir = tenant_state_dir(&mode.run.state_dir, tenant);
+        let path = state_dir.join("repos").join(slug);
         RunConfig {
             provider: mode.provider.clone(),
             models: mode.models.clone(),
-            run: mode.run.clone(),
+            run: crate::config::RunSection {
+                state_dir,
+                ..mode.run.clone()
+            },
             // A repo budget without a call cap keeps its mode's (#471).
             budget: settings.budget.map_or(mode.budget, |own| BudgetSection {
                 max_model_calls: own.max_model_calls.or(mode.budget.max_model_calls),
@@ -438,14 +502,37 @@ impl Modes {
             config: serde_json::to_value(&spec.settings)
                 .map_err(|e| LifecycleError::Config(format!("repo `{}`: {e}", spec.slug)))?,
         };
+        let tenant = spec.tenant.as_ref();
+        if let Some(t) = tenant {
+            check_tenant_secrets(t, &new.config)?;
+        }
         let config = self.build(
             &new.slug,
             &new.default_branch,
             &new.language,
             new.mode,
             &new.config,
+            tenant.map_or(aegis_store::TenantId::DEFAULT, |t| t.id),
         )?;
         Ok((new, config))
+    }
+
+    /// `spec` with the tenant its registered repo is in: an update keeps
+    /// it. `Config` when there is no such repo.
+    async fn with_its_tenant(
+        &self,
+        store: &Store,
+        spec: &RepoSpec,
+    ) -> Result<RepoSpec, LifecycleError> {
+        let repo = store
+            .repo_by_slug(&spec.slug)
+            .await?
+            .ok_or_else(|| LifecycleError::Config(format!("no repo `{}`", spec.slug)))?;
+        let tenant = store.tenant(repo.tenant_id).await?;
+        Ok(RepoSpec {
+            tenant,
+            ..spec.clone()
+        })
     }
 
     /// Registers a repo, refused unless its configuration can be built
@@ -463,7 +550,9 @@ impl Modes {
         actor: &Actor,
     ) -> Result<Repo, LifecycleError> {
         let (new, _) = self.check_spec(spec)?;
-        Ok(store.create_repo_by(&new, actor).await?)
+        Ok(store
+            .create_repo_in_by(&new, tenant_of(spec), actor)
+            .await?)
     }
 
     /// [`Modes::update`] without touching the clone, audited as `actor`;
@@ -474,10 +563,8 @@ impl Modes {
         spec: &RepoSpec,
         actor: &Actor,
     ) -> Result<Repo, LifecycleError> {
+        let spec = &self.with_its_tenant(store, spec).await?;
         let (new, _) = self.check_spec(spec)?;
-        if store.repo_by_slug(&new.slug).await?.is_none() {
-            return Err(LifecycleError::Config(format!("no repo `{}`", new.slug)));
-        }
         Ok(store.update_repo_by(&new, actor).await?)
     }
 
@@ -515,7 +602,7 @@ impl Modes {
             auth(spec.settings.fork.platform, token),
         )
         .await?;
-        match store.create_repo_by(&new, actor).await {
+        match store.create_repo_in_by(&new, tenant_of(spec), actor).await {
             Ok(repo) => Ok(repo),
             Err(e) => {
                 if made {
@@ -536,10 +623,8 @@ impl Modes {
         token: Option<&str>,
         actor: &Actor,
     ) -> Result<Repo, LifecycleError> {
+        let spec = &self.with_its_tenant(store, spec).await?;
         let (new, config) = self.check_spec(spec)?;
-        if store.repo_by_slug(&new.slug).await?.is_none() {
-            return Err(LifecycleError::Config(format!("no repo `{}`", new.slug)));
-        }
         crate::clone::prepare_async(
             &config.repo.path,
             &new.url,
@@ -549,6 +634,12 @@ impl Modes {
         .await?;
         Ok(store.update_repo_by(&new, actor).await?)
     }
+}
+
+fn tenant_of(spec: &RepoSpec) -> aegis_store::TenantId {
+    spec.tenant
+        .as_ref()
+        .map_or(aegis_store::TenantId::DEFAULT, |t| t.id)
 }
 
 /// The user `token` is sent as for a repo whose fork is on `platform`.
@@ -563,6 +654,48 @@ fn auth(platform: crate::ForkPlatform, token: Option<&str>) -> Option<(&'static 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tenant(id: i64, slug: &str) -> aegis_store::Tenant {
+        aegis_store::Tenant {
+            id: aegis_store::TenantId(id),
+            slug: slug.into(),
+            name: slug.into(),
+            monthly_budget_usd: None,
+            max_concurrent_jobs: None,
+            created_at: Default::default(),
+        }
+    }
+
+    #[test]
+    fn another_tenants_repos_live_under_its_own_dir() {
+        let root = std::path::Path::new("/state");
+        assert_eq!(tenant_state_dir(root, aegis_store::TenantId::DEFAULT), root);
+        assert_eq!(
+            tenant_state_dir(root, aegis_store::TenantId(7)),
+            std::path::Path::new("/state/tenants/7")
+        );
+    }
+
+    #[test]
+    fn a_tenants_repo_names_only_its_own_secrets() {
+        let config = serde_json::json!({
+            "fork": {"owner": "bot", "name": "r", "token_env": "ACME_FORK_TOKEN"},
+            "tracker": {"kind": "jira", "token_env": "ACME_JIRA"},
+            "apm": {"datadog": {"token_env": "ACME_DD", "app_key_env": "ACME_DD_APP"}},
+            "sidecars": [{"name": "pg", "env": {"POSTGRES_PASSWORD": "x"}}],
+        });
+        assert!(check_tenant_secrets(&tenant(2, "acme"), &config).is_ok());
+        assert!(check_tenant_secrets(&tenant(1, "default"), &config).is_ok());
+        let err = check_tenant_secrets(&tenant(3, "globex"), &config)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("`GLOBEX_`") && err.contains("ACME_"), "{err}");
+        let leaky = serde_json::json!({"apm": {"datadog": {"token_env": "ACME_DD", "app_key_env": "AEGIS_DD_APP"}}});
+        assert!(
+            check_tenant_secrets(&tenant(2, "acme"), &leaky).is_err(),
+            "every name"
+        );
+    }
 
     const POC: &str = include_str!("../../../config/poc.toml");
     const JP: &str = include_str!("../../../config/customer-jp.toml");
@@ -592,6 +725,7 @@ mod tests {
             max_concurrent_jobs: 1,
             config,
             created_at: Default::default(),
+            tenant_id: aegis_store::TenantId::DEFAULT,
         }
     }
 

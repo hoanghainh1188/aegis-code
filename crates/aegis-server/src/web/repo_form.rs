@@ -108,6 +108,9 @@ impl RepoForm {
             language,
             mode: self.mode.trim().into(),
             max_concurrent_jobs,
+            // The pages register in the default tenant; `repo add` and
+            // `tenant move` place a repo in another (#525).
+            tenant: None,
             settings,
         })
     }

@@ -184,6 +184,8 @@ pub struct Repo {
     pub max_concurrent_jobs: u32,
     pub config: serde_json::Value,
     pub created_at: DateTime<Utc>,
+    /// The contract it belongs to (#525).
+    pub tenant_id: crate::TenantId,
 }
 
 #[derive(Debug, Clone, PartialEq)]

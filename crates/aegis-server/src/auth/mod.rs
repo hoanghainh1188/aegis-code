@@ -183,21 +183,49 @@ pub struct Access {
     pub actor: Actor,
     admin: bool,
     roles: BTreeMap<RepoId, RepoRole>,
+    /// The repos of the tenants this one administers (#525): every right
+    /// in them, roles, pauses and budgets included; none elsewhere.
+    tenant_repos: std::collections::BTreeSet<RepoId>,
 }
 
 impl Access {
     /// `user`'s roles, read now: a role taken away counts at once.
     pub async fn load(store: &Store, user: &User, kind: ActorKind) -> Result<Self, StoreError> {
-        let roles = if user.is_admin {
-            BTreeMap::new()
+        let (roles, tenant_repos) = if user.is_admin {
+            (BTreeMap::new(), Default::default())
         } else {
-            store.repo_roles(user.id).await?.into_iter().collect()
+            let tenants = store.tenants_administered(user.id).await?;
+            let tenant_repos = match tenants.is_empty() {
+                true => Default::default(),
+                false => store
+                    .repos_of_tenants(&tenants)
+                    .await?
+                    .into_iter()
+                    .collect(),
+            };
+            (
+                store.repo_roles(user.id).await?.into_iter().collect(),
+                tenant_repos,
+            )
         };
         Ok(Self {
             actor: Actor::user(user, kind),
             admin: user.is_admin,
             roles,
+            tenant_repos,
         })
+    }
+
+    /// Whether this administers `repo`: the platform's admin, or an admin
+    /// of its tenant (#525).
+    pub fn administers(&self, repo: RepoId) -> bool {
+        self.admin || self.tenant_repos.contains(&repo)
+    }
+
+    /// Whether this administers any repo, as a tenant's admin or the
+    /// platform's: the repos' admin pages are for them.
+    pub fn administers_any(&self) -> bool {
+        self.admin || !self.tenant_repos.is_empty()
     }
 
     pub fn is_admin(&self) -> bool {
@@ -206,13 +234,13 @@ impl Access {
 
     /// Whether this may do in `repo` what `needed` allows.
     pub fn can(&self, repo: RepoId, needed: RepoRole) -> bool {
-        self.admin || self.roles.get(&repo).is_some_and(|r| r.includes(needed))
+        self.administers(repo) || self.roles.get(&repo).is_some_and(|r| r.includes(needed))
     }
 
     /// This one's role in `repo`, as the client shows it (#231):
     /// `admin`, `maintainer`, `reviewer`, `viewer`, or none.
     pub fn role_name(&self, repo: RepoId) -> Option<&'static str> {
-        if self.admin {
+        if self.administers(repo) {
             return Some("admin");
         }
         self.roles.get(&repo).map(|r| r.as_str())
@@ -220,7 +248,15 @@ impl Access {
 
     /// The repos this may see; `None`: every repo.
     pub fn visible(&self) -> Option<Vec<RepoId>> {
-        (!self.admin).then(|| self.roles.keys().copied().collect())
+        (!self.admin).then(|| {
+            self.roles
+                .keys()
+                .chain(&self.tenant_repos)
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
     }
 }
 
@@ -242,7 +278,23 @@ mod tests {
             ),
             admin,
             roles: roles.iter().map(|(r, role)| (RepoId(*r), *role)).collect(),
+            tenant_repos: Default::default(),
         }
+    }
+
+    #[test]
+    fn a_tenant_admin_has_every_right_in_its_repos_only() {
+        let a = Access {
+            tenant_repos: [RepoId(3), RepoId(4)].into(),
+            ..access(false, &[(1, RepoRole::Viewer)])
+        };
+        assert!(a.administers(RepoId(3)) && a.administers_any());
+        assert!(a.can(RepoId(4), RepoRole::Maintainer));
+        assert!(!a.administers(RepoId(1)) && !a.can(RepoId(1), RepoRole::Reviewer));
+        assert!(!a.can(RepoId(9), RepoRole::Viewer));
+        assert!(!a.is_admin(), "not the platform's admin");
+        assert_eq!(a.role_name(RepoId(3)), Some("admin"));
+        assert_eq!(a.visible(), Some(vec![RepoId(1), RepoId(3), RepoId(4)]));
     }
 
     #[test]

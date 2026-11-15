@@ -43,6 +43,8 @@ pub struct Dashboard {
     pub total_review_rounds: Option<f64>,
     pub languages: Vec<Group>,
     pub repos: Vec<Group>,
+    /// By tenant (#525); shown when there is more than one.
+    pub tenants: Vec<Group>,
     /// By ticket origin (`cli`, `github`, `jira`, `jsm`, ...; #511).
     pub ticket_sources: Vec<Group>,
     /// By detected natural language of the ticket (`en`, `ja`, `vi`, `other`; #511).
@@ -166,6 +168,9 @@ pub async fn dashboard_kpis_within(
     let repos = groups(&records, &rounds, |r| {
         Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.repo_slug.clone()))
     });
+    let tenants = groups(&records, &rounds, |r| {
+        Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.tenant.clone()))
+    });
     let ticket_sources = groups(&records, &rounds, |r| {
         Some(
             job_of(r)
@@ -209,6 +214,7 @@ pub async fn dashboard_kpis_within(
         total_review_rounds: mean_rounds(&records, &rounds),
         languages,
         repos,
+        tenants,
         ticket_sources,
         ticket_languages,
         weeks,
@@ -225,6 +231,7 @@ struct DashboardPage<'a> {
     total: KpiRow,
     languages: Vec<KpiRow>,
     repos: Vec<KpiRow>,
+    tenants: Vec<KpiRow>,
     ticket_sources: Vec<KpiRow>,
     ticket_languages: Vec<KpiRow>,
     weeks: Vec<KpiRow>,
@@ -292,6 +299,7 @@ pub async fn page(
         total: KpiRow::new("Total", &d.total, ACCEPT_RATE_MIN).with_rounds(d.total_review_rounds),
         languages: rows(&d.languages, LANGUAGE_ACCEPT_RATE_MIN),
         repos: rows(&d.repos, ACCEPT_RATE_MIN),
+        tenants: rows(&d.tenants, ACCEPT_RATE_MIN),
         ticket_sources: rows(&d.ticket_sources, ACCEPT_RATE_MIN),
         ticket_languages: rows(&d.ticket_languages, ACCEPT_RATE_MIN),
         weeks: rows(&d.weeks, ACCEPT_RATE_MIN),
@@ -343,6 +351,7 @@ mod tests {
             job: Some(KpiJob {
                 repo_id: RepoId(1),
                 repo_slug: "demo".into(),
+                tenant: "default".into(),
                 language: "go".into(),
                 source: "cli".into(),
                 created_at: Default::default(),

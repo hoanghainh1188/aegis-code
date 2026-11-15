@@ -138,13 +138,14 @@ pub(crate) async fn check(
         repo.0,
         rules.time_zone,
     )
-    .fetch_optional(conn)
+    .fetch_optional(&mut *conn)
     .await?
     .ok_or_else(|| StoreError::NotFound(format!("repo {}", repo.0)))?
     .into();
     match budget.state(rules) {
         BudgetState::Spent => Err(StoreError::BudgetSpent(budget.spent_reason(rules))),
-        _ => Ok(()),
+        // Then its contract's, over all its repos (#525).
+        _ => crate::tenants::check(conn, rules, repo).await,
     }
 }
 

@@ -47,7 +47,7 @@ pub use issue::{HiddenTests, IssueInput};
 pub use publish::fork_forge_of;
 pub use registry::{
     IssueTrustConfig, IssueTrustPolicy, ModeConfig, Modes, PatchScopeConfig, RepoRun, RepoSettings,
-    RepoSpec,
+    RepoSpec, check_tenant_secrets, tenant_state_dir,
 };
 pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;

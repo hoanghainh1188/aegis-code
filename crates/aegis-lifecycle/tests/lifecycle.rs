@@ -2030,6 +2030,7 @@ fn spec(scratch: &Scratch, slug: &str, mode: RepoMode, api: &str, jobs: u32) -> 
         mode,
         max_concurrent_jobs: jobs,
         settings,
+        tenant: None,
     }
 }
 

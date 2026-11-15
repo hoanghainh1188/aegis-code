@@ -206,6 +206,8 @@ impl Store {
                 return Ok(tx::Done::Commit(None));
             }
             let mut held = budget::hold_spent(&mut tx, &self.budget).await?;
+            // Then the repos of contracts whose month is spent (#525).
+            held.extend(crate::tenants::hold_spent(&mut tx, &self.budget).await?);
             // A paused repo's reason is written last: it is the one to act on.
             held.extend(crate::pause::hold_paused(&mut tx).await?);
             let row = sqlx::query_as!(
@@ -214,13 +216,24 @@ impl Store {
                      SELECT repo_id, count(*) AS n FROM jobs WHERE status = 'running'
                      GROUP BY repo_id
                  ),
+                 tbusy AS (
+                     SELECT r.tenant_id, count(*) AS n FROM jobs rj
+                     JOIN repos r ON r.id = rj.repo_id
+                     WHERE rj.status = 'running'
+                     GROUP BY r.tenant_id
+                 ),
                  next AS (
                      SELECT j.id FROM jobs j
                      JOIN repos r ON r.id = j.repo_id
+                     JOIN tenants t ON t.id = r.tenant_id
                      LEFT JOIN busy b ON b.repo_id = j.repo_id
+                     LEFT JOIN tbusy tb ON tb.tenant_id = r.tenant_id
                      WHERE j.status = 'queued' AND j.run_after <= now()
                        AND NOT j.cancel_requested
                        AND coalesce(b.n, 0) < r.max_concurrent_jobs
+                       -- A contract's cap over all its repos (#525).
+                       AND (t.max_concurrent_jobs IS NULL
+                            OR coalesce(tb.n, 0) < t.max_concurrent_jobs)
                        AND j.repo_id <> ALL($4)
                        AND (SELECT count(*) FROM jobs
                             WHERE status = 'running' AND locked_by = $1) < $3
@@ -232,6 +245,9 @@ impl Store {
                                 (CASE j.priority WHEN 'P1' THEN 1 WHEN 'P2' THEN 2
                                                  WHEN 'P3' THEN 3 ELSE 4 END)
                                 - floor(extract(epoch FROM now() - j.created_at)::float8 / $6::float8)::int),
+                              -- At the same level, the contract running the
+                              -- fewest jobs first: workers are shared (#525).
+                              coalesce(tb.n, 0),
                               j.sla_deadline NULLS LAST,
                               j.id
                      LIMIT 1
