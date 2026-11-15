@@ -275,6 +275,17 @@ pub async fn create(
             );
         }
     };
+    // The pages register in the default tenant.
+    let tenant = spec
+        .tenant
+        .as_ref()
+        .map_or(aegis_store::TenantId::DEFAULT, |t| t.id);
+    if let Err(why) =
+        crate::github_app::check_binding(&store, &spec.settings, &spec.url, tenant).await
+    {
+        let refused = Some((StatusCode::BAD_REQUEST, why.as_str()));
+        return form_page(&nonce, &me, None, &form, refused, Vec::new());
+    }
     let repo = match admin.modes.register_by(&store, &spec, &access.actor).await {
         Ok(repo) => repo,
         Err(e) => {
@@ -335,6 +346,13 @@ pub async fn update(
             return form_page(&nonce, &me, Some(&repo), &form, refused, Vec::new());
         }
     };
+    let tenant = spec.tenant.as_ref().map_or(repo.tenant_id, |t| t.id);
+    if let Err(why) =
+        crate::github_app::check_binding(&store, &spec.settings, &spec.url, tenant).await
+    {
+        let refused = Some((StatusCode::BAD_REQUEST, why.as_str()));
+        return form_page(&nonce, &me, Some(&repo), &form, refused, Vec::new());
+    }
     let updated = match admin.modes.update_by(&store, &spec, &access.actor).await {
         Ok(repo) => repo,
         Err(e) => {
@@ -386,6 +404,7 @@ async fn make_clone(admin: &RepoAdmin, repo: &Repo) -> Result<(), String> {
         admin.github_app.as_deref(),
         &file.settings,
         &repo.url,
+        repo.tenant_id,
     )
     .await?;
     admin

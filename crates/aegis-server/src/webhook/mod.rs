@@ -642,7 +642,7 @@ async fn deliver(
             Err(e) => internal(delivery, &e),
         };
     }
-    let on_app = via == Some(Via::App);
+    let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     if let Kind::Issue { author } = &wanted.kind {
         let policy = issue_trust_policy(&repo.config);
         if policy == IssueTrustPolicy::Collaborators {
@@ -973,7 +973,7 @@ async fn review_round(
             Err(e) => internal(delivery, &e),
         };
     }
-    let on_app = via == Some(Via::App);
+    let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     let ignored = |delivery: &str, why: &str| ignored_in(delivery, why, Some(repo.id));
     let allowed = match source {
         WebhookSource::Gitlab => {

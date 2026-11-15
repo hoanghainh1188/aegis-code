@@ -15,6 +15,7 @@ mod budget;
 mod connection;
 mod dashboard;
 mod guard;
+mod installations;
 mod jobs;
 mod patch;
 mod pause_all;
@@ -112,6 +113,11 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/admin/ai", get(ai::show))
         .route("/admin/ai/{mode}/check", post(ai::check))
         .route("/admin/audit", get(audit::list))
+        .route("/admin/installations", get(installations::list))
+        .route(
+            "/admin/installations/{id}/tenant",
+            post(installations::bind),
+        )
         .route("/admin/pause", get(pause_all::show).post(pause_all::pause))
         .route("/admin/resume", post(pause_all::resume))
         .route("/admin/users", get(users::list).post(users::add_admin))

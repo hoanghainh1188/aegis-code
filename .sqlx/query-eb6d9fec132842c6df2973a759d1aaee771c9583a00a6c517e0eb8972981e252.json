@@ -1,0 +1,110 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account, repository_selection, repositories, suspended, removed,\n                    tenant_id, updated_at\n             FROM github_installations ORDER BY lower(account), id LIMIT 1000",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "account"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "repository_selection",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "repository_selection"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "repositories",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "repositories"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "suspended",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "suspended"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "removed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "removed"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "tenant_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "tenant_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "github_installations",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "eb6d9fec132842c6df2973a759d1aaee771c9583a00a6c517e0eb8972981e252"
+}

@@ -144,12 +144,14 @@ fn modes(config: &ServerConfig) -> Result<Modes, String> {
 fn github_app(
     config: &ServerConfig,
     secrets: &aegis_secrets::Secrets,
+    store: &Store,
 ) -> Result<Option<Arc<aegis_server::github_app::AppHandle>>, String> {
     config
         .github_app
         .clone()
         .map(|section| {
-            aegis_server::github_app::AppHandle::new(section, secrets.clone()).map(Arc::new)
+            aegis_server::github_app::AppHandle::new(section, secrets.clone())
+                .map(|h| Arc::new(h.with_store(store.clone())))
         })
         .transpose()
 }
@@ -194,12 +196,12 @@ async fn run(args: Args) -> Result<(), String> {
         // a configuration error, not a silent queue.
         let runner = LifecycleRunner::new(store.clone(), modes(&config)?, secrets.clone())
             .await?
-            .with_github_app(github_app(&config, &secrets)?);
+            .with_github_app(github_app(&config, &secrets, &store)?);
         let notifier = Arc::new((
             (
                 GitHubNotifier::from_secrets(&secrets)
                     .await?
-                    .with_app(github_app(&config, &secrets)?, store.clone()),
+                    .with_app(github_app(&config, &secrets, &store)?, store.clone()),
                 GitLabNotifier::from_secrets(&secrets).await?,
             ),
             TrackerNotifier::new(store.clone(), secrets.clone()),
@@ -255,7 +257,7 @@ async fn run(args: Args) -> Result<(), String> {
             Ok(modes) => Some(
                 aegis_server::web::RepoAdmin::new(modes, secrets.clone())
                     .with_webhook_making(config.web.make_webhooks)
-                    .with_github_app(github_app(&config, &secrets)?),
+                    .with_github_app(github_app(&config, &secrets, &store)?),
             ),
             Err(e) => {
                 tracing::warn!(error = %e, "repos cannot be added or changed from the pages");
@@ -311,7 +313,7 @@ async fn run_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode
             tenant_cli::run(&store, &argv[1..]).await
         } else if repo_cli::is_command(&argv[0]) {
             match modes(&config) {
-                Ok(modes) => match github_app(&config, &secrets) {
+                Ok(modes) => match github_app(&config, &secrets, &store) {
                     Ok(app) => {
                         repo_cli::run(&store, &modes, &secrets, app.as_deref(), &argv[1..]).await
                     }

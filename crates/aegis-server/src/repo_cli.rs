@@ -156,8 +156,9 @@ async fn read_token(
     secrets: &Secrets,
     app: Option<&crate::github_app::AppHandle>,
     spec: &RepoSpec,
+    tenant: aegis_store::TenantId,
 ) -> Result<Option<String>, String> {
-    crate::github_app::read_token(secrets, app, &spec.settings, &spec.url).await
+    crate::github_app::read_token(secrets, app, &spec.settings, &spec.url, tenant).await
 }
 
 /// The secret `name`, a fork's `token_env`, when the store has it; the
@@ -205,7 +206,17 @@ pub async fn run(
     match args.as_slice() {
         [verb @ ("add" | "update"), file] => {
             let spec = RepoFile::load(Path::new(file))?.spec_in(store).await?;
-            let token = read_token(secrets, app, &spec).await?;
+            // An update keeps the repo's tenant unless the file names one.
+            let tenant = match &spec.tenant {
+                Some(t) => t.id,
+                None => store
+                    .repo_by_slug(&spec.slug)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_or(aegis_store::TenantId::DEFAULT, |r| r.tenant_id),
+            };
+            crate::github_app::check_binding(store, &spec.settings, &spec.url, tenant).await?;
+            let token = read_token(secrets, app, &spec, tenant).await?;
             let token = token.as_deref();
             let repo = if *verb == "add" {
                 modes.add(store, &spec, token, &actor).await

@@ -127,3 +127,74 @@ async fn bad_ids_and_accounts_are_refused() {
     );
     assert!(s.installation_removed(1, "").await.is_err());
 }
+
+#[tokio::test]
+async fn an_installation_is_bound_to_one_tenant_and_audited() {
+    use aegis_store::{Actor, StoreError, TenantId, binding_refusal};
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let actor = Actor::cli();
+    let acme = s.create_tenant_by("acme", "Acme", &actor).await.unwrap();
+    let other = s.create_tenant_by("other", "Other", &actor).await.unwrap();
+    s.installation_seen(&seen(5, "acme", RepoSelection::All, &[]))
+        .await
+        .unwrap();
+    assert_eq!(s.installation_tenant(5).await.unwrap(), Some(None));
+    assert_eq!(s.installation_tenant(6).await.unwrap(), None);
+    for (bound, why) in [(None, "not recorded"), (Some(None), "not bound")] {
+        assert!(binding_refusal(5, bound, acme.id).unwrap().contains(why));
+    }
+
+    s.bind_installation_by(5, Some(acme.id), &actor)
+        .await
+        .unwrap();
+    assert_eq!(s.installation_tenant(5).await.unwrap(), Some(Some(acme.id)));
+    assert_eq!(binding_refusal(5, Some(Some(acme.id)), acme.id), None);
+    assert!(
+        binding_refusal(5, Some(Some(acme.id)), other.id)
+            .unwrap()
+            .contains("another tenant")
+    );
+    // Bound again to the same: fine. To another: unbind first.
+    s.bind_installation_by(5, Some(acme.id), &actor)
+        .await
+        .unwrap();
+    assert!(matches!(
+        s.bind_installation_by(5, Some(other.id), &actor).await,
+        Err(StoreError::Conflict(_))
+    ));
+    s.bind_installation_by(5, None, &actor).await.unwrap();
+    s.bind_installation_by(5, Some(other.id), &actor)
+        .await
+        .unwrap();
+    assert!(matches!(
+        s.bind_installation_by(9, Some(acme.id), &actor).await,
+        Err(StoreError::NotFound(_))
+    ));
+    assert!(
+        s.bind_installation_by(5, Some(TenantId(999)), &actor)
+            .await
+            .is_err()
+    );
+    let listed = s.installations().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].tenant, Some(other.id));
+    let audited = s
+        .audit_log_where(
+            &aegis_store::AuditFilter {
+                action: Some("installation.tenant".into()),
+                ..Default::default()
+            },
+            aegis_store::Page::first(50),
+        )
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(
+        audited
+            .iter()
+            .filter(|e| e.action == "installation.tenant")
+            .count(),
+        4
+    );
+}

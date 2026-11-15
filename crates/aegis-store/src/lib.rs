@@ -50,7 +50,9 @@ pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};
 pub use error::StoreError;
-pub use installations::{AppOnRepo, InstallationSeen, RepoSelection};
+pub use installations::{
+    AppOnRepo, Installation, InstallationSeen, RepoSelection, binding_refusal,
+};
 pub use instance_pause::{INSTANCE_PAUSED, InstancePause, InstancePaused, PauseLevel};
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
