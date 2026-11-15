@@ -1,5 +1,5 @@
-//! The job queue (ADR 0003 §3, #23). A worker claims the oldest queued job
-//! with `FOR UPDATE SKIP LOCKED`, in the same statement that applies the
+//! The job queue (ADR 0003 §3, #23). A worker claims the next queued job,
+//! by SLA level and then the oldest (#524), with `FOR UPDATE SKIP LOCKED`, in the same statement that applies the
 //! worker's `max_workers` and the repo's `repos.max_concurrent_jobs`, and holds a lease on it that it renews
 //! while the job runs. Every write to a running job is conditioned on that
 //! lease: a worker that lost it (expired, reclaimed) can no longer end it.
@@ -22,6 +22,10 @@ const CLAIM_LOCK: i64 = 0x6165_6769_735f_6a6f; // "aegis_jo"
 
 /// Rows one reclaim handles; the rest wait for the next one.
 const RECLAIM_BATCH: i64 = 100;
+
+/// A queued job waiting this long is claimed as if one SLA level higher
+/// (#524), unless the server sets its own (`[worker] sla_aging_s`).
+pub const DEFAULT_SLA_AGING: Duration = Duration::from_secs(3600);
 
 /// A claimed job and the run that just started for it.
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +107,15 @@ impl Patch {
 }
 
 impl Store {
+    /// Queued jobs are claimed one SLA level higher for each `aging` they
+    /// have waited (#524); at least a second.
+    pub fn with_sla_aging(self, aging: Duration) -> Self {
+        Self {
+            sla_aging: aging.max(Duration::from_secs(1)),
+            ..self
+        }
+    }
+
     /// The diagnosis `job` wrote back to its ticket (#451), if it ended
     /// `diagnosed`.
     pub async fn diagnosis(&self, job: JobId) -> Result<Option<String>, StoreError> {
@@ -168,7 +181,8 @@ fn secs(d: Duration) -> f64 {
 }
 
 impl Store {
-    /// The oldest queued job `worker` may take while it holds fewer than
+    /// The next queued job `worker` may take, by SLA level (`P1` first; each
+    /// `sla_aging` waited lifts a job one level) and then the oldest, while it holds fewer than
     /// `max_workers` and the job's repo runs fewer than its
     /// `max_concurrent_jobs` and has budget left this month (#31), now
     /// running under a lease of `lease`; `None` when there is none. Queued
@@ -210,7 +224,16 @@ impl Store {
                        AND j.repo_id <> ALL($4)
                        AND (SELECT count(*) FROM jobs
                             WHERE status = 'running' AND locked_by = $1) < $3
-                     ORDER BY j.id
+                     -- By SLA (#524): P1, P2, P3, then jobs with no level;
+                     -- each $6 seconds a job has waited lifts it one level,
+                     -- so none waits for ever. Then the sooner deadline,
+                     -- then the order they came in: FIFO without SLAs.
+                     ORDER BY GREATEST(1,
+                                (CASE j.priority WHEN 'P1' THEN 1 WHEN 'P2' THEN 2
+                                                 WHEN 'P3' THEN 3 ELSE 4 END)
+                                - floor(extract(epoch FROM now() - j.created_at)::float8 / $6::float8)::int),
+                              j.sla_deadline NULLS LAST,
+                              j.id
                      LIMIT 1
                      FOR UPDATE OF j SKIP LOCKED
                  )
@@ -229,6 +252,7 @@ impl Store {
                 i64::from(max_workers),
                 &held,
                 budget::waiting_prefix(),
+                self.sla_aging.as_secs_f64().max(1.0),
             )
             .fetch_optional(&mut *tx)
             .await?;

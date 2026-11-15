@@ -265,6 +265,10 @@ pub struct WorkerSection {
     pub drain_s: u64,
     #[serde(default = "default_retry_base_s")]
     pub retry_base_s: u64,
+    /// Queued jobs are claimed by SLA level, `P1` first (#524); each this
+    /// long a job has waited lifts it one level, so none waits for ever.
+    #[serde(default = "default_sla_aging_s")]
+    pub sla_aging_s: u64,
 }
 
 impl Default for WorkerSection {
@@ -291,6 +295,10 @@ fn default_renew_s() -> u64 {
 
 fn default_poll_s() -> u64 {
     5
+}
+
+fn default_sla_aging_s() -> u64 {
+    3600
 }
 
 fn default_drain_s() -> u64 {

@@ -53,7 +53,7 @@ pub use pause::{Paused, REPO_PAUSED, RepoPause};
 pub use queue::{AttemptEnd, Claim, Lease, MAX_DIAGNOSIS_CHARS, MAX_PATCH_BYTES, Patch};
 pub use reviews::{DEFAULT_MAX_REVIEW_ROUNDS, pr_issue_ref};
 pub use sonar::MAX_BATCH_WARNINGS;
-pub use stats::QueueStats;
+pub use stats::{PRIORITY_LEVELS, PriorityStats, QueueStats};
 pub use tokens::{MAX_PERSONAL_TOKENS, MAX_TOKEN_DAYS, PersonalToken, ServiceToken};
 pub use types::{
     ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,
@@ -84,6 +84,9 @@ pub struct Store {
     budget: Arc<BudgetRules>,
     /// Review rounds a PR may have (#243).
     max_review_rounds: u32,
+    /// How long a queued job waits before it is claimed as if one SLA level
+    /// higher (#524), so none waits for ever behind newer `P1`s.
+    sla_aging: std::time::Duration,
 }
 
 impl Store {
@@ -103,6 +106,7 @@ impl Store {
             pool,
             budget: Arc::default(),
             max_review_rounds: reviews::DEFAULT_MAX_REVIEW_ROUNDS,
+            sla_aging: queue::DEFAULT_SLA_AGING,
         })
     }
 

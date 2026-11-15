@@ -6,7 +6,7 @@
 - Issue: #461 (frames #451–#457)
 - Amends: [ADR 0002](0002-full-platform-mvp-as-checkpoint.md), Decision 1 (roadmap spanned Phase 0 through Phase 3)
 - Related: [ADR 0005](0005-kpi-thresholds-after-phase-1.md), [ADR 0009](0009-prompt-injection-threat-model.md), Proposal §0, §1, §9
-- Amendments: 2026-11-14, the CVE lane (#455) starts before the pilot (§4); 2026-11-15, read-only APM telemetry enrichment (#452) starts before the pilot (§4); 2026-11-15, ITSM intake and SLA metadata (#453) starts before the pilot (§4); 2026-11-15, the triage diagnosis lane (#451) is built before the pilot, off by default (§4); 2026-11-15, sidecar lifecycle telemetry and controlled Golden Master evaluation (#454) starts before the pilot (§4)
+- Amendments: 2026-11-14, the CVE lane (#455) starts before the pilot (§4); 2026-11-15, read-only APM telemetry enrichment (#452) starts before the pilot (§4); 2026-11-15, ITSM intake and SLA metadata (#453) starts before the pilot (§4); 2026-11-15, the triage diagnosis lane (#451) is built before the pilot, off by default (§4); 2026-11-15, #457 is split into #524–#526 and starts before the pilot (§4); 2026-11-15, sidecar lifecycle telemetry and controlled Golden Master evaluation (#454) starts before the pilot (§4)
 
 ## Context
 
@@ -71,6 +71,8 @@ Some of this cannot be fixed by tuning the engine:
    **Amendment 2026-11-15 (#451):** the diagnosis lane (#451) may also be built before the pilot, because it ships **off**: a repository turns it on per triage category (`ops_or_config`, `data_issue`, `needs_info`, never `code_bug`) above a confidence (`[triage_lane]`, default 0.8). Until a repository does, every ticket goes to the fix loop as before and shadow triage (#497) keeps measuring. A repository turns a category on only where the pilot's triage table shows code defects are rarely read as that category ([ADR 0012](0012-triage-and-diagnostic-lane.md) amendment #497 §4). The lane writes a read-only report whose every finding cites a checked source (#508), applies nothing, and opens no PR.
 
    **Amendment 2026-11-15 (#454):** Sidecar lifecycle timing telemetry (`SidecarReport` / `GateRun.sidecar_s`) and controlled Golden Master empirical evaluation (`eval/golden-master/`, #454) may start before the pilot. It adds read-only sidecar timing metrics to gate reports and ledger events without modifying the bug-fix loop or weakening sandbox/network controls; live-model LLM token cost on real legacy tickets remains deferred until live API evaluation / pilot #158.
+
+   **Amendment 2026-11-15 (#457):** #457 is split into three issues, built in order before the pilot: SLA queue ordering (#524), the tenant/contract entity and its isolation (#525), and the AMS report (#526). Each changes behaviour only for jobs that carry what it reads: the claim orders by SLA level only when jobs have one (from ITSM intake, #453), and is first in, first out otherwise; tenants other than the default one, and the report, exist only once an operator creates them. A single-team pilot on one tenant without SLAs runs as before. Phase 4's measurements (§5) still wait for the pilot and the internal KPIs.
 
    In addition, the Phase 3 issues Phase 4 depends on must be closed: #451 for #456, and #451 and #453 for #457. If the pilot or the internal KPIs fall short, ADR 0002 applies: find the cause in the ledger and harden the core engine before adding AMS layers.
 
