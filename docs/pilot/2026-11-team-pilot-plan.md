@@ -9,7 +9,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 | Mục | Giá trị |
 | --- | --- |
 | Máy | `<host-ssh>`: Linux x86_64 hoặc arm64, tối thiểu 4 vCPU, 16 GB RAM, 100 GB SSD, chỉ dùng cho aegis ([runbook on-premise](../runbook/on-premise.md#prerequisites)) |
-| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.13.0** (có `aegis check-repo` trong image server, #474; sidecar DB cho gate và `run_tests`, #490, #491; triage chạy ngầm, #497; luồng CVE, #455) |
+| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.14.0** (có `aegis check-repo` trong image server, #474; sidecar DB cho gate và `run_tests`, #490, #491; triage chạy ngầm, #497; luồng CVE, #455; dừng mọi agent khi có sự cố, #510; quét secret ở đầu ra, #509; kiểm nguồn của câu trả lời, #508) |
 | Repo | `<owner/name>` trên GitHub. Issue và lỗi CI đến qua webhook (#25) |
 | Ngôn ngữ | `<language>`. Trần lượt gọi theo profile: 80 cho Rust, 40 cho các ngôn ngữ khác ([ADR 0014](../adr/0014-per-language-call-cap.md)) |
 | Ngân sách | **$100 mỗi tháng** cho repo (#31), $4 mỗi job (`[worker] max_cost_usd`) |
@@ -21,7 +21,13 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 
 ## Bước 0: chuẩn bị (trước ngày triển khai)
 
-1. **Phát hành v0.13.0.** Merge PR release của release-please để có tag `v0.13.0` cùng image trên GHCR. Từ v0.11.0, image server có `aegis check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Từ v0.12.0, test cần PostgreSQL hay Redis chạy được trong gate và trong `run_tests` của agent (sidecar, #490, #491). Từ v0.13.0, mỗi ticket được Light phân loại ngầm (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) để đo trong pilot (#497); job bug-fix không được đổi phiên bản nào trong lockfile, và phụ thuộc được nâng bằng một job CVE (#455, [runbook repos](../runbook/repos.md#registration-and-cloning) bước 8). Bản v0.9.0 còn thiếu cả trần lượt gọi theo ngôn ngữ (#471) và các quy tắc prompt của #448.
+1. **Phát hành v0.14.0.** Merge PR release của release-please để có tag `v0.14.0` cùng image trên GHCR. Từ v0.11.0, image server có `aegis check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Từ v0.12.0, test cần PostgreSQL hay Redis chạy được trong gate và trong `run_tests` của agent (sidecar, #490, #491). Từ v0.13.0, mỗi ticket được Light phân loại ngầm (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) để đo trong pilot (#497); job bug-fix không được đổi phiên bản nào trong lockfile, và phụ thuộc được nâng bằng một job CVE (#455, [runbook repos](../runbook/repos.md#registration-and-cloning) bước 8). Từ v0.14.0:
+   - admin dừng được mọi agent bằng một thao tác khi có sự cố, rồi cho chạy tiếp mà không mất job trong hàng đợi (#510, [runbook incident](../runbook/incident.md));
+   - gate có bước `secrets`, làm hỏng bản vá thêm khoá hay token; mọi văn bản đăng lên forge hay tracker đều được che secret (#509). Repo có fixture chứa khoá giả cần khai báo ngoại lệ ([runbook repos](../runbook/repos.md#registration-and-cloning) bước 9);
+   - câu trả lời của agent phải trích nguồn có thật trong repo; nguồn sai thì agent được hỏi lại, hết lượt thì không mở PR (#508);
+   - lane chẩn đoán (#451) có sẵn nhưng **tắt**: pilot chỉ đo triage ngầm (#497), không bật lane cho repo pilot. Tenant, hàng đợi SLA, ITSM, APM, báo cáo AMS và bộ nhớ sự cố (#452–#457) không đổi gì với một team một repo không cấu hình chúng.
+
+   Bản v0.9.0 còn thiếu cả trần lượt gọi theo ngôn ngữ (#471) và các quy tắc prompt của #448.
 2. **Gom 9 mục** trong [danh sách chuẩn bị của runbook](../runbook/on-premise.md#preparation-checklist). Các mục thường mất thời gian nhất vì phải chờ team khác:
    - tên DNS cùng chứng chỉ TLS, đặt sau reverse proxy;
    - một OIDC client trong SSO của team;
@@ -40,7 +46,7 @@ Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setu
    - các sandbox cần kéo về, chỉ chọn ngôn ngữ của repo;
    - API key Claude, OIDC client secret và token để comment. Ba thứ này nhập ẩn.
    Câu nào để trống thì chạy lại script sẽ được hỏi lại.
-2. `sudo ./aegis-deploy.sh 0.13.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
+2. `sudo ./aegis-deploy.sh 0.14.0`. Ở đây ghi version không có chữ `v`. Khi server chạy được, script tự cấp quyền `admin` cho email đã nhập.
 3. Kiểm tra sau khi cài (runbook §1, bước 5): healthcheck trả về được, và đăng nhập SSO được.
 4. Chạy `backup.sh` lần đầu, rồi đặt lịch chạy hằng ngày bằng cron hoặc systemd timer ([runbook on-premise §4](../runbook/on-premise.md#4-backup--disaster-recovery)).
 
@@ -109,4 +115,7 @@ Nếu `<owner/name>` là repo nội bộ và khách đồng ý bằng văn bản
 | API model lỗi (5xx, 429) hàng loạt | Server thử lại 3 lần, giãn cách tăng dần từ 30 giây. Hết lượt thử thì job lỗi; chạy lại bằng `POST /api/v1/jobs/{id}/retry` ([runbook §4](../runbook/README.md#4-troubleshooting)) |
 | Team chỉ giao việc khó, nên tỉ lệ chấp nhận thấp | Chọn issue cùng team trong tuần đầu, và ghi độ khó của từng issue vào bảng tuần |
 | Repo công khai, model có thể đã thấy bản sửa | Ghi rõ trong báo cáo. Ưu tiên repo nội bộ (#157) |
+| Gate hỏng ở bước `secrets` vì fixture của test chứa khoá hay token giả (#509) | Thêm `[[settings.secrets.allow]]` theo đường dẫn và loại, kèm lý do ([runbook repos](../runbook/repos.md#registration-and-cloning) bước 9), rồi chạy lại job. Ghi số ca vào báo cáo |
+| Job dừng vì câu trả lời không có nguồn kiểm được (#508) | Xem trang job (dòng "check sources"). Đếm các ca này riêng trong báo cáo: dashboard và `aegis report` có số "Held: no verifiable sources" |
+| Agent gây sự cố (PR lạ hàng loạt, tốn tiền bất thường) | Admin dừng mọi agent (`/admin/pause` hoặc `aegis-server pause-all`), xử lý theo [runbook incident](../runbook/incident.md), rồi tiếp tục |
 | Bug mà bản sửa cần nâng một phụ thuộc: gate của job bug-fix hỏng vì lockfile bị khoá (#500) | Chạy một job CVE (hoặc job nâng) cho phụ thuộc đó trước, rồi chạy lại job bug-fix. Ghi số ca như vậy vào báo cáo |
