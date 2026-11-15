@@ -8,6 +8,7 @@
       <th scope="col" class="num">PRs opened</th>
       <th scope="col" class="num">Awaiting review</th>
       <th scope="col" class="num">Accepted PRs</th>
+      <th scope="col" class="num">Stopped</th>
       <th scope="col" class="num">Broke tests</th>
       <th scope="col" class="num">Cost / issue</th>
       <th scope="col" class="num">Review time</th>
@@ -24,6 +25,7 @@
       <td class="num">{{ r.prs_opened }}</td>
       <td class="num">{{ r.awaiting_review }}</td>
       <td class="num {{ r.accept_class }}">{{ r.accept }}</td>
+      <td class="num">{{ r.stopped }}</td>
       <td class="num">{{ r.broke_tests }}</td>
       <td class="num {{ r.cost_class }}">{{ r.cost }}</td>
       <td class="num {{ r.review_class }}">{{ r.review }}</td>
@@ -32,7 +34,7 @@
       <td class="num">{{ r.rounds }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="10" class="empty">No runs yet.</td></tr>
+    <tr><td colspan="12" class="empty">No runs yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>

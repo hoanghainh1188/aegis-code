@@ -16,6 +16,8 @@ pub struct KpiJob {
     pub tenant: String,
     /// As the repo was registered; the dashboard lowercases it.
     pub language: String,
+    /// Ticket origin (`cli`, `github`, `jira`, `jsm`, ...; lowercased).
+    pub source: String,
     pub created_at: DateTime<Utc>,
     /// A review round (#245): the ledger of the job that opened the PR,
     /// and which round of it this is.
@@ -61,6 +63,7 @@ impl Store {
                       s.ledger_key IS NOT NULL AS "stale!",
                       j.repo_id AS "repo_id?", p.slug AS "slug?", p.language AS "language?",
                       t.slug AS "tenant?",
+                      j.source AS "source?",
                       j.created_at AS "created_at?",
                       root.ledger_key AS "review_of?", j.review_round AS "review_round?"
                FROM keys k
@@ -94,21 +97,32 @@ impl Store {
                 }
                 (false, None) => IssueRecord::new(issue),
             };
-            let job = match (row.repo_id, row.slug, row.language, row.created_at) {
-                (Some(repo_id), Some(repo_slug), Some(language), Some(created_at)) => {
-                    Some(KpiJob {
-                        repo_id: RepoId(repo_id),
-                        repo_slug,
-                        tenant: row.tenant.unwrap_or_else(|| "default".into()),
-                        language,
-                        created_at,
-                        review_of: row.review_of.map(IssueId::parse).transpose()?,
-                        review_round: row
-                            .review_round
-                            .and_then(|r| u32::try_from(r).ok())
-                            .unwrap_or(0),
-                    })
-                }
+            let job = match (
+                row.repo_id,
+                row.slug,
+                row.language,
+                row.source,
+                row.created_at,
+            ) {
+                (
+                    Some(repo_id),
+                    Some(repo_slug),
+                    Some(language),
+                    Some(source),
+                    Some(created_at),
+                ) => Some(KpiJob {
+                    repo_id: RepoId(repo_id),
+                    repo_slug,
+                    tenant: row.tenant.unwrap_or_else(|| "default".into()),
+                    language,
+                    source,
+                    created_at,
+                    review_of: row.review_of.map(IssueId::parse).transpose()?,
+                    review_round: row
+                        .review_round
+                        .and_then(|r| u32::try_from(r).ok())
+                        .unwrap_or(0),
+                }),
                 _ => None,
             };
             out.push(KpiRecord { record, job });

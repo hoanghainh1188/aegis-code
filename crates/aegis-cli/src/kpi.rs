@@ -6,7 +6,8 @@ use std::path::Path;
 
 use aegis_lang::Language;
 use aegis_ledger::{
-    IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Report, Review, ReviewVerdict, SetIssue,
+    BiasReport, IssueId, IssueLedger, LedgerStore, Outcome, PriceTable, Report, Review,
+    ReviewVerdict, SetIssue,
 };
 use aegis_lifecycle::{RunConfig, load_set};
 use aegis_pr::GitHub;
@@ -123,9 +124,14 @@ pub async fn report<S: LedgerStore>(store: &S, set: Option<&Path>) -> Result<Str
     let Some(dir) = set else {
         // Shadow triage against what the jobs did (#497), once there is any.
         let triage = aegis_ledger::TriageTable::from_records(&records);
+        // Multi-dimensional bias slices (#511, ADR 0016), once ticket metadata exists.
+        let bias = BiasReport::from_records(&records, |r| r.ticket_meta.clone());
         let mut text = Report::<Language>::all(&records).to_string();
         if !triage.is_empty() {
             text.push_str(&format!("\n{triage}"));
+        }
+        if !bias.is_empty() {
+            text.push_str(&format!("\n{bias}"));
         }
         return Ok(text);
     };
@@ -317,5 +323,43 @@ mod tests {
             text.contains("| needs_info | 1 | 0 | 0 | 0 | 1 |"),
             "{text}"
         );
+    }
+
+    #[tokio::test]
+    async fn the_report_includes_bias_tables_when_ticket_meta_is_present() {
+        let store = MemoryLedger::new();
+        let meta = aegis_ledger::TicketMeta {
+            programming_language: Some("rust".into()),
+            ticket_language: Some(aegis_ledger::TicketLanguage::Ja),
+            ticket_source: Some("jira".into()),
+            repo: Some("acme/service".into()),
+        };
+        let id = aegis_ledger::IssueId::parse("ACME-1").unwrap();
+        for event in [
+            LedgerEvent::TicketMeta(meta),
+            LedgerEvent::Finished {
+                outcome: Outcome::StoppedBudget,
+                wall_time_s: 2.0,
+            },
+        ] {
+            store.append(&id, &event).await.unwrap();
+        }
+        let text = report(&store, None).await.unwrap();
+        assert!(
+            text.contains("## Bias check: By ticket language (#511)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("| ja | 1 | 0% (0/1) | 100% (1/1) |"),
+            "{text}"
+        );
+        assert!(
+            text.contains("## Bias check: By ticket source (#511)"),
+            "{text}"
+        );
+        assert!(text.contains("| jira | 1 |"), "{text}");
+        assert!(text.contains("## Bias check: By repo (#511)"), "{text}");
+        assert!(text.contains("| acme/service | 1 |"), "{text}");
+        assert!(text.contains("Stopped without PR | 100% (1/1)"), "{text}");
     }
 }

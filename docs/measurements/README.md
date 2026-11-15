@@ -88,6 +88,12 @@ Mô hình đe doạ ở [ADR 0009](../adr/0009-prompt-injection-threat-model.md)
 | 11-09 | [helm-docker-proxy-kind](2026-11-09-helm-docker-proxy-kind.md) (#411) | `aegis-docker-proxy` trong worker Pod, kiểm trên kind; thiết kế ở [ADR 0010](../adr/0010-docker-socket-proxy.md) |
 | 11-15 | [sidecar-golden-master](2026-11-15-sidecar-golden-master.md) (#454) | Thực nghiệm Golden Master (bắt 6/6 regression so với 0/6 khi thiếu) và PostgreSQL sidecar trong Docker (~4.5s overhead cho start + 3 reset + teardown) |
 
+## Thiên lệch (bias) và theo dõi pilot
+
+| Ngày | Báo cáo | Nội dung |
+| --- | --- | --- |
+| 11-15 | [bias-scope-and-eval-baseline](2026-11-15-bias-scope-and-eval-baseline.md) (#511) | Phạm vi bias theo WORTH – R ([ADR 0016](../adr/0016-platform-bias-scope-and-measurement.md)), baseline 52 issue `eval/issues` và khoảng trống dữ liệu chờ pilot `#158` |
+
 ## Khi thêm báo cáo mới
 
 1. Đặt tên `YYYY-MM-DD-<chủ đề>.md`, tiêu đề kết thúc bằng số issue.

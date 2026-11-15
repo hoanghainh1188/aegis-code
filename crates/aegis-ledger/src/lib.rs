@@ -4,6 +4,7 @@
 //! happens (ADR 0003), so a restart loses no cost data. The per-issue
 //! [`IssueRecord`] is a fold over those events.
 
+mod bias;
 mod error;
 mod issue;
 mod kpi;
@@ -13,6 +14,10 @@ pub mod report;
 mod store;
 mod triage;
 
+pub use bias::{
+    ACCEPT_GAP_ALERT, BiasReport, BiasRow, BiasSection, COST_FLOOR_ALERT, COST_RATIO_ALERT,
+    MIN_BIAS_SAMPLE, STOP_GAP_ALERT, STOP_RATE_ALERT, TRIAGE_MISS_RATE_ALERT,
+};
 pub use error::LedgerError;
 pub use issue::{IssueLedger, MAX_CHANGES, MAX_NOTE_CHARS, MAX_TEXT_CHARS, MAX_TITLE_CHARS};
 pub use kpi::{
@@ -22,8 +27,8 @@ pub use kpi::{
 pub use pricing::{LongPrompt, ModelPrice, PriceTable};
 pub use record::{
     AnswerChange, AnswerReply, AnswerSummary, AnswerSuspicious, GateRun, InputFlag, IssueId,
-    IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, Tier, TokenCounts,
-    ToolCall, Triage, TriageCategory,
+    IssueKind, IssueRecord, LedgerEvent, Outcome, Review, ReviewVerdict, TicketLanguage,
+    TicketMeta, Tier, TokenCounts, ToolCall, Triage, TriageCategory, detect_ticket_language,
 };
 pub use report::{Report, SetIssue};
 pub use store::{CopyReport, JsonFileLedger, LedgerStore, MemoryLedger, copy_ledger};

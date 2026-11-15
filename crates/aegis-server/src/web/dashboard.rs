@@ -10,14 +10,15 @@
 use std::collections::BTreeMap;
 
 use aegis_ledger::{
-    ACCEPT_RATE_MIN, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN, TriageTable, accepted,
+    ACCEPT_RATE_MIN, BiasReport, IssueRecord, Kpi, LANGUAGE_ACCEPT_RATE_MIN, TicketMeta,
+    TriageTable, accepted,
 };
 use aegis_store::{KpiJob, KpiRecord, Page, Repo, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::State;
 
-use super::view::{BudgetRow, KpiRow, dollars};
+use super::view::{BudgetRow, KpiRow, dollars, pct};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::Access;
 
@@ -44,10 +45,28 @@ pub struct Dashboard {
     pub repos: Vec<Group>,
     /// By tenant (#525); shown when there is more than one.
     pub tenants: Vec<Group>,
+    /// By ticket origin (`cli`, `github`, `jira`, `jsm`, ...; #511).
+    pub ticket_sources: Vec<Group>,
+    /// By detected natural language of the ticket (`en`, `ja`, `vi`, `other`; #511).
+    pub ticket_languages: Vec<Group>,
     /// By the ISO week the job was created; jobs only.
     pub weeks: Vec<Group>,
     /// Light's shadow triage against what the jobs did (#497).
     pub triage: TriageTable,
+    /// Multi-dimensional disparity monitor (ADR 0016, #511).
+    pub bias: BiasReport,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct BiasAlertRow {
+    dimension: &'static str,
+    group: String,
+    runs: usize,
+    accept: String,
+    stopped: String,
+    cost: String,
+    triage_miss: String,
+    flags: String,
 }
 
 pub(super) async fn all_repos(store: &Store) -> Result<BTreeMap<RepoId, Repo>, WebError> {
@@ -152,6 +171,40 @@ pub async fn dashboard_kpis_within(
     let tenants = groups(&records, &rounds, |r| {
         Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.tenant.clone()))
     });
+    let ticket_sources = groups(&records, &rounds, |r| {
+        Some(
+            job_of(r)
+                .map(|job| job.source.to_ascii_lowercase())
+                .or_else(|| r.ticket_meta.ticket_source.clone())
+                .unwrap_or_else(|| OUTSIDE_JOBS.into()),
+        )
+    });
+    let ticket_languages = groups(&records, &rounds, |r| {
+        r.ticket_meta
+            .ticket_language
+            .map(|lang| lang.as_str().to_owned())
+    });
+    let bias = BiasReport::from_records(&records, |r| {
+        let j = job_of(r);
+        TicketMeta {
+            programming_language: r
+                .ticket_meta
+                .programming_language
+                .clone()
+                .or_else(|| j.map(|job| job.language.to_ascii_lowercase())),
+            ticket_language: r.ticket_meta.ticket_language,
+            ticket_source: r
+                .ticket_meta
+                .ticket_source
+                .clone()
+                .or_else(|| j.map(|job| job.source.to_ascii_lowercase())),
+            repo: r
+                .ticket_meta
+                .repo
+                .clone()
+                .or_else(|| j.map(|job| job.repo_slug.clone())),
+        }
+    });
     let mut weeks = groups(&records, &rounds, |r| {
         job_of(r).map(|job| job.created_at.format("%G-W%V").to_string())
     });
@@ -162,8 +215,11 @@ pub async fn dashboard_kpis_within(
         languages,
         repos,
         tenants,
+        ticket_sources,
+        ticket_languages,
         weeks,
         triage: TriageTable::from_records(&records),
+        bias,
     })
 }
 
@@ -176,6 +232,8 @@ struct DashboardPage<'a> {
     languages: Vec<KpiRow>,
     repos: Vec<KpiRow>,
     tenants: Vec<KpiRow>,
+    ticket_sources: Vec<KpiRow>,
+    ticket_languages: Vec<KpiRow>,
     weeks: Vec<KpiRow>,
     budgets: Vec<BudgetRow>,
     time_zone: &'a str,
@@ -186,6 +244,7 @@ struct DashboardPage<'a> {
     language_min: u32,
     /// Once any job was triaged (#497).
     triage: Option<TriageTable>,
+    bias_alerts: Vec<BiasAlertRow>,
 }
 
 /// A threshold on the 0–200 scale of the bars.
@@ -214,6 +273,26 @@ pub async fn page(
             .map(|g| KpiRow::new(g.label.clone(), &g.kpi, min).with_rounds(g.review_rounds))
             .collect()
     };
+    let bias_alerts: Vec<BiasAlertRow> = d
+        .bias
+        .sections
+        .iter()
+        .flat_map(|s| {
+            s.rows
+                .iter()
+                .filter(|r| !r.alerts.is_empty())
+                .map(|r| BiasAlertRow {
+                    dimension: s.heading,
+                    group: r.label.clone(),
+                    runs: r.kpi.runs,
+                    accept: pct(r.kpi.accepted, r.fix_attempts()),
+                    stopped: pct(r.kpi.stopped(), r.fix_attempts()),
+                    cost: r.kpi.mean_cost_usd.map_or("—".into(), dollars),
+                    triage_miss: pct(r.non_code_accepted, r.non_code_reviewed),
+                    flags: r.alerts.join(", "),
+                })
+        })
+        .collect();
     render(&DashboardPage {
         nonce: nonce.as_str(),
         me: &me,
@@ -221,6 +300,8 @@ pub async fn page(
         languages: rows(&d.languages, LANGUAGE_ACCEPT_RATE_MIN),
         repos: rows(&d.repos, ACCEPT_RATE_MIN),
         tenants: rows(&d.tenants, ACCEPT_RATE_MIN),
+        ticket_sources: rows(&d.ticket_sources, ACCEPT_RATE_MIN),
+        ticket_languages: rows(&d.ticket_languages, ACCEPT_RATE_MIN),
         weeks: rows(&d.weeks, ACCEPT_RATE_MIN),
         budgets,
         time_zone: &rules.time_zone,
@@ -229,6 +310,7 @@ pub async fn page(
         total_min: bar(ACCEPT_RATE_MIN),
         language_min: bar(LANGUAGE_ACCEPT_RATE_MIN),
         triage: (!d.triage.is_empty()).then_some(d.triage),
+        bias_alerts,
     })
 }
 
@@ -271,6 +353,7 @@ mod tests {
                 repo_slug: "demo".into(),
                 tenant: "default".into(),
                 language: "go".into(),
+                source: "cli".into(),
                 created_at: Default::default(),
                 review_of: review_of.map(|k| IssueId::parse(k.to_owned()).unwrap()),
                 review_round: round,
