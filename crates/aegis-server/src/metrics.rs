@@ -26,6 +26,10 @@
 //!   (the gate's `secrets` step failed on them) or the text they were
 //!   masked in (`commit message`, `PR`, `review reply`).
 //! - Tickets the diagnosis lane took (#451), by triage category.
+//! - The AMS report (#526), this month, by `tenant` and SLA `priority`:
+//!   MTTR, the share on time of jobs with a deadline, open jobs already
+//!   past it, done jobs by how they were resolved (`triage`, `pr`,
+//!   `other`); and each tenant's spend and cap.
 //! - `aegis_paused` (#510), read at each scrape: 1 while every agent is
 //!   paused (intake or emergency), 0 otherwise.
 
@@ -104,6 +108,25 @@ struct PlaceLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct AmsLabels {
+    tenant: String,
+    priority: String,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct ResolvedLabels {
+    tenant: String,
+    priority: String,
+    /// `triage`, `pr` or `other`.
+    by: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct TenantLabels {
+    tenant: String,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct PriorityLabels {
     priority: &'static str,
 }
@@ -138,6 +161,12 @@ pub struct Metrics {
     paused: Gauge,
     secrets_blocked: Family<PlaceLabels, Counter>,
     diagnosed: Family<TriageLabels, Counter>,
+    ams_mttr_seconds: Family<AmsLabels, Gauge<f64, AtomicU64>>,
+    ams_on_time_ratio: Family<AmsLabels, Gauge<f64, AtomicU64>>,
+    ams_overdue_open: Family<AmsLabels, Gauge>,
+    ams_resolved: Family<ResolvedLabels, Gauge>,
+    tenant_spent_usd: Family<TenantLabels, Gauge<f64, AtomicU64>>,
+    tenant_cap_usd: Family<TenantLabels, Gauge<f64, AtomicU64>>,
 }
 
 impl Metrics {
@@ -249,7 +278,49 @@ impl Metrics {
             "Tickets the diagnosis lane took (#451): a read-only report, no PR",
             diagnosed.clone(),
         );
+        let ams_mttr_seconds = Family::default();
+        registry.register(
+            "ams_mttr_seconds",
+            "Mean time from a ticket to its job's result, this month (#526)",
+            ams_mttr_seconds.clone(),
+        );
+        let ams_on_time_ratio = Family::default();
+        registry.register(
+            "ams_sla_on_time_ratio",
+            "Done jobs with an SLA deadline that ended by it, this month",
+            ams_on_time_ratio.clone(),
+        );
+        let ams_overdue_open = Family::default();
+        registry.register(
+            "ams_overdue_open_jobs",
+            "Queued or running jobs already past their SLA deadline",
+            ams_overdue_open.clone(),
+        );
+        let ams_resolved = Family::default();
+        registry.register(
+            "ams_resolved_jobs",
+            "Done jobs this month by how they were resolved: triage, pr, other",
+            ams_resolved.clone(),
+        );
+        let tenant_spent_usd = Family::default();
+        registry.register(
+            "tenant_budget_spent_usd",
+            "What each tenant's repos spent this month, in $ (#525)",
+            tenant_spent_usd.clone(),
+        );
+        let tenant_cap_usd = Family::default();
+        registry.register(
+            "tenant_budget_cap_usd",
+            "Each tenant's monthly cap, in $; absent for one without",
+            tenant_cap_usd.clone(),
+        );
         Self {
+            ams_mttr_seconds,
+            ams_on_time_ratio,
+            ams_overdue_open,
+            ams_resolved,
+            tenant_spent_usd,
+            tenant_cap_usd,
             triage,
             paused,
             secrets_blocked,
@@ -337,6 +408,54 @@ impl Metrics {
 
     fn paused(&self, paused: bool) {
         self.paused.set(i64::from(paused));
+    }
+
+    fn ams(&self, report: &aegis_store::AmsReport) {
+        // A month's rows go when it ends: none of last month's stay.
+        self.ams_mttr_seconds.clear();
+        self.ams_on_time_ratio.clear();
+        self.ams_overdue_open.clear();
+        self.ams_resolved.clear();
+        self.tenant_cap_usd.clear();
+        for r in &report.rows {
+            let labels = AmsLabels {
+                tenant: r.tenant.clone(),
+                priority: r.priority.clone(),
+            };
+            if let Some(mttr) = r.mttr_s {
+                self.ams_mttr_seconds.get_or_create(&labels).set(mttr);
+            }
+            if let Some(ratio) = r.on_time_ratio() {
+                self.ams_on_time_ratio.get_or_create(&labels).set(ratio);
+            }
+            self.ams_overdue_open
+                .get_or_create(&labels)
+                .set(r.overdue_open);
+            for (by, n) in [
+                ("triage", r.diagnosed),
+                ("pr", r.prs),
+                ("other", r.done - r.diagnosed - r.prs),
+            ] {
+                self.ams_resolved
+                    .get_or_create(&ResolvedLabels {
+                        tenant: r.tenant.clone(),
+                        priority: r.priority.clone(),
+                        by,
+                    })
+                    .set(n);
+            }
+        }
+        for c in &report.contracts {
+            let labels = TenantLabels {
+                tenant: c.slug.clone(),
+            };
+            self.tenant_spent_usd
+                .get_or_create(&labels)
+                .set(c.spent_usd);
+            if let Some(cap) = c.monthly_usd {
+                self.tenant_cap_usd.get_or_create(&labels).set(cap);
+            }
+        }
     }
 
     fn budgets(&self, budgets: &[RepoBudget]) {
@@ -458,6 +577,10 @@ async fn scrape(State(store): State<Store>) -> Response {
     match store.instance_pause().await {
         Ok(pause) => m.paused(pause.is_some()),
         Err(e) => tracing::error!(error = %e, "reading the pause for /metrics"),
+    }
+    match store.ams_report(None).await {
+        Ok(report) => m.ams(&report),
+        Err(e) => tracing::error!(error = %e, "reading the AMS report for /metrics"),
     }
     match store.repo_budgets(None).await {
         Ok(budgets) => m.budgets(&budgets),
@@ -616,6 +739,42 @@ mod tests {
             " 1",
         );
         assert!(text.ends_with("# EOF\n"));
+    }
+
+    #[test]
+    fn the_ams_report_is_exported_by_tenant_and_level() {
+        let m = Metrics::new();
+        m.ams(&aegis_store::AmsReport {
+            rows: vec![aegis_store::AmsRow {
+                tenant: "acme".into(),
+                priority: "P1".into(),
+                done: 4,
+                mttr_s: Some(1800.0),
+                with_deadline: 4,
+                on_time: 3,
+                overdue_open: 1,
+                diagnosed: 1,
+                prs: 2,
+            }],
+            contracts: vec![aegis_store::TenantBudget {
+                tenant: aegis_store::TenantId(2),
+                slug: "acme".into(),
+                monthly_usd: Some(100.0),
+                spent_usd: 12.5,
+            }],
+        });
+        let text = m.render().unwrap();
+        for line in [
+            r#"aegis_ams_mttr_seconds{tenant="acme",priority="P1"} 1800"#,
+            r#"aegis_ams_sla_on_time_ratio{tenant="acme",priority="P1"} 0.75"#,
+            r#"aegis_ams_overdue_open_jobs{tenant="acme",priority="P1"} 1"#,
+            r#"aegis_ams_resolved_jobs{tenant="acme",priority="P1",by="triage"} 1"#,
+            r#"aegis_ams_resolved_jobs{tenant="acme",priority="P1",by="other"} 1"#,
+            r#"aegis_tenant_budget_spent_usd{tenant="acme"} 12.5"#,
+            r#"aegis_tenant_budget_cap_usd{tenant="acme"} 100"#,
+        ] {
+            assert!(line_of(&text, line).is_some(), "{line}\n{text}");
+        }
     }
 
     #[test]

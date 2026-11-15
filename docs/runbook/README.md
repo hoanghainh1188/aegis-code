@@ -1,6 +1,6 @@
 # Operations Runbook: aegis-server (AWS)
 
-For operators running Aegis on AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). For self-hosted on-premise deployments without AWS, see [on-premise.md](on-premise.md). Four common tasks: [Deployment](#1-deployment), [Rollback](#2-rollback), [Secret Rotation](#3-secret-rotation), [Troubleshooting](#4-troubleshooting), [Adding Repositories](#6-adding-repositories). Metrics, alerts, and Grafana: [Monitoring](#5-monitoring). Stopping every agent in an incident: [incident.md](incident.md). Several customers on one instance: [tenants.md](tenants.md). The [Account Setup](#0-account-setup) section is performed only once per account.
+For operators running Aegis on AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). For self-hosted on-premise deployments without AWS, see [on-premise.md](on-premise.md). Four common tasks: [Deployment](#1-deployment), [Rollback](#2-rollback), [Secret Rotation](#3-secret-rotation), [Troubleshooting](#4-troubleshooting), [Adding Repositories](#6-adding-repositories). Metrics, alerts, and Grafana: [Monitoring](#5-monitoring). Stopping every agent in an incident: [incident.md](incident.md). Several customers on one instance, and their AMS report (MTTR, SLA): [tenants.md](tenants.md). The [Account Setup](#0-account-setup) section is performed only once per account.
 
 ## Overview
 

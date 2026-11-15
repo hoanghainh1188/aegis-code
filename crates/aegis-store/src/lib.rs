@@ -8,6 +8,7 @@
 //! workspace root lets the crate build without a database. Every list is
 //! paged ([`Page`]).
 
+mod ams;
 mod audit;
 mod budget;
 mod clones;
@@ -42,6 +43,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
+pub use ams::{AmsReport, AmsRow};
 pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};

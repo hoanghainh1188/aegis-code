@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}AMS report{% endblock %}
+{% block content %}
+<section class="hero" aria-labelledby="ams-heading">
+  <p class="eyebrow">Ledger · jobs created this month</p>
+  <h1 id="ams-heading">AMS report</h1>
+  <p class="note">By contract and SLA level (#526). MTTR runs from the ticket coming in to the end of its job's last run, for the jobs that ended with a result. On time: of those with an SLA deadline, the ones that ended by it. Triage: resolved by a diagnosis on the ticket, with no PR.</p>
+</section>
+
+<section aria-labelledby="sla-heading" class="band">
+  <h2 id="sla-heading">MTTR and SLA</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Contract</th><th scope="col">Level</th><th scope="col" class="num">Done</th><th scope="col" class="num">MTTR</th><th scope="col" class="num">On time</th><th scope="col" class="num">Open, overdue</th><th scope="col" class="num">Triage</th><th scope="col" class="num">PR</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr{% if r.total %} class="total"{% endif %}>
+        <th scope="row">{{ r.tenant }}</th>
+        <td>{{ r.priority }}</td>
+        <td class="num">{{ r.done }}</td>
+        <td class="num">{{ r.mttr }}</td>
+        <td class="num">{{ r.on_time }}</td>
+        <td class="num{% if r.overdue_open > 0 %} bad{% endif %}">{{ r.overdue_open }}</td>
+        <td class="num">{{ r.triage }}</td>
+        <td class="num">{{ r.prs }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">No job created this month yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section aria-labelledby="cost-heading" class="band">
+  <h2 id="cost-heading">Cost per contract</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th scope="col">Contract</th><th scope="col" class="num">Spent this month</th><th scope="col" class="num">Monthly cap</th></tr></thead>
+    <tbody>
+    {% for c in contracts %}
+      <tr>
+        <th scope="row">{{ c.tenant }}</th>
+        <td class="num{% if !c.state.is_empty() %} {{ c.state }}{% endif %}">{{ c.spent }}</td>
+        <td class="num">{{ c.cap }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

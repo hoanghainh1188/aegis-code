@@ -287,3 +287,6 @@ form.stack { display: grid; gap: var(--space-3); justify-items: start; max-width
 details.confirm form.stack .note { margin: 0; }
 /* The diagnosis lane's report (#451): Markdown as written, wrapped. */
 pre.diagnosis { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The AMS report (#526): a contract's total under its levels. */
+tr.total th, tr.total td { font-weight: 600; border-top: 1px solid var(--rule-strong); }

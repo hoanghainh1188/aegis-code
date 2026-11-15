@@ -9,6 +9,7 @@
 mod actions;
 mod admin;
 mod ai;
+mod ams;
 mod audit;
 mod budget;
 mod connection;
@@ -100,6 +101,7 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/auth/logout", post(oidc::logout))
         .route("/auth/signed-out", get(oidc::signed_out))
         .route("/", get(dashboard::page))
+        .route("/ams", get(ams::page))
         .route("/jobs", get(jobs::list).post(actions::create))
         .route("/jobs/cve", post(actions::create_cve))
         .route("/jobs/{id}", get(jobs::detail))
