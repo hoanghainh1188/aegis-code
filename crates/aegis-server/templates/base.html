@@ -25,6 +25,13 @@
     <button type="submit" class="ghost">Sign out</button>
   </form>
 </header>
+{%- if let Some(p) = me.paused %}
+<section class="halted" role="alert" aria-label="All agents paused">
+  <p><strong>{% if p.emergency %}Emergency stop{% else %}All agents paused{% endif %}</strong> by {{ p.by }} at {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}.
+  No new job runs; queued jobs wait{% if p.emergency %} and running ones were asked to cancel{% endif %}.
+  {%- if me.is_admin %} <a href="/admin/pause">Resume</a>{% endif %}</p>
+</section>
+{%- endif %}
 <main>
 {% block content %}{% endblock %}
 </main>

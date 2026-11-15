@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM instance_pause",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "9625973bf73b881361421bc6351613e68aa90f029ac5dedec3c19bd29a0e8ec2"
+}

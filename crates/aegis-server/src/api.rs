@@ -12,6 +12,9 @@
 //! `POST /api/v1/jobs/{id}/review` (maintainer) queues the next review
 //! round of the PR the job opened (#243), at most `[reviews] max_rounds`.
 //!
+//! `POST /api/v1/admin/pause` and `/resume` (admin only) pause and resume
+//! every agent of the instance (#510, [`crate::pause_all`]).
+//!
 //! A repo's monthly budget (#31) is read at `GET /api/v1/repos/{id}/budget`
 //! and its cap set with `PUT` (maintainer); a job asked for when it is
 //! spent is refused with `409 budget_spent` and the reason.
@@ -56,6 +59,11 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .route("/api/v1/jobs/{id}/review", post(review_job))
+        .route(
+            "/api/v1/admin/pause",
+            get(crate::pause_all::show).post(crate::pause_all::pause),
+        )
+        .route("/api/v1/admin/resume", post(crate::pause_all::resume))
         .route("/api/v1/me", get(me))
         .route("/api/v1/repos", get(repos))
         .route(
@@ -111,7 +119,7 @@ struct Meta {
     next_cursor: Option<i64>,
 }
 
-fn ok<T: Serialize>(status: StatusCode, data: T) -> Response {
+pub(crate) fn ok<T: Serialize>(status: StatusCode, data: T) -> Response {
     let body = Envelope {
         data: Some(data),
         error: None,
@@ -246,7 +254,7 @@ impl From<PathRejection> for ApiError {
     }
 }
 
-type ApiResult = Result<Response, ApiError>;
+pub(crate) type ApiResult = Result<Response, ApiError>;
 
 #[derive(Debug, Serialize)]
 struct JobView {

@@ -44,6 +44,28 @@ pub struct Me {
     pub csrf: String,
     /// The masthead offers the admin pages (#329).
     pub is_admin: bool,
+    /// Every agent is paused (#510): every page says so, in a band.
+    pub paused: Option<PausedBand>,
+}
+
+/// What the band of a paused instance says (#510).
+#[derive(Debug, Clone)]
+pub struct PausedBand {
+    pub emergency: bool,
+    pub by: String,
+    pub at: String,
+    pub reason: Option<String>,
+}
+
+impl From<aegis_store::InstancePause> for PausedBand {
+    fn from(p: aegis_store::InstancePause) -> Self {
+        Self {
+            emergency: p.level == aegis_store::PauseLevel::Emergency,
+            by: p.by,
+            at: p.at.format("%Y-%m-%d %H:%M").to_string(),
+            reason: p.reason,
+        }
+    }
 }
 
 /// The hash of the request's session token, for signing out.
@@ -158,12 +180,23 @@ async fn signed_in(auth: &Auth, request: Request, form: bool) -> Result<Request,
             tracing::error!(error = %e, "web: roles");
             Box::new(refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
         })?;
+    // One small read per page: a pause must not go unseen (#510).
+    let paused = auth
+        .store()
+        .instance_pause()
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "web: the instance pause");
+            Box::new(refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
+        })?
+        .map(PausedBand::from);
     let extensions = request.extensions_mut();
     extensions.insert(access);
     extensions.insert(Me {
         name: session.user.name.clone(),
         csrf: session.csrf_token,
         is_admin: session.user.is_admin,
+        paused,
     });
     if let Some(hash) = token {
         extensions.insert(SessionToken(hash));

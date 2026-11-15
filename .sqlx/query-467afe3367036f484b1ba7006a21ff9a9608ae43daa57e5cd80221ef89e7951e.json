@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT level, paused_at, paused_by, reason FROM instance_pause",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "paused_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "paused_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "paused_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "paused_by"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "467afe3367036f484b1ba7006a21ff9a9608ae43daa57e5cd80221ef89e7951e"
+}

@@ -20,6 +20,8 @@
 //!   Every process reports the same queue; alerts take the max.
 //! - Each repo's monthly budget (#31), read at each scrape too: what it
 //!   spent this month and its cap, when it has one.
+//! - `aegis_paused` (#510), read at each scrape: 1 while every agent is
+//!   paused (intake or emergency), 0 otherwise.
 
 use std::net::SocketAddr;
 use std::sync::OnceLock;
@@ -115,6 +117,7 @@ pub struct Metrics {
     budget_spent_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
     budget_cap_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
     triage: Family<TriageLabels, Counter>,
+    paused: Gauge,
 }
 
 impl Metrics {
@@ -196,8 +199,15 @@ impl Metrics {
             "Tickets by what Light read them as needing (#497); recorded only",
             triage.clone(),
         );
+        let paused = Gauge::default();
+        registry.register(
+            "paused",
+            "1 while every agent of the instance is paused (#510), 0 otherwise",
+            paused.clone(),
+        );
         Self {
             triage,
+            paused,
             registry,
             jobs_running,
             attempts,
@@ -241,6 +251,10 @@ impl Metrics {
                 .set(count);
         }
         self.queue_oldest_ready_seconds.set(stats.oldest_ready_s);
+    }
+
+    fn paused(&self, paused: bool) {
+        self.paused.set(i64::from(paused));
     }
 
     fn budgets(&self, budgets: &[RepoBudget]) {
@@ -359,6 +373,10 @@ async fn scrape(State(store): State<Store>) -> Response {
         // The other metrics still count; the queue's stay as last read.
         Err(e) => tracing::error!(error = %e, "reading the queue for /metrics"),
     }
+    match store.instance_pause().await {
+        Ok(pause) => m.paused(pause.is_some()),
+        Err(e) => tracing::error!(error = %e, "reading the pause for /metrics"),
+    }
     match store.repo_budgets(None).await {
         Ok(budgets) => m.budgets(&budgets),
         Err(e) => tracing::error!(error = %e, "reading the budgets for /metrics"),
@@ -406,6 +424,16 @@ mod tests {
 
     fn line_of<'a>(text: &'a str, start: &str) -> Option<&'a str> {
         text.lines().find(|l| l.starts_with(start))
+    }
+
+    #[test]
+    fn paused_is_one_only_while_every_agent_is_paused() {
+        let m = Metrics::new();
+        assert!(line_of(&m.render().unwrap(), "aegis_paused 0").is_some());
+        m.paused(true);
+        assert!(line_of(&m.render().unwrap(), "aegis_paused 1").is_some());
+        m.paused(false);
+        assert!(line_of(&m.render().unwrap(), "aegis_paused 0").is_some());
     }
 
     #[test]

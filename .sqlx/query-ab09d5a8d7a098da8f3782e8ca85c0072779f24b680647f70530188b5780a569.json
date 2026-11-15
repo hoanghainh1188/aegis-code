@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO instance_pause (level, paused_by, reason) VALUES ($1, $2, $3)\n                 ON CONFLICT (id) DO UPDATE\n                     SET level = EXCLUDED.level, paused_at = now(),\n                         paused_by = EXCLUDED.paused_by, reason = EXCLUDED.reason\n                 RETURNING level, paused_at, paused_by, reason",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "paused_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "paused_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "paused_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "paused_by"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_pause",
+            "name": "reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ab09d5a8d7a098da8f3782e8ca85c0072779f24b680647f70530188b5780a569"
+}

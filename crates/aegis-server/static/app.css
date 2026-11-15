@@ -194,6 +194,10 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--accent); width
 
 .notice { border-left: 4px solid var(--accent); background: var(--surface); padding: var(--space-3); }
 .notice.bad { border-color: var(--fail); background: var(--fail-wash); }
+/* Every agent paused (#510): on every page, under the masthead. */
+.halted { border-bottom: 4px solid var(--fail); background: var(--fail-wash); color: var(--fail); padding: var(--space-3) clamp(1rem, 4vw, 3rem); }
+.halted p { margin: 0; max-width: 90rem; }
+.halted a { color: inherit; font-weight: 600; }
 .pager { margin-top: var(--space-3); }
 
 @media (max-width: 40rem) {

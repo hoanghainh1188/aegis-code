@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET cancel_requested = true, updated_at = now()\n                     WHERE status = 'running' AND NOT cancel_requested",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b5d3c19e4ca3b098fea88bc3e68dcc5e69865a2e381c19e96d3625f50a653457"
+}
