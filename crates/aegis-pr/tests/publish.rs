@@ -197,6 +197,7 @@ fn the_body_follows_the_template_and_model_text_is_inert() {
     let body = render(&PrContent {
         issue_url: "https://github.com/me/typst/issues/7".into(),
         cause: "The check used `>` instead of `>=` (reported by @alice, closes #3).".into(),
+        evidence: vec![],
         changes: vec![ChangeNote {
             location: "src/lib.rs:2".into(),
             note: "return 1".into(),

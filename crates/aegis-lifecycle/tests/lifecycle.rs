@@ -142,6 +142,7 @@ fn fixed_answer() -> Vec<ContentBlock> {
         json!({
             "status": "fixed",
             "cause": "`add` compared with `>` so a fourth item was accepted.",
+            "evidence": [{"location": "src/lib.rs:24", "excerpt": "MAX_ITEMS"}],
             "changes": [{"location": "src/lib.rs:24", "note": "compare with >="}],
             "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
             "allowed_test_changes": [],
@@ -343,6 +344,7 @@ async fn a_local_review_round_neither_fetches_nor_pushes() {
         json!({
             "status": "fixed",
             "cause": "Nothing to change in the code.",
+            "evidence": [{"location": "tests/fourth_item.rs"}],
             "changes": [{"location": "tests/fourth_item.rs", "note": "already names the limit"}],
             "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
             "review_replies": [{"note": 1, "done": false, "reply": "the CI request is out of scope"}]
@@ -485,6 +487,7 @@ async fn a_review_round_pushes_onto_the_pr_branch_and_answers_each_note() {
         json!({
             "status": "fixed",
             "cause": "The limit needed a comment.",
+            "evidence": [{"location": "src/lib.rs:24"}],
             "changes": [{"location": "src/lib.rs:24", "note": "say why the limit is inclusive"}],
             "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
             "review_replies": [{"note": 1, "done": true, "reply": "added the comment"}]
@@ -683,6 +686,7 @@ async fn a_review_round_on_a_gitlab_mr_pushes_and_answers_on_it() {
     let answer = vec![ContentBlock::text(
         json!({
             "status": "fixed", "cause": "The limit needed a comment.",
+            "evidence": [{"location": "src/lib.rs:24"}],
             "changes": [{"location": "src/lib.rs:24", "note": "comment the limit"}],
             "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
             "review_replies": [{"note": 1, "done": true, "reply": "added it"}]
@@ -1404,6 +1408,7 @@ async fn a_secret_in_the_answer_never_reaches_the_pr() {
         json!({
             "status": "fixed",
             "cause": format!("`add` compared with `>`; seen with GITHUB_TOKEN={token}."),
+            "evidence": [{"location": "src/lib.rs:24", "excerpt": "MAX_ITEMS"}],
             "changes": [{"location": "src/lib.rs:24", "note": "compare with >="}],
             "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
             "allowed_test_changes": [],
@@ -1449,6 +1454,134 @@ async fn a_secret_in_the_answer_never_reaches_the_pr() {
         })
         .collect();
     assert!(places.iter().any(|p| p == "PR"), "{places:?}");
+}
+
+/// A fix's answer with `evidence` replaced (#508).
+fn answer_citing(evidence: Value) -> Vec<ContentBlock> {
+    vec![ContentBlock::text(
+        json!({
+            "status": "fixed",
+            "cause": "`add` compared with `>` so a fourth item was accepted.",
+            "evidence": evidence,
+            "changes": [{"location": "src/lib.rs:24", "note": "compare with >="}],
+            "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
+            "allowed_test_changes": [],
+            "stop_reason": null
+        })
+        .to_string(),
+    )]
+}
+
+async fn source_checks(p: &Arc<Platform<Scripted, MemoryLedger>>) -> Vec<(u32, u32, bool)> {
+    p.store
+        .events(&IssueId::parse("fixture-7").unwrap())
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e {
+            LedgerEvent::SourcesChecked { cited, wrong, held } => Some((cited, wrong, held)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #508: an answer that cites nothing goes back to the agent; the next one
+/// cites the lines and quotes them, and the PR lists the checked source.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_without_sources_is_asked_again_and_the_pr_lists_them() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let model = Scripted::new(
+        vec![
+            create_repro("t1"),
+            fix("t2"),
+            answer_citing(json!([])),
+            answer_citing(
+                json!([{"location": "src/lib.rs:24", "excerpt": "self.items.len() >= MAX_ITEMS"}]),
+            ),
+        ],
+        vec![],
+    );
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+    let report = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move { run(&p, CancellationToken::new()).await }
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    // The agent was told why.
+    let asked = p.provider.requests.lock().unwrap().iter().any(|r| {
+        serde_json::to_string(&r.messages)
+            .unwrap()
+            .contains("`evidence` is empty")
+    });
+    assert!(asked, "the agent was not told what to fix");
+    // 1 change only, then 1 evidence + 1 change.
+    assert_eq!(source_checks(&p).await, [(1, 1, false), (2, 0, false)]);
+    let pr: Value = server.received_requests().await.unwrap()[0]
+        .body_json()
+        .unwrap();
+    let body = pr["body"].as_str().unwrap();
+    assert!(
+        body.contains("Nguồn đã kiểm:\n- `src/lib.rs:24` — \"self.items.len() >= MAX_ITEMS\""),
+        "{body}"
+    );
+}
+
+/// #508: a source that is not in the repository, every time, stops the job
+/// with no PR, held for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_whose_sources_never_hold_opens_no_pr() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let made_up = || answer_citing(json!([{"location": "src/cart_rules.rs:12"}]));
+    let model = Scripted::new(
+        vec![
+            create_repro("t1"),
+            fix("t2"),
+            made_up(),
+            made_up(),
+            made_up(),
+        ],
+        vec![],
+    );
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+    let report = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move { run(&p, CancellationToken::new()).await }
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::StoppedSteps, "{report:?}");
+    let reason = report.reason.clone().unwrap_or_default();
+    assert!(
+        reason.contains("no verifiable sources") && reason.contains("src/cart_rules.rs"),
+        "{reason}"
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "no PR"
+    );
+    let checks = source_checks(&p).await;
+    assert_eq!(checks.len(), 3, "{checks:?}");
+    assert!(
+        checks[..2].iter().all(|c| !c.2) && checks[2].2,
+        "{checks:?}"
+    );
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    assert!(record.held_for_sources);
+    assert_eq!(record.sources_wrong, 3);
+    assert_eq!(Kpi::from_records([&record]).held_for_sources, 1);
 }
 
 const HIDDEN: &str = "use fixture_rust::{cart, Cart, CartError, Priced};\n\n#[test]\nfn hidden_fourth_item() {\n    let mut three: Cart = cart![1, 2, 3];\n    assert_eq!(three.add(4), Err(CartError::Full));\n    assert_eq!(three.total(), 6);\n}\n";

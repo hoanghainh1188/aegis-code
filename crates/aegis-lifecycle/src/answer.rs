@@ -1,7 +1,7 @@
 //! The agent's final answer, the JSON object `prompts/system.md` asks for.
 
 use aegis_gate::Repro;
-use aegis_pr::{AllowedReferenceChange, AllowedTestChange, ChangeNote};
+use aegis_pr::{AllowedReferenceChange, AllowedTestChange, ChangeNote, Evidence};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -15,6 +15,13 @@ pub enum Status {
 struct RawChange {
     location: String,
     note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct RawEvidence {
+    location: String,
+    #[serde(default)]
+    excerpt: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -96,6 +103,8 @@ struct Raw {
     #[serde(default)]
     cause: String,
     #[serde(default, deserialize_with = "null_as_empty")]
+    evidence: Vec<RawEvidence>,
+    #[serde(default, deserialize_with = "null_as_empty")]
     changes: Vec<RawChange>,
     #[serde(default)]
     repro_test: Option<RawRepro>,
@@ -115,6 +124,9 @@ struct Raw {
 pub struct FinalAnswer {
     pub status: Status,
     pub cause: String,
+    /// The places of the repository the cause rests on (#508); checked
+    /// before the gate runs.
+    pub evidence: Vec<Evidence>,
     pub changes: Vec<ChangeNote>,
     pub repro: Option<Repro>,
     pub allowed_test_changes: Vec<AllowedTestChange>,
@@ -143,6 +155,15 @@ pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
     Ok(FinalAnswer {
         status: raw.status,
         cause: raw.cause,
+        evidence: raw
+            .evidence
+            .into_iter()
+            .map(|e| Evidence {
+                location: e.location,
+                excerpt: e.excerpt,
+                url: None,
+            })
+            .collect(),
         changes: raw
             .changes
             .into_iter()

@@ -120,6 +120,7 @@ fn core_script() -> VecDeque<Vec<ContentBlock>> {
             json!({
                 "status": "fixed",
                 "cause": "`add` compared with `>` so a fourth item was accepted.",
+                "evidence": [{"location": "src/lib.rs:24", "excerpt": "MAX_ITEMS"}],
                 "changes": [{"location": "src/lib.rs:24", "note": "compare with >="}],
                 "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
                 "allowed_test_changes": [],

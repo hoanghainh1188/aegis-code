@@ -55,6 +55,13 @@ A misread ticket in the diagnostic lane costs more than a wasted job: a real cod
 3. **Not shown per job.** The job page, which reviewers read, leaves the triage out, as it does hidden test results (ADR 0005): a reviewer who saw "ops_or_config, 0.9" might judge the PR by it, and the measurement would measure that.
 4. **Measured against the jobs.** `aegis report` and the dashboard show, per category, the jobs, their PRs, accepted and rejected PRs, and jobs with no PR. A ticket read as anything but `code_bug` whose PR was accepted is a miss the lane would have made. #451 turns the lane on, per category and above a confidence, only where the pilot's table shows such misses are rare.
 
+## Amendment (#508): every claim cites a checked source
+
+The diagnostic report has no test to check it, as a fix has its reproduction test and the gate. Its claims are checked the way a fix's answer now is (#508, `aegis-lifecycle/src/evidence.rs`):
+
+1. **A fix's answer cites its sources.** The answer's `evidence` lists the places of the repository the `cause` rests on (`file:line` or `file:from-to`, optionally a short `excerpt`), at least one for a fix. Before the gate runs, the platform checks every `evidence` entry and every `changes[].location`: the file exists in the patched tree or at the base, the lines are inside it, and an excerpt is found there (whitespace aside). A failure goes back to the agent, as an unreadable answer does (`MAX_ANSWER_RETRIES`); out of tries the job stops with "the answer has no verifiable sources" and no PR. The ledger records each check (`SourcesChecked`); `aegis report` and the dashboard count the jobs held for it. The PR lists the checked sources, each linked to its lines on the PR's commit.
+2. **The diagnostic report uses the same check (#451).** Each claim of the RCA and each runbook step cites a source: a configuration file of the repository, or a line of the ticket's own logs, which the platform then finds where it says. A claim without a checked source is not posted to the tracker; a report left with none is not posted at all, and the ticket goes to a person.
+
 ## Consequences
 
 - **Positive:** Eliminates wasteful model calls and noisy PRs for non-code incidents; reduces human triage time for L1/L2 support staff.

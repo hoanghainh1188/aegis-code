@@ -275,6 +275,8 @@ pub(crate) fn answer(target: &CveTarget, upgrade: &Upgrade) -> FinalAnswer {
              ecosystem's upgrade command; the manifests and lockfiles below are its output.",
             target.advisory, target.package, target.version
         ),
+        // Written by the platform from what it ran, not by the agent.
+        evidence: vec![],
         changes: upgrade
             .files
             .keys()

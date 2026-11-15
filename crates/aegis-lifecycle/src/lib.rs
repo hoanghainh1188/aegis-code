@@ -18,6 +18,7 @@ mod config;
 mod cve;
 mod error;
 mod eval;
+mod evidence;
 pub mod flags;
 pub mod injection;
 mod issue;

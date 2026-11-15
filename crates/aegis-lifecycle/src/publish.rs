@@ -140,10 +140,24 @@ where
         None => cfg.repo.base.clone(),
     };
 
+    // The sources were checked before the gate (#508); each links to its
+    // lines on the PR's commit.
+    let mut evidence = Vec::with_capacity(answer.evidence.len());
+    for e in &answer.evidence {
+        evidence.push(aegis_pr::Evidence {
+            url: crate::evidence::line_url(&cfg.repo.fork, &pushed.commit, &e.location),
+            location: masked(ledger, "PR", &e.location).await?,
+            excerpt: match &e.excerpt {
+                Some(x) => Some(masked(ledger, "PR", x).await?),
+                None => None,
+            },
+        });
+    }
     let record = ledger.record();
     let body = render(&PrContent {
         issue_url: issue.url.clone(),
         cause,
+        evidence,
         changes,
         repro_test: answer.repro.as_ref().map(|r| r.test.clone()),
         allowed_test_changes: answer.allowed_test_changes.clone(),

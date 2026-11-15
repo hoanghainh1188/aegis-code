@@ -177,6 +177,8 @@ For untested legacy code:
 
 ## Root Cause
 <concise-explanation>
+Checked sources:
+- [<file:line>](<line-link-on-the-PR-commit>) — "<excerpt>"
 
 ## Changes
 - <file:line> — <description-and-rationale>
@@ -192,6 +194,8 @@ fmt ✔ · lint ✔ · repro-test ✔ · full-test ✔ · coverage <x%> · Sonar
 ## Token Ledger & Cost
 <model-breakdown> · <turns> · <total-usd>
 ```
+
+Every source and every `<file:line>` of **Changes** is checked against the job's tree before the gate runs (#508, [ADR 0012](../adr/0012-triage-and-diagnostic-lane.md) amendment): the file exists in the patched tree or at the base, the lines are inside it, and a quoted excerpt is there. An answer that fails is sent back to the agent; out of tries, no PR is opened.
 
 ---
 

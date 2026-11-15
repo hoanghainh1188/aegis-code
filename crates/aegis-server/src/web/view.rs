@@ -75,6 +75,8 @@ pub struct KpiRow {
     pub cache: String,
     pub cache_class: &'static str,
     pub expert: String,
+    /// Runs held back for an answer without verifiable sources (#508).
+    pub held_for_sources: String,
     /// Review rounds per accepted PR (#245).
     pub rounds: String,
 }
@@ -111,6 +113,7 @@ impl KpiRow {
                 .map_or("—".into(), |r| format!("{:.0}%", r * 100.0)),
             cache_class: class(kpi.cache_read_ratio.map(|r| r >= CACHE_READ_MIN)),
             expert: pct(kpi.expert_runs, kpi.runs),
+            held_for_sources: pct(kpi.held_for_sources, kpi.runs),
             rounds: "—".into(),
         }
     }
