@@ -16,6 +16,7 @@ mod dashboard;
 mod guard;
 mod jobs;
 mod patch;
+mod pause_all;
 mod repo_admin;
 mod repo_form;
 mod review;
@@ -38,7 +39,7 @@ use std::sync::LazyLock;
 use crate::auth::{Access, Auth, oidc};
 
 pub use dashboard::{Dashboard, Group, dashboard_kpis, dashboard_kpis_within};
-pub use guard::{Me, Nonce, SessionToken};
+pub use guard::{Me, Nonce, PausedBand, SessionToken};
 pub use repo_admin::RepoAdmin;
 pub use review::{REVIEW_MAX_AGE_MS, opened_at_signature, review_minutes};
 
@@ -109,6 +110,8 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/admin/ai", get(ai::show))
         .route("/admin/ai/{mode}/check", post(ai::check))
         .route("/admin/audit", get(audit::list))
+        .route("/admin/pause", get(pause_all::show).post(pause_all::pause))
+        .route("/admin/resume", post(pause_all::resume))
         .route("/admin/users", get(users::list).post(users::add_admin))
         .route("/admin/users/{id}", get(users::detail))
         .route("/admin/users/{id}/admin", post(users::set_admin))

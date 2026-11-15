@@ -71,7 +71,7 @@
       "id": 1,
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 5,
         "x": 0,
         "y": 0
       },
@@ -120,8 +120,8 @@
       "id": 2,
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 5,
+        "x": 5,
         "y": 0
       },
       "fieldConfig": {
@@ -177,8 +177,8 @@
       "id": 3,
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 5,
+        "x": 10,
         "y": 0
       },
       "fieldConfig": {
@@ -234,8 +234,8 @@
       "id": 4,
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 5,
+        "x": 15,
         "y": 0
       },
       "fieldConfig": {
@@ -276,6 +276,74 @@
             "uid": "${datasource}"
           },
           "expr": "sum(rate(aegis_provider_tokens_total{kind=\"cache_read\",repo=~\"$repo\"}[1h])) / sum(rate(aegis_provider_tokens_total{kind=~\"input|cache_read|cache_write\",repo=~\"$repo\"}[1h]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Mọi agent tạm dừng",
+      "description": "1 khi admin đã dừng mọi agent (#510); job trong hàng đợi chờ tới khi tiếp tục. Xem /admin/pause.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 21,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Đang chạy",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "Tạm dừng",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(aegis_paused)",
           "refId": "A"
         }
       ]

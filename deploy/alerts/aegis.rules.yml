@@ -43,14 +43,28 @@ groups:
       # Job sẵn sàng đã chờ hơn 30 phút mà chưa worker nào nhận: worker
       # chết, thiếu chỗ hoặc giới hạn theo repo quá chặt. Mọi tiến trình
       # báo cùng một hàng đợi nên lấy max.
+      # Không tính lúc mọi agent đang tạm dừng (#510): job chờ là đúng ý,
+      # AegisPaused đã báo.
       - alert: AegisQueueBacklog
-        expr: max(aegis_queue_oldest_ready_seconds) > 1800
+        expr: max(aegis_queue_oldest_ready_seconds) > 1800 unless on() max(aegis_paused) == 1
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: "Hàng đợi job dồn"
           description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."
+
+      # Admin đã dừng mọi agent (#510: `aegis-server pause-all`, trang
+      # /admin/pause hoặc POST /api/v1/admin/pause): không job nào chạy cho
+      # tới khi tiếp tục. Báo để cả nhóm biết, và để không ai quên tiếp tục.
+      - alert: AegisPaused
+        expr: max(aegis_paused) == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mọi agent đang tạm dừng"
+          description: "Admin đã dừng mọi agent của instance; job trong hàng đợi đang chờ. Xem ai dừng và vì sao ở /admin/pause hoặc nhật ký audit (instance.pause). Tiếp tục: docs/runbook/incident.md."
 
       # Prometheus không scrape được aegis-server (job `aegis`, #33) trong 5
       # phút, hoặc không tìm thấy máy nào: tiến trình chết, máy dừng, hay

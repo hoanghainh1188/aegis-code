@@ -10,6 +10,7 @@ pub mod config;
 pub mod lifecycle;
 pub mod logs;
 pub mod metrics;
+pub mod pause_all;
 pub mod repo_cli;
 pub mod runner;
 pub mod secrets;

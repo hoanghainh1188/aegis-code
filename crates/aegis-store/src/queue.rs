@@ -157,7 +157,7 @@ impl Store {
     /// `max_concurrent_jobs` and has budget left this month (#31), now
     /// running under a lease of `lease`; `None` when there is none. Queued
     /// jobs of a repo whose budget is spent, or that is paused (#374), wait,
-    /// and say so.
+    /// and say so; while every agent is paused (#510) none is claimed.
     pub async fn claim_job(
         &self,
         worker: &str,
@@ -170,6 +170,11 @@ impl Store {
                 .bind(CLAIM_LOCK)
                 .execute(&mut *tx)
                 .await?;
+            // Every agent paused (#510): nothing is claimed; the queued
+            // jobs keep the reason written, as they wait for it.
+            if crate::instance_pause::hold_all(&mut tx).await?.is_some() {
+                return Ok(tx::Done::Commit(None));
+            }
             let mut held = budget::hold_spent(&mut tx, &self.budget).await?;
             // A paused repo's reason is written last: it is the one to act on.
             held.extend(crate::pause::hold_paused(&mut tx).await?);

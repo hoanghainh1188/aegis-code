@@ -4,6 +4,7 @@
 //! aegis-server --config config/server.toml [--role api|worker|all]
 //! aegis-server --config <file> grant|revoke|token|revoke-tokens|revoke-sessions …
 //! aegis-server --config <file> repo add|update|show|list …
+//! aegis-server --config <file> pause-all [--emergency] [--reason …] | resume-all
 //! ```
 //!
 //! Secrets come from `[secrets]` (#30): AWS Secrets Manager, or the
@@ -47,7 +48,7 @@ use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::tracker::{self, TrackerNotifier};
 use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
-use aegis_server::{Role, api, metrics, repo_cli, sonar, worker};
+use aegis_server::{Role, api, metrics, pause_all, repo_cli, sonar, worker};
 use aegis_store::Store;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -266,8 +267,8 @@ async fn run(args: Args) -> Result<(), String> {
 }
 
 /// Roles, tokens and sessions ([`auth::cli`]), registered repos
-/// ([`repo_cli`]): straight to the database, whose URL comes from the
-/// configuration's secret store.
+/// ([`repo_cli`]), pausing every agent ([`pause_all`]): straight to the
+/// database, whose URL comes from the configuration's secret store.
 async fn run_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode {
     let done = async {
         let config = ServerConfig::load(config_path)?;
@@ -283,7 +284,9 @@ async fn run_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode
         let store = Store::connect(url.expose())
             .await
             .map_err(|e| format!("{DATABASE_URL}: {e}"))?;
-        let out = if repo_cli::is_command(&argv[0]) {
+        let out = if pause_all::is_command(&argv[0]) {
+            pause_all::run(&store, argv).await
+        } else if repo_cli::is_command(&argv[0]) {
             match modes(&config) {
                 Ok(modes) => repo_cli::run(&store, &modes, &secrets, &argv[1..]).await,
                 Err(e) => Err(e),
@@ -317,7 +320,9 @@ async fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if let ["--config", config, command, ..] =
         argv.iter().map(String::as_str).collect::<Vec<_>>()[..]
-        && (auth::cli::is_command(command) || repo_cli::is_command(command))
+        && (auth::cli::is_command(command)
+            || repo_cli::is_command(command)
+            || pause_all::is_command(command))
     {
         return run_command(std::path::Path::new(config), &argv[2..]).await;
     }

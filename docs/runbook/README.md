@@ -1,6 +1,6 @@
 # Operations Runbook: aegis-server (AWS)
 
-For operators running Aegis on AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). For self-hosted on-premise deployments without AWS, see [on-premise.md](on-premise.md). Four common tasks: [Deployment](#1-deployment), [Rollback](#2-rollback), [Secret Rotation](#3-secret-rotation), [Troubleshooting](#4-troubleshooting), [Adding Repositories](#6-adding-repositories). Metrics, alerts, and Grafana: [Monitoring](#5-monitoring). The [Account Setup](#0-account-setup) section is performed only once per account.
+For operators running Aegis on AWS (#33, [ADR 0003](../adr/0003-platform-service-architecture.md) §6). For self-hosted on-premise deployments without AWS, see [on-premise.md](on-premise.md). Four common tasks: [Deployment](#1-deployment), [Rollback](#2-rollback), [Secret Rotation](#3-secret-rotation), [Troubleshooting](#4-troubleshooting), [Adding Repositories](#6-adding-repositories). Metrics, alerts, and Grafana: [Monitoring](#5-monitoring). Stopping every agent in an incident: [incident.md](incident.md). The [Account Setup](#0-account-setup) section is performed only once per account.
 
 ## Overview
 
@@ -280,6 +280,7 @@ Open http://localhost:3000, user `admin`. Prometheus (port 9090) and Alertmanage
 | `AegisServerDown` | critical | [Server Startup Failures](#server-startup-failures); host down or port 9464 blocked |
 | `AegisProviderErrorsSustained` | critical | [Sustained LLM Provider Errors](#sustained-llm-provider-errors) |
 | `AegisQueueBacklog` | warning | [Queue Backlog Stalling](#queue-backlog-stalling) |
+| `AegisPaused` | warning | An admin paused every agent (#510): who and why at `/admin/pause` or in the audit log; resume once the cause is fixed, [incident.md](incident.md) |
 | `AegisCacheReadRatioLow` | warning | Prompt order altered or cache breakpoint misplaced: diff latest deployment, inspect per-repo cache rates on dashboard |
 
 **Monitoring Host Triage:** Access via `aws ssm start-session --target <monitoring_instance_id>`, inspect services: `systemctl status prometheus alertmanager grafana aegis-monitoring-sync.timer` and `sudo journalctl -u aegis-monitoring-sync`. If an `aegis` target (label `role`: `api`, `worker` or `all`) on Prometheus Targets page reports `down` while server is running: verify that machine's security group port 9464 rules and `[metrics] listen` configuration in `/etc/aegis/server.toml`.

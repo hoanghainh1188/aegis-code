@@ -94,6 +94,43 @@ tests:
               summary: "Hàng đợi job dồn"
               description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."
 
+  # Job sẵn sàng chờ từ đầu, mọi agent dừng đến phút 60 (#510). Lúc dừng
+  # chỉ AegisPaused bắn (sau 1 phút): hàng đợi dồn là đúng ý. Tiếp tục ở
+  # phút 61 thì AegisPaused hết, và hàng đợi còn dồn thì 10 phút sau
+  # AegisQueueBacklog bắn như thường.
+  - interval: 1m
+    input_series:
+      - series: 'aegis_queue_oldest_ready_seconds{instance="i-0abc"}'
+        values: '0+60x90'
+      - series: 'aegis_paused{instance="i-0abc"}'
+        values: '1x60 0x30'
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: AegisQueueBacklog
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: AegisQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Hàng đợi job dồn"
+              description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."
+      - eval_time: 0m
+        alertname: AegisPaused
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: AegisPaused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Mọi agent đang tạm dừng"
+              description: "Admin đã dừng mọi agent của instance; job trong hàng đợi đang chờ. Xem ai dừng và vì sao ở /admin/pause hoặc nhật ký audit (instance.pause). Tiếp tục: docs/runbook/incident.md."
+      - eval_time: 65m
+        alertname: AegisPaused
+        exp_alerts: []
+
   # Server trả lời đến phút 10, rồi dừng. Prometheus vẫn thấy máy (up = 0).
   - interval: 1m
     input_series:
