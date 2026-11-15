@@ -341,3 +341,184 @@ async fn a_cve_job_is_asked_for_with_a_checked_target() {
     );
     db.drop().await;
 }
+
+#[tokio::test]
+async fn repo_memories_api_and_merged_pr_extraction_work_end_to_end() {
+    let Some(db) = test_db().await else { return };
+    let repo_id = repo(&db.store).await;
+    let app = app(&db.store).await;
+    let uri = format!("/api/v1/repos/{repo_id}/memories");
+
+    // Create a business_rule and a runbook via the API.
+    let (status, created_rule) = call(
+        &app,
+        "POST",
+        &uri,
+        Some(json!({
+            "kind": "business_rule",
+            "source_ref": "rule:tax-rounding",
+            "title": "Business rule: JPY tax rounds per rate bucket",
+            "summary": "Never round JPY consumption tax per line item in src/tax.rs.",
+            "paths": ["src/tax.rs"],
+            "keywords": "jpy tax rounding bucket"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created_rule}");
+    let rule_id = created_rule["data"]["id"].as_i64().unwrap();
+
+    let (status, created_runbook) = call(
+        &app,
+        "POST",
+        &uri,
+        Some(json!({
+            "kind": "runbook",
+            "source_ref": "runbook:tax-mismatch",
+            "title": "Runbook: JPY invoice tax total mismatch",
+            "summary": "Inspect src/tax.rs bucket aggregation first.",
+            "paths": ["src/tax.rs"],
+            "keywords": "jpy invoice tax mismatch"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created_runbook}");
+
+    // Simulate a job that opened a PR and had a review round, then extract merged PR memory.
+    let pr_url = "https://github.com/typst/typst/pull/55";
+    let root_key = aegis_ledger::IssueId::parse("TYPST-55-1".to_owned()).unwrap();
+    let root_job = db
+        .store
+        .create_job(&aegis_store::NewJob {
+            repo_id: aegis_store::RepoId(repo_id),
+            issue_ref: "typst/typst#55".into(),
+            ledger_key: root_key.clone(),
+            source: aegis_store::JobSource::Github,
+            priority: None,
+            sla_deadline: None,
+        })
+        .await
+        .unwrap();
+    let claim = db
+        .store
+        .claim_job("w", std::time::Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let ledger = db.store.ledger();
+    aegis_ledger::LedgerStore::append(
+        &ledger,
+        &root_key,
+        &aegis_ledger::LedgerEvent::IssueRead {
+            title: "JPY tax rounding off by 1 yen in src/tax.rs".into(),
+            url: "https://github.com/typst/typst/issues/55".into(),
+        },
+    )
+    .await
+    .unwrap();
+    aegis_ledger::LedgerStore::append(
+        &ledger,
+        &root_key,
+        &aegis_ledger::LedgerEvent::Answered(aegis_ledger::AnswerSummary {
+            fixed: true,
+            cause: "src/tax.rs rounded each line item before summing buckets.".into(),
+            changes: vec![aegis_ledger::AnswerChange {
+                location: "src/tax.rs:42".into(),
+                note: "Round once per tax rate bucket.".into(),
+            }],
+            repro_test: Some("jpy_bucket_rounding".into()),
+            stop_reason: None,
+            review_replies: vec![],
+            suspicious_input: vec![],
+        }),
+    )
+    .await
+    .unwrap();
+    db.store
+        .finish_attempt(
+            &claim.run,
+            "w",
+            &aegis_store::AttemptEnd::Done {
+                outcome: aegis_ledger::Outcome::PrOpened,
+                pr_url: Some(pr_url.into()),
+                reason: None,
+                patch: None,
+                diagnosis: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    // Add a review round (/aegis fix) and record its reply.
+    let round_job = db
+        .store
+        .review_job_by(root_job.id, &aegis_store::Actor::system())
+        .await
+        .unwrap();
+    aegis_ledger::LedgerStore::append(
+        &ledger,
+        &round_job.ledger_key,
+        &aegis_ledger::LedgerEvent::Answered(aegis_ledger::AnswerSummary {
+            fixed: true,
+            cause: "Addressed review feedback on zero-decimal currency.".into(),
+            changes: vec![aegis_ledger::AnswerChange {
+                location: "src/tax.rs:58".into(),
+                note: "Assert zero fractional yen in bucket totals.".into(),
+            }],
+            repro_test: None,
+            stop_reason: None,
+            review_replies: vec![aegis_ledger::AnswerReply {
+                note: 1,
+                done: true,
+                reply: "Added zero-decimal currency assertion in src/tax.rs.".into(),
+            }],
+            suspicious_input: vec![],
+        }),
+    )
+    .await
+    .unwrap();
+
+    let extracted = aegis_server::memory::extract_and_store_merged_pr(
+        &db.store,
+        pr_url,
+        None,
+        &aegis_store::Actor::webhook("github"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(extracted.len(), 2, "expected merged_pr + review_lesson");
+
+    // List all 4 memories via GET /api/v1/repos/{id}/memories.
+    let (status, listed) = call(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["data"].as_array().unwrap().len(), 4);
+
+    // Enrich an incoming issue and verify >=3 relevant memories are recalled into BP3.
+    let mut incoming = aegis_lifecycle::IssueInput {
+        id: "typst-99".into(),
+        title: "JPY invoice tax rounding bug in src/tax.rs".into(),
+        body: "10% JPY tax bucket calculation in src/tax.rs is off by 1 yen.".into(),
+        url: "https://github.com/typst/typst/issues/99".into(),
+        ..Default::default()
+    };
+    aegis_server::memory::enrich_with_memory(
+        &db.store,
+        aegis_store::RepoId(repo_id),
+        &mut incoming,
+    )
+    .await;
+    let bp3 = incoming.first_message("Tax rounding mismatch in src/tax.rs.", true);
+    assert!(bp3.contains("<repo-memory count=\"4\">"), "{bp3}");
+    assert!(bp3.contains("[merged_pr]"), "{bp3}");
+    assert!(bp3.contains("[review_lesson]"), "{bp3}");
+    assert!(bp3.contains("[business_rule]"), "{bp3}");
+    assert!(bp3.contains("[runbook]"), "{bp3}");
+
+    // Delete the business rule via DELETE /api/v1/repos/{id}/memories/{memory_id}.
+    let del_uri = format!("{uri}/{rule_id}");
+    let (status, _) = call(&app, "DELETE", &del_uri, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(&app, "DELETE", &del_uri, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    db.drop().await;
+}

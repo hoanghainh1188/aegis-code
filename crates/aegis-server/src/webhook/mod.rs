@@ -536,6 +536,9 @@ async fn deliver(
         )
         .await;
     }
+    if let Kind::PrMerged { pr_url } = &wanted.kind {
+        return pr_merged(hooks, source, delivery, pr_url).await;
+    }
     let repo = match hooks.store.repo_by_remote(&wanted.repo_url).await {
         Ok(Some(repo)) => repo,
         Ok(None) => return ignored(delivery, "repository not registered"),
@@ -628,7 +631,7 @@ async fn deliver(
         (Kind::Issue { .. }, WebhookSource::Backlog) => JobSource::Backlog,
         (Kind::Issue { .. }, WebhookSource::Jsm) => JobSource::Jsm,
         (Kind::Issue { .. }, WebhookSource::Servicenow) => JobSource::Servicenow,
-        (Kind::ReviewRound { .. }, _) => unreachable!("handled above"),
+        (Kind::ReviewRound { .. } | Kind::PrMerged { .. }, _) => unreachable!("handled above"),
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
         Ok(key) => key,
@@ -741,6 +744,39 @@ pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
     let (rest, name) = path.rsplit_once('/')?;
     let owner = rest.rsplit('/').next()?;
     (!owner.is_empty() && !name.is_empty()).then_some((owner, name))
+}
+
+/// Extracts `merged_pr` and `review_lesson` repository memories when an
+/// agent PR is merged (#456).
+async fn pr_merged(hooks: &Hooks, source: WebhookSource, delivery: &str, pr_url: &str) -> Handled {
+    let actor = aegis_store::Actor::webhook(source.as_str());
+    match crate::memory::extract_and_store_merged_pr(&hooks.store, pr_url, None, &actor).await {
+        Ok(saved) if saved.is_empty() => ignored(delivery, "no job opened this pull request"),
+        Ok(saved) => {
+            let repo_id = saved[0].repo_id;
+            let job_id = saved[0].job_id;
+            let count = saved.len();
+            let mut handled = Handled::new(
+                answer(
+                    StatusCode::OK,
+                    json!({
+                        "status": "memory_recorded",
+                        "memories": count,
+                        "pr_url": pr_url,
+                    }),
+                ),
+                WebhookOutcome::Queued,
+                Some(format!("recorded {count} memory entries from {pr_url}")),
+                Some(repo_id),
+            );
+            if let Some(id) = job_id {
+                handled = handled.with_job(id);
+            }
+            handled
+        }
+        Err(StoreError::Invalid { field, message }) => malformed(format!("{field}: {message}")),
+        Err(e) => internal(delivery, &e),
+    }
 }
 
 /// A review round asked for on the agent's PR (#244): the job that opened

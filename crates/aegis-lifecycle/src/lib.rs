@@ -25,6 +25,7 @@ pub mod injection;
 mod issue;
 mod job;
 mod light;
+pub mod memory;
 mod publish;
 mod registry;
 mod replay;
@@ -44,6 +45,10 @@ pub use diagnose::TriageLane;
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};
+pub use memory::{
+    ExtractedMemory, MemoryLesson, extract_from_merged_pr, fallback_extract_from_merged_pr,
+    format_for_bp3,
+};
 pub use publish::fork_forge_of;
 pub use registry::{
     IssueTrustConfig, IssueTrustPolicy, ModeConfig, Modes, PatchScopeConfig, RepoRun, RepoSettings,
