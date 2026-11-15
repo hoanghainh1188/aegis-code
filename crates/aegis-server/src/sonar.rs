@@ -155,6 +155,8 @@ pub async fn poll_repo(
         issue_ref: batch.clone(),
         ledger_key,
         source: JobSource::Sonar,
+        priority: None,
+        sla_deadline: None,
     };
     match store.deliver_sonar_batch(&job, &keys).await? {
         None => Ok(None),

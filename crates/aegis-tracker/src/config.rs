@@ -9,6 +9,8 @@ use crate::TrackerError;
 pub enum TrackerConfig {
     Jira(JiraConfig),
     Backlog(BacklogConfig),
+    Jsm(JsmConfig),
+    Servicenow(ServiceNowConfig),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,11 +69,82 @@ pub struct BacklogConfig {
     pub pr_status_id: Option<u64>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_sn_table() -> String {
+    "incident".to_owned()
+}
+
+/// Jira Service Management (ITSM) intake and SLA sync (#453).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JsmConfig {
+    /// The site: `https://acme.atlassian.net`, or Data Center base URL.
+    pub url: String,
+    #[serde(default)]
+    pub deployment: Deployment,
+    /// Cloud: the account's e-mail, with its API token (basic auth).
+    /// Without it the token is sent as a Data Center bearer token.
+    #[serde(default)]
+    pub user: Option<String>,
+    /// The secret holding the token.
+    pub token_env: String,
+    /// Which tickets get a job, e.g. `project = SD AND status = "Waiting for support"`.
+    pub jql: String,
+    /// Optional Jira Service Desk ID, validated if set.
+    #[serde(default)]
+    pub service_desk_id: Option<String>,
+    /// Optional custom field holding JSM SLA JSON or ISO timestamp (e.g. `customfield_10050`);
+    /// falls back to `duedate`.
+    #[serde(default)]
+    pub sla_field: Option<String>,
+    /// The transition (by name, any case) to apply once a PR is opened.
+    #[serde(default)]
+    pub pr_transition: Option<String>,
+    /// The transition (by name, any case) to apply when a job ends without a PR.
+    #[serde(default)]
+    pub diagnosis_transition: Option<String>,
+    /// Post updates as internal agent notes (`"public": false`); defaults to `true`.
+    #[serde(default = "default_true")]
+    pub internal_comments: bool,
+}
+
+/// ServiceNow ITSM incident/task intake and SLA sync (#453).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceNowConfig {
+    /// Instance base URL, e.g. `https://acme.service-now.com`.
+    pub url: String,
+    /// ServiceNow username for Basic auth; when omitted, `token_env` is used as a Bearer token.
+    #[serde(default)]
+    pub user: Option<String>,
+    /// The secret holding the password or OAuth bearer token.
+    pub token_env: String,
+    /// ServiceNow table name (defaults to `incident`).
+    #[serde(default = "default_sn_table")]
+    pub table: String,
+    /// Encoded query passed as `sysparm_query`, e.g. `active=true^state=1`.
+    pub query: String,
+    /// State value or label to set once a PR is opened.
+    #[serde(default)]
+    pub pr_state: Option<String>,
+    /// State value or label to set when a job ends without opening a PR.
+    #[serde(default)]
+    pub diagnosis_state: Option<String>,
+    /// Write updates to internal `work_notes` (`true`, default) or customer-visible `comments` (`false`).
+    #[serde(default = "default_true")]
+    pub work_notes: bool,
+}
+
 impl TrackerConfig {
     pub fn token_env(&self) -> &str {
         match self {
             Self::Jira(c) => &c.token_env,
             Self::Backlog(c) => &c.token_env,
+            Self::Jsm(c) => &c.token_env,
+            Self::Servicenow(c) => &c.token_env,
         }
     }
 
@@ -97,6 +170,48 @@ impl TrackerConfig {
                 token_env(&c.token_env)?;
                 if c.project_ids.is_empty() {
                     return bad("backlog: `project_ids` is empty".into());
+                }
+            }
+            Self::Jsm(c) => {
+                site_url(&c.url)?;
+                token_env(&c.token_env)?;
+                if c.jql.trim().is_empty() {
+                    return bad("jsm: `jql` is empty".into());
+                }
+                if c.deployment == Deployment::Cloud
+                    && c.user.as_deref().is_none_or(|u| u.trim().is_empty())
+                {
+                    return bad(
+                        "jsm: Cloud needs `user`, the e-mail of the API token's account".into(),
+                    );
+                }
+                if let Some(field) = &c.sla_field {
+                    let ok = !field.is_empty()
+                        && field.len() <= 64
+                        && field
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+                    if !ok {
+                        return bad(format!("jsm: `{field}` is not a valid Jira field key"));
+                    }
+                }
+            }
+            Self::Servicenow(c) => {
+                site_url(&c.url)?;
+                token_env(&c.token_env)?;
+                if c.query.trim().is_empty() {
+                    return bad("servicenow: `query` is empty".into());
+                }
+                let ok_table = !c.table.is_empty()
+                    && c.table.len() <= 64
+                    && c.table
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_');
+                if !ok_table {
+                    return bad(format!(
+                        "servicenow: `{}` is not a valid table name",
+                        c.table
+                    ));
                 }
             }
         }

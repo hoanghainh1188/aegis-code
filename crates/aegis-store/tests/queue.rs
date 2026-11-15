@@ -40,6 +40,8 @@ async fn job(s: &Store, repo: RepoId, n: u32) -> aegis_store::Job {
         issue_ref: format!("example/r{}#{n}", repo.0),
         ledger_key: IssueId::parse(format!("r{}-{n}", repo.0)).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap()

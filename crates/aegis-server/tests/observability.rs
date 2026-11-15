@@ -291,6 +291,8 @@ async fn a_whole_job_logs_its_id_and_no_secret_or_code_and_is_counted() {
             issue_ref: "me/fixture#7".into(),
             ledger_key: IssueId::parse("fixture-7").unwrap(),
             source: JobSource::Github,
+            priority: None,
+            sla_deadline: None,
         })
         .await
         .unwrap();

@@ -1,6 +1,6 @@
 //! Jira REST API v2: Cloud (`/search/jql`, basic auth with the account's
 //! e-mail and API token) or Data Center (`/search`, a personal access
-//! token).
+//! token). Also provides shared REST helpers for the JSM connector (#453).
 
 use reqwest::RequestBuilder;
 use serde::Deserialize;
@@ -15,13 +15,19 @@ const JIRA: &str = "Jira";
 const PAGE: usize = 100;
 
 #[derive(Debug, Clone)]
-pub struct Jira {
-    client: reqwest::Client,
+pub(crate) struct JiraRest {
+    pub(crate) label: &'static str,
+    pub(crate) client: reqwest::Client,
     /// The site, without a trailing `/`.
-    site: String,
-    deployment: Deployment,
-    user: Option<String>,
-    token: String,
+    pub(crate) site: String,
+    pub(crate) deployment: Deployment,
+    pub(crate) user: Option<String>,
+    pub(crate) token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Jira {
+    rest: JiraRest,
     jql: String,
     pr_transition: Option<String>,
 }
@@ -29,7 +35,7 @@ pub struct Jira {
 #[derive(Debug, Deserialize)]
 struct Page {
     #[serde(default)]
-    issues: Vec<Keyed>,
+    issues: Vec<Value>,
     /// Cloud.
     #[serde(default, rename = "nextPageToken")]
     next_page_token: Option<String>,
@@ -39,34 +45,19 @@ struct Page {
 }
 
 #[derive(Debug, Deserialize)]
-struct Keyed {
-    key: String,
+pub(crate) struct RawIssue {
+    pub(crate) key: String,
+    pub(crate) fields: Value,
 }
 
 #[derive(Debug, Deserialize)]
-struct Issue {
-    key: String,
-    fields: Fields,
-}
-
-#[derive(Debug, Deserialize)]
-struct Fields {
-    #[serde(default)]
-    summary: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    attachment: Vec<Attachment>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Attachment {
-    filename: String,
+pub(crate) struct Attachment {
+    pub(crate) filename: String,
     #[serde(default, rename = "mimeType")]
-    mime_type: Option<String>,
+    pub(crate) mime_type: Option<String>,
     #[serde(default)]
-    size: u64,
-    content: String,
+    pub(crate) size: u64,
+    pub(crate) content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,8 +71,8 @@ struct Transition {
     name: String,
 }
 
-/// `errorMessages` and `errors` of a Jira error.
-fn message(v: &Value) -> Option<String> {
+/// `errorMessages` and `errors` of a Jira / JSM error response.
+pub(crate) fn message(v: &Value) -> Option<String> {
     let mut parts: Vec<String> = v
         .get("errorMessages")
         .and_then(Value::as_array)
@@ -89,6 +80,11 @@ fn message(v: &Value) -> Option<String> {
         .flatten()
         .filter_map(|m| m.as_str().map(str::to_owned))
         .collect();
+    if let Some(error_msg) = v.get("errorMessage").and_then(Value::as_str)
+        && !error_msg.is_empty()
+    {
+        parts.push(error_msg.to_owned());
+    }
     if let Some(errors) = v.get("errors").and_then(Value::as_object) {
         parts.extend(
             errors
@@ -99,50 +95,63 @@ fn message(v: &Value) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("; "))
 }
 
-impl Jira {
-    pub(crate) fn new(config: &JiraConfig, token: &str) -> Result<Self, TrackerError> {
+impl JiraRest {
+    pub(crate) fn new(
+        label: &'static str,
+        url: &str,
+        deployment: Deployment,
+        user: Option<&str>,
+        token: &str,
+    ) -> Result<Self, TrackerError> {
         Ok(Self {
-            client: client(JIRA)?,
-            site: site_url(&config.url)?.to_owned(),
-            deployment: config.deployment,
-            user: config.user.clone().filter(|u| !u.trim().is_empty()),
+            label,
+            client: client(label)?,
+            site: site_url(url)?.to_owned(),
+            deployment,
+            user: user
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(str::to_owned),
             token: token.to_owned(),
-            jql: config.jql.clone(),
-            pr_transition: config.pr_transition.clone(),
         })
     }
 
-    fn api(&self, rest: &str) -> String {
+    pub(crate) fn api(&self, rest: &str) -> String {
         format!("{}/rest/api/2/{rest}", self.site)
     }
 
-    fn authed(&self, request: RequestBuilder) -> RequestBuilder {
+    pub(crate) fn authed(&self, request: RequestBuilder) -> RequestBuilder {
         match &self.user {
             Some(user) => request.basic_auth(user, Some(&self.token)),
             None => request.bearer_auth(&self.token),
         }
     }
 
-    fn get(&self, url: &str) -> RequestBuilder {
+    pub(crate) fn get(&self, url: &str) -> RequestBuilder {
         self.authed(self.client.get(url))
             .header("Accept", "application/json")
     }
 
-    fn post(&self, url: &str, body: &Value) -> RequestBuilder {
+    pub(crate) fn post(&self, url: &str, body: &Value) -> RequestBuilder {
         self.authed(self.client.post(url)).json(body)
     }
 
-    pub(crate) async fn search(&self) -> Result<Vec<String>, TrackerError> {
-        let mut keys = Vec::new();
+    /// Paginated Jira JQL search returning raw issue JSON objects (`key` + requested `fields`).
+    pub(crate) async fn search_issues(
+        &self,
+        jql: &str,
+        fields: &str,
+    ) -> Result<Vec<Value>, TrackerError> {
+        let mut issues = Vec::new();
         let mut token: Option<String> = None;
         loop {
             let page_size = PAGE.to_string();
             let mut query = vec![
-                ("jql", self.jql.as_str()),
-                ("fields", "summary"),
+                ("jql", jql),
+                ("fields", fields),
                 ("maxResults", page_size.as_str()),
             ];
-            let start = keys.len().to_string();
+            let start = issues.len().to_string();
             let request = match self.deployment {
                 Deployment::Cloud => {
                     if let Some(t) = &token {
@@ -155,34 +164,53 @@ impl Jira {
                     self.get(&self.api("search")).query(&query)
                 }
             };
-            let page: Page = http::json(JIRA, request, message).await?;
+            let page: Page = http::json(self.label, request, message).await?;
             let got = page.issues.len();
-            let before = keys.len();
-            keys.extend(page.issues.into_iter().map(|i| i.key));
+            let before = issues.len();
+            for item in page.issues {
+                let valid = item
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .is_some_and(|k| checked_key(k).is_ok());
+                if valid {
+                    issues.push(item);
+                }
+            }
             let more = match self.deployment {
                 Deployment::Cloud => {
                     token = page.next_page_token;
                     token.is_some()
                 }
-                Deployment::DataCenter => page.total.is_some_and(|t| keys.len() < t),
+                Deployment::DataCenter => page.total.is_some_and(|t| issues.len() < t),
             };
-            if !more || got == 0 || keys.len() >= MAX_TICKETS || keys.len() == before {
+            if !more || got == 0 || issues.len() >= MAX_TICKETS || issues.len() == before {
                 break;
             }
         }
-        keys.truncate(MAX_TICKETS);
-        keys.retain(|k| checked_key(k).is_ok());
-        Ok(keys)
+        issues.truncate(MAX_TICKETS);
+        Ok(issues)
     }
 
-    pub(crate) async fn ticket(&self, key: &str) -> Result<Ticket, TrackerError> {
+    pub(crate) async fn fetch_issue(
+        &self,
+        key: &str,
+        fields: &str,
+    ) -> Result<RawIssue, TrackerError> {
         let url = self.api(&format!("issue/{key}"));
-        let request = self
-            .get(&url)
-            .query(&[("fields", "summary,description,attachment")]);
-        let issue: Issue = http::json(JIRA, request, message).await?;
+        let request = self.get(&url).query(&[("fields", fields)]);
+        http::json(self.label, request, message).await
+    }
+
+    pub(crate) async fn download_logs(
+        &self,
+        attachments_val: Option<&Value>,
+    ) -> Result<Vec<Log>, TrackerError> {
+        let Some(val) = attachments_val else {
+            return Ok(Vec::new());
+        };
+        let attachments: Vec<Attachment> = serde_json::from_value(val.clone()).unwrap_or_default();
         let mut logs = Vec::new();
-        for a in &issue.fields.attachment {
+        for a in &attachments {
             if logs.len() == MAX_LOGS {
                 break;
             }
@@ -193,61 +221,111 @@ impl Jira {
             if !a.content.starts_with(&format!("{}/", self.site)) {
                 continue;
             }
-            logs.push(self.log(a).await?);
+            let response = http::send(self.label, self.get(&a.content), message).await?;
+            let (bytes, cut) = http::read(self.label, response, MAX_LOG_BYTES).await?;
+            logs.push(ticket::log(&a.filename, &bytes, cut));
         }
-        Ok(Ticket {
-            url: format!("{}/browse/{}", self.site, issue.key),
-            key: issue.key,
-            title: issue.fields.summary,
-            body: issue.fields.description.unwrap_or_default(),
-            logs,
-        })
+        Ok(logs)
     }
 
-    async fn log(&self, a: &Attachment) -> Result<Log, TrackerError> {
-        let response = http::send(JIRA, self.get(&a.content), message).await?;
-        let (bytes, cut) = http::read(JIRA, response, MAX_LOG_BYTES).await?;
-        Ok(ticket::log(&a.filename, &bytes, cut))
-    }
-
-    pub(crate) async fn report(&self, key: &str, report: &Report<'_>) -> Result<(), TrackerError> {
-        let comment = self.api(&format!("issue/{key}/comment"));
-        http::send(
-            JIRA,
-            self.post(&comment, &json!({ "body": report.comment })),
-            message,
-        )
-        .await?;
-        let Some(pr) = report.pr_url else {
-            return Ok(());
-        };
+    pub(crate) async fn post_remotelink(&self, key: &str, pr: &str) -> Result<(), TrackerError> {
         // The same global ID updates the link instead of adding one.
         let link = json!({
             "globalId": format!("aegis-code-pr={pr}"),
             "object": { "url": pr, "title": "Pull request by aegis-code" },
         });
         let remote = self.api(&format!("issue/{key}/remotelink"));
-        http::send(JIRA, self.post(&remote, &link), message).await?;
-        if let Some(name) = &self.pr_transition {
-            self.transition(key, name).await?;
-        }
+        http::send(self.label, self.post(&remote, &link), message).await?;
         Ok(())
     }
 
-    async fn transition(&self, key: &str, name: &str) -> Result<(), TrackerError> {
+    pub(crate) async fn transition(&self, key: &str, name: &str) -> Result<(), TrackerError> {
         let url = self.api(&format!("issue/{key}/transitions"));
-        let found: Transitions = http::json(JIRA, self.get(&url), message).await?;
+        let found: Transitions = http::json(self.label, self.get(&url), message).await?;
         let Some(t) = found
             .transitions
             .iter()
             .find(|t| t.name.eq_ignore_ascii_case(name.trim()))
         else {
             return Err(TrackerError::Config(format!(
-                "jira: {key} has no transition `{name}` now"
+                "{}: {key} has no transition `{name}` now",
+                self.label.to_ascii_lowercase()
             )));
         };
         let body = json!({ "transition": { "id": t.id } });
-        http::send(JIRA, self.post(&url, &body), message).await?;
+        http::send(self.label, self.post(&url, &body), message).await?;
+        Ok(())
+    }
+}
+
+impl Jira {
+    pub(crate) fn new(config: &JiraConfig, token: &str) -> Result<Self, TrackerError> {
+        Ok(Self {
+            rest: JiraRest::new(
+                JIRA,
+                &config.url,
+                config.deployment,
+                config.user.as_deref(),
+                token,
+            )?,
+            jql: config.jql.clone(),
+            pr_transition: config.pr_transition.clone(),
+        })
+    }
+
+    pub(crate) async fn search(&self) -> Result<Vec<String>, TrackerError> {
+        let issues = self.rest.search_issues(&self.jql, "summary").await?;
+        Ok(issues
+            .into_iter()
+            .filter_map(|i| i.get("key").and_then(Value::as_str).map(str::to_owned))
+            .collect())
+    }
+
+    pub(crate) async fn ticket(&self, key: &str) -> Result<Ticket, TrackerError> {
+        let issue = self
+            .rest
+            .fetch_issue(key, "summary,description,attachment")
+            .await?;
+        let logs = self
+            .rest
+            .download_logs(issue.fields.get("attachment"))
+            .await?;
+        Ok(Ticket {
+            url: format!("{}/browse/{}", self.rest.site, issue.key),
+            key: issue.key,
+            title: issue
+                .fields
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            body: issue
+                .fields
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            logs,
+            priority: None,
+            sla_deadline: None,
+        })
+    }
+
+    pub(crate) async fn report(&self, key: &str, report: &Report<'_>) -> Result<(), TrackerError> {
+        let comment = self.rest.api(&format!("issue/{key}/comment"));
+        http::send(
+            JIRA,
+            self.rest.post(&comment, &json!({ "body": report.comment })),
+            message,
+        )
+        .await?;
+        let Some(pr) = report.pr_url else {
+            return Ok(());
+        };
+        self.rest.post_remotelink(key, pr).await?;
+        if let Some(name) = &self.pr_transition {
+            self.rest.transition(key, name).await?;
+        }
         Ok(())
     }
 }

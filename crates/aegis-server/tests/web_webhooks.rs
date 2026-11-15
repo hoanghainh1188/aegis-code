@@ -53,6 +53,8 @@ async fn job(s: &Store, repo: RepoId, n: u32) -> JobId {
         issue_ref: format!("x/y#{n}"),
         ledger_key: IssueId::parse(format!("y-{n}")).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap()

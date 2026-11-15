@@ -10,7 +10,7 @@ use crate::tx;
 use crate::types::{count, decode_outcome, outcome_str};
 use crate::{
     Actor, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoId, Run,
-    RunEnd, RunId, RunStatus, Store, StoreError,
+    RunEnd, RunId, RunStatus, SlaPriority, Store, StoreError,
 };
 
 pub(crate) struct JobRow {
@@ -19,6 +19,8 @@ pub(crate) struct JobRow {
     pub(crate) issue_ref: String,
     pub(crate) ledger_key: String,
     pub(crate) source: String,
+    pub(crate) priority: Option<String>,
+    pub(crate) sla_deadline: Option<DateTime<Utc>>,
     pub(crate) status: String,
     pub(crate) outcome: Option<String>,
     pub(crate) attempts: i32,
@@ -46,6 +48,12 @@ impl TryFrom<JobRow> for Job {
             issue_ref: row.issue_ref,
             ledger_key: IssueId::parse(row.ledger_key)?,
             source: JobSource::decode("jobs.source", &row.source)?,
+            priority: row
+                .priority
+                .as_deref()
+                .map(|p| SlaPriority::decode("jobs.priority", p))
+                .transpose()?,
+            sla_deadline: row.sla_deadline,
             status: JobStatus::decode("jobs.status", &row.status)?,
             outcome: row.outcome.as_deref().map(decode_outcome).transpose()?,
             attempts: count("jobs.attempts", row.attempts)?,
@@ -110,15 +118,18 @@ impl Store {
             budget::check(&mut tx, &self.budget, job.repo_id).await?;
             let created: Job = sqlx::query_as!(
                 JobRow,
-                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
-                 VALUES ($1, $2, $3, $4)
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                           attempts, locked_by, locked_until, created_at, updated_at,
-                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round",
                 job.repo_id.0,
                 job.issue_ref,
                 job.ledger_key.as_str(),
                 job.source.as_str(),
+                job.priority.map(SlaPriority::as_str),
+                job.sla_deadline,
             )
             .fetch_one(&mut *tx)
             .await
@@ -144,8 +155,8 @@ impl Store {
     pub async fn job(&self, id: JobId) -> Result<Option<Job>, StoreError> {
         sqlx::query_as!(
             JobRow,
-            "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                    attempts, locked_by, locked_until, created_at, updated_at,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
              FROM jobs WHERE id = $1",
             id.0,
@@ -175,8 +186,8 @@ impl Store {
         let within: Option<Vec<i64>> = within.map(|repos| repos.iter().map(|r| r.0).collect());
         let rows = sqlx::query_as!(
             JobRow,
-            "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                    attempts, locked_by, locked_until, created_at, updated_at,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
              FROM jobs
              WHERE ($1::bigint IS NULL OR repo_id = $1)
@@ -349,9 +360,10 @@ impl Store {
                 "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,
                                  updated_at = now()
                  WHERE id = $1
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                           attempts, locked_by, locked_until, created_at, updated_at,
-                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round",
                 job.0,
                 status.as_str(),
                 outcome,

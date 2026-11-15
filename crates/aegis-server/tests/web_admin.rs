@@ -159,6 +159,8 @@ async fn an_admin_grants_and_revokes_roles_at_once() {
         issue_ref: "x/y#1".into(),
         ledger_key: IssueId::parse("a-1").unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap();

@@ -3,8 +3,8 @@
 use aegis_ledger::IssueId;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Delivered, JobSource, NewDelivery, NewJob, NewRepo, RepoId, RepoMode, Store, StoreError,
-    WebhookSource,
+    Delivered, JobSource, NewDelivery, NewJob, NewRepo, RepoId, RepoMode, SlaPriority, Store,
+    StoreError, WebhookSource,
 };
 use serde_json::json;
 
@@ -85,6 +85,8 @@ async fn a_delivery_makes_one_job_however_often_it_comes() {
         issue_ref: "typst/typst#1".into(),
         ledger_key: IssueId::parse(key).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     };
 
     let Delivered::Queued(first) = s.deliver_job(&delivery("a"), &job("k-1")).await.unwrap() else {
@@ -129,9 +131,15 @@ async fn a_polled_ticket_is_taken_once() {
     let Some(db) = test_db().await else { return };
     let s = &db.store;
     let app = repo(s, "app", "https://github.com/me/app").await;
-    for (source, job_source) in [
-        (WebhookSource::Jira, JobSource::Jira),
-        (WebhookSource::Backlog, JobSource::Backlog),
+    for (source, job_source, priority) in [
+        (WebhookSource::Jira, JobSource::Jira, None),
+        (WebhookSource::Backlog, JobSource::Backlog, None),
+        (WebhookSource::Jsm, JobSource::Jsm, Some(SlaPriority::P1)),
+        (
+            WebhookSource::Servicenow,
+            JobSource::Servicenow,
+            Some(SlaPriority::P2),
+        ),
     ] {
         let delivery = NewDelivery {
             source,
@@ -143,12 +151,15 @@ async fn a_polled_ticket_is_taken_once() {
             issue_ref: "APP-7".into(),
             ledger_key: IssueId::parse(format!("APP-7-{}", source.as_str())).unwrap(),
             source: job_source,
+            priority,
+            sla_deadline: None,
         };
         let first = s.deliver_job(&delivery, &job).await.unwrap();
         let Delivered::Queued(queued) = first else {
             panic!("{first:?}")
         };
         assert_eq!(queued.source, job_source);
+        assert_eq!(queued.priority, priority);
         assert_eq!(
             s.deliver_job(&delivery, &job).await.unwrap(),
             Delivered::Duplicate

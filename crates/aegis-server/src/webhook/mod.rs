@@ -626,6 +626,8 @@ async fn deliver(
         // Polled (`crate::tracker`), never posted here.
         (Kind::Issue { .. }, WebhookSource::Jira) => JobSource::Jira,
         (Kind::Issue { .. }, WebhookSource::Backlog) => JobSource::Backlog,
+        (Kind::Issue { .. }, WebhookSource::Jsm) => JobSource::Jsm,
+        (Kind::Issue { .. }, WebhookSource::Servicenow) => JobSource::Servicenow,
         (Kind::ReviewRound { .. }, _) => unreachable!("handled above"),
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
@@ -645,6 +647,8 @@ async fn deliver(
                 issue_ref: wanted.issue_ref.clone(),
                 ledger_key,
                 source: job_source,
+                priority: None,
+                sla_deadline: None,
             },
         )
         .await;

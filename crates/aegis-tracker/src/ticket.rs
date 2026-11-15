@@ -1,5 +1,8 @@
 //! A ticket and its logs, as the agent reads them.
 
+use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
+
 use crate::TrackerError;
 
 /// Longest key taken: `PROJECT_KEY-123456`.
@@ -13,6 +16,73 @@ const MAX_LOG_CHARS: usize = 6_000;
 /// Files read as logs, by extension.
 const LOG_EXTENSIONS: [&str; 7] = ["log", "txt", "out", "err", "trace", "stacktrace", "csv"];
 
+/// Normalized severity / SLA priority mapped from ITSM tickets (#453).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Priority {
+    P1,
+    P2,
+    P3,
+}
+
+impl Priority {
+    /// Map a tracker priority or severity label to `P1`–`P3`.
+    pub fn parse_label(label: &str) -> Option<Self> {
+        let norm = label.trim().to_ascii_lowercase();
+        if norm.is_empty() {
+            return None;
+        }
+        if matches!(
+            norm.as_str(),
+            "1" | "p1" | "critical" | "highest" | "blocker" | "urgent" | "sev1" | "severity 1"
+        ) || norm.starts_with("1 -")
+            || norm.starts_with("p1 ")
+            || norm.contains("critical")
+        {
+            return Some(Self::P1);
+        }
+        if matches!(
+            norm.as_str(),
+            "2" | "p2" | "high" | "major" | "sev2" | "severity 2"
+        ) || norm.starts_with("2 -")
+            || norm.starts_with("p2 ")
+            || norm == "high priority"
+        {
+            return Some(Self::P2);
+        }
+        if matches!(
+            norm.as_str(),
+            "3" | "4"
+                | "5"
+                | "p3"
+                | "p4"
+                | "medium"
+                | "moderate"
+                | "normal"
+                | "minor"
+                | "low"
+                | "lowest"
+                | "planning"
+                | "sev3"
+                | "severity 3"
+        ) || norm.starts_with("3 -")
+            || norm.starts_with("4 -")
+            || norm.starts_with("5 -")
+            || norm.starts_with("p3 ")
+        {
+            return Some(Self::P3);
+        }
+        None
+    }
+}
+
+/// Ticket reference and optional SLA metadata returned when polling a tracker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchTicket {
+    pub key: String,
+    pub priority: Option<Priority>,
+    pub sla_deadline: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ticket {
     pub key: String,
@@ -21,6 +91,10 @@ pub struct Ticket {
     /// Where people open it.
     pub url: String,
     pub logs: Vec<Log>,
+    /// Mapped ITSM priority (`P1`–`P3`) when present (#453).
+    pub priority: Option<Priority>,
+    /// SLA deadline in UTC when present (#453).
+    pub sla_deadline: Option<DateTime<Utc>>,
 }
 
 /// A text attachment, cut to its last [`MAX_LOG_CHARS`] characters.
@@ -81,6 +155,48 @@ pub fn checked_key(key: &str) -> Result<&str, TrackerError> {
     } else {
         Err(TrackerError::Config(format!("`{key}` is not a ticket key")))
     }
+}
+
+/// `INC0010001`, `PRB0040001`, `CHG0030001`: a ServiceNow task/incident number
+/// (up to 64 uppercase ASCII letters, digits, `_`, or `-`, starting with an
+/// uppercase ASCII letter).
+pub fn checked_servicenow_key(key: &str) -> Result<&str, TrackerError> {
+    let ok = !key.is_empty()
+        && key.len() <= MAX_KEY_LEN
+        && key.starts_with(|c: char| c.is_ascii_uppercase())
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'));
+    if ok {
+        Ok(key)
+    } else {
+        Err(TrackerError::Config(format!(
+            "`{key}` is not a ServiceNow ticket number"
+        )))
+    }
+}
+
+/// Parse common ITSM deadline formats (RFC 3339, Jira `+0000` offset timestamps,
+/// ServiceNow `YYYY-MM-DD HH:MM:SS` UTC timestamps, or `YYYY-MM-DD` due dates).
+pub(crate) fn parse_deadline(raw: &str) -> Option<DateTime<Utc>> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f%z") {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return Some(Utc.from_utc_datetime(&ndt));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let ndt = date.and_hms_opt(23, 59, 59)?;
+        return Some(Utc.from_utc_datetime(&ndt));
+    }
+    None
 }
 
 /// Whether an attachment is read as a log: a text file by its type or
@@ -144,9 +260,31 @@ mod tests {
             body: "b".into(),
             url: "u".into(),
             logs: vec![log("x.log", b"```\nescaped?\n````", false)],
+            priority: None,
+            sla_deadline: None,
         };
         let body = ticket.body_with_logs();
         assert!(body.contains("\n`````text\n"), "{body}");
         assert!(body.trim_end().ends_with("`````"), "{body}");
+    }
+
+    #[test]
+    fn priority_labels_and_deadlines_parse() {
+        assert_eq!(Priority::parse_label("1 - Critical"), Some(Priority::P1));
+        assert_eq!(Priority::parse_label("Highest"), Some(Priority::P1));
+        assert_eq!(Priority::parse_label("P2"), Some(Priority::P2));
+        assert_eq!(Priority::parse_label("2 - High"), Some(Priority::P2));
+        assert_eq!(Priority::parse_label("Medium"), Some(Priority::P3));
+        assert_eq!(Priority::parse_label("4 - Low"), Some(Priority::P3));
+        assert_eq!(Priority::parse_label("unknown"), None);
+
+        assert!(checked_servicenow_key("INC0010001").is_ok());
+        assert!(checked_servicenow_key("../etc").is_err());
+
+        assert!(parse_deadline("2026-12-01T15:30:00Z").is_some());
+        assert!(parse_deadline("2026-12-01T15:30:00.000+0000").is_some());
+        assert!(parse_deadline("2026-12-01 15:30:00").is_some());
+        assert!(parse_deadline("2026-12-01").is_some());
+        assert!(parse_deadline("not-a-date").is_none());
     }
 }

@@ -111,6 +111,8 @@ async fn the_job_and_its_review_show_the_patch_file_by_file() {
         issue_ref: "x/y#1".into(),
         ledger_key: IssueId::parse("a-1").unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap();
@@ -151,6 +153,8 @@ async fn the_job_and_its_review_show_the_patch_file_by_file() {
         issue_ref: "x/z#2".into(),
         ledger_key: IssueId::parse("b-1").unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap();

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round\n                 FROM jobs WHERE id = $1 FOR UPDATE",
+  "query": "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                        status, review_of, review_round\n                 FROM jobs WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -49,6 +49,28 @@
       },
       {
         "ordinal": 4,
+        "name": "priority",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "sla_deadline",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "sla_deadline"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -59,7 +81,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "review_of",
         "type_info": "Int8",
         "origin": {
@@ -70,7 +92,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "review_round",
         "type_info": "Int4",
         "origin": {
@@ -91,10 +113,12 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       true,
       false
     ]
   },
-  "hash": "ca0aeb39e9b4ad807359c2032b5a078821fb332c21ce64096d3ec462dd302923"
+  "hash": "a0fe5d7a389c2b3108a4c4e68a6eb86ffd7a94936d84b38f24704fea0553cc85"
 }

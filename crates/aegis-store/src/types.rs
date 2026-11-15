@@ -58,6 +58,8 @@ text_enum! {
         Gitlab = "gitlab",
         Jira = "jira",
         Backlog = "backlog",
+        Jsm = "jsm",
+        Servicenow = "servicenow",
         Sonar = "sonar",
         Ci = "ci",
         Review = "review",
@@ -67,8 +69,24 @@ text_enum! {
 
 text_enum! {
     /// Who sent a webhook delivery, or which tracker a polled ticket is
-    /// from (#26).
-    WebhookSource { Github = "github", Gitlab = "gitlab", Jira = "jira", Backlog = "backlog" }
+    /// from (#26, #453).
+    WebhookSource {
+        Github = "github",
+        Gitlab = "gitlab",
+        Jira = "jira",
+        Backlog = "backlog",
+        Jsm = "jsm",
+        Servicenow = "servicenow",
+    }
+}
+
+text_enum! {
+    /// Severity / SLA priority mapped from ITSM tickets (#453).
+    SlaPriority {
+        P1 = "P1",
+        P2 = "P2",
+        P3 = "P3",
+    }
 }
 
 text_enum! {
@@ -174,6 +192,10 @@ pub struct NewJob {
     /// The job's ledger, unique across repos.
     pub ledger_key: IssueId,
     pub source: JobSource,
+    /// SLA priority (`P1`–`P3`) mapped from an ITSM ticket (#453), if any.
+    pub priority: Option<SlaPriority>,
+    /// SLA due timestamp from an ITSM ticket (#453), if any.
+    pub sla_deadline: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +205,10 @@ pub struct Job {
     pub issue_ref: String,
     pub ledger_key: IssueId,
     pub source: JobSource,
+    /// SLA priority (`P1`–`P3`) mapped from an ITSM ticket (#453), if any.
+    pub priority: Option<SlaPriority>,
+    /// SLA due timestamp from an ITSM ticket (#453), if any.
+    pub sla_deadline: Option<DateTime<Utc>>,
     pub status: JobStatus,
     /// Set exactly when `status` is `Done`.
     pub outcome: Option<Outcome>,

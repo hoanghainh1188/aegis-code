@@ -28,6 +28,8 @@ fn batch(repo: RepoId, name: &str) -> NewJob {
         issue_ref: name.into(),
         ledger_key: IssueId::parse(format!("app-{name}-{}", repo.0)).unwrap(),
         source: JobSource::Sonar,
+        priority: None,
+        sla_deadline: None,
     }
 }
 

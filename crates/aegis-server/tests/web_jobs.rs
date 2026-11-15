@@ -88,6 +88,8 @@ async fn queued(s: &Store, repo: RepoId, key: &str) -> JobId {
         issue_ref: format!("x/y#{key}"),
         ledger_key: IssueId::parse(key).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap()

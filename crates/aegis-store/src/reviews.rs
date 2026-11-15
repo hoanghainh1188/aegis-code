@@ -143,9 +143,10 @@ impl Store {
             JobRow,
             "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, review_of, review_round)
              VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                       status, outcome, attempts, locked_by, locked_until, created_at,
+                       updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                       retry_of, review_of, review_round",
             root.repo_id,
             issue_ref,
             key.as_str(),
@@ -174,8 +175,8 @@ impl Store {
         let url = pr_url.trim().trim_end_matches('/').to_ascii_lowercase();
         sqlx::query_as!(
             JobRow,
-            "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                    attempts, locked_by, locked_until, created_at, updated_at,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
              FROM jobs
              WHERE review_of IS NULL AND status = 'done' AND outcome = 'pr_opened'
@@ -194,8 +195,8 @@ impl Store {
     pub async fn review_rounds_of(&self, root: JobId) -> Result<Vec<Job>, StoreError> {
         sqlx::query_as!(
             JobRow,
-            "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                    attempts, locked_by, locked_until, created_at, updated_at,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
              FROM jobs WHERE review_of = $1 ORDER BY review_round, id LIMIT 100",
             root.0,

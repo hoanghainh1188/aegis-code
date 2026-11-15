@@ -319,6 +319,8 @@ mod tests {
             issue_ref: "typst/typst#12".into(),
             ledger_key: IssueId::parse("typst-12").unwrap(),
             source: JobSource::Github,
+            priority: None,
+            sla_deadline: None,
             status,
             outcome,
             attempts: 1,

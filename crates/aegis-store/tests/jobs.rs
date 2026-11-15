@@ -4,8 +4,9 @@ use aegis_ledger::Outcome;
 use aegis_store::testing::test_db;
 use aegis_store::{
     JobEnd, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, RepoMode, RunEnd, RunStatus,
-    StoreError,
+    SlaPriority, StoreError,
 };
+use chrono::{TimeZone, Utc};
 
 fn repo(slug: &str) -> NewRepo {
     NewRepo {
@@ -25,6 +26,8 @@ fn job(repo_id: aegis_store::RepoId, n: u32) -> NewJob {
         issue_ref: format!("example/typst#{n}"),
         ledger_key: aegis_ledger::IssueId::parse(format!("typst-{n}")).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     }
 }
 
@@ -206,5 +209,49 @@ async fn jobs_list_newest_first_by_repo_and_status() {
             .len(),
         5
     );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn itsm_priority_and_sla_deadline_persist_across_reads_and_retries() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let r = s.create_repo(&repo("itsm")).await.unwrap();
+    let deadline = Utc.with_ymd_and_hms(2026, 12, 1, 15, 30, 0).unwrap();
+
+    for (idx, (source, priority, sla_deadline)) in [
+        (JobSource::Jsm, Some(SlaPriority::P1), Some(deadline)),
+        (JobSource::Servicenow, Some(SlaPriority::P2), Some(deadline)),
+        (JobSource::Servicenow, Some(SlaPriority::P3), None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let created = s
+            .create_job(&NewJob {
+                repo_id: r.id,
+                issue_ref: format!("ITSM-{idx}"),
+                ledger_key: aegis_ledger::IssueId::parse(format!("itsm-{idx}")).unwrap(),
+                source,
+                priority,
+                sla_deadline,
+            })
+            .await
+            .unwrap();
+        assert_eq!(created.source, source);
+        assert_eq!(created.priority, priority);
+        assert_eq!(created.sla_deadline, sla_deadline);
+
+        let loaded = s.job(created.id).await.unwrap().unwrap();
+        assert_eq!(loaded.priority, priority);
+        assert_eq!(loaded.sla_deadline, sla_deadline);
+
+        if idx == 0 {
+            s.end_job(created.id, JobEnd::Failed).await.unwrap();
+            let retried = s.retry_job(created.id).await.unwrap();
+            assert_eq!(retried.priority, Some(SlaPriority::P1));
+            assert_eq!(retried.sla_deadline, Some(deadline));
+        }
+    }
     db.drop().await;
 }

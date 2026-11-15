@@ -6,7 +6,7 @@
 - Issue: #461 (frames #451–#457)
 - Amends: [ADR 0002](0002-full-platform-mvp-as-checkpoint.md), Decision 1 (roadmap spanned Phase 0 through Phase 3)
 - Related: [ADR 0005](0005-kpi-thresholds-after-phase-1.md), [ADR 0009](0009-prompt-injection-threat-model.md), Proposal §0, §1, §9
-- Amendments: 2026-11-14, the CVE lane (#455) starts before the pilot (§4); 2026-11-15, read-only APM telemetry enrichment (#452) starts before the pilot (§4)
+- Amendments: 2026-11-14, the CVE lane (#455) starts before the pilot (§4); 2026-11-15, read-only APM telemetry enrichment (#452) starts before the pilot (§4); 2026-11-15, ITSM intake and SLA metadata (#453) starts before the pilot (§4)
 
 ## Context
 
@@ -65,6 +65,8 @@ Some of this cannot be fixed by tuning the engine:
    **Amendment 2026-11-14 (#455):** the CVE lane (#455) starts before the pilot. It does not touch the bug-fix path, which it tightens instead (#500, [ADR 0015](0015-cve-remediation-lane.md)): the pilot measures the same engine. #451–#454 keep the condition above, apart from what serves the pilot directly (#490, #497).
 
    **Amendment 2026-11-15 (#452):** read-only APM telemetry enrichment (#452) may also start before the pilot. It is opt-in per repository (`repo.config.apm`), reads production stack traces and breadcrumbs as untrusted, size-capped text into `BP3`, and does not change triage routing or the verification gate.
+
+   **Amendment 2026-11-15 (#453):** ITSM intake and SLA metadata sync (#453) may also start before the pilot. It adds opt-in Jira Service Management and ServiceNow tracker kinds (`repo.config.tracker`), stores `P1`–`P3` severity and `sla_deadline` on `jobs`, and syncs job status/PR results back to the ITSM ticket without changing triage routing, the verification gate, or existing FIFO queue ordering (SLA queue prioritization remains in #457).
 
    In addition, the Phase 3 issues Phase 4 depends on must be closed: #451 for #456, and #451 and #453 for #457. If the pilot or the internal KPIs fall short, ADR 0002 applies: find the cause in the ledger and harden the core engine before adding AMS layers.
 

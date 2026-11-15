@@ -117,6 +117,8 @@ async fn job(
             issue_ref: format!("x/y#{key}"),
             ledger_key: IssueId::parse(key).unwrap(),
             source: JobSource::Cli,
+            priority: None,
+            sla_deadline: None,
         })
         .await
         .unwrap();
