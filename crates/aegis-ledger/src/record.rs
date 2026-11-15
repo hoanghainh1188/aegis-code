@@ -146,6 +146,9 @@ pub enum Outcome {
     StoppedBudget,
     StoppedSteps,
     StoppedExpertFail,
+    /// Triaged as no code change (#451): a read-only diagnosis was written
+    /// back to the ticket, and no worktree, patch or PR was made.
+    Diagnosed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -285,6 +288,14 @@ pub enum LedgerEvent {
     Triaged {
         triage: Triage,
     },
+    /// The diagnosis lane took the ticket (#451): its `category`, and how
+    /// many of the report's items were kept (each with a checked source)
+    /// and dropped (none could be checked).
+    Diagnosed {
+        category: TriageCategory,
+        kept: u32,
+        dropped: u32,
+    },
     /// `cost_usd` is priced when the call happens, so later price changes do
     /// not rewrite history.
     ModelCall {
@@ -373,6 +384,7 @@ impl LedgerEvent {
             | Self::SecretsRedacted { .. }
             | Self::SecretsBlocked { .. }
             | Self::SourcesChecked { .. }
+            | Self::Diagnosed { .. }
             | Self::ToolCalls { .. }
             | Self::TestReminded { .. }
             | Self::ImpactChecked { .. }
@@ -526,6 +538,7 @@ impl IssueRecord {
         match event {
             LedgerEvent::Classified { kind } => self.kind = Some(*kind),
             LedgerEvent::Triaged { triage } => self.triage = Some(triage.clone()),
+            LedgerEvent::Diagnosed { .. } => {}
             LedgerEvent::ModelCall {
                 tier,
                 model,

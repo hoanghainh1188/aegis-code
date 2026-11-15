@@ -144,6 +144,7 @@ async fn only_the_lease_holder_renews_or_ends_a_run() {
         reason: None,
         pr_url: Some("https://github.com/example/a/pull/1".into()),
         patch: Some(patch.clone()),
+        diagnosis: None,
     };
     let err = s.finish_attempt(&c.run, "w2", &done).await.unwrap_err();
     assert!(matches!(err, StoreError::Conflict(_)), "{err}");
@@ -166,6 +167,35 @@ async fn only_the_lease_holder_renews_or_ends_a_run() {
     );
     let err = s.finish_attempt(&c.run, "w1", &done).await.unwrap_err();
     assert!(matches!(err, StoreError::Conflict(_)), "ended once: {err}");
+    db.drop().await;
+}
+
+/// #451: a job the diagnosis lane took ends `diagnosed`, its report kept
+/// with it for the ticket and the job's page.
+#[tokio::test]
+async fn a_diagnosed_job_keeps_its_report() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let a = repo(s, "a").await;
+    job(s, a, 1).await;
+    let c = s.claim_job("w1", LEASE, ANY).await.unwrap().unwrap();
+    let report = "**Diagnosis**: ops_or_config (confidence 0.90).".to_owned();
+    let done = AttemptEnd::Done {
+        outcome: Outcome::Diagnosed,
+        reason: Some("diagnosed as ops_or_config: no code change was made".into()),
+        pr_url: None,
+        patch: None,
+        diagnosis: Some(report.clone()),
+    };
+    let ended = s.finish_attempt(&c.run, "w1", &done).await.unwrap();
+    assert_eq!(
+        (ended.status, ended.outcome),
+        (JobStatus::Done, Some(Outcome::Diagnosed))
+    );
+    assert_eq!(s.diagnosis(c.job.id).await.unwrap(), Some(report));
+    let read = s.job(c.job.id).await.unwrap().unwrap();
+    assert_eq!(read.outcome, Some(Outcome::Diagnosed), "decoded back");
+    assert_eq!(s.patch(c.job.id).await.unwrap(), None);
     db.drop().await;
 }
 

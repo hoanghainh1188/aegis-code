@@ -49,6 +49,9 @@ pub enum AttemptEnd {
         reason: Option<String>,
         pr_url: Option<String>,
         patch: Option<Patch>,
+        /// The diagnosis written back to the ticket (#451), for a job that
+        /// ended `diagnosed`; capped at [`MAX_DIAGNOSIS_CHARS`].
+        diagnosis: Option<String>,
     },
     Cancelled {
         reason: String,
@@ -78,6 +81,9 @@ pub struct Patch {
 /// The most of a patch kept: a page shows it whole.
 pub const MAX_PATCH_BYTES: usize = 1 << 20;
 
+/// The most of a diagnosis kept, as the table allows.
+pub const MAX_DIAGNOSIS_CHARS: usize = 20_000;
+
 impl Patch {
     /// At most [`MAX_PATCH_BYTES`], cut at the end of a line.
     pub fn capped(&self) -> Patch {
@@ -97,6 +103,16 @@ impl Patch {
 }
 
 impl Store {
+    /// The diagnosis `job` wrote back to its ticket (#451), if it ended
+    /// `diagnosed`.
+    pub async fn diagnosis(&self, job: JobId) -> Result<Option<String>, StoreError> {
+        Ok(
+            sqlx::query_scalar!("SELECT report FROM job_diagnoses WHERE job_id = $1", job.0)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
+    }
+
     /// The patch kept with `job`, if its PR was opened with one.
     pub async fn patch(&self, job: JobId) -> Result<Option<Patch>, StoreError> {
         let row = sqlx::query!(
@@ -321,6 +337,21 @@ impl Store {
                     run.job_id.0,
                     diff.diff,
                     diff.truncated,
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            if let AttemptEnd::Done {
+                diagnosis: Some(report),
+                ..
+            } = end
+            {
+                let report: String = report.chars().take(MAX_DIAGNOSIS_CHARS).collect();
+                sqlx::query!(
+                    "INSERT INTO job_diagnoses (job_id, report) VALUES ($1, $2)
+                     ON CONFLICT (job_id) DO UPDATE SET report = EXCLUDED.report",
+                    run.job_id.0,
+                    report,
                 )
                 .execute(&mut *tx)
                 .await?;

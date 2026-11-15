@@ -44,7 +44,7 @@ pub fn reply_text(response: &Response) -> String {
         .collect()
 }
 
-async fn ask<P: ModelProvider + Sync>(
+pub(crate) async fn ask<P: ModelProvider + Sync>(
     provider: &P,
     model: &TierModel,
     system: &str,

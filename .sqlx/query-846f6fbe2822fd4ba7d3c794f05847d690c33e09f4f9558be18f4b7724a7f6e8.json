@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT report FROM job_diagnoses WHERE job_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "report",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_diagnoses",
+            "name": "report"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "846f6fbe2822fd4ba7d3c794f05847d690c33e09f4f9558be18f4b7724a7f6e8"
+}

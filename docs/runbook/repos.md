@@ -126,6 +126,16 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
    Keep exceptions narrow: a path that also holds real config hides real leaks. Texts the platform posts (commit message, PR, review replies, issue and tracker comments) are masked in any case; there is no exception for them.
 
+10. **Diagnosis instead of a PR (#451, [ADR 0012](../adr/0012-triage-and-diagnostic-lane.md)):** off by default. Every ticket gets a shadow triage (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) that changes nothing; once the pilot's triage table (`aegis report`, the dashboard) shows a category is rarely a code defect read wrong, turn it on for the repository:
+
+   ```toml
+   [settings.triage_lane]
+   categories = ["ops_or_config", "needs_info"]   # never "code_bug"
+   min_confidence = 0.8                           # Light's confidence, 0–1
+   ```
+
+   Such a ticket gets no worktree and no PR: a read-only report (findings and operator steps, each with a checked source in the repository or the ticket, and questions for the reporter) is written back to the ticket and shown on the job's page, and the job ends `diagnosed`. A report with nothing checked is not posted; the job stops for a person. A ticket that was in fact a code defect is triaged again if it is run again; to send such tickets to the fix loop, take the category out of `categories`.
+
 ### RBAC and Budgets
 
 7. Grant dashboard permissions: `... grant <email> <repo-slug> maintainer|reviewer|viewer` (maintainer: start/cancel jobs, set budgets; reviewer: review PRs; viewer: read-only).

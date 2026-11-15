@@ -16,6 +16,7 @@ pub mod clone;
 mod code_graph;
 mod config;
 mod cve;
+mod diagnose;
 mod error;
 mod eval;
 mod evidence;
@@ -39,6 +40,7 @@ pub use config::{
     RepoConfig, RunConfig, RunSection, SonarConfig,
 };
 pub use cve::CveTarget;
+pub use diagnose::TriageLane;
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput};

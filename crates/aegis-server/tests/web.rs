@@ -508,6 +508,7 @@ async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
         reason: None,
         pr_url: Some(pr.into()),
         patch: None,
+        diagnosis: None,
     };
     let finished = LedgerEvent::Finished {
         outcome: Outcome::PrOpened,

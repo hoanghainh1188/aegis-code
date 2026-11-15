@@ -285,3 +285,5 @@ table.audit td.num { white-space: nowrap; }
 /* Signing a person out everywhere (#370). */
 form.stack { display: grid; gap: var(--space-3); justify-items: start; max-width: 40rem; }
 details.confirm form.stack .note { margin: 0; }
+/* The diagnosis lane's report (#451): Markdown as written, wrapped. */
+pre.diagnosis { white-space: pre-wrap; overflow-wrap: anywhere; }

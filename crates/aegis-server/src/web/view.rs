@@ -77,6 +77,8 @@ pub struct KpiRow {
     pub expert: String,
     /// Runs held back for an answer without verifiable sources (#508).
     pub held_for_sources: String,
+    /// Tickets the diagnosis lane took (#451).
+    pub diagnosed: String,
     /// Review rounds per accepted PR (#245).
     pub rounds: String,
 }
@@ -98,7 +100,7 @@ impl KpiRow {
             runs: kpi.runs,
             prs_opened: kpi.prs_opened,
             awaiting_review: kpi.awaiting_review,
-            accept: pct(kpi.accepted, kpi.runs),
+            accept: pct(kpi.accepted, kpi.runs - kpi.diagnosed),
             accept_class: class(accept.map(|a| a >= accept_min)),
             accept_bar: accept.map_or(0, |a| (a * 200.0).round() as u32),
             broke_tests: kpi.broke_tests,
@@ -114,6 +116,7 @@ impl KpiRow {
             cache_class: class(kpi.cache_read_ratio.map(|r| r >= CACHE_READ_MIN)),
             expert: pct(kpi.expert_runs, kpi.runs),
             held_for_sources: pct(kpi.held_for_sources, kpi.runs),
+            diagnosed: pct(kpi.diagnosed, kpi.runs),
             rounds: "—".into(),
         }
     }

@@ -116,7 +116,12 @@ fn wrong_in(text: &str, location: &str, cited: &Cited, excerpt: Option<&str>) ->
 
 /// Why `location` (with `excerpt`) does not hold, if it does not: it must
 /// hold in the patched file or in the file at `base`.
-fn wrong_with(tree: &Path, base: &str, location: &str, excerpt: Option<&str>) -> Option<String> {
+pub(crate) fn wrong_with(
+    tree: &Path,
+    base: &str,
+    location: &str,
+    excerpt: Option<&str>,
+) -> Option<String> {
     let cited = match parse_location(location) {
         Ok(c) => c,
         Err(why) => return Some(why),

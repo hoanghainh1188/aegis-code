@@ -98,7 +98,7 @@ impl GitHubNotifier {
 }
 
 impl JobNotifier for GitHubNotifier {
-    async fn job_ended(&self, job: &Job) {
+    async fn job_ended(&self, job: &Job, diagnosis: Option<&str>) {
         if job.source != JobSource::Github {
             return;
         }
@@ -111,7 +111,7 @@ impl JobNotifier for GitHubNotifier {
         };
         let posted = match GitHub::new(&self.api, &owner, &repo, token.expose()) {
             Ok(github) => github
-                .comment_on_issue(number, &status_comment(job))
+                .comment_on_issue(number, &comment_with(job, diagnosis))
                 .await
                 .map(|_| ()),
             Err(e) => Err(e),
@@ -194,7 +194,7 @@ impl GitLabNotifier {
 }
 
 impl JobNotifier for GitLabNotifier {
-    async fn job_ended(&self, job: &Job) {
+    async fn job_ended(&self, job: &Job, diagnosis: Option<&str>) {
         if job.source != JobSource::Gitlab {
             return;
         }
@@ -207,7 +207,7 @@ impl JobNotifier for GitLabNotifier {
         };
         let posted = match GitLab::new(&self.api, project, token.expose()) {
             Ok(gitlab) => gitlab
-                .comment_on_issue(iid, &status_comment(job))
+                .comment_on_issue(iid, &comment_with(job, diagnosis))
                 .await
                 .map(|_| ()),
             Err(e) => Err(e),
@@ -224,6 +224,32 @@ impl JobNotifier for GitLabNotifier {
 fn gitlab_issue_ref(text: &str) -> Option<(&str, u64)> {
     let (project, iid) = text.rsplit_once('#')?;
     Some((project, iid.parse().ok()?))
+}
+
+/// The comment on the issue: the job's status, and for a job the
+/// diagnosis lane took (#451) its report, which the lifecycle built from
+/// checked sources and made inert item by item.
+pub fn comment_with(job: &Job, diagnosis: Option<&str>) -> String {
+    match diagnosis.filter(|_| job.outcome == Some(Outcome::Diagnosed)) {
+        Some(report) => {
+            let status = status_comment(job);
+            let (head, foot) = status.rsplit_once("\n\n").unwrap_or((&status, ""));
+            format!("{head}\n\n{report}\n\n{foot}")
+        }
+        None => status_comment(job),
+    }
+}
+
+/// [`comment_with`] in plain text, for the trackers.
+pub fn plain_comment_with(job: &Job, diagnosis: Option<&str>) -> String {
+    match diagnosis.filter(|_| job.outcome == Some(Outcome::Diagnosed)) {
+        Some(report) => {
+            let status = plain_status_comment(job);
+            let (head, foot) = status.rsplit_once("\n\n").unwrap_or((&status, ""));
+            format!("{head}\n\n{report}\n\n{foot}")
+        }
+        None => plain_status_comment(job),
+    }
 }
 
 /// What the comment says, in Markdown. The stop reason may hold model
@@ -267,6 +293,13 @@ fn status_parts(job: &Job) -> (String, Option<String>) {
             };
             (what, None)
         }
+        (JobStatus::Done, Some(Outcome::Diagnosed)) => (
+            format!(
+                "looked into this issue: it does not read as a code defect, so no {request} \
+                 was opened. What it found is below; a person decides what to do."
+            ),
+            None,
+        ),
         (JobStatus::Done, Some(outcome)) => (
             format!("stopped without a {request}: {}.", stop(outcome)),
             job.reason.as_deref(),
@@ -302,6 +335,7 @@ fn stop(outcome: Outcome) -> &'static str {
         Outcome::StoppedBudget => "its budget is spent",
         Outcome::StoppedSteps => "it reached its step limit",
         Outcome::StoppedExpertFail => "even the strongest model could not fix it",
+        Outcome::Diagnosed => "it was diagnosed as needing no code change",
     }
 }
 
@@ -337,6 +371,30 @@ mod tests {
             review_of: None,
             review_round: 0,
         }
+    }
+
+    #[test]
+    fn a_diagnosed_job_writes_its_report_back_with_no_request() {
+        let done = job(JobStatus::Done, Some(Outcome::Diagnosed));
+        let report = "**Diagnosis**: ops_or_config (confidence 0.90). Read-only.";
+        let text = comment_with(&done, Some(report));
+        assert!(
+            text.starts_with("**aegis-code** looked into this issue: it does not read as a code defect, so no pull request was opened."),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!("\n\n{report}\n\n<sub>aegis-code job 7</sub>")),
+            "{text}"
+        );
+        let plain = plain_comment_with(&done, Some(report));
+        assert!(
+            plain.contains(report) && plain.ends_with("(aegis-code job 7)"),
+            "{plain}"
+        );
+        // A report goes only with a diagnosed job.
+        let stopped = job(JobStatus::Done, Some(Outcome::StoppedSteps));
+        assert!(!comment_with(&stopped, Some(report)).contains("Diagnosis"));
+        assert_eq!(comment_with(&done, None), status_comment(&done));
     }
 
     #[test]

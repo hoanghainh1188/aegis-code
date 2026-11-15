@@ -437,6 +437,7 @@ where
             pr_url: None,
             kept: None,
             patch: None,
+            diagnosis: None,
         });
     }
     // `agent/integration-<issue-id>` on the fork, like the local branch.
@@ -465,6 +466,7 @@ where
         pr_url: Some(published.url),
         kept: None,
         patch: Some(patch),
+        diagnosis: None,
     })
 }
 

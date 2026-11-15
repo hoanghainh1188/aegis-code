@@ -278,20 +278,23 @@ async fn the_end_of_a_job_is_written_on_its_ticket() {
 
     let notifier = TrackerNotifier::new(s.clone(), secrets());
     notifier
-        .job_ended(&ended(JobId(1), &app, JobSource::Jira, "APP-7", Some(pr)))
+        .job_ended(
+            &ended(JobId(1), &app, JobSource::Jira, "APP-7", Some(pr)),
+            None,
+        )
         .await;
     notifier
-        .job_ended(&ended(JobId(2), &ops, JobSource::Backlog, "OPS-9", None))
+        .job_ended(
+            &ended(JobId(2), &ops, JobSource::Backlog, "OPS-9", None),
+            None,
+        )
         .await;
     // Jobs from elsewhere are not its business.
     notifier
-        .job_ended(&ended(
-            JobId(3),
-            &app,
-            JobSource::Github,
-            "me/app#1",
-            Some(pr),
-        ))
+        .job_ended(
+            &ended(JobId(3), &app, JobSource::Github, "me/app#1", Some(pr)),
+            None,
+        )
         .await;
 }
 
@@ -457,22 +460,28 @@ async fn itsm_jsm_and_servicenow_poll_store_sla_and_sync_results_back() {
 
     let notifier = TrackerNotifier::new(s.clone(), secrets());
     notifier
-        .job_ended(&ended(
-            stored[0].id,
-            &jsm_repo,
-            JobSource::Jsm,
-            "SD-10",
-            Some("https://github.com/acme/jsm-app/pull/4"),
-        ))
+        .job_ended(
+            &ended(
+                stored[0].id,
+                &jsm_repo,
+                JobSource::Jsm,
+                "SD-10",
+                Some("https://github.com/acme/jsm-app/pull/4"),
+            ),
+            None,
+        )
         .await;
     notifier
-        .job_ended(&ended(
-            stored[1].id,
-            &sn_repo,
-            JobSource::Servicenow,
-            "INC0010077",
+        .job_ended(
+            &ended(
+                stored[1].id,
+                &sn_repo,
+                JobSource::Servicenow,
+                "INC0010077",
+                None,
+            ),
             None,
-        ))
+        )
         .await;
     db.drop().await;
 }

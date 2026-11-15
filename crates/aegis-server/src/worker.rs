@@ -64,23 +64,25 @@ pub fn backoff(base: Duration, retries: u32) -> Duration {
 /// Told of every job a worker ends, once, after its end is recorded. It
 /// runs in the job's slot, so it should bound its own time.
 pub trait JobNotifier: Send + Sync + 'static {
-    fn job_ended(&self, job: &Job) -> impl Future<Output = ()> + Send;
+    /// `diagnosis`: the report of a job the diagnosis lane took (#451), to
+    /// write back to its ticket.
+    fn job_ended(&self, job: &Job, diagnosis: Option<&str>) -> impl Future<Output = ()> + Send;
 }
 
 /// Tells both, one after the other: a notifier per forge, each skipping
 /// the jobs of the others.
 impl<A: JobNotifier, B: JobNotifier> JobNotifier for (A, B) {
-    async fn job_ended(&self, job: &Job) {
-        self.0.job_ended(job).await;
-        self.1.job_ended(job).await;
+    async fn job_ended(&self, job: &Job, diagnosis: Option<&str>) {
+        self.0.job_ended(job, diagnosis).await;
+        self.1.job_ended(job, diagnosis).await;
     }
 }
 
 /// Tells it if there is one.
 impl<N: JobNotifier> JobNotifier for Option<N> {
-    async fn job_ended(&self, job: &Job) {
+    async fn job_ended(&self, job: &Job, diagnosis: Option<&str>) {
         if let Some(notifier) = self {
-            notifier.job_ended(job).await;
+            notifier.job_ended(job, diagnosis).await;
         }
     }
 }
@@ -90,7 +92,7 @@ impl<N: JobNotifier> JobNotifier for Option<N> {
 pub struct NoNotifier;
 
 impl JobNotifier for NoNotifier {
-    async fn job_ended(&self, _job: &Job) {}
+    async fn job_ended(&self, _job: &Job, _diagnosis: Option<&str>) {}
 }
 
 /// The runs this worker holds, to release them if the drain runs out.
@@ -215,7 +217,11 @@ async fn attempt<R: JobRunner, N: JobNotifier>(
             Ok(j) => {
                 tracing::info!(status = j.status.as_str(), reason = ?j.reason, "attempt ended");
                 if j.status != JobStatus::Queued {
-                    notifier.job_ended(&j).await;
+                    let diagnosis = match &end {
+                        AttemptEnd::Done { diagnosis, .. } => diagnosis.as_deref(),
+                        _ => None,
+                    };
+                    notifier.job_ended(&j, diagnosis).await;
                 }
                 j.status.as_str()
             }
@@ -257,6 +263,7 @@ async fn run_attempt<R: JobRunner>(
             )),
             pr_url: None,
             patch: None,
+            diagnosis: None,
         });
     }
     let cancel = CancellationToken::new();
@@ -302,11 +309,13 @@ fn end_of(config: &WorkerConfig, claim: &Claim, attempt: Attempt, cancelled: boo
             reason,
             pr_url,
             patch,
+            diagnosis,
         } => AttemptEnd::Done {
             outcome,
             reason,
             pr_url,
             patch,
+            diagnosis,
         },
         Attempt::Infra(error) => infra(config, claim, error),
         Attempt::Rejected(error) => AttemptEnd::Failed { error },

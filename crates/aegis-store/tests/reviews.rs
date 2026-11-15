@@ -50,6 +50,7 @@ fn pr_opened() -> AttemptEnd {
         reason: None,
         pr_url: Some(PR.into()),
         patch: None,
+        diagnosis: None,
     }
 }
 

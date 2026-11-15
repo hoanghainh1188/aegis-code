@@ -10,6 +10,7 @@
     <div><dt>Review time / PR</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">≤ 15 min</dd></div>
     <div><dt>Cache read</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
     <div><dt>Escalated to Expert</dt><dd>{{ total.expert }}</dd><dd class="threshold">tracked</dd></div>
+    <div><dt>Diagnosed, no PR</dt><dd>{{ total.diagnosed }}</dd><dd class="threshold">triage lane</dd></div>
     <div><dt>Held: no verifiable sources</dt><dd>{{ total.held_for_sources }}</dd><dd class="threshold">tracked</dd></div>
     <div><dt>Awaiting review</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">PRs without review</dd></div>
   </dl>

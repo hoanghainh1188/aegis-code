@@ -59,6 +59,13 @@
 </section>
 {% endif %}
 
+{% if let Some(d) = diagnosis %}
+<section aria-labelledby="diagnosis-heading" class="band">
+  <h2 id="diagnosis-heading">Diagnosis</h2>
+  <p class="note">Written back to the ticket instead of a pull request (#451). Read-only: aegis changed nothing; each finding was checked against the source it cites.</p>
+  <pre class="diagnosis">{{ d }}</pre>
+</section>
+{% endif %}
 {% include "patch.html" %}
 
 <section aria-labelledby="runs-heading" class="band">
