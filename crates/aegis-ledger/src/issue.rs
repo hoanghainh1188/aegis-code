@@ -377,6 +377,7 @@ mod tests {
                 passed: false,
                 failed_step: Some("test".into()),
                 duration_s: 100.0,
+                sidecar_s: None,
             })
             .await
             .unwrap();
@@ -393,6 +394,7 @@ mod tests {
                 passed: true,
                 failed_step: None,
                 duration_s: 95.0,
+                sidecar_s: None,
             })
             .await
             .unwrap();
@@ -659,6 +661,7 @@ mod tests {
             passed: true,
             failed_step: None,
             duration_s: 3.0,
+            sidecar_s: None,
         })
         .await
         .unwrap();

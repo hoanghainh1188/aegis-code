@@ -424,6 +424,9 @@ pub struct GateRun {
     /// First failing step (`fmt`, `clippy`, `test`, …); `None` when passed.
     pub failed_step: Option<String>,
     pub duration_s: f64,
+    /// Cumulative sidecar startup, reset, and teardown time in seconds when sidecars ran (#454).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar_s: Option<f64>,
 }
 
 /// Per-issue record (design §8). `outcome` is `None` while the issue is
@@ -762,6 +765,7 @@ mod tests {
                 passed: false,
                 failed_step: Some("test".into()),
                 duration_s: 90.0,
+                sidecar_s: None,
             }),
             call(Tier::Core, "claude-sonnet-5-5", 2_000, 0.25),
             call(Tier::Expert, "claude-opus-5-5", 500, 1.0),
@@ -769,6 +773,7 @@ mod tests {
                 passed: true,
                 failed_step: None,
                 duration_s: 80.0,
+                sidecar_s: None,
             }),
             LedgerEvent::Finished {
                 outcome: Outcome::PrOpened,
@@ -836,6 +841,7 @@ mod tests {
             passed: false,
             failed_step: Some("clippy".into()),
             duration_s: 3.0,
+            sidecar_s: None,
         });
         let value = serde_json::to_value(&event).unwrap();
         assert_eq!(value["event"], "gate_run");

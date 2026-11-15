@@ -86,6 +86,7 @@ Mô hình đe doạ ở [ADR 0009](../adr/0009-prompt-injection-threat-model.md)
 | 10-29 | [k8s-gate-sandbox](2026-10-29-k8s-gate-sandbox.md) (#264) | Sandbox của gate trên Kubernetes, thử trên kind; cơ sở của [ADR 0008](../adr/0008-gate-sandbox-on-kubernetes.md) |
 | 11-09 | [helm-chart-kind](2026-11-09-helm-chart-kind.md) (#281) | Helm chart kiểm trên kind |
 | 11-09 | [helm-docker-proxy-kind](2026-11-09-helm-docker-proxy-kind.md) (#411) | `aegis-docker-proxy` trong worker Pod, kiểm trên kind; thiết kế ở [ADR 0010](../adr/0010-docker-socket-proxy.md) |
+| 11-15 | [sidecar-golden-master](2026-11-15-sidecar-golden-master.md) (#454) | Thực nghiệm Golden Master (bắt 6/6 regression so với 0/6 khi thiếu) và PostgreSQL sidecar trong Docker (~4.5s overhead cho start + 3 reset + teardown) |
 
 ## Khi thêm báo cáo mới
 

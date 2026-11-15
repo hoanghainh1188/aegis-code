@@ -63,7 +63,8 @@ The sidecars were split out of #454 to unblock the team pilot (#158); Golden Mas
 6. **Hardening.** Sidecars get the gate's flags (#320): no capabilities, `no-new-privileges`, limits (1 GB, 2 CPUs, 512 pids by default), a read-only root, `/tmp` and the declared directories on tmpfs owned by `user`, and no bind mount of the host. An image that must start as root to `chown` its data directory does not run; its non-root user does (`postgres:*-alpine` 70:70).
 7. **Proxy (ADR 0010).** Networks `aegis-sidecar-*` only as internal bridges; containers named `aegis-sidecar-*` only with an image in `--sidecar-image` (exact names, set by the deployment, not patterns), on their own network or a sidecar's namespace, with no bind mount; network aliases only for them; `NetworkMode: container:<x>` only when `x` is a sidecar.
 8. **The agent's `run_tests` (#491).** The lifecycle hands the ACI the repo's sidecars (`--sidecars <file>`, `[[sidecar]]`). They start at the first `run_tests`, are reset before each later one, and live for the agent's session, apart from the gate's own: the ACI removes them when the session ends (`AciServer::stop_tests`, as its process exits without dropping). An ACI process that is killed leaves them, like a killed worker.
-9. **Not yet.** The offline bundle does not hold sidecar images; the operator loads them.
+9. **Telemetry & Golden Master evaluation (#454).** `GateReport.sidecars` (`SidecarReport`) and optional `GateRun.sidecar_s` record container startup, `tmpfs` reset count/duration, and teardown overhead per gate run. Empirical regression-detection and gate-overhead results are tracked in [docs/measurements/2026-11-15-sidecar-golden-master.md](../measurements/2026-11-15-sidecar-golden-master.md) via `eval/golden-master/`.
+10. **Not yet.** The offline bundle does not hold sidecar images; the operator loads them.
 
 ## Consequences
 

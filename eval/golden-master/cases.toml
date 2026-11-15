@@ -1,0 +1,79 @@
+# Benchmark suite for #454: Golden Master characterization testing (Design §6.2)
+# and ephemeral PostgreSQL sidecar verification (ADR 0013 / #490).
+# Executed empirically by `crates/aegis-gate/tests/golden_master_sidecar_eval.rs`.
+
+[suite]
+id = "golden-master-sidecar-v1"
+issue = 454
+
+[[case]]
+id = "gm-01-shipping-threshold"
+repo_kind = "legacy_python"
+language = "python"
+requires_sidecar = false
+scenario = "silent_regression"
+title = "Fix free-shipping threshold boundary without regressing VIP rounding"
+description = "Untested legacy billing module: threshold fix (< vs <=) accidentally truncates VIP tier 12.5% discount via int() instead of half-up rounding."
+
+[[case]]
+id = "gm-02-null-coupon"
+repo_kind = "legacy_python"
+language = "python"
+requires_sidecar = false
+scenario = "silent_regression"
+title = "Handle None coupon safely without altering whitespace coupon fallback"
+description = "Untested legacy billing module: None-guard fix treats whitespace-only coupons as 0% override instead of preserving loyalty tier rate."
+
+[[case]]
+id = "gm-03-exempt-tax"
+repo_kind = "legacy_python"
+language = "python"
+requires_sidecar = false
+scenario = "silent_regression"
+title = "Exempt books in OR from sales tax without dropping CA electronics surcharge"
+description = "Untested legacy billing module: OR books exemption accidentally zeroes regional electronics surcharge in CA."
+
+[[case]]
+id = "gm-04-invoice-format"
+repo_kind = "legacy_python"
+language = "python"
+requires_sidecar = false
+scenario = "undeclared_change"
+title = "Enforce Golden Master snapshot declaration for intentional output format changes"
+description = "Intentional invoice summary change must fail undeclared in Golden Master gate and pass only when declared in allowed_test_changes."
+
+[[case]]
+id = "gm-05-proration-credit"
+repo_kind = "legacy_rust"
+language = "rust"
+requires_sidecar = false
+scenario = "silent_regression"
+title = "Fix partial-month upgrade proration without shifting full-month renewal credit"
+description = "Untested legacy Rust financial crate: proration off-by-one fix shifts full-month renewal credits by one day."
+
+[[case]]
+id = "gm-06-jpy-rounding"
+repo_kind = "legacy_rust"
+language = "rust"
+requires_sidecar = false
+scenario = "silent_regression"
+title = "Fix zero-decimal JPY conversion without truncating USD cents"
+description = "Untested legacy Rust financial crate: JPY integer scale fix drops minor cents from two-decimal currencies."
+
+[[case]]
+id = "gm-07-idempotent-payment"
+repo_kind = "legacy_postgres_python"
+language = "python"
+requires_sidecar = true
+scenario = "silent_regression"
+title = "Enforce idempotent payment insertion on PostgreSQL without corrupting settled orders"
+description = "DB-backed legacy service running against postgres:16-alpine sidecar: fails under --network none, mutated UPSERT passes repro-only gate, caught by Golden Master DB characterization."
+
+[[case]]
+id = "gm-08-refund-balance"
+repo_kind = "legacy_postgres_python"
+language = "python"
+requires_sidecar = true
+scenario = "clean_fix"
+title = "End-to-end clean fix with PostgreSQL sidecar and Golden Master suite"
+description = "Full gate run (Scope, Secrets, Format, Lint, ReproTest, Test, Coverage, Integrity) on DB-backed legacy repo with fresh postgres:16-alpine resets and SidecarReport telemetry."

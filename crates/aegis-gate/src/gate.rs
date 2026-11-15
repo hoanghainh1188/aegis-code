@@ -1718,6 +1718,11 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
             let _ = cache.refresh_from(&base.path().join(dir));
         }
     }
+    let sidecars = run
+        .sidecars
+        .borrow_mut()
+        .take()
+        .map(SidecarSession::teardown);
     let (tree, base) = (run.tree.clone(), run.base.clone());
     let scope_warnings = match steps.iter().find(|s| s.name == StepName::Scope) {
         Some(s) if !s.detail.is_empty() => vec![s.detail.clone()],
@@ -1731,6 +1736,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         parts: touched.iter().map(|&i| dirs[i].clone()).collect(),
         scope_warnings,
         secrets_found: run.secrets_found,
+        sidecars,
     })
 }
 
