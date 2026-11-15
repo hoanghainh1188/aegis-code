@@ -363,3 +363,84 @@ mod tests {
         assert!(text.contains("Stopped without PR | 100% (1/1)"), "{text}");
     }
 }
+
+fn pct(ratio: Option<f64>) -> String {
+    ratio.map_or("—".into(), |r| format!("{:.0}%", r * 100.0))
+}
+
+fn minutes(seconds: Option<f64>) -> String {
+    seconds.map_or("—".into(), |s| format!("{:.1} min", s / 60.0))
+}
+
+/// The AMS report (#526) as `aegis report` prints it after the KPIs: by
+/// contract and SLA level, jobs created this month (UTC), and each
+/// contract's spend.
+pub fn ams(report: &aegis_store::AmsReport) -> String {
+    if report.rows.is_empty() && report.contracts.iter().all(|c| c.spent_usd == 0.0) {
+        return String::new();
+    }
+    let mut text = String::from(
+        "\nAMS report, jobs created this month (UTC)\n\
+         | Contract | Level | Done | MTTR | On time | Open, overdue | Triage | PR |\n\
+         | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+    );
+    for r in &report.rows {
+        text.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            r.tenant,
+            r.priority,
+            r.done,
+            minutes(r.mttr_s),
+            pct(r.on_time_ratio()),
+            r.overdue_open,
+            pct(r.triage_ratio()),
+            pct(r.pr_ratio()),
+        ));
+    }
+    text.push_str("\n| Contract | Spent this month | Monthly cap |\n| --- | --- | --- |\n");
+    for c in &report.contracts {
+        text.push_str(&format!(
+            "| {} | ${:.2} | {} |\n",
+            c.slug,
+            c.spent_usd,
+            c.monthly_usd
+                .map_or("no cap".into(), |m| format!("${m:.2}"))
+        ));
+    }
+    text
+}
+
+#[cfg(test)]
+mod ams_tests {
+    use super::*;
+
+    #[test]
+    fn the_ams_report_prints_a_row_per_contract_and_level() {
+        let report = aegis_store::AmsReport {
+            rows: vec![aegis_store::AmsRow {
+                tenant: "acme".into(),
+                priority: "P1".into(),
+                done: 4,
+                mttr_s: Some(1800.0),
+                with_deadline: 4,
+                on_time: 3,
+                overdue_open: 1,
+                diagnosed: 1,
+                prs: 2,
+            }],
+            contracts: vec![aegis_store::TenantBudget {
+                tenant: aegis_store::TenantId(2),
+                slug: "acme".into(),
+                monthly_usd: None,
+                spent_usd: 12.5,
+            }],
+        };
+        let text = ams(&report);
+        assert!(
+            text.contains("| acme | P1 | 4 | 30.0 min | 75% | 1 | 25% | 50% |"),
+            "{text}"
+        );
+        assert!(text.contains("| acme | $12.50 | no cap |"), "{text}");
+        assert_eq!(ams(&aegis_store::AmsReport::default()), "");
+    }
+}

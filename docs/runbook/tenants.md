@@ -29,3 +29,14 @@ aegis-server --config /etc/aegis/server.toml tenant list
 - **New repo in a tenant:** add `tenant = "acme"` to its repo file, then `repo add`. Repos added from the admin pages go into `default`.
 - **Existing repo:** `tenant move <repo-slug> acme`, once none of its jobs runs. Its secret names must already carry the prefix. Its next job clones it under the tenant's directory; the old clone can then be removed.
 - `tenant revoke-admin <who> <slug>` takes the role back. `--budget none` and `--max-jobs none` remove a cap.
+
+## AMS Report
+
+The **AMS** page (`/ams`) shows, for the jobs created this month (the budget's month and time zone), by contract and SLA level (#526):
+
+- **MTTR:** from the ticket coming in (the job's creation) to the end of its last run, over the jobs that ended with a result: a PR, a diagnosis or a stop.
+- **On time:** of those with an SLA deadline (ITSM tickets, #453), the share that ended by it. **Open, overdue:** queued or running jobs already past their deadline.
+- **Triage / PR:** the share resolved by a diagnosis on the ticket (#451), and by a PR.
+- **Cost per contract:** what each tenant's repos spent this month, against its cap.
+
+A person sees the contracts of the repos they have a role in; platform admins see all of them. `aegis report` prints the same tables when the ledger is in PostgreSQL, with the month in UTC. Prometheus has the same figures: `aegis_ams_mttr_seconds`, `aegis_ams_sla_on_time_ratio`, `aegis_ams_overdue_open_jobs` and `aegis_ams_resolved_jobs{by}`, by `tenant` and `priority`, and `aegis_tenant_budget_spent_usd` / `_cap_usd` by `tenant`.

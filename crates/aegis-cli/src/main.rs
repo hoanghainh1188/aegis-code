@@ -373,7 +373,20 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
                 kpi::review(&config, &ledger::open(&config).await?, &review).await?
             }
             ("report", _) => {
-                kpi::report(&ledger::open(&config).await?, args.set.as_deref()).await?
+                let mut text =
+                    kpi::report(&ledger::open(&config).await?, args.set.as_deref()).await?;
+                // The jobs are in the database only (#526).
+                if args.set.is_none()
+                    && config.run.ledger == aegis_lifecycle::LedgerBackend::Postgres
+                {
+                    let report = ledger::database()
+                        .await?
+                        .ams_report(None)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    text.push_str(&kpi::ams(&report));
+                }
+                text
             }
             ("ledger", Some("import")) => {
                 let from = args
