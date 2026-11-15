@@ -1239,6 +1239,7 @@ pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
             .find(|s| s.status == StepStatus::Failed)
             .map(|s| s.name.id().to_owned()),
         duration_s: took.as_secs_f64(),
+        sidecar_s: report.sidecars.map(|s| s.total_duration().as_secs_f64()),
     }
 }
 

@@ -16,11 +16,12 @@
 
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::report::SidecarReport;
 use crate::sandbox::CLIENT_ENV;
 use crate::{GateError, Sandbox};
 
@@ -181,8 +182,8 @@ pub struct Sidecars {
     pub specs: Vec<SidecarSpec>,
 }
 
-/// Running sidecars and their network; all removed on drop. The gate
-/// holds one per run; the ACI's `run_tests` one per session (#491).
+/// Running sidecars and their network; all removed on drop or [`SidecarSession::teardown`].
+/// The gate holds one per run; the ACI's `run_tests` one per session (#491).
 #[derive(Debug)]
 pub struct SidecarSession {
     docker: String,
@@ -191,6 +192,10 @@ pub struct SidecarSession {
     containers: Vec<(String, SidecarSpec)>,
     /// Probe containers made so far, for unique names.
     probes: AtomicU32,
+    start_ns: AtomicU64,
+    resets: AtomicU32,
+    reset_ns: AtomicU64,
+    torn_down: bool,
 }
 
 fn client(docker: &str) -> Command {
@@ -289,6 +294,7 @@ impl Sidecars {
     /// each is ready. On an error, what was started is removed.
     pub fn start(&self) -> Result<SidecarSession, GateError> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
+        let started = Instant::now();
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let id = format!("{SIDECAR_PREFIX}{}-{n}", std::process::id());
         let mut session = SidecarSession {
@@ -296,6 +302,10 @@ impl Sidecars {
             network: id.clone(),
             containers: vec![],
             probes: AtomicU32::new(0),
+            start_ns: AtomicU64::new(0),
+            resets: AtomicU32::new(0),
+            reset_ns: AtomicU64::new(0),
+            torn_down: false,
         };
         docker(&self.docker, &["network", "create", "--internal", &id])?;
         for spec in &self.specs {
@@ -307,6 +317,10 @@ impl Sidecars {
             docker(&self.docker, &args).map_err(|e| error(&spec.name, e.to_string()))?;
         }
         session.wait_ready()?;
+        session.start_ns.store(
+            u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
         Ok(session)
     }
 }
@@ -333,12 +347,40 @@ impl SidecarSession {
     /// Stops and starts every sidecar, which empties its tmpfs, and waits
     /// until each is ready again.
     pub fn reset(&self) -> Result<(), GateError> {
+        let started = Instant::now();
         for (container, spec) in &self.containers {
             docker(&self.docker, &["stop", "--time", "5", container])
                 .and_then(|_| docker(&self.docker, &["start", container]))
                 .map_err(|e| error(&spec.name, e.to_string()))?;
         }
-        self.wait_ready()
+        self.wait_ready()?;
+        self.resets.fetch_add(1, Ordering::Relaxed);
+        self.reset_ns.fetch_add(
+            u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+        Ok(())
+    }
+
+    /// Removes all sidecar containers and their internal network, returning lifecycle metrics.
+    pub fn teardown(mut self) -> SidecarReport {
+        let started = Instant::now();
+        self.cleanup();
+        self.torn_down = true;
+        SidecarReport {
+            services: self.containers.len(),
+            start_duration: Duration::from_nanos(self.start_ns.load(Ordering::Relaxed)),
+            resets: self.resets.load(Ordering::Relaxed),
+            reset_duration: Duration::from_nanos(self.reset_ns.load(Ordering::Relaxed)),
+            teardown_duration: started.elapsed(),
+        }
+    }
+
+    fn cleanup(&self) {
+        for (container, _) in &self.containers {
+            let _ = docker(&self.docker, &["rm", "--force", "--volumes", container]);
+        }
+        let _ = docker(&self.docker, &["network", "rm", &self.network]);
     }
 
     fn wait_ready(&self) -> Result<(), GateError> {
@@ -440,10 +482,9 @@ impl SidecarSession {
 
 impl Drop for SidecarSession {
     fn drop(&mut self) {
-        for (container, _) in &self.containers {
-            let _ = docker(&self.docker, &["rm", "--force", "--volumes", container]);
+        if !self.torn_down {
+            self.cleanup();
         }
-        let _ = docker(&self.docker, &["network", "rm", &self.network]);
     }
 }
 

@@ -139,6 +139,28 @@ pub struct UpdatedReferences {
     pub files: Vec<String>,
 }
 
+/// Lifecycle overhead of a gate run's ephemeral service sidecars (#454, #490).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SidecarReport {
+    /// Number of sidecar containers started for this run.
+    pub services: usize,
+    /// Time spent creating the internal network, starting containers, and waiting for readiness.
+    pub start_duration: Duration,
+    /// Number of stop+start resets performed between test commands to clear `tmpfs`.
+    pub resets: u32,
+    /// Cumulative time spent resetting sidecars and waiting for readiness again.
+    pub reset_duration: Duration,
+    /// Time spent tearing down sidecars and the internal network after the gate finished.
+    pub teardown_duration: Duration,
+}
+
+impl SidecarReport {
+    /// Total wall time spent starting, resetting, and tearing down sidecars.
+    pub fn total_duration(&self) -> Duration {
+        self.start_duration + self.reset_duration + self.teardown_duration
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateReport {
     pub steps: Vec<StepReport>,
@@ -158,6 +180,8 @@ pub struct GateReport {
     /// Secrets the `secrets` step found in the patch (#509); counted in the
     /// ledger, never named by value.
     pub secrets_found: usize,
+    /// Ephemeral sidecar lifecycle metrics when any sidecar ran (#454).
+    pub sidecars: Option<SidecarReport>,
 }
 
 impl GateReport {
@@ -228,6 +252,18 @@ impl fmt::Display for GateReport {
                 StepStatus::Skipped(skip) => skip.text().to_owned(),
             };
             write!(f, "\n  {:<13}{status}", step.name.id())?;
+        }
+        if let Some(sc) = &self.sidecars {
+            write!(
+                f,
+                "\n  {:<13}{} service(s), start {:.2}s, {} reset(s) ({:.2}s), teardown {:.2}s",
+                "sidecars",
+                sc.services,
+                sc.start_duration.as_secs_f64(),
+                sc.resets,
+                sc.reset_duration.as_secs_f64(),
+                sc.teardown_duration.as_secs_f64(),
+            )?;
         }
         if let Some(step) = self.failed() {
             write!(f, "\n--- {} ---\n{}", step.name.id(), step.detail)?;

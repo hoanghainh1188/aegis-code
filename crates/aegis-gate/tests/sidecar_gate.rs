@@ -108,7 +108,11 @@ fn only_the_test_steps_reach_fresh_sidecars() {
         }),
         dependency_policy: Default::default(),
     };
-    run_gate(&request).unwrap();
+    let report = run_gate(&request).unwrap();
+    let sidecars = report.sidecars.expect("sidecar timing report");
+    assert_eq!(sidecars.services, 1);
+    assert_eq!(sidecars.resets, 1);
+    assert!(report.to_string().contains("sidecars"), "{report}");
 
     let calls = std::fs::read_to_string(fake.join("calls")).unwrap();
     let calls: Vec<&str> = calls.lines().collect();

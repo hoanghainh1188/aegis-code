@@ -418,6 +418,7 @@ mod tests {
             parts: vec![String::new()],
             scope_warnings: vec![],
             secrets_found: 0,
+            sidecars: None,
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
@@ -464,6 +465,7 @@ mod tests {
             parts: vec![String::new()],
             scope_warnings: vec![],
             secrets_found: 0,
+            sidecars: None,
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
@@ -542,6 +544,7 @@ mod tests {
                 "deleted test file `tests/foo.rs` is not allowed by patch scope policy".into(),
             ],
             secrets_found: 0,
+            sidecars: None,
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
@@ -582,6 +585,7 @@ mod tests {
             parts: vec![String::new()],
             scope_warnings: vec![],
             secrets_found: 0,
+            sidecars: None,
         };
         let flag = |n: usize| InputFlagNote {
             source: "file".into(),

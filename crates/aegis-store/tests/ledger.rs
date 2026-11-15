@@ -67,6 +67,7 @@ fn run_events(cost: f64) -> Vec<LedgerEvent> {
             passed: false,
             failed_step: Some("test".into()),
             duration_s: 61.25,
+            sidecar_s: Some(4.5),
         }),
         LedgerEvent::SecretsRedacted { count: 1 },
         LedgerEvent::HiddenTests {
