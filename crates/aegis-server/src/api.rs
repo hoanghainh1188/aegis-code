@@ -24,14 +24,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use aegis_ledger::IssueId;
 use aegis_lifecycle::CveTarget;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoBudget, RepoId,
-    RepoRole, Run, SlaPriority, Store, StoreError,
+    Job, JobFilter, JobId, JobSource, JobStatus, MemoryId, MemoryKind, NewJob, NewRepoMemory, Page,
+    PageOf, RepoBudget, RepoId, RepoMemory, RepoRole, Run, SlaPriority, Store, StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router, middleware};
 use serde::{Deserialize, Deserializer, Serialize};
 use tower_http::limit::RequestBodyLimitLayer;
@@ -69,6 +69,14 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
         .route(
             "/api/v1/repos/{id}/budget",
             get(repo_budget).put(set_repo_budget),
+        )
+        .route(
+            "/api/v1/repos/{id}/memories",
+            get(list_repo_memories).post(upsert_repo_memory),
+        )
+        .route(
+            "/api/v1/repos/{id}/memories/{memory_id}",
+            delete(delete_repo_memory),
         )
         .route_layer(middleware::from_fn_with_state(
             auth.clone(),
@@ -716,6 +724,140 @@ async fn set_repo_budget(
         .set_monthly_budget_by(repo, monthly_usd, &access.actor)
         .await?;
     Ok(ok(StatusCode::OK, BudgetView::new(&store, budget)))
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryView {
+    id: i64,
+    repo_id: i64,
+    kind: &'static str,
+    source_ref: String,
+    title: String,
+    summary: String,
+    paths: Vec<String>,
+    keywords: String,
+    job_id: Option<i64>,
+    created_at: String,
+    updated_at: String,
+}
+
+impl From<RepoMemory> for MemoryView {
+    fn from(m: RepoMemory) -> Self {
+        Self {
+            id: m.id.0,
+            repo_id: m.repo_id.0,
+            kind: m.kind.as_str(),
+            source_ref: m.source_ref,
+            title: m.title,
+            summary: m.summary,
+            paths: m.paths,
+            keywords: m.keywords,
+            job_id: m.job_id.map(|j| j.0),
+            created_at: m.created_at.to_rfc3339(),
+            updated_at: m.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListMemories {
+    kind: Option<String>,
+    limit: Option<u32>,
+    cursor: Option<i64>,
+}
+
+async fn list_repo_memories(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+    query: Result<Query<ListMemories>, QueryRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let Query(q) = query?;
+    let repo = repo_for(&access, id, RepoRole::Viewer)?;
+    let kind = match q.kind.as_deref() {
+        Some(raw) => Some(MemoryKind::parse(raw).ok_or_else(|| {
+            ApiError::invalid(format!(
+                "kind: unknown `{raw}`, expected merged_pr, review_lesson, runbook or business_rule"
+            ))
+        })?),
+        None => None,
+    };
+    let p = page_of(q.limit, q.cursor);
+    let memories = store.list_repo_memories(repo, kind, p).await?;
+    Ok(page(memories, p.limit(), MemoryView::from))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpsertMemory {
+    kind: String,
+    source_ref: String,
+    title: String,
+    summary: String,
+    #[serde(default)]
+    paths: Vec<String>,
+    #[serde(default)]
+    keywords: String,
+    #[serde(default)]
+    job_id: Option<i64>,
+}
+
+async fn upsert_repo_memory(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+    body: Result<Json<UpsertMemory>, JsonRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let Json(body) = body?;
+    let repo = repo_for(&access, id, RepoRole::Maintainer)?;
+    let kind = MemoryKind::parse(body.kind.trim()).ok_or_else(|| {
+        ApiError::invalid(format!(
+            "kind: unknown `{}`, expected merged_pr, review_lesson, runbook or business_rule",
+            body.kind
+        ))
+    })?;
+    let saved = store
+        .upsert_repo_memory_by(
+            &NewRepoMemory {
+                repo_id: repo,
+                kind,
+                source_ref: body.source_ref,
+                title: body.title,
+                summary: body.summary,
+                paths: body.paths,
+                keywords: body.keywords,
+                job_id: body.job_id.map(JobId),
+            },
+            &access.actor,
+        )
+        .await?;
+    Ok(ok(StatusCode::CREATED, MemoryView::from(saved)))
+}
+
+async fn delete_repo_memory(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    path: Result<Path<(i64, i64)>, PathRejection>,
+) -> ApiResult {
+    let Path((id, memory_id)) = path?;
+    let repo = repo_for(&access, id, RepoRole::Maintainer)?;
+    let deleted = store
+        .delete_repo_memory_by(repo, MemoryId(memory_id), &access.actor)
+        .await?;
+    if !deleted {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("memory {memory_id} not found"),
+        ));
+    }
+    Ok(ok(
+        StatusCode::OK,
+        serde_json::json!({ "deleted": true, "id": memory_id }),
+    ))
 }
 
 #[cfg(test)]

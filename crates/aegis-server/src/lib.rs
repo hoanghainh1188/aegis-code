@@ -9,6 +9,7 @@ pub mod auth;
 pub mod config;
 pub mod lifecycle;
 pub mod logs;
+pub mod memory;
 pub mod metrics;
 pub mod pause_all;
 pub mod repo_cli;

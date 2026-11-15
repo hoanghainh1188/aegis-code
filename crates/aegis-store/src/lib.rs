@@ -17,6 +17,7 @@ mod instance_pause;
 mod jobs;
 mod kpi;
 mod ledger;
+mod memory;
 mod page;
 mod pause;
 mod polls;
@@ -48,6 +49,9 @@ pub use error::StoreError;
 pub use instance_pause::{INSTANCE_PAUSED, InstancePause, InstancePaused, PauseLevel};
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
+pub use memory::{
+    MemoryId, MemoryKind, NewRepoMemory, RepoMemory, rank_memories, score_repo_memory,
+};
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};
 pub use queue::{AttemptEnd, Claim, Lease, MAX_DIAGNOSIS_CHARS, MAX_PATCH_BYTES, Patch};

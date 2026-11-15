@@ -74,6 +74,8 @@ Some of this cannot be fixed by tuning the engine:
 
    **Amendment 2026-11-15 (#457):** #457 is split into three issues, built in order before the pilot: SLA queue ordering (#524), the tenant/contract entity and its isolation (#525), and the AMS report (#526). Each changes behaviour only for jobs that carry what it reads: the claim orders by SLA level only when jobs have one (from ITSM intake, #453), and is first in, first out otherwise; tenants other than the default one, and the report, exist only once an operator creates them. A single-team pilot on one tenant without SLAs runs as before. Phase 4's measurements (§5) still wait for the pilot and the internal KPIs.
 
+   **Amendment 2026-11-15 (#456):** Incident and domain memory (#456) may also be built before the pilot once #451 is closed. A repository starts with zero rows in `repo_memories`, leaving prompts and behaviour unchanged until PRs are merged or runbooks and business rules are recorded; recalled items are sanitized as untrusted data (`redact` + `defang`, size-capped) and placed in `BP3` so the cached `BP2` prefix never changes ([measurement](../measurements/2026-11-15-incident-domain-memory.md)). Live multi-sprint AMS memory retention remains measured during the pilot (#158) and internal KPI evaluation (#157).
+
    In addition, the Phase 3 issues Phase 4 depends on must be closed: #451 for #456, and #451 and #453 for #457. If the pilot or the internal KPIs fall short, ADR 0002 applies: find the cause in the ledger and harden the core engine before adding AMS layers.
 
 5. **Measurement milestones.** Each phase closes on a measurement in `docs/measurements/`, not on a feature list:

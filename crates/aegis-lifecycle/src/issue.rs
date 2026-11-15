@@ -250,6 +250,29 @@ impl IssueInput {
             self.url, title, body, summary, repro
         )
     }
+
+    /// Appends recalled repository memories (`merged_pr`, `review_lesson`,
+    /// `runbook`, `business_rule`) into the issue context so that triage
+    /// (`light::classify`, `diagnose`) and fix planning (`first_message` /
+    /// `BP3`) receive them while `BP2` (`RepoPrompt` / `system_blocks`)
+    /// remains unchanged (#456).
+    pub fn attach_memories(&mut self, lessons: &[crate::MemoryLesson]) {
+        let block = crate::memory::format_for_bp3(lessons);
+        if block.is_empty() {
+            return;
+        }
+        let clean_body = crate::memory::defang_memory_text(&self.body);
+        let budget = MAX_BODY_CHARS.saturating_sub(block.chars().count());
+        let mut head: String = clean_body.chars().take(budget).collect();
+        head.push_str(&block);
+        self.body = head;
+    }
+
+    /// Builder variant of [`Self::attach_memories`].
+    pub fn with_memories(mut self, lessons: &[crate::MemoryLesson]) -> Self {
+        self.attach_memories(lessons);
+        self
+    }
 }
 
 /// Refuses a run that did not fail or ran on another branch than `branch`.

@@ -28,6 +28,9 @@ pub enum Kind {
     /// changes requested, or `/aegis fix` in a comment, by `sender`, whose
     /// right to write is checked before a job is made.
     ReviewRound { pr_url: String, sender: String },
+    /// An agent PR (`agent/*`) was merged (#456): extract `merged_pr` and
+    /// `review_lesson` memories for its repository.
+    PrMerged { pr_url: String },
 }
 
 /// The command that asks for a review round in a comment on a PR.
@@ -156,7 +159,16 @@ struct GithubPull {
     number: u64,
     html_url: String,
     state: String,
+    #[serde(default)]
+    merged: bool,
     head: PrHead,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubPullEvent {
+    action: String,
+    pull_request: GithubPull,
+    repository: GithubRepo,
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,6 +340,23 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
                 kind: Kind::CiFailure { branch },
             })
         }
+        "pull_request" => {
+            let e: GithubPullEvent = parse(body)?;
+            if e.action != "closed" || !e.pull_request.merged {
+                return Err(ignored("not a merged pull request"));
+            }
+            if !e.pull_request.head.name.starts_with("agent/") {
+                return Err(ignored("not a pull request of the agent"));
+            }
+            let path = checked_path(&e.repository.full_name, 2)?;
+            Ok(Wanted {
+                issue_ref: checked_ref(format!("{path}#{}", e.pull_request.number))?,
+                repo_url: e.repository.html_url,
+                kind: Kind::PrMerged {
+                    pr_url: e.pull_request.html_url,
+                },
+            })
+        }
         other => Err(ignored(format!("event `{other}`"))),
     }
 }
@@ -420,7 +449,15 @@ struct GitlabMergeRequest {
     iid: u64,
     url: String,
     state: String,
+    #[serde(default)]
+    action: Option<String>,
     source_branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitlabMergeRequestHook {
+    project: GitlabProject,
+    object_attributes: GitlabMergeRequest,
 }
 
 /// A delivery of GitLab event `event` (`X-Gitlab-Event`).
@@ -491,6 +528,22 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
                 issue_ref: checked_ref(format!("{path}/-/pipelines/{}", p.id))?,
                 repo_url: e.project.web_url,
                 kind: Kind::CiFailure { branch: p.branch },
+            })
+        }
+        "Merge Request Hook" => {
+            let e: GitlabMergeRequestHook = parse(body)?;
+            let mr = e.object_attributes;
+            if mr.state != "merged" && mr.action.as_deref() != Some("merge") {
+                return Err(ignored("not a merged merge request"));
+            }
+            if !mr.source_branch.starts_with("agent/") {
+                return Err(ignored("not a merge request of the agent"));
+            }
+            let path = checked_path(&e.project.path_with_namespace, MAX_GITLAB_PARTS)?;
+            Ok(Wanted {
+                issue_ref: checked_ref(format!("{path}!{}", mr.iid))?,
+                repo_url: e.project.web_url,
+                kind: Kind::PrMerged { pr_url: mr.url },
             })
         }
         other => Err(ignored(format!("event `{other}`"))),
@@ -820,5 +873,70 @@ mod tests {
                 Err(Skip::Ignored(_))
             ));
         }
+    }
+
+    #[test]
+    fn merged_agent_pr_or_mr_triggers_memory_extraction() {
+        let gh_merged = json!({
+            "action": "closed",
+            "pull_request": {
+                "number": 42,
+                "html_url": "https://github.com/bot/demo/pull/42",
+                "state": "closed",
+                "merged": true,
+                "head": { "ref": "agent/demo-12" }
+            },
+            "repository": repo()
+        })
+        .to_string()
+        .into_bytes();
+        let wanted = github("pull_request", &gh_merged, "aegis").unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::PrMerged {
+                pr_url: "https://github.com/bot/demo/pull/42".into()
+            }
+        );
+
+        let gh_unmerged = json!({
+            "action": "closed",
+            "pull_request": {
+                "number": 42,
+                "html_url": "https://github.com/bot/demo/pull/42",
+                "state": "closed",
+                "merged": false,
+                "head": { "ref": "agent/demo-12" }
+            },
+            "repository": repo()
+        })
+        .to_string()
+        .into_bytes();
+        assert!(matches!(
+            github("pull_request", &gh_unmerged, "aegis"),
+            Err(Skip::Ignored(_))
+        ));
+
+        let gl_merged = json!({
+            "project": {
+                "path_with_namespace": "group/app",
+                "web_url": "https://gitlab.com/group/app"
+            },
+            "object_attributes": {
+                "iid": 9,
+                "url": "https://gitlab.com/group/app/-/merge_requests/9",
+                "state": "merged",
+                "action": "merge",
+                "source_branch": "agent/app-9"
+            }
+        })
+        .to_string()
+        .into_bytes();
+        let wanted = gitlab("Merge Request Hook", &gl_merged, "aegis").unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::PrMerged {
+                pr_url: "https://gitlab.com/group/app/-/merge_requests/9".into()
+            }
+        );
     }
 }
