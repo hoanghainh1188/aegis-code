@@ -159,6 +159,10 @@ pub struct RepoSettings {
     /// Patch scope restrictions for gate and PR review (#359).
     #[serde(default, skip_serializing_if = "is_default_patch_scope")]
     pub patch_scope: PatchScopeConfig,
+    /// Secrets the gate's `secrets` step lets through (#509):
+    /// `[[secrets.allow]]` with `path`, `kinds` and `reason`.
+    #[serde(default, skip_serializing_if = "is_default_secrets")]
+    pub secrets: aegis_gate::SecretPolicy,
     /// Services the test steps reach (#490): `[[sidecars]]`, as
     /// `[[repo.sidecars]]` of a run configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -250,6 +254,10 @@ pub struct PatchScopeConfig {
     /// Whether scope violations fail the gate (`true`) or only warn & flag reviewer (`false`, default).
     #[serde(default)]
     pub enforce: bool,
+}
+
+fn is_default_secrets(p: &aegis_gate::SecretPolicy) -> bool {
+    p.allow.is_empty()
 }
 
 fn is_default_patch_scope(c: &PatchScopeConfig) -> bool {
@@ -383,6 +391,7 @@ impl Modes {
                 ignored_advisories: settings.ignored_advisories,
                 hidden_test: settings.hidden_test,
                 patch_scope: Some(settings.patch_scope),
+                secrets: settings.secrets,
                 sidecars: settings.sidecars,
                 fork: settings.fork,
             },

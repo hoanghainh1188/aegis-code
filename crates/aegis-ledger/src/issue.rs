@@ -141,6 +141,19 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::SecretsRedacted { count }).await
     }
 
+    /// Secrets kept from leaving the platform at `place` (#509); nothing
+    /// is recorded for zero.
+    pub async fn secrets_blocked(&mut self, place: &str, count: u32) -> Result<(), LedgerError> {
+        if count == 0 {
+            return Ok(());
+        }
+        self.push(LedgerEvent::SecretsBlocked {
+            place: place.to_owned(),
+            count,
+        })
+        .await
+    }
+
     /// The issue the job works on (#316): `title` already redacted, as the
     /// model sees it, cut to [`MAX_TITLE_CHARS`].
     pub async fn issue_read(&mut self, title: &str, url: &str) -> Result<(), LedgerError> {

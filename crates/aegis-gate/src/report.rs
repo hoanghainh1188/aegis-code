@@ -12,6 +12,8 @@ const MAX_LINE_CHARS: usize = 200;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepName {
     Scope,
+    /// The lines the patch adds hold no secret (#509).
+    Secrets,
     Dependencies,
     Format,
     Lint,
@@ -25,8 +27,9 @@ pub enum StepName {
 }
 
 impl StepName {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Scope,
+        Self::Secrets,
         Self::Dependencies,
         Self::Format,
         Self::Lint,
@@ -41,6 +44,7 @@ impl StepName {
     pub fn id(self) -> &'static str {
         match self {
             Self::Scope => "scope",
+            Self::Secrets => "secrets",
             Self::Dependencies => "dependencies",
             Self::Format => "format",
             Self::Lint => "lint",
@@ -151,6 +155,9 @@ pub struct GateReport {
     pub parts: Vec<String>,
     /// Scope warnings detected by the scope step (#359) to flag reviewers on the PR.
     pub scope_warnings: Vec<String>,
+    /// Secrets the `secrets` step found in the patch (#509); counted in the
+    /// ledger, never named by value.
+    pub secrets_found: usize,
 }
 
 impl GateReport {

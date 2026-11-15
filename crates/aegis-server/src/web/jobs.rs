@@ -300,6 +300,9 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
             )
         }
         LedgerEvent::SecretsRedacted { count } => row("redact secrets", format!("{count} values")),
+        LedgerEvent::SecretsBlocked { place, count } => {
+            row("block secrets", format!("{count} in the {place}"))
+        }
         LedgerEvent::HiddenTests { .. } => return None,
         // Shadow triage (#497) is measured against the review: a reviewer
         // who saw it might judge the PR by it. Only the KPI report shows it.

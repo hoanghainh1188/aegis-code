@@ -134,8 +134,8 @@ impl GitLab {
         let request = json!({
             "source_branch": head.name(),
             "target_branch": base,
-            "title": title,
-            "description": body,
+            "title": crate::masked(&title),
+            "description": crate::masked(body),
             "remove_source_branch": false,
         });
         self.call(reqwest::Method::POST, "merge_requests", Some(&request))
@@ -148,7 +148,7 @@ impl GitLab {
         self.call(
             reqwest::Method::POST,
             &format!("issues/{iid}/notes"),
-            Some(&json!({ "body": body })),
+            Some(&json!({ "body": crate::masked(body) })),
         )
         .await
     }

@@ -20,6 +20,9 @@
 //!   Every process reports the same queue; alerts take the max.
 //! - Each repo's monthly budget (#31), read at each scrape too: what it
 //!   spent this month and its cap, when it has one.
+//! - Secrets kept from leaving the platform (#509), by `place`: `patch`
+//!   (the gate's `secrets` step failed on them) or the text they were
+//!   masked in (`commit message`, `PR`, `review reply`).
 //! - `aegis_paused` (#510), read at each scrape: 1 while every agent is
 //!   paused (intake or emergency), 0 otherwise.
 
@@ -93,6 +96,11 @@ struct TriageLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct PlaceLabels {
+    place: String,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct QueueLabels {
     state: &'static str,
 }
@@ -118,6 +126,7 @@ pub struct Metrics {
     budget_cap_usd: Family<RepoLabels, Gauge<f64, AtomicU64>>,
     triage: Family<TriageLabels, Counter>,
     paused: Gauge,
+    secrets_blocked: Family<PlaceLabels, Counter>,
 }
 
 impl Metrics {
@@ -205,9 +214,16 @@ impl Metrics {
             "1 while every agent of the instance is paused (#510), 0 otherwise",
             paused.clone(),
         );
+        let secrets_blocked = Family::default();
+        registry.register(
+            "secrets_blocked",
+            "Secrets kept from leaving the platform (#509), by where: patch, or the text masked",
+            secrets_blocked.clone(),
+        );
         Self {
             triage,
             paused,
+            secrets_blocked,
             registry,
             jobs_running,
             attempts,
@@ -230,6 +246,20 @@ impl Metrics {
                 category: category.as_str(),
             })
             .inc();
+    }
+
+    /// Secrets kept from leaving at `place` (#509). The few places the
+    /// lifecycle names; anything else counts as `other`.
+    pub fn secrets_blocked(&self, place: &str, count: u32) {
+        let place = match place {
+            "patch" | "commit message" | "PR" | "review reply" => place,
+            _ => "other",
+        };
+        self.secrets_blocked
+            .get_or_create(&PlaceLabels {
+                place: place.to_owned(),
+            })
+            .inc_by(u64::from(count));
     }
 
     pub fn attempt_ended(&self, status: &str, seconds: f64) {
@@ -424,6 +454,21 @@ mod tests {
 
     fn line_of<'a>(text: &'a str, start: &str) -> Option<&'a str> {
         text.lines().find(|l| l.starts_with(start))
+    }
+
+    #[test]
+    fn blocked_secrets_count_by_place() {
+        let m = Metrics::new();
+        m.secrets_blocked("patch", 2);
+        m.secrets_blocked("PR", 1);
+        m.secrets_blocked("somewhere new", 1);
+        let text = m.render().unwrap();
+        assert!(
+            line_of(&text, r#"aegis_secrets_blocked_total{place="patch"} 2"#).is_some(),
+            "{text}"
+        );
+        assert!(line_of(&text, r#"aegis_secrets_blocked_total{place="PR"} 1"#).is_some());
+        assert!(line_of(&text, r#"aegis_secrets_blocked_total{place="other"} 1"#).is_some());
     }
 
     #[test]

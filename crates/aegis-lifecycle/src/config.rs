@@ -200,6 +200,10 @@ pub struct RepoConfig {
     /// Patch scope limits and controls (#359).
     #[serde(default)]
     pub patch_scope: Option<crate::registry::PatchScopeConfig>,
+    /// Secrets the gate's `secrets` step lets through (#509), by path and
+    /// kind, each with its reason: `[[repo.secrets.allow]]`.
+    #[serde(default)]
+    pub secrets: aegis_gate::SecretPolicy,
     /// Services the test steps reach, such as PostgreSQL (#490, ADR
     /// 0013): `[[repo.sidecars]]`. They run only with `run.sandbox`.
     #[serde(default)]
@@ -545,6 +549,7 @@ impl RunConfig {
             .audit_policy()
             .check_ids()
             .map_err(LifecycleError::Config)?;
+        self.repo.secrets.check().map_err(LifecycleError::Config)?;
         aegis_gate::check_sidecars(&self.repo.sidecars)
             .map_err(|e| LifecycleError::Config(format!("repo.sidecars: {e}")))?;
         if !self.repo.sidecars.is_empty() && !self.run.sandbox {

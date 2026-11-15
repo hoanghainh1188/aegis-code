@@ -158,6 +158,7 @@ impl Repo {
             sonar,
             audit: AuditPolicy::default(),
             scope: aegis_gate::ScopePolicy::default(),
+            secrets: aegis_gate::SecretPolicy::default(),
             parts: vec![GatePart {
                 dir: "py".into(),
                 profile: &py,

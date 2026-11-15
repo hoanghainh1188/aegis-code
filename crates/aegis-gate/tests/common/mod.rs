@@ -271,6 +271,7 @@ impl Repo {
             sonar: None,
             audit,
             scope: aegis_gate::ScopePolicy::default(),
+            secrets: aegis_gate::SecretPolicy::default(),
             parts: vec![],
             sidecars: None,
             dependency_policy,

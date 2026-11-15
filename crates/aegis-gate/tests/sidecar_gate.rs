@@ -100,6 +100,7 @@ fn only_the_test_steps_reach_fresh_sidecars() {
         sonar: None,
         audit: AuditPolicy::default(),
         scope: aegis_gate::ScopePolicy::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         parts: vec![],
         sidecars: Some(Sidecars {
             docker,
@@ -173,6 +174,7 @@ fn sidecars_without_the_sandbox_are_refused() {
         sonar: None,
         audit: AuditPolicy::default(),
         scope: aegis_gate::ScopePolicy::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         parts: vec![],
         sidecars: Some(Sidecars {
             docker: "docker".into(),
@@ -265,6 +267,7 @@ fn db_gate(root: &Path, sidecars: Option<Vec<SidecarSpec>>) -> aegis_gate::StepS
         sonar: None,
         audit: AuditPolicy::default(),
         scope: aegis_gate::ScopePolicy::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         parts: vec![],
         sidecars: sidecars.map(|specs| Sidecars {
             docker: "docker".into(),

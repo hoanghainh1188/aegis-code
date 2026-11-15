@@ -325,6 +325,14 @@ pub enum LedgerEvent {
     SecretsRedacted {
         count: u32,
     },
+    /// Secrets kept from leaving the platform (#509): `place` is `patch`
+    /// when the gate's `secrets` step failed on them, or the text they
+    /// were masked in before it was sent (`commit message`, `PR`,
+    /// `review reply`). Never the values.
+    SecretsBlocked {
+        place: String,
+        count: u32,
+    },
     /// The fix's own tests run on the agent's patch (eval runs, #98).
     HiddenTests {
         passed: bool,
@@ -355,6 +363,7 @@ impl LedgerEvent {
         let fields: &[(&'static str, f64)] = match self {
             Self::Classified { .. }
             | Self::SecretsRedacted { .. }
+            | Self::SecretsBlocked { .. }
             | Self::ToolCalls { .. }
             | Self::TestReminded { .. }
             | Self::ImpactChecked { .. }
@@ -417,6 +426,10 @@ pub struct IssueRecord {
     /// Secret values hidden from the model during the run.
     #[serde(default)]
     pub secrets_redacted: u32,
+    /// Secrets kept from leaving the platform (#509): found in the patch
+    /// by the gate, or masked in a text before it was sent.
+    #[serde(default)]
+    pub secrets_blocked: u32,
     /// In eval runs: whether the fix's own tests pass on the agent's patch.
     /// `None` when they did not run (no eval, or no gated patch).
     #[serde(default)]
@@ -452,6 +465,7 @@ impl IssueRecord {
             model_calls: self.model_calls + round.model_calls,
             cost_usd: self.cost_usd + round.cost_usd,
             secrets_redacted: self.secrets_redacted + round.secrets_redacted,
+            secrets_blocked: self.secrets_blocked + round.secrets_blocked,
             tokens,
             ..self.clone()
         }
@@ -470,6 +484,7 @@ impl IssueRecord {
             wall_time_s: None,
             review: None,
             secrets_redacted: 0,
+            secrets_blocked: 0,
             hidden_tests_passed: None,
             issue_title: None,
             issue_url: None,
@@ -514,6 +529,9 @@ impl IssueRecord {
             LedgerEvent::HiddenTests { passed, .. } => self.hidden_tests_passed = Some(*passed),
             LedgerEvent::SecretsRedacted { count } => {
                 self.secrets_redacted = self.secrets_redacted.saturating_add(*count);
+            }
+            LedgerEvent::SecretsBlocked { count, .. } => {
+                self.secrets_blocked = self.secrets_blocked.saturating_add(*count);
             }
             LedgerEvent::Finished {
                 outcome,

@@ -58,6 +58,7 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
         statuses(&report),
         [
             (StepName::Scope, StepStatus::Passed),
+            (StepName::Secrets, StepStatus::Passed),
             (
                 StepName::Dependencies,
                 StepStatus::Skipped(Skip::NoDependencyChange)

@@ -88,8 +88,12 @@ impl LedgerStore for RunLedger {
     async fn append(&self, issue: &IssueId, event: &LedgerEvent) -> Result<(), LedgerError> {
         let run = self.runs().get(issue).copied();
         self.pg.append_in_run(issue, event, run).await?;
-        if let LedgerEvent::Triaged { triage } = event {
-            crate::metrics::metrics().triaged(triage.category);
+        match event {
+            LedgerEvent::Triaged { triage } => crate::metrics::metrics().triaged(triage.category),
+            LedgerEvent::SecretsBlocked { place, count } => {
+                crate::metrics::metrics().secrets_blocked(place, *count);
+            }
+            _ => {}
         }
         Ok(())
     }

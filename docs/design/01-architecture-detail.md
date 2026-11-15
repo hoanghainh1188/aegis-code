@@ -152,6 +152,8 @@ Executes sequentially in isolated Docker sandboxes (`--network none`):
 
 | Step | Scope (Rust Profile Example) | Pass Criteria |
 | :---: | --- | --- |
+| **Scope** | Files, directories, deleted tests and new skips against the repo's limits (#359) | Within limits, or a warning on the PR |
+| **Secrets** | The lines the patch adds, scanned with the platform's secret rules (provider key shapes, private keys, high-entropy strings; #509); exceptions by path and kind, with a reason | No secret added; named by file, line and kind, never by value |
 | **0. Dependencies** | Validates lockfile changes against allow-list and CVE databases | Zero rogue packages |
 | **1. Formatting** | `cargo fmt --check` | Zero diff |
 | **2. Linting** | `cargo clippy --all-targets -- -D warnings` | Zero compiler warnings |

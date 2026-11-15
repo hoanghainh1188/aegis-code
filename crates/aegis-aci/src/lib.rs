@@ -17,7 +17,8 @@ mod navigate;
 mod run_tests;
 pub mod sbfl;
 mod search;
-mod secrets;
+// The rules live in the gate (#509), which scans patches with them too.
+use aegis_gate::secrets;
 mod server;
 mod summary;
 mod viewer;

@@ -52,6 +52,13 @@ pub struct Pushed {
     pub commit: String,
 }
 
+/// `text` with every secret value masked (#509): the last check before
+/// anything leaves for a forge, under what the lifecycle already masked
+/// and counted. A commit message, a PR, a comment: none is sent unscanned.
+pub fn masked(text: &str) -> String {
+    aegis_gate::secrets::redact(text).text
+}
+
 /// Commits the tree the gate passed and pushes it to `agent/<issue_id>`.
 pub fn push_gated(
     repo: &Path,
@@ -66,7 +73,7 @@ pub fn push_gated(
     }
     let branch = AgentBranch::for_issue(issue_id)?;
     let staging = git::Staging::new(repo)?;
-    let commit = git::commit_tree(&staging, &gate.tree, &gate.base, message, who)?;
+    let commit = git::commit_tree(&staging, &gate.tree, &gate.base, &masked(message), who)?;
     git::push(&staging, remote, &branch, &commit)?;
     Ok(Pushed { branch, commit })
 }
@@ -89,7 +96,7 @@ pub fn push_gated_onto(
     }
     let branch = AgentBranch::for_issue(issue_id)?;
     let staging = git::Staging::new(repo)?;
-    let commit = git::commit_tree(&staging, &gate.tree, parent, message, who)?;
+    let commit = git::commit_tree(&staging, &gate.tree, parent, &masked(message), who)?;
     git::push(&staging, remote, &branch, &commit)?;
     Ok(Pushed { branch, commit })
 }
@@ -114,4 +121,21 @@ pub fn push_eval_base(
 pub fn abandon(repo: &Path, pushed: &Pushed, remote: &Remote) -> Result<(), PrError> {
     let staging = git::Staging::new(repo)?;
     git::delete(&staging, remote, &pushed.branch, &pushed.commit)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn masked_text_keeps_no_secret_and_the_rest_as_it_was() {
+        // Built at run time, so no secret-shaped string sits in the source.
+        let token = format!("ghp_{}", "Q".repeat(36));
+        let text = format!("fixed the cart; token {token} was in the log\n");
+        let out = super::masked(&text);
+        assert!(!out.contains(&token), "{out}");
+        assert_eq!(
+            out,
+            "fixed the cart; token [REDACTED:github-token] was in the log\n"
+        );
+        assert_eq!(super::masked("plain words"), "plain words");
+    }
 }

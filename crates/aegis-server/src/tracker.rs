@@ -273,7 +273,9 @@ impl TrackerNotifier {
             .await
             .map_err(|e| e.to_string())?
             .ok_or("the repo has no tracker now")?;
-        let comment = plain_status_comment(job);
+        // No secret leaves for the tracker (#509): the job's reason may
+        // quote what the agent or a tool said.
+        let comment = aegis_pr::masked(&plain_status_comment(job));
         let report = Report {
             comment: &comment,
             pr_url: pr_url(job),
