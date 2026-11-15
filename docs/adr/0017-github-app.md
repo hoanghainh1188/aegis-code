@@ -71,6 +71,8 @@ Tokens:
 
 The app is registered with the union: Metadata read, Contents read/write, Pull requests read/write, Issues read/write, Actions read; no Workflows, no Administration, no organization permissions. Whether `GET collaborators/{login}/permission` is allowed with only `metadata: read` is checked during implementation; if it needs more, that permission is added to the table and the app registration, not to every token.
 
+  *Checked in #538:* GitHub's docs for that endpoint do not name the permission a fine-grained or installation token needs; the Metadata permission is described as covering listing collaborators, so `metadata: read` (already in the comment token's set) is the likely minimum but is **not confirmed**. It is verified against a real installation in #540, where `can_write` moves to the app; until then the table stays as is.
+
 In code, the string token a job holds today (`Platform::github_token`, `Source::token`, `GitHub::new(.., token)`) becomes a token source: `Static(Secret)` for the token path, `App { installation, permissions }` for the app path, asked for a token at each call. The token path keeps reading `token_env` from the store as now. Installation tokens go where PATs go today and nowhere else: git's environment for the platform's own git calls and the `Authorization` header of API calls; never into a sandbox, a prompt, a log or the ledger. The output scan (#509) already masks `ghs_…` tokens and JWTs.
 
 ### 4. Comments and review-round checks from the app

@@ -8,6 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::app::{TokenSource, TokenUse};
 use crate::{AgentBranch, PrError, Remote};
 
 const API_VERSION: &str = "2022-11-28";
@@ -15,13 +16,26 @@ const API_VERSION: &str = "2022-11-28";
 /// A request to GitHub still running after this long fails.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GitHub {
     client: reqwest::Client,
     api: String,
     owner: String,
     repo: String,
-    token: String,
+    /// Asked for a token at each request (ADR 0017 §3): a fixed one on
+    /// the token path, a fresh installation token on the app path.
+    token: TokenSource,
+}
+
+impl std::fmt::Debug for GitHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitHub")
+            .field("api", &self.api)
+            .field("owner", &self.owner)
+            .field("repo", &self.repo)
+            .field("token", &self.token)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -93,6 +107,26 @@ impl GitHub {
     /// `api` is `https://api.github.com` (or a GitHub Enterprise API root);
     /// `owner/repo` is the fork the agent works on.
     pub fn new(api: &str, owner: &str, repo: &str, token: &str) -> Result<Self, PrError> {
+        Self::with_source(api, owner, repo, TokenSource::Static(token.to_owned()))
+    }
+
+    /// The same, with its token from `source`; an app source must be for
+    /// this very repo.
+    pub fn with_source(
+        api: &str,
+        owner: &str,
+        repo: &str,
+        source: TokenSource,
+    ) -> Result<Self, PrError> {
+        if let TokenSource::App {
+            owner: o, repo: r, ..
+        } = &source
+            && (o != owner || r != repo)
+        {
+            return Err(PrError::App(format!(
+                "a token source for `{o}/{r}` cannot serve `{owner}/{repo}`"
+            )));
+        }
         if !plain_name(owner) || !plain_name(repo) {
             return Err(PrError::GitHub {
                 status: 0,
@@ -110,8 +144,17 @@ impl GitHub {
             api,
             owner: owner.to_owned(),
             repo: repo.to_owned(),
-            token: token.to_owned(),
+            token: source,
         })
+    }
+
+    /// This client with its token for another use (ADR 0017 §3): on the
+    /// app path its requests then carry only that use's permissions.
+    pub fn for_use(&self, use_: TokenUse) -> Self {
+        Self {
+            token: self.token.for_use(use_),
+            ..self.clone()
+        }
     }
 
     pub(crate) fn owner(&self) -> &str {
@@ -124,15 +167,32 @@ impl GitHub {
 
     /// Where the agent's branch for this repo is pushed: the web host of
     /// the API root (`api.github.com` → `github.com`, `<host>/api/v3` →
-    /// `<host>`), same owner and repo, same token.
+    /// `<host>`), same owner and repo, same token. Only for a fixed token:
+    /// on the app path the token expires, so [`GitHub::remote_now`] asks
+    /// for one right before the push.
     pub fn remote(&self) -> Result<Remote, PrError> {
+        match &self.token {
+            TokenSource::Static(token) => self.remote_with(token),
+            TokenSource::App { .. } => Err(PrError::App(
+                "an app token is asked for at each push: use `remote_now`".into(),
+            )),
+        }
+    }
+
+    /// The same remote with a token asked for now: what a push on either
+    /// path uses.
+    pub async fn remote_now(&self) -> Result<Remote, PrError> {
+        self.remote_with(&self.token.token().await?)
+    }
+
+    fn remote_with(&self, token: &str) -> Result<Remote, PrError> {
         let rest = self
             .api
             .split_once("://")
             .map_or(self.api.as_str(), |(_, r)| r);
         let host = rest.split('/').next().unwrap_or(rest);
         let host = host.strip_prefix("api.").unwrap_or(host);
-        Remote::https(host, &self.owner, &self.repo, &self.token)
+        Remote::https(host, &self.owner, &self.repo, token)
     }
 
     pub(crate) async fn get(&self, path: &str) -> Result<serde_json::Value, PrError> {
@@ -147,10 +207,11 @@ impl GitHub {
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, PrError> {
+        let token = self.token.token().await?;
         let response = self
             .client
             .get(url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION)
             .send()
@@ -180,10 +241,11 @@ impl GitHub {
     /// where it is stored: the token is not sent to another host.
     pub(crate) async fn get_text(&self, path: &str) -> Result<String, PrError> {
         let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
+        let token = self.token.token().await?;
         let response = self
             .client
             .get(&url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&token)
             .header("X-GitHub-Api-Version", API_VERSION)
             .send()
             .await
@@ -249,10 +311,11 @@ impl GitHub {
         body: Option<&serde_json::Value>,
     ) -> Result<T, PrError> {
         let url = format!("{}/repos/{}/{}/{path}", self.api, self.owner, self.repo);
+        let token = self.token.token().await?;
         let mut request = self
             .client
             .request(method, &url)
-            .bearer_auth(&self.token)
+            .bearer_auth(&token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION);
         if let Some(body) = body {
