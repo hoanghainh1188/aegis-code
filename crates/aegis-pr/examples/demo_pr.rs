@@ -74,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         issue_url: "https://github.com/hoanghainh1188/aegis-code/issues/15 (demo, no real issue)"
             .into(),
         cause: "Demo of the aegis-pr template; the patch only adds a comment.".into(),
+        evidence: vec![],
         changes: vec![ChangeNote {
             location: "scrapy/http/request/__init__.py".into(),
             note: "comment on why headers are copied".into(),

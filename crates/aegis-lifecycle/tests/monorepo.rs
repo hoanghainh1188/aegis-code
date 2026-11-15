@@ -238,6 +238,7 @@ fn scripted() -> Scripted {
     let answer = json!({
         "status": "fixed",
         "cause": "Both `add`s compared with `>`, so a fourth item was accepted.",
+        "evidence": [{"location": "src/lib.rs:24"}],
         "changes": [
             {"location": "src/lib.rs:24", "note": "compare with >="},
             {"location": "py/cart/__init__.py:17", "note": "compare with >="}

@@ -37,6 +37,7 @@ use crate::batch::sonar_batch;
 use crate::checks::{Halt, JobCheck, fold_tools, test_reminder};
 use crate::code_graph::{self, CodeGraph, ServerCalls, changed_functions};
 use crate::cve;
+use crate::evidence::check_sources;
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
@@ -46,6 +47,8 @@ use crate::{IssueInput, LifecycleError, RunConfig};
 
 /// Final answers the agent may get wrong before the job stops.
 const MAX_ANSWER_RETRIES: u32 = 2;
+/// The unchecked places listed back to the agent, or in the stop reason.
+const MAX_SOURCE_COMPLAINTS: usize = 10;
 
 /// What every job of a run shares. Built once; jobs hold it in an `Arc`.
 pub struct Platform<P, S> {
@@ -1395,6 +1398,41 @@ where
                     let (summary, hidden) = summary_of(&answer);
                     ledger.secrets_redacted(hidden).await?;
                     ledger.answered(summary).await?;
+                    if answer.status == Status::Fixed {
+                        // Its text is checked as its code will be (#508).
+                        let check = check_sources(tree, base, &answer);
+                        let retry = !check.holds() && answer_retries < MAX_ANSWER_RETRIES;
+                        let held = !check.holds() && !retry;
+                        ledger
+                            .sources_checked(count(check.cited), count(check.wrong.len()), held)
+                            .await?;
+                        let wrong = check
+                            .wrong
+                            .iter()
+                            .take(MAX_SOURCE_COMPLAINTS)
+                            .map(|w| format!("- {w}"))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        if retry {
+                            answer_retries += 1;
+                            session = session.with_message(Message::user_text(format!(
+                                "Your final answer cites places that could not be checked in \
+                                 the repository:\n{wrong}\nEvery `changes[].location` and \
+                                 `evidence[].location` must be a file of the repository (as \
+                                 patched, or as it was), with lines inside it, and an \
+                                 `excerpt` must be text found at those lines. Open the files \
+                                 again if needed, then reply with only the corrected JSON \
+                                 object."
+                            )));
+                            continue 'turns;
+                        }
+                        if held {
+                            return Ok(Ending::stop(
+                                Outcome::StoppedSteps,
+                                format!("the answer has no verifiable sources:\n{wrong}"),
+                            ));
+                        }
+                    }
                     answer
                 }
                 Err(why) if answer_retries < MAX_ANSWER_RETRIES => {

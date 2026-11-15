@@ -166,6 +166,7 @@ impl<P, S> BatchSteps<'_, P, S> {
         FinalAnswer {
             status: Status::Fixed,
             cause: String::new(),
+            evidence: vec![],
             changes: vec![],
             repro: None,
             allowed_test_changes: answers
@@ -313,6 +314,7 @@ fn batch_answer(
     FinalAnswer {
         status: Status::Fixed,
         cause,
+        evidence: merged.iter().flat_map(|a| a.evidence.clone()).collect(),
         changes: merged.iter().flat_map(|a| a.changes.clone()).collect(),
         repro: None,
         allowed_test_changes: merged

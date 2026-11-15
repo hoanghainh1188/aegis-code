@@ -208,6 +208,7 @@ async fn a_breaking_upgrade_gets_the_agent_to_adapt_the_code() {
         json!({
             "status": "fixed",
             "cause": "left-pad 1.0.1 changed its API.",
+            "evidence": [{"location": "src/lib.rs:1"}],
             "changes": [{"location": "src/lib.rs:1", "note": "adapted to left-pad 1.0.1"}],
             "repro_test": null,
             "allowed_test_changes": [],

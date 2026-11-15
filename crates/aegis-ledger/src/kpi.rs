@@ -31,6 +31,8 @@ pub struct Kpi {
     pub hidden_passed: usize,
     /// Runs without a review yet among those that opened a PR.
     pub awaiting_review: usize,
+    /// Runs stopped because the answer had no verifiable sources (#508).
+    pub held_for_sources: usize,
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
@@ -93,6 +95,7 @@ impl Kpi {
                 .filter(|r| r.hidden_tests_passed == Some(true))
                 .count(),
             awaiting_review: prs.iter().filter(|r| r.review.is_none()).count(),
+            held_for_sources: finished.iter().filter(|r| r.held_for_sources).count(),
         }
     }
 
@@ -166,6 +169,12 @@ impl fmt::Display for Kpi {
             (
                 "Hidden tests pass (eval runs)",
                 pct(self.hidden_passed, self.hidden_ran),
+                "tracked",
+                None,
+            ),
+            (
+                "Runs held for unverified sources",
+                pct(self.held_for_sources, self.runs),
                 "tracked",
                 None,
             ),

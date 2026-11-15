@@ -325,6 +325,14 @@ pub enum LedgerEvent {
     SecretsRedacted {
         count: u32,
     },
+    /// The places a fix's answer cites, checked against the job's tree
+    /// (#508): how many, how many did not hold, and whether the job was
+    /// held back for it (out of tries, no PR).
+    SourcesChecked {
+        cited: u32,
+        wrong: u32,
+        held: bool,
+    },
     /// Secrets kept from leaving the platform (#509): `place` is `patch`
     /// when the gate's `secrets` step failed on them, or the text they
     /// were masked in before it was sent (`commit message`, `PR`,
@@ -364,6 +372,7 @@ impl LedgerEvent {
             Self::Classified { .. }
             | Self::SecretsRedacted { .. }
             | Self::SecretsBlocked { .. }
+            | Self::SourcesChecked { .. }
             | Self::ToolCalls { .. }
             | Self::TestReminded { .. }
             | Self::ImpactChecked { .. }
@@ -430,6 +439,15 @@ pub struct IssueRecord {
     /// by the gate, or masked in a text before it was sent.
     #[serde(default)]
     pub secrets_blocked: u32,
+    /// The places the last checked answer cited (#508).
+    #[serde(default)]
+    pub sources_cited: u32,
+    /// Cited places that did not hold, over every answer checked.
+    #[serde(default)]
+    pub sources_wrong: u32,
+    /// The job stopped because its answer had no verifiable sources.
+    #[serde(default)]
+    pub held_for_sources: bool,
     /// In eval runs: whether the fix's own tests pass on the agent's patch.
     /// `None` when they did not run (no eval, or no gated patch).
     #[serde(default)]
@@ -485,6 +503,9 @@ impl IssueRecord {
             review: None,
             secrets_redacted: 0,
             secrets_blocked: 0,
+            sources_cited: 0,
+            sources_wrong: 0,
+            held_for_sources: false,
             hidden_tests_passed: None,
             issue_title: None,
             issue_url: None,
@@ -529,6 +550,11 @@ impl IssueRecord {
             LedgerEvent::HiddenTests { passed, .. } => self.hidden_tests_passed = Some(*passed),
             LedgerEvent::SecretsRedacted { count } => {
                 self.secrets_redacted = self.secrets_redacted.saturating_add(*count);
+            }
+            LedgerEvent::SourcesChecked { cited, wrong, held } => {
+                self.sources_cited = *cited;
+                self.sources_wrong = self.sources_wrong.saturating_add(*wrong);
+                self.held_for_sources |= *held;
             }
             LedgerEvent::SecretsBlocked { count, .. } => {
                 self.secrets_blocked = self.secrets_blocked.saturating_add(*count);

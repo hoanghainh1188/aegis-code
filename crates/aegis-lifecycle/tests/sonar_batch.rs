@@ -114,6 +114,7 @@ impl ModelProvider for PerGroup {
                         json!({
                             "status": "fixed",
                             "cause": "Sonar warning",
+                            "evidence": [{"location": format!("src/lib.rs:{line}")}],
                             "changes": [{"location": format!("src/lib.rs:{line}"), "note": note}],
                             "allowed_test_changes": [],
                             "stop_reason": null

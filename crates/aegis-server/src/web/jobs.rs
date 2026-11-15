@@ -300,6 +300,14 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
             )
         }
         LedgerEvent::SecretsRedacted { count } => row("redact secrets", format!("{count} values")),
+        LedgerEvent::SourcesChecked { cited, wrong, held } => row(
+            "check sources",
+            match (wrong, held) {
+                (0, _) => format!("{cited} cited, all found"),
+                (w, false) => format!("{cited} cited, {w} not found; asked again"),
+                (w, true) => format!("{cited} cited, {w} not found; held, no PR"),
+            },
+        ),
         LedgerEvent::SecretsBlocked { place, count } => {
             row("block secrets", format!("{count} in the {place}"))
         }

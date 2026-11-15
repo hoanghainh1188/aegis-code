@@ -12,6 +12,7 @@ const MAX_FIELD_CHARS: usize = 2000;
 
 /// Change notes listed; the rest are counted.
 const MAX_CHANGES: usize = 50;
+const MAX_EVIDENCE: usize = 20;
 
 /// Updated reference files and tests listed each; the rest are counted.
 const MAX_REFERENCES: usize = 100;
@@ -21,7 +22,20 @@ const MAX_BODY_CHARS: usize = 60_000;
 
 const ZWSP: char = '\u{200b}';
 
-#[derive(Debug, Clone, PartialEq)]
+/// A source the root cause rests on (#508).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evidence {
+    /// `file:line` or `file:from-to`, checked against the job's tree (#508).
+    pub location: String,
+    /// What the agent quoted from there, found there.
+    pub excerpt: Option<String>,
+    /// The cited lines on the PR's commit, built by the platform; `None`
+    /// when the fork has no web page (a local remote).
+    pub url: Option<String>,
+}
+
+/// One change of the patch, as the agent describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangeNote {
     /// `file:line` or `file:from-to`.
     pub location: String,
@@ -70,6 +84,8 @@ const MAX_FLAGS: usize = 20;
 pub struct PrContent<'a> {
     pub issue_url: String,
     pub cause: String,
+    /// The sources `cause` rests on, each checked (#508).
+    pub evidence: Vec<Evidence>,
     pub changes: Vec<ChangeNote>,
     pub repro_test: Option<String>,
     pub allowed_test_changes: Vec<AllowedTestChange>,
@@ -141,6 +157,16 @@ pub fn inert(text: &str) -> String {
 }
 
 /// The issue link as given when it is a plain `https://` URL, else inert.
+/// A URL the platform built: https, short, and only characters a path,
+/// a commit and a `#L` anchor need, so nothing in it breaks the Markdown.
+fn safe_url(url: &str) -> bool {
+    url.starts_with("https://")
+        && url.len() <= 500
+        && url
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-._~/:#".contains(c))
+}
+
 fn link(url: &str) -> String {
     let plain = url.starts_with("https://")
         && url.len() <= 500
@@ -222,6 +248,30 @@ pub fn render(pr: &PrContent<'_>) -> String {
     let mut out = String::new();
     let _ = write!(out, "## Issue\n{}\n\n", link(&pr.issue_url));
     let _ = write!(out, "## Nguyên nhân\n{}\n\n", inert(&pr.cause));
+    if !pr.evidence.is_empty() {
+        out.push_str("Nguồn đã kiểm:\n");
+        for e in pr.evidence.iter().take(MAX_EVIDENCE) {
+            let at = format!("`{}`", inert(&e.location));
+            let at = match e.url.as_deref().filter(|u| safe_url(u)) {
+                Some(url) => format!("[{at}]({url})"),
+                None => at,
+            };
+            match e
+                .excerpt
+                .as_deref()
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+            {
+                Some(x) => {
+                    let _ = writeln!(out, "- {at} — \"{}\"", inert(x));
+                }
+                None => {
+                    let _ = writeln!(out, "- {at}");
+                }
+            }
+        }
+        out.push('\n');
+    }
     out.push_str("## Thay đổi (theo từng đoạn)\n");
     for change in pr.changes.iter().take(MAX_CHANGES) {
         let _ = writeln!(
@@ -372,6 +422,7 @@ mod tests {
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
             cause: "c".into(),
+            evidence: vec![],
             changes: vec![],
             repro_test: None,
             allowed_test_changes: vec![],
@@ -401,6 +452,64 @@ mod tests {
         );
         assert!(body.contains("`math-99`, … và 1 khác\n"), "{body}");
         assert!(!body.contains("math-100"), "{body}");
+    }
+
+    #[test]
+    fn checked_sources_link_to_their_lines_and_quote_inertly() {
+        let gate = GateReport {
+            steps: vec![],
+            tree: "t".into(),
+            base: "b".into(),
+            references: aegis_gate::UpdatedReferences::default(),
+            parts: vec![String::new()],
+            scope_warnings: vec![],
+            secrets_found: 0,
+        };
+        let body = render(&PrContent {
+            issue_url: "https://github.com/o/r/issues/1".into(),
+            cause: "c".into(),
+            evidence: vec![
+                Evidence {
+                    location: "src/lib.rs:24".into(),
+                    excerpt: Some("if a > b { @admin }".into()),
+                    url: Some("https://github.com/bot/r/blob/abc123/src/lib.rs#L24".into()),
+                },
+                Evidence {
+                    location: "README.md".into(),
+                    excerpt: None,
+                    url: None,
+                },
+                Evidence {
+                    location: "x.rs:1".into(),
+                    excerpt: None,
+                    // Not one the platform would build: no link.
+                    url: Some("https://evil.example/a?q=<x>".into()),
+                },
+            ],
+            changes: vec![],
+            repro_test: None,
+            allowed_test_changes: vec![],
+            allowed_reference_changes: vec![],
+            gate: &gate,
+            coverage_percent: None,
+            cost: Cost {
+                models: vec![],
+                model_calls: 0,
+                usd: 0.0,
+            },
+            input_flags: vec![],
+        });
+        assert!(
+            body.contains(
+                "Nguồn đã kiểm:\n\
+                 - [`src/lib.rs:24`](https://github.com/bot/r/blob/abc123/src/lib.rs#L24) — \
+                 \"if a > b { @\u{200b}admin }\"\n\
+                 - `README.md`\n\
+                 - `x.rs:1`\n\n"
+            ),
+            "{body}"
+        );
+        assert!(!body.contains("evil.example"), "{body}");
     }
 
     #[test]
@@ -437,6 +546,7 @@ mod tests {
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
             cause: "c".into(),
+            evidence: vec![],
             changes: vec![],
             repro_test: None,
             allowed_test_changes: vec![],
@@ -481,6 +591,7 @@ mod tests {
         let content = |input_flags| PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
             cause: "c".into(),
+            evidence: vec![],
             changes: vec![],
             repro_test: None,
             allowed_test_changes: vec![],

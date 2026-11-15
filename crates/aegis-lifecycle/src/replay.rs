@@ -106,6 +106,12 @@ impl Replay {
         let answer = json!({
             "status": "fixed",
             "cause": format!("Replay of {} (fix {}).", issue.url, issue.fix_commit),
+            // The fix's own files are its sources (#508).
+            "evidence": issue
+                .source_files
+                .iter()
+                .map(|f| json!({"location": f}))
+                .collect::<Vec<_>>(),
             "changes": changes,
             "repro_test": null,
             "allowed_test_changes": allowed,

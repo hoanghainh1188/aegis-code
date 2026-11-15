@@ -130,6 +130,9 @@ else:
 {
   "status": "fixed",
   "cause": "One to three sentences on the root cause.",
+  "evidence": [
+    {"location": "path/to/file.ext:41-44", "excerpt": "if len(items) > MAX_ITEMS:"}
+  ],
   "changes": [
     {"location": "path/to/file.ext:12-30", "note": "What changed and why."}
   ],
@@ -149,6 +152,14 @@ else:
 
 - `status` is `fixed`, or `stopped` when you could not fix the issue; then
   `stop_reason` says why and the other fields describe what you found.
+- `evidence` lists the places of the repository your `cause` rests on, at
+  least one for a fix: `location` is `path:line` or `path:from-to`, in the
+  code before or after your patch; `excerpt` (optional, one short line)
+  is text found there. The platform checks every `evidence` and every
+  `changes[].location`: a file that does not exist, a line past its end
+  or an excerpt that is not there sends the answer back to you, and too
+  many such answers stop the job with no pull request. Cite only what you
+  opened.
 - `repro_test` is `null` when the issue is not a bug (for example a
   refactor or documentation change). Its `files` are every file that holds
   the test, and only tests.

@@ -141,6 +141,17 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::SecretsRedacted { count }).await
     }
 
+    /// What the check of an answer's sources found (#508).
+    pub async fn sources_checked(
+        &mut self,
+        cited: u32,
+        wrong: u32,
+        held: bool,
+    ) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::SourcesChecked { cited, wrong, held })
+            .await
+    }
+
     /// Secrets kept from leaving the platform at `place` (#509); nothing
     /// is recorded for zero.
     pub async fn secrets_blocked(&mut self, place: &str, count: u32) -> Result<(), LedgerError> {
