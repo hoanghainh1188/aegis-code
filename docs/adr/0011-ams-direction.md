@@ -49,7 +49,7 @@ Some of this cannot be fixed by tuning the engine:
    | #454 | gate | Temporary service sidecars (PostgreSQL, Redis, …) declared in `RepoConfig`, on an internal network with no internet egress, for the life of the gate run. A benchmark on repositories with few tests puts the Golden Master procedure of [Design §6.2](../design/01-architecture-detail.md#62-golden-master-characterization-testing) to an empirical test. | One repository with database-backed integration tests and one with few tests go through the gate, with a measurement report. |
    | #455 | orchestrator | A separate `cve-remediation` job mode, started by an `osv-scanner` alert or a controlled label. It may raise only the configured package to the configured version, and adapt code to small breaking changes. | One sample CVE is fixed (lockfile raised, six-step gate passed) while bug-fix and review-round jobs still cannot touch manifests or lockfiles. |
 
-   The Phase 3 items already planned remain: additional languages (#37) and review evidence (#36).
+   The Phase 3 items already planned remain: additional languages (#37). SpecRover-style review evidence (#36) was evaluated and deferred until median review time exceeds 15 min/PR ([measurement](../measurements/2026-11-15-spec-review-evidence.md)).
 
 3. **Phase 4 – `AMS Quy mô Doanh nghiệp` (enterprise AMS).** These issues turn the engine into a service that runs several AMS contracts at once:
 
