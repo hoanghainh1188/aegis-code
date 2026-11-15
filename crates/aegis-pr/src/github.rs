@@ -295,10 +295,10 @@ impl GitHub {
         self.post(
             "pulls",
             &json!({
-                "title": title,
+                "title": crate::masked(title),
                 "head": head.name(),
                 "base": base,
-                "body": body,
+                "body": crate::masked(body),
                 "draft": draft,
                 "maintainer_can_modify": false,
             }),
@@ -325,7 +325,7 @@ impl GitHub {
     pub async fn comment_on_issue(&self, number: u64, body: &str) -> Result<IssueComment, PrError> {
         self.post(
             &format!("issues/{number}/comments"),
-            &json!({ "body": body }),
+            &json!({ "body": crate::masked(body) }),
         )
         .await
     }

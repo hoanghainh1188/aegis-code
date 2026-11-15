@@ -19,8 +19,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use aegis_gate::{
-    AuditPolicy, CancelToken, GateRequest, Hardening, Sandbox, ScopePolicy, StepName, StepReport,
-    StepStatus, WORKDIR, run_gate,
+    AuditPolicy, CancelToken, GateRequest, Hardening, Sandbox, ScopePolicy, SecretPolicy, StepName,
+    StepReport, StepStatus, WORKDIR, run_gate,
 };
 use aegis_lang::{Language, Profiles, RepoProfiles};
 use aegis_lifecycle::{RepoConfig, RunConfig};
@@ -600,6 +600,7 @@ async fn run_baseline_gate(
             sonar: None,
             audit: AuditPolicy::default(),
             scope: ScopePolicy::default(),
+            secrets: SecretPolicy::default(),
             parts: vec![],
             sidecars,
             dependency_policy: aegis_gate::DependencyPolicy::Locked,
@@ -965,6 +966,7 @@ mod tests {
             ignored_advisories: vec![],
             hidden_test: None,
             patch_scope: None,
+            secrets: Default::default(),
             sidecars: vec![],
             fork: aegis_lifecycle::ForkConfig {
                 platform: aegis_lifecycle::ForkPlatform::GitHub,

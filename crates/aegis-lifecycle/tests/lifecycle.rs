@@ -1390,6 +1390,67 @@ async fn secrets_in_the_issue_and_the_repo_are_hidden_and_counted() {
     }
 }
 
+/// #509: a secret the agent's answer quotes is masked in the PR before it
+/// is sent, and counted where it was kept back; the commit holds none.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_secret_in_the_answer_never_reaches_the_pr() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let token = format!("ghp_{}", "Q".repeat(36));
+    let leaky_answer = vec![ContentBlock::text(
+        json!({
+            "status": "fixed",
+            "cause": format!("`add` compared with `>`; seen with GITHUB_TOKEN={token}."),
+            "changes": [{"location": "src/lib.rs:24", "note": "compare with >="}],
+            "repro_test": {"name": "fourth_item_is_refused", "files": ["tests/fourth_item.rs"]},
+            "allowed_test_changes": [],
+            "stop_reason": null
+        })
+        .to_string(),
+    )];
+    let model = Scripted::new(vec![create_repro("t1"), fix("t2"), leaky_answer], vec![]);
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+
+    let report = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move { run(&p, CancellationToken::new()).await }
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    let pr: Value = server.received_requests().await.unwrap()[0]
+        .body_json()
+        .unwrap();
+    let body = pr["body"].as_str().unwrap();
+    assert!(!body.contains(&token), "the token reached the PR: {body}");
+    assert!(body.contains("[REDACTED:github-token]"), "{body}");
+    let log = Command::new("git")
+        .args(["log", "--format=%B", "-1", "agent/fixture-7"])
+        .current_dir(scratch.0.join("fork.git"))
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&log.stdout).contains(&token));
+
+    let id = IssueId::parse("fixture-7").unwrap();
+    let record = p.store.record(&id).unwrap();
+    assert!(record.secrets_blocked >= 1, "{record:?}");
+    let places: Vec<String> = p
+        .store
+        .events(&id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e {
+            LedgerEvent::SecretsBlocked { place, .. } => Some(place),
+            _ => None,
+        })
+        .collect();
+    assert!(places.iter().any(|p| p == "PR"), "{places:?}");
+}
+
 const HIDDEN: &str = "use fixture_rust::{cart, Cart, CartError, Priced};\n\n#[test]\nfn hidden_fourth_item() {\n    let mut three: Cart = cart![1, 2, 3];\n    assert_eq!(three.add(4), Err(CartError::Full));\n    assert_eq!(three.total(), 6);\n}\n";
 
 /// The bug's fix as a later commit of the clone, with the hidden test; the

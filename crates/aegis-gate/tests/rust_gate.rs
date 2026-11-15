@@ -76,6 +76,7 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
         statuses(&report),
         [
             (StepName::Scope, StepStatus::Passed),
+            (StepName::Secrets, StepStatus::Passed),
             (
                 StepName::Dependencies,
                 StepStatus::Skipped(Skip::NoDependencyChange)
@@ -99,7 +100,9 @@ fn a_fix_with_its_reproduction_test_passes_every_step() {
     assert!(repo.dir().join("tests/fourth_item.rs").exists());
     let s = report.to_string();
     assert!(
-        s.starts_with("Gate passed.\n  scope        passed (0s)\n  dependencies skipped"),
+        s.starts_with(
+            "Gate passed.\n  scope        passed (0s)\n  secrets      passed (0s)\n  dependencies skipped"
+        ),
         "{s}"
     );
 }
@@ -286,7 +289,7 @@ fn unformatted_code_stops_the_gate_at_format() {
     );
 
     let report = repo.gate(&profile(Language::Rust, FAKE_COVERAGE), None);
-    let after: Vec<StepStatus> = report.steps[3..].iter().map(|s| s.status.clone()).collect();
+    let after: Vec<StepStatus> = report.steps[4..].iter().map(|s| s.status.clone()).collect();
     assert_eq!(
         report.step(StepName::Format).unwrap().status,
         StepStatus::Failed
@@ -438,6 +441,7 @@ fn work_dir_inside_the_repo_is_refused() {
         sonar: None,
         audit: Default::default(),
         scope: aegis_gate::ScopePolicy::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
@@ -628,6 +632,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             sonar: None,
             audit: Default::default(),
             scope: aegis_gate::ScopePolicy::default(),
+            secrets: aegis_gate::SecretPolicy::default(),
             parts: vec![],
             sidecars: None,
             dependency_policy: Default::default(),
@@ -1146,6 +1151,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         scope: aegis_gate::ScopePolicy {
             allow_test_deletion: false,
             enforce: false,
@@ -1185,6 +1191,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         scope: aegis_gate::ScopePolicy {
             allow_test_deletion: false,
             enforce: true,
@@ -1240,6 +1247,7 @@ fn scope_enforcement_blocks_added_test_skips_when_configured() {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         scope: aegis_gate::ScopePolicy {
             allow_test_skips: false,
             enforce: true,
@@ -1292,6 +1300,7 @@ fn scope_enforcement_blocks_excessive_file_count() {
         reference_groups: vec![],
         sonar: None,
         audit: Default::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         scope: aegis_gate::ScopePolicy {
             max_files: Some(1),
             enforce: true,
@@ -1440,4 +1449,82 @@ fn a_cve_job_keeps_the_platform_s_upgrade_and_nothing_else() {
         "{}",
         beyond.detail
     );
+}
+
+/// #509: a patch that adds a secret fails the `secrets` step, which names
+/// the file, the line and the kind but never the value; the steps after it
+/// do not run. A repo exception for a fixture lets it through.
+#[test]
+fn a_patch_adding_a_secret_fails_unless_the_repo_allows_it() {
+    let rust = profile(
+        Language::Rust,
+        "[gate]\nformat = false\nlint = false\nrepro_test = false\ntest = [\"true\"]\ncoverage = false\n",
+    );
+    let repo = Repo::new("rust", &[]);
+    // Built at run time, so no secret-shaped string sits in the source.
+    let key = format!("AKIA{}", "QWERTYUIOP234567");
+    repo.write(
+        "tests/fixtures/creds.txt",
+        &format!("aws_access_key_id = {key}\n"),
+    );
+    let dir = repo.dir();
+    let allowed = Default::default();
+    let work = repo.work();
+    let gate = |sub: &str, secrets: aegis_gate::SecretPolicy| {
+        aegis_gate::run_gate(&aegis_gate::GateRequest {
+            repo: &dir,
+            base: "main",
+            profile: &rust,
+            allowed: &allowed,
+            repro: None,
+            work_dir: &work.join(sub),
+            env: vec![],
+            step_timeout: Duration::from_secs(10),
+            cancel: CancelToken::new(),
+            sandbox: None,
+            fetch: None,
+            build_cache: None,
+            allowed_tests: vec![],
+            reference_groups: vec![],
+            sonar: None,
+            audit: Default::default(),
+            scope: aegis_gate::ScopePolicy::default(),
+            secrets,
+            parts: vec![],
+            sidecars: None,
+            dependency_policy: Default::default(),
+        })
+        .unwrap()
+    };
+
+    let report = gate("blocked", aegis_gate::SecretPolicy::default());
+    let step = report.step(StepName::Secrets).unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{report}");
+    assert!(
+        step.detail
+            .contains("tests/fixtures/creds.txt:1: aws-access-key"),
+        "{}",
+        step.detail
+    );
+    assert!(!step.detail.contains(&key), "the value is never shown");
+    assert!(!report.to_string().contains(&key));
+    assert_eq!(report.secrets_found, 1);
+    assert_eq!(
+        report.step(StepName::Test).unwrap().status,
+        StepStatus::Skipped(Skip::NotRun)
+    );
+    assert!(!report.passed());
+
+    let fixture = aegis_gate::SecretPolicy {
+        allow: vec![aegis_gate::SecretException {
+            path: "tests/fixtures/*".into(),
+            kinds: vec!["aws-access-key".into()],
+            reason: "a fake key the parser tests read".into(),
+        }],
+    };
+    let report = gate("allowed", fixture);
+    let step = report.step(StepName::Secrets).unwrap();
+    assert_eq!(step.status, StepStatus::Passed, "{report}");
+    assert!(step.detail.contains("1 let through"), "{}", step.detail);
+    assert_eq!(report.secrets_found, 0);
 }

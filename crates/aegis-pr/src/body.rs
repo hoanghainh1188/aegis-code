@@ -154,7 +154,9 @@ fn mark(step: &aegis_gate::StepReport, coverage: Option<f64>) -> Option<String> 
     let id = step.name.id();
     Some(match (&step.status, step.name) {
         (StepStatus::Skipped(Skip::NotInProfile | Skip::NoDependencyChange), _) => return None,
-        (StepStatus::Passed, StepName::Scope) if step.detail.is_empty() => return None,
+        (StepStatus::Passed, StepName::Scope | StepName::Secrets) if step.detail.is_empty() => {
+            return None;
+        }
         (StepStatus::Passed, StepName::Coverage) => match coverage {
             Some(p) => format!("coverage {p:.1}%"),
             None => "coverage ✔".to_owned(),
@@ -365,6 +367,7 @@ mod tests {
             },
             parts: vec![String::new()],
             scope_warnings: vec![],
+            secrets_found: 0,
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
@@ -429,6 +432,7 @@ mod tests {
                 "patch changed 25 files, exceeding limit of 20".into(),
                 "deleted test file `tests/foo.rs` is not allowed by patch scope policy".into(),
             ],
+            secrets_found: 0,
         };
         let body = render(&PrContent {
             issue_url: "https://github.com/o/r/issues/1".into(),
@@ -467,6 +471,7 @@ mod tests {
             references: aegis_gate::UpdatedReferences::default(),
             parts: vec![String::new()],
             scope_warnings: vec![],
+            secrets_found: 0,
         };
         let flag = |n: usize| InputFlagNote {
             source: "file".into(),

@@ -1012,6 +1012,7 @@ pub(crate) async fn gate(
         cfg.repo.scope_policy(),
     );
     let sidecars = cfg.repo.gate_sidecars(&cfg.run);
+    let secrets = cfg.repo.secrets.clone();
     let report = tokio::task::spawn_blocking(move || {
         let (
             repo,
@@ -1060,6 +1061,7 @@ pub(crate) async fn gate(
             sonar,
             audit,
             scope,
+            secrets,
             parts,
             sidecars,
             dependency_policy,
@@ -1425,6 +1427,10 @@ where
         let report = gate(cfg, profiles, tree, base, job_dir, &answer, policy, cancel).await?;
         ledger
             .gate_run(gate_run(&report, gate_started.elapsed()))
+            .await?;
+        // The patch does not reach a PR; the agent is told where (#509).
+        ledger
+            .secrets_blocked("patch", count(report.secrets_found))
             .await?;
         if report.cancelled() {
             return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));

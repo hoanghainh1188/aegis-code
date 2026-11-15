@@ -49,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sonar: None,
         audit: Default::default(),
         scope: aegis_gate::ScopePolicy::default(),
+        secrets: aegis_gate::SecretPolicy::default(),
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),

@@ -1,4 +1,7 @@
-//! Secret values hidden from what the model sees (design §7). Text from
+//! Secret values hidden from what the model sees (design §7), and kept
+//! out of what the platform sends (#509): the gate's `secrets` step scans
+//! the lines a patch adds with these rules, and every text posted to a
+//! forge or a tracker passes [`redact`] first. Text from
 //! the repo (file windows, search hits, edit snippets) and from outside
 //! (issues, gate logs) is scanned for common secret shapes; each value is
 //! replaced by `[REDACTED:<kind>]`. Only the value goes: the rest of the
@@ -343,6 +346,22 @@ pub fn redact(text: &str) -> Redacted {
         text: lines.concat(),
         hidden,
     }
+}
+
+/// The kinds of secret on `line`, one per value, as [`redact`] would
+/// hide them; a PEM private key's `BEGIN` line counts as `private-key`.
+/// Never the values.
+pub fn kinds_on(line: &str) -> Vec<&'static str> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    if line.contains(PEM_BEGIN) && line.contains("PRIVATE KEY-----") {
+        return vec!["private-key"];
+    }
+    let mut hidden = BTreeMap::new();
+    redact_line(line, &mut hidden);
+    hidden
+        .into_iter()
+        .flat_map(|(kind, n)| std::iter::repeat_n(kind, n))
+        .collect()
 }
 
 #[cfg(test)]

@@ -32,6 +32,7 @@ use crate::parts::{self, GatePart};
 use crate::report::{GateReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail};
 use crate::sandbox::Sandbox;
 use crate::scope::{ScopePolicy, analyze_scope};
+use crate::secret_scan::{SecretPolicy, scan_patch};
 use crate::sidecar::{SidecarSession, Sidecars, check_sidecars};
 use crate::sonar::{self, SonarStep};
 use crate::{GateError, deps};
@@ -92,6 +93,8 @@ pub struct GateRequest<'a> {
     pub audit: AuditPolicy,
     /// Patch scope limit and enforcement policy (#359).
     pub scope: ScopePolicy,
+    /// Secrets the repo lets the `secrets` step pass (#509).
+    pub secrets: SecretPolicy,
     /// Directories another profile owns (#71); `profile`, `sandbox`,
     /// `fetch` and `build_cache` are the rest of the repo's. Only the parts
     /// the patch changes are checked, the rest of the repo first.
@@ -230,6 +233,8 @@ struct Run<'a> {
     references: UpdatedReferences,
     /// Build caches to refresh from the base copy, with their part's dir.
     seeded: Vec<(BuildCache, String)>,
+    /// Secrets the `secrets` step found in the patch (#509).
+    secrets_found: usize,
 }
 
 /// The reruns of suspected new failures, and those that failed in every
@@ -588,6 +593,35 @@ impl<'a> Run<'a> {
                 fails_on_base: false,
             })
         }
+    }
+
+    /// The lines the whole patch adds, scanned for secrets (#509): any
+    /// found fails the step, named by file, line and kind, never by value.
+    fn secrets(&mut self) -> Result<StepReport, GateError> {
+        let name = StepName::Secrets;
+        let scan = scan_patch(
+            self.req.repo,
+            self.req.base,
+            &self.all_changes,
+            &self.req.secrets,
+        )?;
+        self.secrets_found = scan.found.len();
+        let detail = scan.summary();
+        let status = if scan.found.is_empty() {
+            StepStatus::Passed
+        } else {
+            StepStatus::Failed
+        };
+        let detail = match status {
+            StepStatus::Failed => format!(
+                "the patch adds {} secret(s); remove them (read the value from the \
+                 environment or a secret store instead), or, for a fake value in a test \
+                 fixture, ask for a `secrets.allow` exception:\n{detail}",
+                scan.found.len()
+            ),
+            _ => detail,
+        };
+        Ok(report(name, status, &[], detail))
     }
 
     fn dependencies(&mut self) -> Result<StepReport, GateError> {
@@ -1471,6 +1505,7 @@ impl<'a> Run<'a> {
         let gate = &self.part.profile.gate;
         match name {
             StepName::Scope => self.scope(),
+            StepName::Secrets => self.secrets(),
             StepName::Integrity => Ok(self.integrity()),
             StepName::Dependencies => self.dependencies(),
             StepName::Format => self.simple(name, &gate.format.clone()),
@@ -1631,6 +1666,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         tree,
         references: UpdatedReferences::default(),
         seeded: vec![],
+        secrets_found: 0,
     };
     let mut reports: Vec<Vec<(String, StepReport)>> = vec![vec![]; StepName::ALL.len()];
     let mut stop: Option<Skip> = None;
@@ -1653,6 +1689,10 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
                 None if name == StepName::Sonar && n + 1 < touched.len() => {
                     StepReport::skipped(name, Skip::NotConfigured)
                 }
+                // The secrets step scans the whole patch once (#509).
+                None if name == StepName::Secrets && n > 0 => {
+                    StepReport::skipped(name, Skip::NotConfigured)
+                }
                 None => run.step(name)?,
             };
             stop = stop.or(match step.status {
@@ -1661,7 +1701,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
                 _ => None,
             });
             let label = match name {
-                StepName::Sonar => "the whole repo".to_owned(),
+                StepName::Sonar | StepName::Secrets => "the whole repo".to_owned(),
                 _ => label.clone(),
             };
             reports[k].push((label, step));
@@ -1690,6 +1730,7 @@ pub fn run_gate(req: &GateRequest<'_>) -> Result<GateReport, GateError> {
         references: run.references,
         parts: touched.iter().map(|&i| dirs[i].clone()).collect(),
         scope_warnings,
+        secrets_found: run.secrets_found,
     })
 }
 

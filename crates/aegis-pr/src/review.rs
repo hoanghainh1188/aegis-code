@@ -371,7 +371,7 @@ impl GitLab {
             .call(
                 reqwest::Method::POST,
                 &format!("merge_requests/{iid}/notes"),
-                Some(&serde_json::json!({ "body": body })),
+                Some(&serde_json::json!({ "body": crate::masked(body) })),
             )
             .await?;
         Ok(())

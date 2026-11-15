@@ -18,6 +18,21 @@ use crate::review::ReviewRound;
 use crate::{ForkConfig, ForkPlatform};
 use crate::{IssueInput, LifecycleError, Platform};
 
+/// `text` with every secret value masked before it leaves the platform
+/// (#509), the masked ones counted in the ledger at `place`. Pure and
+/// infallible: no text is sent unscanned.
+async fn masked<S: LedgerStore + Sync>(
+    ledger: &mut IssueLedger<'_, S>,
+    place: &str,
+    text: &str,
+) -> Result<String, LifecycleError> {
+    let r = aegis_gate::secrets::redact(text);
+    ledger
+        .secrets_blocked(place, u32::try_from(r.count()).unwrap_or(u32::MAX))
+        .await?;
+    Ok(r.text)
+}
+
 /// Line coverage from the reports the gate's coverage step left in
 /// `tree`, of the parts it checked (`parts`, #199): a part it did not check
 /// may hold a report of an earlier attempt. Several reports count their
@@ -98,13 +113,24 @@ where
             .model_call(Tier::Light, &light.id, &response.usage)
             .await?;
     }
+    let commit_message = masked(ledger, "commit message", &message.text).await?;
+    // Masked before rendering too: rendering makes links inert, which
+    // could hide a URL's password from the scan of the whole PR.
+    let cause = masked(ledger, "PR", &answer.cause).await?;
+    let mut changes = Vec::with_capacity(answer.changes.len());
+    for c in &answer.changes {
+        changes.push(aegis_pr::ChangeNote {
+            location: masked(ledger, "PR", &c.location).await?,
+            note: masked(ledger, "PR", &c.note).await?,
+        });
+    }
     let forge = fork_forge(platform)?;
     let remote = fork_remote(platform)?;
     let identity = Identity {
         name: cfg.identity.name.clone(),
         email: cfg.identity.email.clone(),
     };
-    let pushed = push_gated(tree, &issue.id, gate, &message.text, &identity, &remote)?;
+    let pushed = push_gated(tree, &issue.id, gate, &commit_message, &identity, &remote)?;
     // An eval run's PR targets a branch at the issue's old base, so it shows
     // only the agent's patch (#98).
     let target = match &issue.hidden {
@@ -117,8 +143,8 @@ where
     let record = ledger.record();
     let body = render(&PrContent {
         issue_url: issue.url.clone(),
-        cause: answer.cause.clone(),
-        changes: answer.changes.clone(),
+        cause,
+        changes,
         repro_test: answer.repro.as_ref().map(|r| r.test.clone()),
         allowed_test_changes: answer.allowed_test_changes.clone(),
         allowed_reference_changes: answer.allowed_reference_changes.clone(),
@@ -138,7 +164,8 @@ where
             })
             .collect(),
     });
-    let title = message.text.lines().next().unwrap_or("fix").to_owned();
+    let body = masked(ledger, "PR", &body).await?;
+    let title = commit_message.lines().next().unwrap_or("fix").to_owned();
     match forge
         .open_request(&pushed.branch, &target, &title, &body, cfg.run.draft_prs)
         .await
@@ -211,6 +238,7 @@ where
             .model_call(Tier::Light, &light.id, &response.usage)
             .await?;
     }
+    let commit_message = masked(ledger, "commit message", &message.text).await?;
     let remote = fork_remote(platform)?;
     let identity = Identity {
         name: cfg.identity.name.clone(),
@@ -221,7 +249,7 @@ where
         round.branch_id(),
         gate,
         &round.pull.head_sha,
-        &message.text,
+        &commit_message,
         &identity,
         &remote,
     )
@@ -233,7 +261,7 @@ where
     })?;
     // The commit is on the PR: a reply that fails to post is told, not
     // an error.
-    let reply = round.reply(&pushed.commit, answer);
+    let reply = masked(ledger, "review reply", &round.reply(&pushed.commit, answer)).await?;
     let note = fork_forge(platform)?
         .comment_on_request(round.pull.number, &reply)
         .await

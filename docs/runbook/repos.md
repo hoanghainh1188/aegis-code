@@ -115,6 +115,17 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    - A repo whose build needs another command overrides it in `[repo.overrides]` (`upgrade = ["…", "{package}", "{version}"]`), or turns it off with `upgrade = false`.
    - Only the root of a monorepo is upgraded for now. The job's id defaults to `cve-<package>-<version>`; the PR links the advisory on osv.dev.
 
+9. **Secrets the patch may add (#509):** the gate's `secrets` step fails a patch whose added lines hold a provider key, a token, a private key, a high-entropy string or a new `.env`/key file, naming the file, line and kind but never the value. A repository whose tests read fake keys from fixtures lets them through, by path and kind, each with a reason the job page shows:
+
+   ```toml
+   [[settings.secrets.allow]]
+   path = "tests/fixtures/tls/*"          # `*` matches across `/`
+   kinds = ["private-key"]                # empty: any kind
+   reason = "self-signed keys for the TLS tests"
+   ```
+
+   Keep exceptions narrow: a path that also holds real config hides real leaks. Texts the platform posts (commit message, PR, review replies, issue and tracker comments) are masked in any case; there is no exception for them.
+
 ### RBAC and Budgets
 
 7. Grant dashboard permissions: `... grant <email> <repo-slug> maintainer|reviewer|viewer` (maintainer: start/cancel jobs, set budgets; reviewer: review PRs; viewer: read-only).
