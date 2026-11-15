@@ -19,10 +19,12 @@ use crate::auth::Access;
 
 /// The trackers a job may be read from, as `aegis --source` takes
 /// them; the label shown for each.
-pub(super) const SOURCES: [(&str, &str); 4] = [
+pub(super) const SOURCES: [(&str, &str); 6] = [
     ("github", "GitHub issue (owner/repo#12)"),
     ("gitlab", "GitLab issue (group/project#12)"),
     ("jira", "Jira ticket (KEY-12)"),
+    ("jsm", "JSM ticket (KEY-12)"),
+    ("servicenow", "ServiceNow incident (INC0010001)"),
     ("backlog", "Backlog ticket (KEY-12)"),
 ];
 

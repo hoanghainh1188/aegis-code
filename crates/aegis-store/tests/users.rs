@@ -32,6 +32,8 @@ fn new_job(repo: RepoId, key: &str) -> NewJob {
         issue_ref: format!("x/y#{key}"),
         ledger_key: IssueId::parse(key).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, status, outcome,\n                    attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round\n             FROM jobs WHERE review_of = $1 ORDER BY review_round, id LIMIT 100",
+  "query": "UPDATE jobs SET status = $2, outcome = $3, reason = $4, pr_url = $5,\n                                 retries = retries + $6,\n                                 run_after = CASE WHEN $7::float8 IS NULL THEN run_after\n                                             ELSE now() + make_interval(secs => $7) END,\n                                 locked_by = NULL, locked_until = NULL, updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,28 @@
       },
       {
         "ordinal": 5,
+        "name": "priority",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "sla_deadline",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "sla_deadline"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -70,7 +92,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "outcome",
         "type_info": "Text",
         "origin": {
@@ -81,7 +103,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "attempts",
         "type_info": "Int4",
         "origin": {
@@ -92,7 +114,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "locked_by",
         "type_info": "Text",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "locked_until",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +136,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +147,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +158,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "run_after",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,7 +169,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "retries",
         "type_info": "Int4",
         "origin": {
@@ -158,7 +180,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "cancel_requested",
         "type_info": "Bool",
         "origin": {
@@ -169,7 +191,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "reason",
         "type_info": "Text",
         "origin": {
@@ -180,7 +202,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "pr_url",
         "type_info": "Text",
         "origin": {
@@ -191,7 +213,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "retry_of",
         "type_info": "Int8",
         "origin": {
@@ -202,7 +224,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "review_of",
         "type_info": "Int8",
         "origin": {
@@ -213,7 +235,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 21,
         "name": "review_round",
         "type_info": "Int4",
         "origin": {
@@ -226,7 +248,13 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Float8"
       ]
     },
     "nullable": [
@@ -235,6 +263,8 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       true,
       false,
@@ -252,5 +282,5 @@
       false
     ]
   },
-  "hash": "3ca4650b271fee466edb4de8332fee1a83f1039640f16c0afa4e99d6149ad0f7"
+  "hash": "6469e5a06e5d4d20eeecced645e3017689689ec65c5546e38a176d802ce9df7b"
 }

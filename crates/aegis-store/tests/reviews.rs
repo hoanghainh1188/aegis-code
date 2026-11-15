@@ -31,6 +31,8 @@ async fn setup(s: &Store) -> Job {
         issue_ref: "acme/app#3".into(),
         ledger_key: IssueId::parse("acme-app-3-1".to_owned()).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap()

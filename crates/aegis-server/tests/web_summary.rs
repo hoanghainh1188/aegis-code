@@ -54,6 +54,8 @@ async fn job(s: &Store, repo: RepoId, key: &str, events: &[LedgerEvent]) -> JobI
             issue_ref: format!("x/y#{key}"),
             ledger_key: id.clone(),
             source: JobSource::Github,
+            priority: None,
+            sla_deadline: None,
         })
         .await
         .unwrap();

@@ -25,7 +25,7 @@ use aegis_ledger::IssueId;
 use aegis_lifecycle::CveTarget;
 use aegis_store::{
     Job, JobFilter, JobId, JobSource, JobStatus, NewJob, Page, PageOf, RepoBudget, RepoId,
-    RepoRole, Run, Store, StoreError,
+    RepoRole, Run, SlaPriority, Store, StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -263,6 +263,8 @@ struct JobView {
     issue_ref: String,
     ledger_key: String,
     source: &'static str,
+    priority: Option<&'static str>,
+    sla_deadline: Option<String>,
     status: &'static str,
     outcome: Option<aegis_ledger::Outcome>,
     reason: Option<String>,
@@ -288,6 +290,8 @@ impl From<Job> for JobView {
             issue_ref: j.issue_ref,
             ledger_key: j.ledger_key.as_str().to_owned(),
             source: j.source.as_str(),
+            priority: j.priority.map(SlaPriority::as_str),
+            sla_deadline: j.sla_deadline.map(|t| t.to_rfc3339()),
             status: j.status.as_str(),
             outcome: j.outcome,
             reason: j.reason,
@@ -438,6 +442,8 @@ pub(crate) fn new_job(
         issue_ref: issue_ref.to_owned(),
         ledger_key,
         source,
+        priority: None,
+        sla_deadline: None,
     })
 }
 
@@ -465,6 +471,8 @@ pub(crate) fn cve_job(repo_id: RepoId, target: &CreateCveJob) -> Result<NewJob, 
         issue_ref,
         ledger_key,
         source: JobSource::Cve,
+        priority: None,
+        sla_deadline: None,
     })
 }
 

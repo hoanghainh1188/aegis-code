@@ -140,6 +140,8 @@ impl Backlog {
             title: issue.summary,
             body: issue.description.unwrap_or_default(),
             logs,
+            priority: None,
+            sla_deadline: None,
         })
     }
 

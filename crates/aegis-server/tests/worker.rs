@@ -180,6 +180,8 @@ async fn job(s: &Store, repo: RepoId, issue_ref: &str) -> Job {
         issue_ref: issue_ref.into(),
         ledger_key: IssueId::parse(key).unwrap(),
         source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
     })
     .await
     .unwrap()

@@ -65,6 +65,8 @@ async fn job(s: &Store, repo: RepoId, key: &str) {
             issue_ref: format!("x/y#{key}"),
             ledger_key: id(key),
             source: JobSource::Cli,
+            priority: None,
+            sla_deadline: None,
         })
         .await
         .unwrap();

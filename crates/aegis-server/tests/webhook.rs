@@ -619,6 +619,8 @@ async fn a_review_on_the_agents_pr_queues_a_round_for_writers_only() {
             issue_ref: "typst/typst#9".into(),
             ledger_key: aegis_ledger::IssueId::parse("typst-typst-9-1".to_owned()).unwrap(),
             source: JobSource::Github,
+            priority: None,
+            sla_deadline: None,
         })
         .await
         .unwrap();
@@ -728,6 +730,8 @@ async fn a_fix_note_on_the_agents_gitlab_mr_queues_a_round_for_developers() {
             issue_ref: "acme/app#9".into(),
             ledger_key: aegis_ledger::IssueId::parse("app-9-1".to_owned()).unwrap(),
             source: JobSource::Gitlab,
+            priority: None,
+            sla_deadline: None,
         })
         .await
         .unwrap();

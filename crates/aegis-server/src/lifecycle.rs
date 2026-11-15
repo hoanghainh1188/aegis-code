@@ -325,9 +325,10 @@ impl LifecycleRunner {
                     ..read
                 }
             }
-            (None, JobSource::Jira | JobSource::Backlog) => {
-                ticket_issue(job, &repo, &self.secrets).await?
-            }
+            (
+                None,
+                JobSource::Jira | JobSource::Backlog | JobSource::Jsm | JobSource::Servicenow,
+            ) => ticket_issue(job, &repo, &self.secrets).await?,
             (None, JobSource::Sonar) => sonar_issue(job, &repo, &self.store, &self.secrets).await?,
             (None, JobSource::Gitlab) => {
                 gitlab_issue(job, &config.repo.fork, &github_token).await?

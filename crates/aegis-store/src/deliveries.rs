@@ -132,19 +132,22 @@ pub(crate) async fn queue_in(
     // live and so not under that index.
     let created = sqlx::query_as!(
         JobRow,
-        "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, status, reason)
-             SELECT $1, $2, $3, $4,
-                    CASE WHEN $5::text IS NULL THEN 'queued' ELSE 'cancelled' END, $5
+        "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline, status, reason)
+             SELECT $1, $2, $3, $4, $5, $6,
+                    CASE WHEN $7::text IS NULL THEN 'queued' ELSE 'cancelled' END, $7
              WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2
                                AND status IN ('queued', 'running'))
              ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING
-             RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                       attempts, locked_by, locked_until, created_at, updated_at,
-                       run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                       status, outcome, attempts, locked_by, locked_until, created_at,
+                       updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                       retry_of, review_of, review_round",
         job.repo_id.0,
         job.issue_ref,
         job.ledger_key.as_str(),
         job.source.as_str(),
+        job.priority.map(crate::SlaPriority::as_str),
+        job.sla_deadline,
         refused,
     )
     .fetch_optional(&mut **tx)

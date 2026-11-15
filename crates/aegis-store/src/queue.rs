@@ -204,9 +204,10 @@ impl Store {
                                           ELSE reason END,
                                  updated_at = now()
                  FROM next WHERE jobs.id = next.id
-                 RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                           attempts, locked_by, locked_until, created_at, updated_at,
-                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                 RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round",
                 worker,
                 secs(lease),
                 i64::from(max_workers),
@@ -337,9 +338,10 @@ impl Store {
                                              ELSE now() + make_interval(secs => $7) END,
                                  locked_by = NULL, locked_until = NULL, updated_at = now()
                  WHERE id = $1
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                           attempts, locked_by, locked_until, created_at, updated_at,
-                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round",
                 run.job_id.0,
                 end.job_status().as_str(),
                 outcome,
@@ -411,9 +413,10 @@ impl Store {
                                    ELSE reason END,
                      updated_at = now()
                  WHERE id = $1 AND status IN ('queued', 'running')
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                           attempts, locked_by, locked_until, created_at, updated_at,
-                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round",
                 job.0,
             )
             .fetch_optional(&mut *tx)
@@ -449,7 +452,8 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         let work = async {
             let old = sqlx::query!(
-                "SELECT repo_id, issue_ref, ledger_key, source, status, review_of, review_round
+                "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                        status, review_of, review_round
                  FROM jobs WHERE id = $1 FOR UPDATE",
                 job.0,
             )
@@ -475,15 +479,19 @@ impl Store {
             let key = IssueId::parse(next_retry_key(base, &taken))?;
             let row = sqlx::query_as!(
                 JobRow,
-                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, retry_of, review_of, review_round)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, status, outcome,
-                           attempts, locked_by, locked_until, created_at, updated_at,
-                           run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round",
+                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                                   retry_of, review_of, review_round)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round",
                 old.repo_id,
                 old.issue_ref,
                 key.as_str(),
                 old.source,
+                old.priority,
+                old.sla_deadline,
                 job.0,
                 // A review round run again is the same round of the same PR.
                 old.review_of,

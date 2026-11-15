@@ -9,9 +9,9 @@ use aegis_server::tracker::{TrackerNotifier, poll_if_due, poll_once, ticket_issu
 use aegis_server::worker::JobNotifier;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, NewRepo, Page, Repo, RepoMode, Store,
+    Job, JobFilter, JobId, JobSource, JobStatus, NewRepo, Page, Repo, RepoMode, SlaPriority, Store,
 };
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use serde_json::{Value, json};
 use wiremock::matchers::{basic_auth, body_partial_json, body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -78,6 +78,8 @@ fn ended(id: JobId, repo: &Repo, source: JobSource, key: &str, pr: Option<&str>)
         issue_ref: key.into(),
         ledger_key: IssueId::parse(format!("{}-1", key.replace(['/', '#'], "-"))).unwrap(),
         source,
+        priority: None,
+        sla_deadline: None,
         status: JobStatus::Done,
         outcome: Some(if pr.is_some() {
             Outcome::PrOpened
@@ -312,4 +314,165 @@ async fn one_poll_per_period_whoever_asks() {
     // Another process, or the same one early: not due.
     poll_if_due(s, &secrets(), hour).await.unwrap();
     assert_eq!(jobs(s).await.len(), 1);
+}
+
+#[tokio::test]
+async fn itsm_jsm_and_servicenow_poll_store_sla_and_sync_results_back() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+
+    let jsm_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/search/jql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issues": [{
+                "key": "SD-10",
+                "fields": {
+                    "summary": "Billing API timeout",
+                    "priority": { "name": "Critical" },
+                    "customfield_10050": {
+                        "ongoingCycle": {
+                            "breachTime": { "iso8601": "2026-12-01T14:00:00Z" }
+                        }
+                    }
+                }
+            }]
+        })))
+        .mount(&jsm_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/rest/servicedeskapi/request/SD-10/comment"))
+        .and(body_partial_json(json!({ "public": false })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "1" })))
+        .expect(1)
+        .mount(&jsm_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/rest/api/2/issue/SD-10/remotelink"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": 1 })))
+        .expect(1)
+        .mount(&jsm_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/issue/SD-10/transitions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "transitions": [{ "id": "21", "name": "In Review" }]
+        })))
+        .expect(1)
+        .mount(&jsm_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/rest/api/2/issue/SD-10/transitions"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&jsm_server)
+        .await;
+
+    let sn_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/now/table/incident"))
+        .and(wiremock::matchers::query_param(
+            "sysparm_query",
+            "active=true^state=1",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": [{
+                "sys_id": "sn77",
+                "number": "INC0010077",
+                "short_description": "SSO session leak",
+                "priority": "2",
+                "sla_due": "2026-12-02 09:00:00"
+            }]
+        })))
+        .mount(&sn_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/now/table/incident"))
+        .and(wiremock::matchers::query_param(
+            "sysparm_query",
+            "number=INC0010077",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": [{ "sys_id": "sn77" }]
+        })))
+        .mount(&sn_server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/now/table/incident/sn77"))
+        .and(body_partial_json(json!({ "state": "3" })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "result": { "sys_id": "sn77" } })),
+        )
+        .expect(1)
+        .mount(&sn_server)
+        .await;
+
+    let jsm_repo = repo(
+        s,
+        "jsm-app",
+        Some(json!({
+            "kind": "jsm",
+            "url": jsm_server.uri(),
+            "user": "bot@acme.com",
+            "token_env": JIRA_TOKEN,
+            "jql": "project = SD",
+            "sla_field": "customfield_10050",
+            "pr_transition": "In Review"
+        })),
+    )
+    .await;
+    let sn_repo = repo(
+        s,
+        "sn-ops",
+        Some(json!({
+            "kind": "servicenow",
+            "url": sn_server.uri(),
+            "user": "aegis",
+            "token_env": BACKLOG_KEY,
+            "query": "active=true^state=1",
+            "diagnosis_state": "3"
+        })),
+    )
+    .await;
+
+    poll_once(s, &secrets()).await.unwrap();
+    let stored = jobs(s).await;
+    assert_eq!(stored.len(), 2);
+
+    assert_eq!(stored[0].source, JobSource::Jsm);
+    assert_eq!(stored[0].issue_ref, "SD-10");
+    assert_eq!(stored[0].priority, Some(SlaPriority::P1));
+    assert_eq!(
+        stored[0].sla_deadline,
+        Some(Utc.with_ymd_and_hms(2026, 12, 1, 14, 0, 0).unwrap())
+    );
+
+    assert_eq!(stored[1].source, JobSource::Servicenow);
+    assert_eq!(stored[1].issue_ref, "INC0010077");
+    assert_eq!(stored[1].priority, Some(SlaPriority::P2));
+    assert_eq!(
+        stored[1].sla_deadline,
+        Some(Utc.with_ymd_and_hms(2026, 12, 2, 9, 0, 0).unwrap())
+    );
+
+    let notifier = TrackerNotifier::new(s.clone(), secrets());
+    notifier
+        .job_ended(&ended(
+            stored[0].id,
+            &jsm_repo,
+            JobSource::Jsm,
+            "SD-10",
+            Some("https://github.com/acme/jsm-app/pull/4"),
+        ))
+        .await;
+    notifier
+        .job_ended(&ended(
+            stored[1].id,
+            &sn_repo,
+            JobSource::Servicenow,
+            "INC0010077",
+            None,
+        ))
+        .await;
+    db.drop().await;
 }

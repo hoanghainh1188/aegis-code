@@ -33,6 +33,10 @@ pub struct Job {
     pub repo_id: i64,
     pub issue_ref: String,
     pub source: String,
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub sla_deadline: Option<String>,
     pub status: String,
     #[serde(default)]
     pub outcome: Option<String>,

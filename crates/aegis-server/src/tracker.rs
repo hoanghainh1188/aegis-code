@@ -18,10 +18,11 @@ use aegis_ledger::IssueId;
 use aegis_lifecycle::IssueInput;
 use aegis_secrets::Secrets;
 use aegis_store::{
-    Delivered, Job, JobSource, NewDelivery, NewJob, Page, Repo, Store, StoreError, WebhookSource,
+    Delivered, Job, JobSource, NewDelivery, NewJob, Page, Repo, SlaPriority, Store, StoreError,
+    WebhookSource,
 };
 use aegis_tracker::{
-    ApmClient, ApmConfig, Report, TelemetryQuery, Tracker, TrackerConfig, TrackerError,
+    ApmClient, ApmConfig, Priority, Report, TelemetryQuery, Tracker, TrackerConfig, TrackerError,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -167,6 +168,16 @@ fn sources(config: &TrackerConfig) -> (WebhookSource, JobSource) {
     match config {
         TrackerConfig::Jira(_) => (WebhookSource::Jira, JobSource::Jira),
         TrackerConfig::Backlog(_) => (WebhookSource::Backlog, JobSource::Backlog),
+        TrackerConfig::Jsm(_) => (WebhookSource::Jsm, JobSource::Jsm),
+        TrackerConfig::Servicenow(_) => (WebhookSource::Servicenow, JobSource::Servicenow),
+    }
+}
+
+fn map_priority(p: Priority) -> SlaPriority {
+    match p {
+        Priority::P1 => SlaPriority::P1,
+        Priority::P2 => SlaPriority::P2,
+        Priority::P3 => SlaPriority::P3,
     }
 }
 
@@ -227,8 +238,8 @@ async fn poll_repo(store: &Store, secrets: &Secrets, repo: &Repo) -> Result<Vec<
             return Ok(Vec::new());
         }
     };
-    let keys = match tracker.search().await {
-        Ok(keys) => keys,
+    let tickets = match tracker.search_tickets().await {
+        Ok(tickets) => tickets,
         Err(e) => {
             tracing::warn!(repo = %repo.slug, error = %e, "polling the tracker");
             return Ok(Vec::new());
@@ -236,7 +247,8 @@ async fn poll_repo(store: &Store, secrets: &Secrets, repo: &Repo) -> Result<Vec<
     };
     let (source, job_source) = sources(&config);
     let mut refused = Vec::new();
-    for key in keys {
+    for ticket in tickets {
+        let key = ticket.key;
         let Ok(ledger_key) = IssueId::parse(default_ledger_key(&key)) else {
             continue;
         };
@@ -250,6 +262,8 @@ async fn poll_repo(store: &Store, secrets: &Secrets, repo: &Repo) -> Result<Vec<
             issue_ref: key.clone(),
             ledger_key,
             source: job_source,
+            priority: ticket.priority.map(map_priority),
+            sla_deadline: ticket.sla_deadline,
         };
         match store.deliver_job(&delivery, &job).await? {
             Delivered::Queued(job) => {
@@ -348,7 +362,10 @@ impl TrackerNotifier {
 
 impl JobNotifier for TrackerNotifier {
     async fn job_ended(&self, job: &Job) {
-        if !matches!(job.source, JobSource::Jira | JobSource::Backlog) {
+        if !matches!(
+            job.source,
+            JobSource::Jira | JobSource::Backlog | JobSource::Jsm | JobSource::Servicenow
+        ) {
             return;
         }
         match self.report(job).await {
