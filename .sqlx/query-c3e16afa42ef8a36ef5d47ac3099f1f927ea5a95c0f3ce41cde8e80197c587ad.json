@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at\n             FROM repos WHERE slug = $1",
+  "query": "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id\n             FROM repos WHERE slug = $1",
   "describe": {
     "columns": [
       {
@@ -101,6 +101,17 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "tenant_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "tenant_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -117,8 +128,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "527411d891ec789464ae1cfe30e9c6d887e2ced528086c3804ec2326a4c486f9"
+  "hash": "c3e16afa42ef8a36ef5d47ac3099f1f927ea5a95c0f3ce41cde8e80197c587ad"
 }

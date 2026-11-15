@@ -5,6 +5,7 @@
 //! aegis-server --config <file> grant|revoke|token|revoke-tokens|revoke-sessions …
 //! aegis-server --config <file> repo add|update|show|list …
 //! aegis-server --config <file> pause-all [--emergency] [--reason …] | resume-all
+//! aegis-server --config <file> tenant add|list|limits|admin|revoke-admin|move …
 //! ```
 //!
 //! Secrets come from `[secrets]` (#30): AWS Secrets Manager, or the
@@ -48,7 +49,7 @@ use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::tracker::{self, TrackerNotifier};
 use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
-use aegis_server::{Role, api, metrics, pause_all, repo_cli, sonar, worker};
+use aegis_server::{Role, api, metrics, pause_all, repo_cli, sonar, tenant_cli, worker};
 use aegis_store::Store;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -287,6 +288,8 @@ async fn run_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode
             .map_err(|e| format!("{DATABASE_URL}: {e}"))?;
         let out = if pause_all::is_command(&argv[0]) {
             pause_all::run(&store, argv).await
+        } else if tenant_cli::is_command(&argv[0]) {
+            tenant_cli::run(&store, &argv[1..]).await
         } else if repo_cli::is_command(&argv[0]) {
             match modes(&config) {
                 Ok(modes) => repo_cli::run(&store, &modes, &secrets, &argv[1..]).await,
@@ -323,7 +326,8 @@ async fn main() -> ExitCode {
         argv.iter().map(String::as_str).collect::<Vec<_>>()[..]
         && (auth::cli::is_command(command)
             || repo_cli::is_command(command)
-            || pause_all::is_command(command))
+            || pause_all::is_command(command)
+            || tenant_cli::is_command(command))
     {
         return run_command(std::path::Path::new(config), &argv[2..]).await;
     }

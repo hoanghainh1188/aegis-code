@@ -66,6 +66,11 @@ pub struct RepoFile {
     pub mode: String,
     #[serde(default = "one")]
     pub max_concurrent_jobs: u32,
+    /// The tenant (contract) it is registered in (#525), by slug; the
+    /// default tenant when absent. Read by `add` only: a repo keeps its
+    /// tenant on `update`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
     pub settings: RepoSettings,
 }
 
@@ -105,6 +110,25 @@ impl RepoFile {
             mode,
             max_concurrent_jobs: self.max_concurrent_jobs,
             settings: self.settings.clone(),
+            tenant: None,
+        })
+    }
+
+    /// [`Self::spec`] with its tenant read from `store` (#525).
+    pub async fn spec_in(&self, store: &Store) -> Result<RepoSpec, String> {
+        let tenant = match &self.tenant {
+            None => None,
+            Some(slug) => Some(
+                store
+                    .tenant_by_slug(slug)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("no tenant `{slug}`; add it with `tenant add`"))?,
+            ),
+        };
+        Ok(RepoSpec {
+            tenant,
+            ..self.spec()?
         })
     }
 
@@ -119,6 +143,7 @@ impl RepoFile {
                 .map_err(|e| bad(e.to_string()))?,
             mode: repo.mode.as_str().into(),
             max_concurrent_jobs: repo.max_concurrent_jobs,
+            tenant: None,
             settings: serde_json::from_value(repo.config.clone())
                 .map_err(|e| bad(e.to_string()))?,
         })
@@ -173,7 +198,7 @@ pub async fn run(
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         [verb @ ("add" | "update"), file] => {
-            let spec = RepoFile::load(Path::new(file))?.spec()?;
+            let spec = RepoFile::load(Path::new(file))?.spec_in(store).await?;
             let token = read_token(secrets, &spec).await?;
             let token = token.as_deref();
             let repo = if *verb == "add" {
@@ -307,6 +332,7 @@ fork = { owner = "aegis-bot", name = "typst", token_env = "AEGIS_GITHUB_TOKEN" }
             max_concurrent_jobs: 1,
             config: serde_json::to_value(&file.settings).unwrap(),
             created_at: Default::default(),
+            tenant_id: aegis_store::TenantId::DEFAULT,
         };
         let shown = serde_json::to_string_pretty(&RepoFile::of(&repo).unwrap()).unwrap();
         let back: RepoFile = serde_json::from_str(&shown).unwrap();

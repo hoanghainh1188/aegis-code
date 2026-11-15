@@ -27,6 +27,9 @@ const MAX_FILTER_LEN: usize = 320;
 pub struct AuditQuery {
     #[serde(default)]
     repo_id: String,
+    /// A tenant's entries (#525).
+    #[serde(default)]
+    tenant_id: String,
     #[serde(default)]
     actor: String,
     #[serde(default)]
@@ -58,6 +61,7 @@ struct AuditPage<'a> {
     nonce: &'a str,
     me: &'a Me,
     repos: Vec<Choice>,
+    tenants: Vec<Choice>,
     actions: Vec<Choice>,
     actor: &'a str,
     rows: Vec<EntryRow>,
@@ -130,6 +134,12 @@ pub async fn list(
         "" => None,
         id => Some(RepoId(id.parse().map_err(|_| bad("repo"))?)),
     };
+    let tenant = match q.tenant_id.trim() {
+        "" => None,
+        id => Some(aegis_store::TenantId(
+            id.parse().map_err(|_| bad("tenant"))?,
+        )),
+    };
     let cursor = match q.cursor.trim() {
         "" => None,
         c => Some(c.parse::<i64>().map_err(|_| bad("cursor"))?),
@@ -138,6 +148,7 @@ pub async fn list(
         repo,
         actor: text_filter(&q.actor, "who")?,
         action: text_filter(&q.action, "action")?,
+        tenant,
     };
     let page = cursor.map_or(Page::first(PAGE_SIZE), |c| Page::after(c, PAGE_SIZE));
     let entries = store.audit_log_where(&filter, page).await?;
@@ -147,8 +158,9 @@ pub async fn list(
 
     let next = entries.next_page().and_then(Page::cursor).map(|c| {
         format!(
-            "/admin/audit?repo_id={}&actor={}&action={}&cursor={c}",
+            "/admin/audit?repo_id={}&tenant_id={}&actor={}&action={}&cursor={c}",
             filter.repo.map_or(String::new(), |r| r.0.to_string()),
+            filter.tenant.map_or(String::new(), |t| t.0.to_string()),
             encoded(filter.actor.as_deref().unwrap_or("")),
             encoded(filter.action.as_deref().unwrap_or("")),
         )
@@ -201,11 +213,25 @@ pub async fn list(
             value: action,
         });
     }
-    let filtered = filter.repo.is_some() || filter.actor.is_some() || filter.action.is_some();
+    let tenants = store
+        .tenants()
+        .await?
+        .into_iter()
+        .map(|t| Choice {
+            value: t.id.0.to_string(),
+            selected: filter.tenant == Some(t.id),
+            label: t.slug,
+        })
+        .collect();
+    let filtered = filter.repo.is_some()
+        || filter.tenant.is_some()
+        || filter.actor.is_some()
+        || filter.action.is_some();
     render(&AuditPage {
         nonce: nonce.as_str(),
         me: &me,
         repos: repo_choices,
+        tenants,
         actions,
         actor: filter.actor.as_deref().unwrap_or(""),
         rows,

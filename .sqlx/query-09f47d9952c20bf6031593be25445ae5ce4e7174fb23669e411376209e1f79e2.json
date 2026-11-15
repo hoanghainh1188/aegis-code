@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.id, t.slug, t.monthly_budget_usd,\n                  tenant_month_spent(t.id, $2) AS \"spent!\"\n           FROM repos r JOIN tenants t ON t.id = r.tenant_id\n           WHERE r.id = $1 AND t.monthly_budget_usd IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "monthly_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "monthly_budget_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "spent!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "09f47d9952c20bf6031593be25445ae5ce4e7174fb23669e411376209e1f79e2"
+}

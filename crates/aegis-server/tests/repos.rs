@@ -131,6 +131,7 @@ fn spec(
         mode,
         max_concurrent_jobs: max,
         settings: settings(extra),
+        tenant: None,
     }
 }
 

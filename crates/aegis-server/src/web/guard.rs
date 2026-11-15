@@ -44,6 +44,8 @@ pub struct Me {
     pub csrf: String,
     /// The masthead offers the admin pages (#329).
     pub is_admin: bool,
+    /// An admin of a tenant (#525): the masthead offers its repos' pages.
+    pub tenant_admin: bool,
     /// Every agent is paused (#510): every page says so, in a band.
     pub paused: Option<PausedBand>,
 }
@@ -191,11 +193,13 @@ async fn signed_in(auth: &Auth, request: Request, form: bool) -> Result<Request,
         })?
         .map(PausedBand::from);
     let extensions = request.extensions_mut();
+    let tenant_admin = !session.user.is_admin && access.administers_any();
     extensions.insert(access);
     extensions.insert(Me {
         name: session.user.name.clone(),
         csrf: session.csrf_token,
         is_admin: session.user.is_admin,
+        tenant_admin,
         paused,
     });
     if let Some(hash) = token {

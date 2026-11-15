@@ -115,6 +115,8 @@ pub struct AuditFilter {
     /// The action; one ending in `.` takes every action it starts
     /// (`job.` is `job.create`, `job.cancel`…).
     pub action: Option<String>,
+    /// A tenant's (#525): what was done in its repos, and to the tenant.
+    pub tenant: Option<crate::TenantId>,
 }
 
 impl Store {
@@ -150,6 +152,9 @@ impl Store {
                AND ($4::text IS NULL OR lower(actor_name) = lower($4))
                AND ($5::text IS NULL OR action = $5)
                AND ($6::text IS NULL OR starts_with(action, $6))
+               AND ($7::bigint IS NULL
+                    OR repo_id IN (SELECT r.id FROM repos r WHERE r.tenant_id = $7)
+                    OR detail->>'tenant' = (SELECT t.slug FROM tenants t WHERE t.id = $7))
              ORDER BY id DESC LIMIT $3",
             filter.repo.map(|r| r.0),
             page.cursor(),
@@ -157,6 +162,7 @@ impl Store {
             filter.actor.as_deref(),
             exact,
             prefix,
+            filter.tenant.map(|t| t.0),
         )
         .fetch_all(&self.pool)
         .await?;

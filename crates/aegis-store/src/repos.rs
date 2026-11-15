@@ -60,6 +60,7 @@ async fn audit_repo(
         "language": repo.language,
         "mode": repo.mode.as_str(),
         "max_concurrent_jobs": repo.max_concurrent_jobs,
+        "tenant": repo.tenant_id.0,
         "config": repo.config,
     });
     let target = Target {
@@ -79,6 +80,7 @@ struct RepoRow {
     max_concurrent_jobs: i32,
     config: serde_json::Value,
     created_at: chrono::DateTime<chrono::Utc>,
+    tenant_id: i64,
 }
 
 impl TryFrom<RepoRow> for Repo {
@@ -95,6 +97,7 @@ impl TryFrom<RepoRow> for Repo {
             max_concurrent_jobs: count("repos.max_concurrent_jobs", row.max_concurrent_jobs)?,
             config: row.config,
             created_at: row.created_at,
+            tenant_id: crate::TenantId(row.tenant_id),
         })
     }
 }
@@ -107,15 +110,26 @@ impl Store {
     /// [`Store::create_repo`], audited as done by `actor` with the
     /// settings it registered.
     pub async fn create_repo_by(&self, repo: &NewRepo, actor: &Actor) -> Result<Repo, StoreError> {
+        self.create_repo_in_by(repo, crate::TenantId::DEFAULT, actor)
+            .await
+    }
+
+    /// [`Store::create_repo_by`] in `tenant` (#525).
+    pub async fn create_repo_in_by(
+        &self,
+        repo: &NewRepo,
+        tenant: crate::TenantId,
+        actor: &Actor,
+    ) -> Result<Repo, StoreError> {
         check_slug(&repo.slug)?;
         let max_jobs = max_jobs(repo.max_concurrent_jobs)?;
         let mut tx = self.pool.begin().await?;
         let work = async {
             let created: Repo = sqlx::query_as!(
                 RepoRow,
-                "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+                "INSERT INTO repos (slug, url, default_branch, language, mode, max_concurrent_jobs, config, tenant_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id",
                 repo.slug,
                 repo.url,
                 repo.default_branch,
@@ -123,6 +137,7 @@ impl Store {
                 repo.mode.as_str(),
                 max_jobs,
                 repo.config,
+                tenant.0,
             )
             .fetch_one(&mut *tx)
             .await
@@ -148,7 +163,7 @@ impl Store {
                  SET url = $2, default_branch = $3, language = $4, mode = $5,
                      max_concurrent_jobs = $6, config = $7
                  WHERE slug = $1
-                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at",
+                 RETURNING id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id",
                 repo.slug,
                 repo.url,
                 repo.default_branch,
@@ -172,7 +187,7 @@ impl Store {
     pub async fn repo(&self, id: RepoId) -> Result<Option<Repo>, StoreError> {
         sqlx::query_as!(
             RepoRow,
-            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
+            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id
              FROM repos WHERE id = $1",
             id.0,
         )
@@ -185,7 +200,7 @@ impl Store {
     pub async fn repo_by_slug(&self, slug: &str) -> Result<Option<Repo>, StoreError> {
         sqlx::query_as!(
             RepoRow,
-            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
+            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id
              FROM repos WHERE slug = $1",
             slug,
         )
@@ -213,7 +228,7 @@ impl Store {
         }
         let rows = sqlx::query_as!(
             RepoRow,
-            r"SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
+            r"SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id
               FROM repos
               WHERE lower(regexp_replace(url, '(\.git)?/*$', '')) = $1
                  OR right(lower(regexp_replace(url, '(\.git)?/*$', '')), length($2) + 1) = '/' || $2
@@ -236,7 +251,7 @@ impl Store {
     pub async fn list_repos(&self, page: Page) -> Result<PageOf<Repo>, StoreError> {
         let rows = sqlx::query_as!(
             RepoRow,
-            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at
+            "SELECT id, slug, url, default_branch, language, mode, max_concurrent_jobs, config, created_at, tenant_id
              FROM repos WHERE $1::bigint IS NULL OR id > $1
              ORDER BY id LIMIT $2",
             page.cursor(),

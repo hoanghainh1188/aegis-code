@@ -15,6 +15,7 @@ pub mod repo_cli;
 pub mod runner;
 pub mod secrets;
 pub mod sonar;
+pub mod tenant_cli;
 pub mod tracker;
 pub mod web;
 pub mod webhook;

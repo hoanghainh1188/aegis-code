@@ -42,6 +42,8 @@ pub struct Dashboard {
     pub total_review_rounds: Option<f64>,
     pub languages: Vec<Group>,
     pub repos: Vec<Group>,
+    /// By tenant (#525); shown when there is more than one.
+    pub tenants: Vec<Group>,
     /// By the ISO week the job was created; jobs only.
     pub weeks: Vec<Group>,
     /// Light's shadow triage against what the jobs did (#497).
@@ -147,6 +149,9 @@ pub async fn dashboard_kpis_within(
     let repos = groups(&records, &rounds, |r| {
         Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.repo_slug.clone()))
     });
+    let tenants = groups(&records, &rounds, |r| {
+        Some(job_of(r).map_or(OUTSIDE_JOBS.into(), |job| job.tenant.clone()))
+    });
     let mut weeks = groups(&records, &rounds, |r| {
         job_of(r).map(|job| job.created_at.format("%G-W%V").to_string())
     });
@@ -156,6 +161,7 @@ pub async fn dashboard_kpis_within(
         total_review_rounds: mean_rounds(&records, &rounds),
         languages,
         repos,
+        tenants,
         weeks,
         triage: TriageTable::from_records(&records),
     })
@@ -169,6 +175,7 @@ struct DashboardPage<'a> {
     total: KpiRow,
     languages: Vec<KpiRow>,
     repos: Vec<KpiRow>,
+    tenants: Vec<KpiRow>,
     weeks: Vec<KpiRow>,
     budgets: Vec<BudgetRow>,
     time_zone: &'a str,
@@ -213,6 +220,7 @@ pub async fn page(
         total: KpiRow::new("Total", &d.total, ACCEPT_RATE_MIN).with_rounds(d.total_review_rounds),
         languages: rows(&d.languages, LANGUAGE_ACCEPT_RATE_MIN),
         repos: rows(&d.repos, ACCEPT_RATE_MIN),
+        tenants: rows(&d.tenants, ACCEPT_RATE_MIN),
         weeks: rows(&d.weeks, ACCEPT_RATE_MIN),
         budgets,
         time_zone: &rules.time_zone,
@@ -261,6 +269,7 @@ mod tests {
             job: Some(KpiJob {
                 repo_id: RepoId(1),
                 repo_slug: "demo".into(),
+                tenant: "default".into(),
                 language: "go".into(),
                 created_at: Default::default(),
                 review_of: review_of.map(|k| IssueId::parse(k.to_owned()).unwrap()),

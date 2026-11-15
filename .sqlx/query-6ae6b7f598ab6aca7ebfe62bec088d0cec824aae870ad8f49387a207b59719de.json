@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants SET monthly_budget_usd = $2, max_concurrent_jobs = $3\n                 WHERE id = $1\n                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "monthly_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "monthly_budget_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "max_concurrent_jobs",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "max_concurrent_jobs"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "6ae6b7f598ab6aca7ebfe62bec088d0cec824aae870ad8f49387a207b59719de"
+}

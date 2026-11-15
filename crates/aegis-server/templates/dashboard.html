@@ -66,6 +66,13 @@
   {% call m::kpi_table("Language", languages) %}{% endcall %}
 </section>
 
+{% if tenants.len() > 1 %}
+<section aria-labelledby="tenant-heading" class="band">
+  <h2 id="tenant-heading">By tenant</h2>
+  {% call m::kpi_table("Tenant", tenants) %}{% endcall %}
+</section>
+{% endif %}
+
 <section aria-labelledby="repo-heading" class="band">
   <h2 id="repo-heading">By repo</h2>
   {% call m::kpi_table("Repo", repos) %}{% endcall %}

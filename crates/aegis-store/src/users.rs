@@ -84,7 +84,7 @@ fn user_name(kind: UserKind, name: &str) -> Result<String, StoreError> {
 
 /// The user `kind`/`name`; created when missing if `create`, else
 /// `NotFound`: taking a role away creates no one.
-async fn ensure_user(
+pub(crate) async fn ensure_user(
     conn: &mut PgConnection,
     kind: UserKind,
     name: &str,
