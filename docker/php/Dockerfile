@@ -19,6 +19,19 @@ RUN COMPOSER_HOME=/usr/local/composer COMPOSER_BIN_DIR=/usr/local/bin \
       friendsofphp/php-cs-fixer:^3.64 \
       phpstan/phpstan:^2.0
 
+# phpactor: the ACI's language server (profiles/php.toml `lsp`, #549). The
+# project ships it as a PHAR; composer would pull its dependencies into the
+# global tools above. A pinned release, checked against its SHA-256.
+ARG PHPACTOR_VERSION=2026.10.07.0
+ARG PHPACTOR_SHA256=b28bf6166e016d539fc2f2aec18ef918b12590e436a6f1ccbdf30b5bbdbdb16b
+RUN set -eu; \
+    curl --retry 6 --retry-delay 5 --retry-all-errors -fsSL \
+      -o /usr/local/bin/phpactor \
+      "https://github.com/phpactor/phpactor/releases/download/${PHPACTOR_VERSION}/phpactor.phar"; \
+    echo "${PHPACTOR_SHA256}  /usr/local/bin/phpactor" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/phpactor; \
+    phpactor --version
+
 # osv-scanner: the dependencies step's audit of a changed lockfile (#159,
 # #191), through a proxy to the profile's audit_hosts only.
 ARG OSV_SCANNER_VERSION=2.7.0

@@ -12,6 +12,13 @@ RUN pip install --no-cache-dir \
       ruff==0.17.1 pytest==9.1.1 pytest-xdist==3.8.0 pytest-cov==7.1.0 \
       coverage==7.16.2 uv==0.13.4
 
+# basedpyright: the ACI's language server (profiles/python.toml `lsp`,
+# #549). Its wheel runs on the Node that nodejs-wheel-binaries ships, so
+# the image needs no Node of its own; both pinned.
+RUN pip install --no-cache-dir \
+      basedpyright==1.40.2 nodejs-wheel-binaries==24.19.0 \
+ && basedpyright --version
+
 # osv-scanner: the dependencies step's audit of a changed lockfile (#159,
 # #191), through a proxy to the profile's audit_hosts only. A pinned
 # release, checked against its published SHA-256. curl retries cover
