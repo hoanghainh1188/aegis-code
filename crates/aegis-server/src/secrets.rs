@@ -23,6 +23,7 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::Role;
+use crate::config::GithubAppSection;
 use crate::webhook::{GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV};
 
 pub const DATABASE_URL: &str = "AEGIS_DATABASE_URL";
@@ -125,15 +126,25 @@ pub fn section(section: Option<&SecretsSection>) -> Result<&SecretsSection, Stri
 
 /// What the process cannot start without, read now: the database URL;
 /// with the API, also the webhook secrets, which may be absent (their
-/// endpoints stay closed). A mode's API key is checked by
+/// endpoints stay closed): the repo webhooks', GitLab's and, with
+/// `[github_app]`, the app's (#554). The webhooks only check a secret the
+/// store has read. A mode's API key is checked by
 /// [`crate::lifecycle::LifecycleRunner::new`].
-pub async fn load_at_start(secrets: &Secrets, role: Role) -> Result<(), String> {
+pub async fn load_at_start(
+    secrets: &Secrets,
+    role: Role,
+    app: Option<&GithubAppSection>,
+) -> Result<(), String> {
     secrets
         .require(&[DATABASE_URL])
         .await
         .map_err(|e| e.to_string())?;
     if role.serves_api() {
-        for name in [GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV] {
+        let app_secret = app.map(|a| a.webhook_secret_env.as_str());
+        for name in [GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV]
+            .into_iter()
+            .chain(app_secret)
+        {
             secrets.load(name).await.map_err(|e| e.to_string())?;
         }
     }

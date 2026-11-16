@@ -160,7 +160,7 @@ async fn run(args: Args) -> Result<(), String> {
     let config = ServerConfig::load(&args.config)?;
     let section = secrets::section(config.secrets.as_ref())?;
     let secrets = section.open(config.modes.customer_jp.is_some()).await?;
-    secrets::load_at_start(&secrets, args.role).await?;
+    secrets::load_at_start(&secrets, args.role, config.github_app.as_ref()).await?;
     if args.role.serves_api() {
         auth::load_at_start(&secrets, &config.auth).await?;
     }
