@@ -27,6 +27,8 @@ sandbox = true
 # the daemon's default (runc). `runsc` runs them under gVisor, a user-space
 # kernel between the code and the host's (#322); the daemon must list it in
 # its `runtimes`, and the Docker proxy allows only runc and runsc.
+# Not usable yet: under runsc the fetch step cannot resolve the egress proxy
+# by name (#548); cost measured in docs/measurements/2026-11-16-gvisor-runsc.md.
 # sandbox_runtime = "runsc"
 
 # tldextract (scrapy's cookie middleware) downloads the Public Suffix List on
