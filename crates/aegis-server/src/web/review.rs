@@ -121,16 +121,6 @@ async fn reviewable(store: &Store, access: &Access, id: i64) -> Result<Job, WebE
     Ok(job)
 }
 
-/// What the job opened, as its forge calls it: GitLab's merge requests
-/// are at `…/-/merge_requests/<n>`.
-fn request_word(pr_url: Option<&str>) -> &'static str {
-    if pr_url.is_some_and(|u| u.contains("/-/merge_requests/")) {
-        "merge request"
-    } else {
-        "pull request"
-    }
-}
-
 async fn page(
     store: &Store,
     viewer: &Viewer<'_>,
@@ -280,6 +270,16 @@ pub async fn submit(
             page(&store, &viewer, &job, opened_at, Some(why)).await
         }
         Err(e) => Err(e.into()),
+    }
+}
+
+/// What the job opened, as its forge calls it: GitLab's merge requests
+/// are at `…/-/merge_requests/<n>`.
+fn request_word(pr_url: Option<&str>) -> &'static str {
+    if pr_url.is_some_and(|u| u.contains("/-/merge_requests/")) {
+        "merge request"
+    } else {
+        "pull request"
     }
 }
 
