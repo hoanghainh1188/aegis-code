@@ -375,3 +375,67 @@ fn the_python_audit_reaches_osv_and_deps_dev_through_the_proxy() {
     assert!(log.contains("LICENSE VIOLATION"), "{log}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The runtimes the daemon offers among runc and runsc; runsc only where
+/// it is registered (`scripts/gvisor/up.sh`).
+fn runtimes() -> Vec<&'static str> {
+    let listed = Command::new("docker")
+        .args(["info", "--format", "{{json .Runtimes}}"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let mut out = vec!["runc"];
+    if listed.contains("\"runsc\"") {
+        out.push("runsc");
+    } else {
+        eprintln!("runsc is not registered with the daemon: checking runc only");
+    }
+    out
+}
+
+/// #548: the fetch container gets the proxy by its address. Under runsc
+/// (gVisor) Docker's embedded DNS is out of reach, so a name never
+/// resolved and every fetch failed.
+#[test]
+fn the_fetch_reaches_the_proxy_by_its_address_under_each_runtime() {
+    if !docker_ready() {
+        return;
+    }
+    for runtime in runtimes() {
+        let dir = scratch(&format!("address-{runtime}"));
+        let tree = dir.join("tree");
+        std::fs::create_dir_all(&tree).unwrap();
+        let mut sandbox = sandbox(PYTHON_IMAGE, vec![]);
+        sandbox.hardening = sandbox.hardening.with_runtime(Some(runtime.into()));
+        let session = egress(&["pypi.org"]).start().unwrap();
+        let log = dir.join("fetch.log");
+        let ran = session
+            .fetch(
+                &sandbox,
+                &argv(&[
+                    "python",
+                    "-c",
+                    "import ipaddress, os, urllib.parse, urllib.request; \
+                     host = urllib.parse.urlsplit(os.environ['HTTPS_PROXY']).hostname; \
+                     print('proxy', ipaddress.ip_address(host)); \
+                     urllib.request.urlopen('https://pypi.org/simple/six/', timeout=30); \
+                     print('fetched')",
+                ]),
+                &tree,
+                &log,
+                TIMEOUT,
+                CancelToken::new(),
+            )
+            .unwrap();
+        let text = log_of(&log);
+        assert_eq!(
+            ran.exit,
+            Exit::Code(0),
+            "{runtime}: {text}\n{}",
+            session.log()
+        );
+        assert!(text.contains("fetched"), "{runtime}: {text}");
+        drop(session);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
