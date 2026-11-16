@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.15.2...v0.16.0) (2026-11-16)
+
+
+### Features
+
+* **web:** pick a job's issue by its number on the chosen repo ([#568](https://github.com/hoanghainh1188/aegis-code/issues/568)) ([7d5481a](https://github.com/hoanghainh1188/aegis-code/commit/7d5481ab986c12dfd81ab62e266c0eff98cafe81)), closes [#564](https://github.com/hoanghainh1188/aegis-code/issues/564)
+
 ## [0.15.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.15.1...v0.15.2) (2026-11-16)
 
 
