@@ -206,8 +206,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: aarch64-apple-darwin, os: macos-15, npm: darwin-arm64 }
-          - { target: x86_64-apple-darwin, os: macos-15-intel, npm: darwin-x64 }
+          # Both Mac builds on the Intel runner (#573): GitHub's macOS arm64
+          # runners were not given to the v0.17.0 release in 2 × 15 min, and
+          # Rust cross-compiles to arm64 with Apple's SDK there.
+          - { target: aarch64-apple-darwin, os: macos-15-intel, npm: darwin-arm64, arch: arm64 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel, npm: darwin-x64, arch: x86_64 }
           # 22.04: the binary runs on glibc 2.35 and later.
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, npm: linux-x64 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, npm: linux-arm64 }
@@ -220,6 +223,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked -p aegis-client --target ${{ matrix.target }}
+      - name: The binary is for its target (#573)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          archs=$(lipo -archs "target/${{ matrix.target }}/release/aegis")
+          echo "aegis for ${{ matrix.target }}: $archs"
+          [ "$archs" = "${{ matrix.arch }}" ] || { echo "expected ${{ matrix.arch }}" >&2; exit 1; }
       - name: Pack
         shell: bash
         run: |
