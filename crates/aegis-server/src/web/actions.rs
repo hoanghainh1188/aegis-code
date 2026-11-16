@@ -36,6 +36,8 @@ pub enum Done {
     Cancelled,
     CancelRequested,
     Retried,
+    /// A review was recorded from the form (#562).
+    Reviewed,
 }
 
 impl Done {
@@ -47,14 +49,19 @@ impl Done {
                 "Cancel requested; the job stops when its worker next checks in."
             }
             Self::Retried => "Job queued again as this new job.",
+            Self::Reviewed => {
+                "Review recorded for the measures. The PR itself is unchanged: approve, \
+                 merge or ask for changes on its forge."
+            }
         }
     }
 
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Created,
         Self::Cancelled,
         Self::CancelRequested,
         Self::Retried,
+        Self::Reviewed,
     ];
 
     fn word(self) -> &'static str {
@@ -63,6 +70,7 @@ impl Done {
             Self::Cancelled => "cancelled",
             Self::CancelRequested => "cancel_requested",
             Self::Retried => "retried",
+            Self::Reviewed => "reviewed",
         }
     }
 

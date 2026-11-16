@@ -39,6 +39,8 @@ Write comments the way you would for a new colleague: say what is wrong and what
 
 ## 4. Recording Your Verdict
 
+The form only records your verdict for the measures: it does not approve, merge or change the PR (#562). Merge, close or ask for changes on GitHub or GitLab as in the sections above; the form links the PR, and the job's page says so again once your review is in.
+
 On the dashboard, open the job and click **Duyệt PR** (Review PR), or go to `/jobs/<id>/review`. The time between opening this page and submitting is recorded as the review time, so open it when you start reading the PR.
 
 | Field | Meaning |
