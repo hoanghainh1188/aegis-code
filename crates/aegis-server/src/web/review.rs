@@ -109,13 +109,15 @@ async fn reviewable(store: &Store, access: &Access, id: i64) -> Result<Job, WebE
     if let Some(root) = job.review_of {
         return Err(WebError::new(
             StatusCode::CONFLICT,
-            format!(
-                "job {id} is a review fix round; PR is reviewed on job {}",
-                root.0
-            ),
-        ));
+            format!("Job #{id} is a review round: its PR is reviewed on"),
+        )
+        .with_link(review_href(root.0), format!("job #{}", root.0)));
     }
     Ok(job)
+}
+
+fn review_href(id: i64) -> String {
+    format!("/jobs/{id}/review")
 }
 
 async fn page(
@@ -175,6 +177,13 @@ pub async fn form(
     Extension(me): Extension<Me>,
     Path(id): Path<i64>,
 ) -> WebResult {
+    // A round's PR is reviewed on the job that opened it: go there (#563).
+    if let Some(root) = job_for(&store, &access, id, RepoRole::Reviewer)
+        .await?
+        .review_of
+    {
+        return Ok(Redirect::to(&review_href(root.0)).into_response());
+    }
     let job = reviewable(&store, &access, id).await?;
     let viewer = Viewer {
         auth: &auth,

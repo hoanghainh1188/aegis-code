@@ -578,8 +578,39 @@ async fn a_prs_review_rounds_show_on_its_job_and_count_with_it() {
         "{}",
         round_page.body
     );
+    // #563: a round's PR is reviewed on the job that opened it. The jobs
+    // list links the root's review only, and a round's review page leads
+    // there instead of an error page.
+    let list = get(&app, "/jobs").await;
+    assert!(
+        list.body
+            .contains(&format!("href=\"/jobs/{}/review\"", root.0)),
+        "{}",
+        list.body
+    );
+    assert!(
+        !list
+            .body
+            .contains(&format!("href=\"/jobs/{}/review\"", round.id.0)),
+        "{}",
+        list.body
+    );
     let review = get(&app, &format!("/jobs/{}/review", round.id.0)).await;
-    assert_eq!(review.status, StatusCode::CONFLICT, "{}", review.body);
+    assert_eq!(review.status, StatusCode::SEE_OTHER, "{}", review.body);
+    assert_eq!(
+        review.headers[header::LOCATION],
+        format!("/jobs/{}/review", root.0)
+    );
+    let posted = post_form(&app, &format!("/jobs/{}/review", round.id.0), "").await;
+    assert_eq!(posted.status, StatusCode::CONFLICT, "{}", posted.body);
+    assert!(
+        posted.body.contains(&format!(
+            "is a review round: its PR is reviewed on <a href=\"/jobs/{}/review\">job #{}</a>",
+            root.0, root.0
+        )),
+        "{}",
+        posted.body
+    );
 
     let d = dashboard_kpis(s).await.unwrap();
     assert_eq!(

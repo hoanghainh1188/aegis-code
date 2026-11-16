@@ -172,8 +172,7 @@ pub async fn list(
             created_at: job.created_at.format("%Y-%m-%d %H:%M").to_string(),
             title: record.issue_title.clone().unwrap_or_default(),
             pr_url: pr_link(job),
-            can_review: job.outcome == Some(Outcome::PrOpened)
-                && access.can(job.repo_id, RepoRole::Reviewer),
+            can_review: can_review(job, &access),
         });
     }
     // A history restore wants the whole page, not the table.
@@ -439,6 +438,15 @@ struct JobHead {
     live: bool,
 }
 
+/// Whether a job's PR may be reviewed from its row or its page: it opened
+/// one, it is not a review round (a round's PR is reviewed on the job that
+/// opened it, #563), and the viewer reviews in its repo.
+fn can_review(job: &Job, access: &Access) -> bool {
+    job.outcome == Some(Outcome::PrOpened)
+        && job.review_of.is_none()
+        && access.can(job.repo_id, RepoRole::Reviewer)
+}
+
 /// A job that may still change.
 fn is_live(job: &Job) -> bool {
     matches!(job.status, JobStatus::Queued | JobStatus::Running)
@@ -463,10 +471,7 @@ async fn head_of(
         outcome: outcome(job),
         reason: job.reason.clone().unwrap_or_default(),
         pr_url: pr_link(job),
-        // A round's PR is reviewed on the job that opened it.
-        can_review: job.outcome == Some(Outcome::PrOpened)
-            && job.review_of.is_none()
-            && access.can(job.repo_id, RepoRole::Reviewer),
+        can_review: can_review(job, access),
         tiers: tiers(record),
         model_calls: record.model_calls,
         cost: dollars(record.cost_usd),

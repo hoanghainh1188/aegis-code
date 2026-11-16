@@ -183,6 +183,9 @@ fn asset(body: &'static [u8], content_type: &'static str, cache: &'static str) -
 pub struct WebError {
     status: StatusCode,
     message: String,
+    /// A page the message points to, as (href, text): shown as a link
+    /// after it, both escaped like the message.
+    link: Option<(String, String)>,
 }
 
 impl WebError {
@@ -190,6 +193,15 @@ impl WebError {
         Self {
             status,
             message: message.into(),
+            link: None,
+        }
+    }
+
+    /// With a link to the page the message points to (#563).
+    pub(crate) fn with_link(self, href: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            link: Some((href.into(), text.into())),
+            ..self
         }
     }
 
@@ -228,6 +240,7 @@ impl From<aegis_ledger::LedgerError> for WebError {
 #[template(path = "error.html")]
 struct ErrorPage<'a> {
     message: &'a str,
+    link: Option<(&'a str, &'a str)>,
 }
 
 impl IntoResponse for WebError {
@@ -235,6 +248,10 @@ impl IntoResponse for WebError {
         // An error page loads no script, so it needs no nonce.
         let page = ErrorPage {
             message: &self.message,
+            link: self
+                .link
+                .as_ref()
+                .map(|(href, text)| (href.as_str(), text.as_str())),
         };
         match page.render() {
             Ok(html) => (self.status, Html(html)).into_response(),
@@ -293,7 +310,12 @@ mod tests {
     fn pages_link_the_stylesheet_by_its_version() {
         let href = format!("/static/app.css?v={}", asset_version(CSS));
         assert_eq!(css_href(), href);
-        let page = ErrorPage { message: "nope" }.render().unwrap();
+        let page = ErrorPage {
+            message: "nope",
+            link: None,
+        }
+        .render()
+        .unwrap();
         assert!(page.contains(&format!(r#"href="{href}""#)), "{page}");
     }
 

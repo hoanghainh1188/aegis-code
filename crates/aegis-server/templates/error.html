@@ -9,7 +9,7 @@
 <body>
 <header class="masthead"><a class="brand" href="/">aegis<span>ledger</span></a></header>
 <main>
-  <section class="notice bad"><h1>Unable to load page</h1><p>{{ message }}</p></section>
+  <section class="notice bad"><h1>Unable to load page</h1><p>{{ message }}{% if let Some((href, text)) = link %} <a href="{{ href }}">{{ text }}</a>{% endif %}</p></section>
 </main>
 </body>
 </html>
