@@ -19,6 +19,7 @@ pub mod secrets;
 pub mod sonar;
 pub mod tenant_cli;
 pub mod tracker;
+pub mod umask;
 pub mod web;
 pub mod webhook;
 pub mod worker;

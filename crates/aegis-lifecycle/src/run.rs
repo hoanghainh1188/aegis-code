@@ -624,6 +624,7 @@ fn tool_specs(
         // `detect_changes` can run no git command (#203).
         let index = cfg.run.state_dir.join("index");
         std::fs::create_dir_all(&index).map_err(|e| LifecycleError::io(&index, &e))?;
+        code_graph::check_index_dirs(&index)?;
         let cwd = index.clone();
         let index = index.display().to_string();
         let fill = |v: &String| v.replace(INDEX_DIR, &index);
