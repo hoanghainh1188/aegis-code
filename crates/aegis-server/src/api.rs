@@ -423,8 +423,22 @@ async fn create_job(
     if !access.can(repo_id, RepoRole::Maintainer) {
         return Err(ApiError::forbidden(repo_id, RepoRole::Maintainer));
     }
-    let new = new_job(repo_id, &body.issue_ref, &body.source, body.ledger_key)
-        .map_err(ApiError::invalid)?;
+    // `"source": "repo"` (#570): the issue's number on the repo's own forge,
+    // completed as the jobs page completes it.
+    let (source, issue_ref) = if body.source == crate::repo_issue::REPO_SOURCE {
+        let repo = store.repo(repo_id).await?.ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                format!("repo {}", repo_id.0),
+            )
+        })?;
+        crate::repo_issue::resolve(&repo, &body.source, &body.issue_ref)
+            .map_err(ApiError::invalid)?
+    } else {
+        (body.source.clone(), body.issue_ref.clone())
+    };
+    let new = new_job(repo_id, &issue_ref, &source, body.ledger_key).map_err(ApiError::invalid)?;
     let job = store.create_job_by(&new, &access.actor).await?;
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }

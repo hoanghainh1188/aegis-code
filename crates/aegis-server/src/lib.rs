@@ -14,6 +14,7 @@ pub mod memory;
 pub mod metrics;
 pub mod pause_all;
 pub mod repo_cli;
+pub(crate) mod repo_issue;
 pub mod runner;
 pub mod secrets;
 pub mod sonar;

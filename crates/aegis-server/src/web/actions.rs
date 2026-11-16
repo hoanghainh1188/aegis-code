@@ -23,7 +23,7 @@ pub(super) const SOURCES: [(&str, &str); 7] = [
     // The first, chosen by default (#564): the issue's number on the
     // chosen repo's own forge.
     (
-        super::issue_hint::REPO_SOURCE,
+        crate::repo_issue::REPO_SOURCE,
         "This repo's issues (12 or #12)",
     ),
     ("github", "GitHub issue (owner/repo#12)"),
@@ -118,7 +118,7 @@ pub async fn create(
         .repo(repo_id)
         .await?
         .ok_or_else(|| WebError::not_found(format!("repo {}", form.repo_id)))?;
-    let (source, issue_ref) = super::issue_hint::resolve(&repo, &form.source, &form.issue_ref)
+    let (source, issue_ref) = crate::repo_issue::resolve(&repo, &form.source, &form.issue_ref)
         .map_err(|why| WebError::new(StatusCode::BAD_REQUEST, why))?;
     let new = new_job(repo_id, &issue_ref, &source, None)
         .map_err(|why| WebError::new(StatusCode::BAD_REQUEST, why))?;

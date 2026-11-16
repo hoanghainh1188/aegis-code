@@ -14,9 +14,10 @@ aegis: give aegis-code jobs and follow them, from your terminal.
   aegis logout
   aegis whoami
   aegis repos                   the repos you have a role in
-  aegis submit <repo> <issue>   a job for an issue: owner/repo#12 (GitHub),
-                                group/project#12 (--source gitlab), PROJ-7
-                                (--source jira), …
+  aegis submit <repo> <issue>   a job for an issue: 12 or #12 (an issue of
+                                the repo, on its forge), owner/repo#12
+                                (GitHub), group/project#12 (--source
+                                gitlab), PROJ-7 (--source jira), …
   aegis list [--repo <repo>] [--status <status>] [--limit <n>]
   aegis show <job>              the job and its runs
   aegis watch <job> [--every <seconds>]
@@ -67,9 +68,14 @@ fn job_id(text: &str) -> Result<i64, String> {
         .map_err(|_| format!("`{text}` is not a job number"))
 }
 
-/// The source an issue ref is from when `--source` is not given: GitHub
-/// for `owner/repo#n`, Jira for `KEY-n`.
+/// The source an issue ref is from when `--source` is not given: the
+/// repo's own forge for `12` or `#12` (the server completes it, #570),
+/// GitHub for `owner/repo#n`, Jira for `KEY-n`.
 fn guess_source(issue_ref: &str) -> Result<&'static str, String> {
+    let number = issue_ref.strip_prefix('#').unwrap_or(issue_ref);
+    if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok("repo");
+    }
     let github = issue_ref.split_once('#').is_some_and(|(repo, n)| {
         repo.split('/').count() == 2 && n.bytes().all(|b| b.is_ascii_digit()) && !n.is_empty()
     });
@@ -85,7 +91,8 @@ fn guess_source(issue_ref: &str) -> Result<&'static str, String> {
         (true, _) => Ok("github"),
         (_, true) => Ok("jira"),
         _ => Err(format!(
-            "which tracker is `{issue_ref}` from? Say it with --source github|gitlab|jira|backlog"
+            "which tracker is `{issue_ref}` from? Give the issue's number on the repo (12), or \
+             say it with --source github|gitlab|jira|backlog"
         )),
     }
 }
@@ -444,7 +451,11 @@ mod tests {
     fn the_tracker_is_guessed_from_the_issue_ref_or_asked_for() {
         assert_eq!(guess_source("typst/typst#12"), Ok("github"));
         assert_eq!(guess_source("APP-7"), Ok("jira"));
-        for unclear in ["group/sub/app#3", "typst#12", "app-7", "12"] {
+        // #570: a number is an issue of the repo, completed by the server.
+        for number in ["12", "#12"] {
+            assert_eq!(guess_source(number), Ok("repo"), "{number}");
+        }
+        for unclear in ["group/sub/app#3", "typst#12", "app-7", "#", "#x"] {
             assert!(guess_source(unclear).is_err(), "{unclear}");
         }
     }

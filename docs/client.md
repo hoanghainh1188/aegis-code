@@ -59,7 +59,7 @@ Tokens enforce RBAC rules assigned to your user account: submitting, canceling, 
 | `aegis logout` | Remove the saved credentials |
 | `aegis whoami` | Show the signed-in user and the server |
 | `aegis repos` | List the repositories you have a role in |
-| `aegis submit <repo> <issue>` | Start a job for an issue, e.g. `aegis submit typst typst/typst#123` |
+| `aegis submit <repo> <issue>` | Start a job for an issue: its number on the repo, e.g. `aegis submit typst 123` (or `#123`), or a whole reference such as `typst/typst#123` |
 | `aegis list [--repo <repo>] [--status <status>] [--limit <n>]` | List jobs |
 | `aegis show <job>` | Show a job, its runs and why it ended |
 | `aegis watch <job> [--every <seconds>]` | Follow a job until it ends; exits `0` when it opened a PR |
@@ -68,7 +68,7 @@ Tokens enforce RBAC rules assigned to your user account: submitting, canceling, 
 | `aegis review <job>` | Start a review round on the PR the job opened (#243) |
 | `aegis open <job>` | Open the job's PR, or its page on the dashboard, in the browser |
 
-- `<issue>` format: `owner/repo#12` for GitHub issues, `KEY-12` for Jira tickets. Other sources require the explicit `--source` flag: `--source gitlab` (`group/project#12`), `--source backlog`.
+- `<issue>` format: `12` or `#12` for an issue of the repo on its own forge (GitHub or GitLab, completed by the server from the repo's URL, as the dashboard's **New job** form does, #570; a server older than this change refuses it as an unknown source), `owner/repo#12` for GitHub issues, `KEY-12` for Jira tickets. Other sources require the explicit `--source` flag: `--source gitlab` (`group/project#12`), `--source backlog`.
 - Structured Output: Append `--json` to any command for raw machine-readable JSON output suitable for automation scripts.
 
 ---
