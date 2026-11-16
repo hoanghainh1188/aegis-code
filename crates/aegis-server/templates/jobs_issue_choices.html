@@ -1,0 +1,4 @@
+<datalist id="issue-choices">
+  {%- for o in offered %}<option value="{{ o.value }}">{{ o.label }}</option>{% endfor -%}
+</datalist>
+{%- if let Some(n) = note %}<span class="note">{{ n }}</span>{% endif %}

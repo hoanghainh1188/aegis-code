@@ -9,19 +9,22 @@
     <form action="/jobs" method="post" class="inline">
       {% include "form_guard.html" %}
       <label>Repo
-        <select name="repo_id" required>
+        <select id="new-job-repo" name="repo_id" required hx-get="/jobs/issue-choices" hx-trigger="change" hx-target="#issue-choices-box">
           {% for c in creatable %}<option value="{{ c.value }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
         </select>
       </label>
       <label>From
-        <select name="source" required>
+        <select id="new-job-source" name="source" required>
           {% for c in sources %}<option value="{{ c.value }}"{% if c.selected %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
         </select>
       </label>
       <label>Issue
-        <input type="text" name="issue_ref" required maxlength="256" placeholder="owner/repo#12" autocomplete="off">
+        <input type="text" name="issue_ref" required maxlength="256" placeholder="12" autocomplete="off" list="issue-choices"
+          hx-get="/jobs/issue-preview" hx-trigger="input changed delay:500ms, change" hx-include="#new-job-repo, #new-job-source" hx-target="#issue-preview">
       </label>
       <button type="submit">Create job</button>
+      <span id="issue-choices-box" hx-get="/jobs/issue-choices" hx-trigger="load" hx-include="#new-job-repo" aria-live="polite"><datalist id="issue-choices"></datalist></span>
+      <p id="issue-preview" class="issue-preview" aria-live="polite"></p>
     </form>
   </details>
   <details class="create">

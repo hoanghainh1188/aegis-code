@@ -19,7 +19,13 @@ use crate::auth::Access;
 
 /// The trackers a job may be read from, as `aegis --source` takes
 /// them; the label shown for each.
-pub(super) const SOURCES: [(&str, &str); 6] = [
+pub(super) const SOURCES: [(&str, &str); 7] = [
+    // The first, chosen by default (#564): the issue's number on the
+    // chosen repo's own forge.
+    (
+        super::issue_hint::REPO_SOURCE,
+        "This repo's issues (12 or #12)",
+    ),
     ("github", "GitHub issue (owner/repo#12)"),
     ("gitlab", "GitLab issue (group/project#12)"),
     ("jira", "Jira ticket (KEY-12)"),
@@ -107,7 +113,14 @@ pub async fn create(
             "you need role maintainer in this repo to create jobs",
         ));
     }
-    let new = new_job(repo_id, &form.issue_ref, &form.source, None)
+    // "This repo's issues" (#564): `12` or `#12` on the repo's forge.
+    let repo = store
+        .repo(repo_id)
+        .await?
+        .ok_or_else(|| WebError::not_found(format!("repo {}", form.repo_id)))?;
+    let (source, issue_ref) = super::issue_hint::resolve(&repo, &form.source, &form.issue_ref)
+        .map_err(|why| WebError::new(StatusCode::BAD_REQUEST, why))?;
+    let new = new_job(repo_id, &issue_ref, &source, None)
         .map_err(|why| WebError::new(StatusCode::BAD_REQUEST, why))?;
     let job = store.create_job_by(&new, &access.actor).await?;
     Ok(to_job(job.id, Done::Created))

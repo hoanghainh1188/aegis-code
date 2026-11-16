@@ -295,6 +295,68 @@ fn failed_on(run: &aegis_pr::FailedRun, what: &str, branch: &str) -> Result<(), 
     Ok(())
 }
 
+/// An open issue as a list shows it: its number and title (#564).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueSummary {
+    pub number: u64,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubListed {
+    number: u64,
+    title: String,
+    #[serde(default)]
+    pull_request: Option<serde_json::Value>,
+}
+
+/// The open issues of `owner/repo`, the most recently updated first, at
+/// most `limit` (GitHub's page holds 100): pull requests, which the same
+/// endpoint lists, are left out.
+pub async fn open_github_issues(
+    api: &str,
+    owner: &str,
+    repo: &str,
+    token: Option<&str>,
+    limit: u8,
+) -> Result<Vec<IssueSummary>, LifecycleError> {
+    let failed = |m: String| LifecycleError::Issue(m);
+    let client = reqwest::Client::builder()
+        .user_agent("aegis-code")
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| failed(e.to_string()))?;
+    let url = format!("{}/repos/{owner}/{repo}/issues", api.trim_end_matches('/'));
+    let per_page = limit.clamp(1, 100).to_string();
+    let mut request = client
+        .get(&url)
+        .query(&[
+            ("state", "open"),
+            ("sort", "updated"),
+            ("per_page", per_page.as_str()),
+        ])
+        .header("Accept", "application/vnd.github+json");
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    let response = request.send().await.map_err(|e| failed(e.to_string()))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(failed(format!(
+            "GitHub answered {status} for the issues of {owner}/{repo}"
+        )));
+    }
+    let listed: Vec<GitHubListed> = response.json().await.map_err(|e| failed(e.to_string()))?;
+    Ok(listed
+        .into_iter()
+        .filter(|i| i.pull_request.is_none())
+        .map(|i| IssueSummary {
+            number: i.number,
+            title: i.title,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

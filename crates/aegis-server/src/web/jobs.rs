@@ -197,7 +197,7 @@ pub async fn list(
         .map(|(value, label)| Choice {
             value: value.into(),
             label: label.into(),
-            selected: value == "github",
+            selected: value == super::issue_hint::REPO_SOURCE,
         })
         .collect();
     let repos = repos

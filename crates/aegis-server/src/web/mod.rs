@@ -16,6 +16,7 @@ mod connection;
 mod dashboard;
 mod guard;
 mod installations;
+mod issue_hint;
 mod jobs;
 mod patch;
 mod pause_all;
@@ -105,6 +106,8 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/ams", get(ams::page))
         .route("/jobs", get(jobs::list).post(actions::create))
         .route("/jobs/cve", post(actions::create_cve))
+        .route("/jobs/issue-choices", get(issue_hint::choices))
+        .route("/jobs/issue-preview", get(issue_hint::preview))
         .route("/jobs/{id}", get(jobs::detail))
         .route("/jobs/{id}/head", get(jobs::head))
         .route("/jobs/{id}/cancel", post(actions::cancel))
