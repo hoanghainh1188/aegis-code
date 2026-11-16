@@ -505,6 +505,34 @@ fn parse_diff_changed_functions(repo: &Path, diff: &str) -> BTreeSet<String> {
     changed
 }
 
+/// Codebase-Memory refuses to start, saying only "could not load saved
+/// runtime settings", when its `HOME` (the index directory) or the
+/// directory above it is writable by everyone (#558). Every job would then
+/// stop before its first step with an error that does not point there.
+/// Checked before the server starts, naming the directory and the fix.
+#[cfg(unix)]
+pub(crate) fn check_index_dirs(index: &Path) -> Result<(), LifecycleError> {
+    use std::os::unix::fs::PermissionsExt;
+    for dir in std::iter::once(index).chain(index.parent()) {
+        let meta = std::fs::metadata(dir).map_err(|e| LifecycleError::io(dir, &e))?;
+        let mode = meta.permissions().mode() & 0o7777;
+        if mode & 0o002 != 0 {
+            return Err(LifecycleError::Config(format!(
+                "{} is writable by everyone (mode {mode:o}) and Codebase-Memory will not \
+                 start under it: run `chmod o-w {}` (docs/runbook/on-premise.md)",
+                dir.display(),
+                dir.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub(crate) fn check_index_dirs(_index: &Path) -> Result<(), LifecycleError> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -922,6 +950,42 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         dir
+    }
+
+    /// #558: a world-writable index directory, or one under a
+    /// world-writable directory, is named before Codebase-Memory starts.
+    #[test]
+    fn a_world_writable_index_directory_is_named_before_the_server_starts() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path, m: u32| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+        };
+        let root = std::env::temp_dir().join(format!("aegis-558-{}", std::process::id()));
+        let state = root.join("state");
+        let index = state.join("index");
+        std::fs::create_dir_all(&index).unwrap();
+
+        mode(&state, 0o755);
+        mode(&index, 0o755);
+        check_index_dirs(&index).unwrap();
+
+        mode(&state, 0o777);
+        let err = check_index_dirs(&index).unwrap_err().to_string();
+        assert!(err.contains(&state.display().to_string()), "{err}");
+        assert!(err.contains("777") && err.contains("chmod o-w"), "{err}");
+
+        mode(&state, 0o755);
+        mode(&index, 0o777);
+        let err = check_index_dirs(&index).unwrap_err().to_string();
+        assert!(err.contains(&index.display().to_string()), "{err}");
+
+        // Sticky does not help: Codebase-Memory refuses 1777 too.
+        mode(&index, 0o755);
+        mode(&state, 0o1777);
+        assert!(check_index_dirs(&index).is_err());
+
+        mode(&state, 0o755);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]

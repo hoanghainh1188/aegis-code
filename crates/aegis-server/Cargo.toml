@@ -35,6 +35,9 @@ tower-http = { version = "0.6.11", features = ["limit", "timeout", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt", "json", "std"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
 [features]
 # Bedrock backend for config/customer-jp.toml (`[modes] customer_jp`).
 bedrock = ["aegis-provider/bedrock"]
