@@ -7,6 +7,7 @@
 use aegis_ledger::Outcome;
 use std::sync::Arc;
 
+use aegis_lifecycle::PLATFORM_ERROR;
 use aegis_pr::{GitHub, GitLab, TokenSource, TokenUse, inert};
 use aegis_secrets::Secrets;
 use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store, TenantId};
@@ -365,6 +366,10 @@ pub fn plain_status_comment(job: &Job) -> String {
     text
 }
 
+/// What a job the platform failed says; why is for its operators.
+const PLATFORM_FAILED: &str =
+    "could not finish this issue: the platform failed. Its operators can see why.";
+
 /// What happened, and the reason made inert.
 fn status_parts(job: &Job) -> (String, Option<String>) {
     // GitLab's issues get a merge request (#252).
@@ -388,6 +393,14 @@ fn status_parts(job: &Job) -> (String, Option<String>) {
             ),
             None,
         ),
+        (JobStatus::Done, Some(Outcome::StoppedSteps))
+            if job
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.starts_with(PLATFORM_ERROR)) =>
+        {
+            (PLATFORM_FAILED.into(), None)
+        }
         (JobStatus::Done, Some(outcome)) => (
             format!("stopped without a {request}: {}.", stop(outcome)),
             job.reason.as_deref(),
@@ -399,10 +412,7 @@ fn status_parts(job: &Job) -> (String, Option<String>) {
             ),
             _ => ("cancelled its job for this issue.".into(), None),
         },
-        _ => (
-            "could not finish this issue: the platform failed. Its operators can see why.".into(),
-            None,
-        ),
+        _ => (PLATFORM_FAILED.into(), None),
     };
     (what, reason.map(inert).filter(|r| !r.is_empty()))
 }
@@ -513,6 +523,35 @@ mod tests {
             ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
         };
         assert!(status_comment(&stopped).contains("stopped without a merge request"));
+    }
+
+    /// #557: a job the platform failed (its tools did not start, say) is
+    /// not told as having reached its step limit, and the error, which
+    /// names the platform's own parts, stays with the operators.
+    #[test]
+    fn a_platform_error_is_told_as_the_platforms_not_as_a_step_limit() {
+        let failed = Job {
+            reason: Some(format!(
+                "{PLATFORM_ERROR}cannot start MCP server `codebase-memory`: connection closed"
+            )),
+            ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
+        };
+        for text in [status_comment(&failed), plain_status_comment(&failed)] {
+            assert!(text.contains("the platform failed"), "{text}");
+            assert!(!text.contains("step limit"), "{text}");
+            assert!(!text.contains("codebase-memory"), "{text}");
+            assert!(!text.contains("Reason:"), "{text}");
+        }
+        // A stop of the agent's own keeps its wording and its reason.
+        let stopped = Job {
+            reason: Some("the model gave up".into()),
+            ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
+        };
+        let text = status_comment(&stopped);
+        assert!(
+            text.contains("step limit") && text.contains("Reason: the model gave up"),
+            "{text}"
+        );
     }
 
     #[test]

@@ -139,7 +139,7 @@ where
             kept: Some(kept), ..
         }) => Ok(kept),
         Ok(ending) => Err(ending.reason.unwrap_or_else(|| "no patch".into())),
-        Err(e) => Err(format!("error: {e}")),
+        Err(e) => Err(format!("{}{e}", crate::PLATFORM_ERROR)),
     };
     Ok((kept, ledger_id))
 }

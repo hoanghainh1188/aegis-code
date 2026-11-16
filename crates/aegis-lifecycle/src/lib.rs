@@ -57,3 +57,10 @@ pub use registry::{
 pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;
 pub use run::{IssueReport, Platform, job_dir, run_issue, run_review};
+
+/// The start of a stop reason when the platform, not the agent, ended a
+/// run on an error (#557): its tools did not start, the store failed. The
+/// outcome stays `StoppedSteps` for the ledger; the issue comment tells
+/// the reporter the platform failed rather than the step limit, and keeps
+/// the error, which names the platform's own parts, for the operators.
+pub const PLATFORM_ERROR: &str = "error: ";
