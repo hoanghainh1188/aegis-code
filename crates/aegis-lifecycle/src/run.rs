@@ -197,7 +197,10 @@ where
     let ending = match prepared {
         Ok(ending) => ending,
         // The ledger still gets an outcome, so the run is not left open.
-        Err(e) => Ending::stop(Outcome::StoppedSteps, format!("error: {e}")),
+        Err(e) => Ending::stop(
+            Outcome::StoppedSteps,
+            format!("{}{e}", crate::PLATFORM_ERROR),
+        ),
     };
 
     ledger
