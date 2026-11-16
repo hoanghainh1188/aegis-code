@@ -1,0 +1,39 @@
+diff --git a/crates/aegis-gate/src/sandbox.rs b/crates/aegis-gate/src/sandbox.rs
+index 4f85452..e671fa6 100644
+--- a/crates/aegis-gate/src/sandbox.rs
++++ b/crates/aegis-gate/src/sandbox.rs
+@@ -167,7 +167,20 @@ impl Hardening {
+         ]
+         .map(str::to_owned)
+         .to_vec();
+-        if let Some(runtime) = &self.runtime {
++        // BENCH-322 (local only, not committed).
++        let mut runtime = self.runtime.clone();
++        if network != "none" {
++            if let Ok(rt) = std::env::var("AEGIS_BENCH_FETCH_RUNTIME") {
++                runtime = Some(rt);
++            }
++        }
++        if runtime.as_deref() == Some("runsc") {
++            if let Ok(user) = std::env::var("AEGIS_BENCH_RUNSC_USER") {
++                let i = out.iter().position(|a| a == "--user").unwrap();
++                out[i + 1] = user;
++            }
++        }
++        if let Some(runtime) = &runtime {
+             out.extend(["--runtime".to_owned(), runtime.clone()]);
+         }
+         if self.read_only_rootfs {
+diff --git a/crates/aegis-orchestrator/src/mcp_tools.rs b/crates/aegis-orchestrator/src/mcp_tools.rs
+index 1df30b2..dcb9937 100644
+--- a/crates/aegis-orchestrator/src/mcp_tools.rs
++++ b/crates/aegis-orchestrator/src/mcp_tools.rs
+@@ -65,7 +65,7 @@ const NO_OUTPUT: &str = "[no output]";
+ 
+ /// Variables a server gets from this process; everything else comes from
+ /// [`McpServerSpec::env`].
+-pub const INHERITED_ENV: &[&str] = &["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"];
++pub const INHERITED_ENV: &[&str] = &["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "AEGIS_BENCH_RUNSC_USER", "AEGIS_BENCH_FETCH_RUNTIME"]; // BENCH-322
+ 
+ pub struct McpTools {
+     servers: Vec<(String, RunningService<RoleClient, ()>)>,
