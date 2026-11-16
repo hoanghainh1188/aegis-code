@@ -6,9 +6,10 @@
 
 use std::sync::Arc;
 
-use aegis_secrets::Secrets;
+use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::config::ServerConfig;
 use aegis_server::github_app::AppHandle;
+use aegis_server::secrets::load_at_start;
 use aegis_server::webhook::{
     DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GitHubNotifier, WebhookConfig, router,
 };
@@ -376,4 +377,36 @@ async fn the_apps_own_comments_start_no_review_round() {
     let (_, reply) = post(&app, APP_SECRET, "issue_comment", "c-1", &comment).await;
     assert_eq!(reply["data"]["status"], "ignored", "{reply}");
     assert_eq!(reply["data"]["reason"], "sent by a bot", "{reply}");
+}
+
+/// #554: with the store as the server opens it, read by `load_at_start`
+/// rather than built full, an app delivery verifies. The app's secret was
+/// never read, and every app delivery was refused as badly signed.
+#[tokio::test]
+async fn an_app_delivery_verifies_with_the_secrets_read_at_start() {
+    let Some(db) = test_db().await else { return };
+    let section = ServerConfig::from_toml("[github_app]\napp_id = 42\n")
+        .unwrap()
+        .github_app
+        .unwrap();
+    let pem = pem();
+    let secrets = Secrets::new(MemorySource::new([
+        ("AEGIS_DATABASE_URL", "postgres://unused"),
+        (APP_SECRET_ENV, APP_SECRET),
+        (APP_KEY_ENV, pem.as_str()),
+    ]));
+    load_at_start(&secrets, aegis_server::Role::Api, Some(&section))
+        .await
+        .unwrap();
+    let app = Arc::new(AppHandle::new(section, secrets.clone()).unwrap());
+    let hooks = router(
+        db.store.clone(),
+        WebhookConfig {
+            secrets,
+            app: Some(app),
+            ..config("http://127.0.0.1:9")
+        },
+    );
+    let (status, body) = post(&hooks, APP_SECRET, "ping", "d-554", &json!({"zen": "hi"})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
