@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.15.0...v0.15.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deploy:** add-repo.sh prints the app's steps for app-path repos ([#559](https://github.com/hoanghainh1188/aegis-code/issues/559)) ([4b53bd3](https://github.com/hoanghainh1188/aegis-code/commit/4b53bd34cf1515b526526ba3afccdbc803e79b6e)), closes [#556](https://github.com/hoanghainh1188/aegis-code/issues/556)
+* **gate:** reach the egress proxy by its address, not its name ([#552](https://github.com/hoanghainh1188/aegis-code/issues/552)) ([283c6d9](https://github.com/hoanghainh1188/aegis-code/commit/283c6d9fa3fd7ff3b173e36fb0e9891841f7ca88))
+* **infra:** install the Python and PHP language servers in their images ([#553](https://github.com/hoanghainh1188/aegis-code/issues/553)) ([820b610](https://github.com/hoanghainh1188/aegis-code/commit/820b6108a1ae24eb474e1f93ac41c9e6e84fc89a))
+* **server:** a job the platform failed is not told as a step limit ([#560](https://github.com/hoanghainh1188/aegis-code/issues/560)) ([9a12cd5](https://github.com/hoanghainh1188/aegis-code/commit/9a12cd5faee787c53b9506f80eb01bdaabf04af7)), closes [#557](https://github.com/hoanghainh1188/aegis-code/issues/557)
+* **server:** no world-writable state directory, and a clear error if one is found ([#561](https://github.com/hoanghainh1188/aegis-code/issues/561)) ([55d5db4](https://github.com/hoanghainh1188/aegis-code/commit/55d5db47d23ffc27fefd8d3f24b42e9d4db2e266))
+* **server:** read the GitHub App's webhook secret at start ([#555](https://github.com/hoanghainh1188/aegis-code/issues/555)) ([57ec0ba](https://github.com/hoanghainh1188/aegis-code/commit/57ec0ba5f744a7b5ca0974181dc98c606fc16888)), closes [#554](https://github.com/hoanghainh1188/aegis-code/issues/554)
+
+
+### Documentation
+
+* **measurements:** cost of the sandbox under gVisor (runsc) ([#550](https://github.com/hoanghainh1188/aegis-code/issues/550)) ([3681ee8](https://github.com/hoanghainh1188/aegis-code/commit/3681ee88e1e939cd5da09f246bc609e7636940b7))
+
 ## [0.15.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.14.0...v0.15.0) (2026-11-16)
 
 
