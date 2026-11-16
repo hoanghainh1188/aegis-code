@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.16.0...v0.17.0) (2026-11-16)
+
+
+### Features
+
+* **client:** aegis submit takes an issue's number on the repo ([#571](https://github.com/hoanghainh1188/aegis-code/issues/571)) ([5025c6c](https://github.com/hoanghainh1188/aegis-code/commit/5025c6cc62c4731b86a9e4c4d2b9dd98e81d8868)), closes [#570](https://github.com/hoanghainh1188/aegis-code/issues/570)
+
 ## [0.16.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.15.2...v0.16.0) (2026-11-16)
 
 
