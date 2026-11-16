@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.17.0...v0.17.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **ci:** build the release's macOS arm64 client on the Intel runner ([#574](https://github.com/hoanghainh1188/aegis-code/issues/574)) ([d1d5f18](https://github.com/hoanghainh1188/aegis-code/commit/d1d5f188a6510ac4e5086411fdb76db5a41d3e10)), closes [#573](https://github.com/hoanghainh1188/aegis-code/issues/573)
+
 ## [0.17.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.16.0...v0.17.0) (2026-11-16)
 
 
