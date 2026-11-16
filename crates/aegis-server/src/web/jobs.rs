@@ -197,7 +197,7 @@ pub async fn list(
         .map(|(value, label)| Choice {
             value: value.into(),
             label: label.into(),
-            selected: value == super::issue_hint::REPO_SOURCE,
+            selected: value == crate::repo_issue::REPO_SOURCE,
         })
         .collect();
     let repos = repos

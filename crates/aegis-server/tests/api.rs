@@ -179,6 +179,43 @@ async fn bad_requests_answer_in_the_envelope() {
     db.drop().await;
 }
 
+/// #570: `"source": "repo"` takes the issue's number on the repo's own
+/// forge, as the jobs page does, completed from its URL; what is not a
+/// number is refused, saying how to write it.
+#[tokio::test]
+async fn a_job_takes_the_issue_s_number_on_the_repo() {
+    let Some(db) = test_db().await else { return };
+    let app = app(&db.store).await;
+    let repo_id = repo(&db.store).await;
+    for (input, n) in [("12", 12), ("#13", 13)] {
+        let new = json!({ "repo_id": repo_id, "issue_ref": input, "source": "repo" });
+        let (status, body) = call(&app, "POST", "/api/v1/jobs", Some(new)).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        assert_eq!(
+            body["data"]["issue_ref"],
+            format!("typst/typst#{n}"),
+            "{body}"
+        );
+        assert_eq!(body["data"]["source"], "github", "{body}");
+    }
+    let bad = json!({ "repo_id": repo_id, "issue_ref": "twelve", "source": "repo" });
+    let (status, body) = call(&app, "POST", "/api/v1/jobs", Some(bad)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_error(&body, "invalid");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("12 or #12"),
+        "{body}"
+    );
+    let unknown = json!({ "repo_id": 9999, "issue_ref": "12", "source": "repo" });
+    let (status, body) = call(&app, "POST", "/api/v1/jobs", Some(unknown)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_error(&body, "not_found");
+    db.drop().await;
+}
+
 /// The status of a POST with `len` bytes of body, as the router answers.
 async fn post_bytes(app: &App, uri: &str, len: usize) -> StatusCode {
     let request = Request::builder()
