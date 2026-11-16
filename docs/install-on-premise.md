@@ -19,6 +19,8 @@ Throughout, replace:
 
 ## Part A: Before the Machine
 
+> **Connecting GitHub with the GitHub App instead** ([ADR 0017](adr/0017-github-app.md)): no bot account, no fork, no token per repo, no comment token and no webhook per repo. An owner of your GitHub organization installs one app, once. Skip A1–A3 and C3, and do [B10](#b10-the-github-app-instead-of-a-bot-and-tokens) after B9. The bot path below keeps working, and both can run side by side.
+
 ### A1. A bot account and its fork
 
 The agent never pushes to the upstream repo. It pushes `agent/*` branches to a fork and opens PRs there; maintainers merge from the fork ([Adding Repositories](runbook/repos.md#prerequisites) describes the alternative of PRs straight into upstream).
@@ -257,6 +259,43 @@ If you gave the admin email in B3, `aegis-deploy.sh` granted it admin as it star
 - *…or SSO has not verified it*: this email was granted a role before its first sign-in, and the SSO does not say it is verified. Mark it verified in the SSO (A4, step 6).
 - The browser gets an error page: `sudo docker compose logs aegis` shows the cause after `sign-in: discovery`. `Request failed` is usually a certificate the server does not trust (internal CA: B6). `unexpected issuer URI` means `issuer` in `server.toml` differs from what the SSO announces (A4, Check).
 
+### B10. The GitHub App (instead of a bot and tokens)
+
+Skip this on the bot path (A1–A3). You need an owner of the GitHub organization (`acme`), and `public_url` set (B4): GitHub sends the app's webhooks there.
+
+1. **Create the app**, on the machine in `deploy/compose`:
+
+   ```bash
+   sudo ./github-app.sh
+   ```
+
+   It asks for the organization (`acme`) and the app's name, and writes `github-app-manifest.html`. Open that file in a browser signed in to GitHub as an owner of `acme` (copy it to your laptop if the machine has no browser). Click **Create the GitHub App**, then GitHub's **Create GitHub App**. GitHub then opens `https://aegis.example.internal/api/v1/health?code=…` (a page that needs no sign-in); paste that whole address into the script within the hour. The script writes the app's private key and webhook secret to `./secrets` (`AEGIS_GITHUB_APP_PRIVATE_KEY`, `AEGIS_GITHUB_APP_WEBHOOK_SECRET`) and `[github_app] app_id` to `server.toml`.
+
+   The app gets only what its tokens need: *Metadata* read, *Contents* and *Pull requests* read and write, *Issues* read and write, *Actions* read. It gets no *Workflows* (GitHub then refuses any push of the app that touches `.github/workflows/`) and no *Administration*. Its webhook is `https://aegis.example.internal/webhooks/github` with the events Issues, Workflow runs, Pull request reviews, Pull request review comments and Issue comments. GitHub always sends an app its installation events.
+
+2. **Restart** so the server reads `[github_app]`: `sudo ./aegis-deploy.sh X.Y.Z`.
+
+3. **Install the app** on `acme` (the link the script printed: `https://github.com/apps/<app>/installations/new`), with *Only select repositories*: `widget`, or all of them.
+
+4. **Bind the installation** to its tenant. Until then the app gets no token for it:
+
+   ```bash
+   A="sudo docker compose exec aegis aegis-server --config /etc/aegis/server.toml"
+   $A tenant installations                    # 12345678  acme  installed  1 repos named  not bound
+   $A tenant bind-installation 12345678 default
+   ```
+
+   Or on the dashboard: **Admin → GitHub App**.
+
+5. **Protect the default branch**: on `acme/widget`, **Settings → Rules → Rulesets → New branch ruleset** for the default branch (and release branches): *Require a pull request before merging*, with no bypass for the app. The app pushes only `agent/*` branches; the ruleset makes sure a fault in the platform cannot write to the default branch either.
+
+> [!WARNING]
+> On the app path the agent's branches live in `acme/widget` itself, so its PRs run your CI as same-repo PRs, **with the repo's Actions secrets**, which PRs from a fork do not get. Code the agent wrote then runs where those secrets can be read. Put the secrets that matter in [environments with required reviewers](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment#required-reviewers), or keep that repo on the bot path with a fork.
+
+**Check:** **Admin → GitHub App** lists the installation, bound to `default`. In C1, choose the connection `app`. There is no C3: the app's webhook covers every repo it is installed on. After the first job (C4), also check who may ask: a comment `/aegis fix` on the agent's PR by a collaborator with write access starts a review round, and the same by someone with read access only is ignored with *cannot write* on the repo's **Connection to the forge** page. If the collaborator's is ignored with *rights could not be checked*, the app needs more than *Metadata* read for it: report it ([ADR 0017](adr/0017-github-app.md) §3).
+
+**Rotating the app's key:** in the app's settings on GitHub (**Private keys → Generate a private key**), make a new key, write it over `secrets/AEGIS_GITHUB_APP_PRIVATE_KEY` (owned by uid 10001, mode 0600), wait for the next secret refresh (5 minutes; no restart), then delete the old key on GitHub.
+
 ---
 
 ## Part C: The First Repo and the First Job
@@ -273,7 +312,7 @@ sudo ./add-repo.sh
 
 It asks for:
 - the upstream URL (`https://github.com/acme/widget`), and the slug, branch, language and mode, each with a default;
-- the fork (`acme-aegis-bot/widget`) and its token (A2, typed without echo);
+- the connection: `app` with the GitHub App (B10, the default once `[github_app]` is set), or `token` with the fork (`acme-aegis-bot/widget`) and its token (A2, typed without echo);
 - the emails of maintainers and reviewers. People granted before their first sign-in need an email the SSO marks verified (A4); otherwise leave them empty and use C2 after they have signed in;
 - the monthly budget.
 

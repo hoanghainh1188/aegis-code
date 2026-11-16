@@ -4,3 +4,4 @@ secrets/
 modes/*
 !modes/.gitkeep
 docker-compose.override.yml
+github-app-manifest.html
