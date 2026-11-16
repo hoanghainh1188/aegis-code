@@ -9,7 +9,8 @@
 # - writes the repo file to the workspace and runs `repo add`, which
 #   clones the repo with the token;
 # - grants the maintainers and reviewers their roles;
-# - prints the webhook settings and the repo's budget page.
+# - prints what is left: the repo webhook (token) or the app's installation
+#   (app), and the repo's budget page.
 #
 # Each value can come from the environment instead: AEGIS_REPO_URL,
 # AEGIS_REPO_SLUG, AEGIS_REPO_BRANCH, AEGIS_REPO_LANGUAGE, AEGIS_REPO_MODE,
@@ -27,6 +28,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 cd "$HERE"
 # shellcheck source=SCRIPTDIR/lib/prompt.sh
 . "$HERE/lib/prompt.sh"
+# shellcheck source=SCRIPTDIR/lib/next_steps.sh
+. "$HERE/lib/next_steps.sh"
 
 die() { echo "add-repo.sh: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root (sudo): it writes secrets and files owned by uid $AEGIS_UID"
@@ -139,29 +142,5 @@ for email in ${AEGIS_REVIEWERS//,/ }; do
 done
 
 public_url=$(sed -n 's/^public_url = "\(.*\)"$/\1/p' server.toml)
-if [ "$AEGIS_CONNECTION" = app ]; then
-  where="the GitHub App: its agent/* branches and PRs go to $AEGIS_REPO_URL itself
-(the app must be installed on $upstream_owner with this repo before the first job)"
-  pr_events="Pull request reviews, Pull request review comments and Issue comments on the repo too"
-else
-  where="the fork $AEGIS_FORK_OWNER/$AEGIS_FORK_NAME"
-  pr_events="On the fork $AEGIS_FORK_OWNER/$AEGIS_FORK_NAME, the same with Pull request
-     reviews, Pull request review comments and Issue comments"
-fi
-echo "Connected through $where."
-cat <<NEXT
-
-Next (docs/runbook/on-premise.md §2):
-  1. Webhook on $AEGIS_REPO_URL (Settings > Webhooks > Add webhook):
-       Payload URL  $public_url/webhooks/github
-       Content type application/json
-       Secret       sudo cat $HERE/secrets/AEGIS_GITHUB_WEBHOOK_SECRET
-       Events       Issues, Workflow runs
-     $pr_events.
-NEXT
-if [ -n "$AEGIS_MONTHLY_USD" ] && [ -n "$id" ]; then
-  echo "  2. Monthly budget: \$$AEGIS_MONTHLY_USD on $public_url/repos/$id/budget (a maintainer)."
-else
-  echo "  2. Monthly budget: on the repo's budget page of the dashboard (a maintainer)."
-fi
-echo "  3. First job: the label aegis on a small, well-described bug."
+repo_next_steps "$AEGIS_CONNECTION" "$AEGIS_REPO_URL" "$public_url" "$HERE" "$id" \
+  "$AEGIS_MONTHLY_USD" "${AEGIS_FORK_OWNER:-}" "${AEGIS_FORK_NAME:-}"
