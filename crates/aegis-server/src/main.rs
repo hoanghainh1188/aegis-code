@@ -342,6 +342,7 @@ async fn run_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode
 #[tokio::main]
 async fn main() -> ExitCode {
     // Before anything is created: serving and commands alike (#558).
+    #[cfg(unix)]
     aegis_server::umask::tighten();
     let logs =
         aegis_server::logs::subscriber(std::io::stderr, aegis_server::logs::filter_from_env());

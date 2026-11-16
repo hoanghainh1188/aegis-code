@@ -4,28 +4,23 @@
 //! the process: a `docker exec` can start it with umask 0000, and
 //! Codebase-Memory then refuses to start under such a directory, which
 //! stops every job.
+//!
+//! In `libc::mode_t` throughout: it is `u32` on Linux and `u16` on macOS,
+//! so no conversion is needed on one and none is useless on the other.
 
 /// What the mask always holds: no write for the group or others.
-pub const REQUIRED: u32 = 0o022;
+pub const REQUIRED: libc::mode_t = 0o022;
 
 /// Adds [`REQUIRED`] to the process's mask, keeping a stricter one (0027,
 /// 0077); the mask now in force.
-#[cfg(unix)]
-pub fn tighten() -> u32 {
-    let required = REQUIRED as libc::mode_t;
+pub fn tighten() -> libc::mode_t {
     // SAFETY: umask cannot fail and touches no memory; the mask is read by
     // setting it, then set again with REQUIRED added.
-    let mask = unsafe {
-        let old = libc::umask(required);
-        libc::umask(old | required);
-        old | required
-    };
-    mask.into()
-}
-
-#[cfg(not(unix))]
-pub fn tighten() -> u32 {
-    REQUIRED
+    unsafe {
+        let old = libc::umask(REQUIRED);
+        libc::umask(old | REQUIRED);
+        old | REQUIRED
+    }
 }
 
 #[cfg(test)]
