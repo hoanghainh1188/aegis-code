@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.15.1...v0.15.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **web:** a review round's review link leads to the job that opened the PR ([#565](https://github.com/hoanghainh1188/aegis-code/issues/565)) ([e1d3bd3](https://github.com/hoanghainh1188/aegis-code/commit/e1d3bd37ba8a59c52b32b56a2a29d86575e23abb)), closes [#563](https://github.com/hoanghainh1188/aegis-code/issues/563)
+* **web:** the review form says it records a verdict, not what happens to the PR ([#566](https://github.com/hoanghainh1188/aegis-code/issues/566)) ([b5ad4d7](https://github.com/hoanghainh1188/aegis-code/commit/b5ad4d79730c004bd0b8c2498afd49a5d842110c))
+
 ## [0.15.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.15.0...v0.15.1) (2026-11-16)
 
 
