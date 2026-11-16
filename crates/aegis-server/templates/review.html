@@ -5,6 +5,7 @@
   <p class="eyebrow"><a href="/jobs/{{ id }}">Job #{{ id }}</a> · <span class="ref">{{ issue_ref }}</span></p>
   <h1 id="review-heading">Review PR</h1>
   {% if let Some(url) = pr_url %}<p><a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Open PR in new tab</a></p>{% endif %}
+  <p class="notice" role="note">Your verdict is recorded for the pilot's measures: acceptance, the lines you edited and your review time. It does not approve, merge or change the {{ request }}: do that on {% if let Some(url) = pr_url %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">the {{ request }}</a>{% else %}the forge{% endif %}. To have the agent work on it again, use Request changes there or comment <code>/aegis fix</code> on a line of its own.</p>
   <p class="note">Review time is calculated automatically from opening this page until submission.</p>
   {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
   {% if let Some(r) = existing %}<p class="notice">Existing review: {{ r }}</p>{% endif %}

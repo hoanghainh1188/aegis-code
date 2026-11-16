@@ -81,6 +81,9 @@ struct ReviewPage<'a> {
     id: i64,
     issue_ref: String,
     pr_url: Option<String>,
+    /// "pull request", or "merge request" on GitLab: what the form says
+    /// it does not touch (#562).
+    request: &'static str,
     existing: Option<String>,
     opened_at: i64,
     opened_sig: String,
@@ -155,6 +158,7 @@ async fn page(
         id: job.id.0,
         issue_ref: job.issue_ref.clone(),
         pr_url: job.pr_url.clone().filter(|u| u.starts_with("https://")),
+        request: request_word(job.pr_url.as_deref()),
         existing,
         opened_at,
         opened_sig: opened_at_signature(
@@ -268,13 +272,23 @@ pub async fn submit(
     {
         // An accepted review is not a merge: the memory of a merged PR is
         // recorded when the forge says it was merged (#456).
-        Ok(_) => Ok(Redirect::to(&format!("/jobs/{id}")).into_response()),
+        Ok(_) => Ok(Redirect::to(&format!("/jobs/{id}?done=reviewed")).into_response()),
         Err(StoreError::Conflict(_)) => {
             let why = "this PR already has a review; check \"replace existing review\" to update"
                 .to_owned();
             page(&store, &viewer, &job, opened_at, Some(why)).await
         }
         Err(e) => Err(e.into()),
+    }
+}
+
+/// What the job opened, as its forge calls it: GitLab's merge requests
+/// are at `…/-/merge_requests/<n>`.
+fn request_word(pr_url: Option<&str>) -> &'static str {
+    if pr_url.is_some_and(|u| u.contains("/-/merge_requests/")) {
+        "merge request"
+    } else {
+        "pull request"
     }
 }
 

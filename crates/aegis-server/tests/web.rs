@@ -364,7 +364,10 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     );
     let sent = post_form(&app, &format!("/jobs/{}/review", id.0), &fields).await;
     assert_eq!(sent.status, StatusCode::SEE_OTHER, "{}", sent.body);
-    assert_eq!(sent.headers[header::LOCATION], format!("/jobs/{}", id.0));
+    assert_eq!(
+        sent.headers[header::LOCATION],
+        format!("/jobs/{}?done=reviewed", id.0)
+    );
     let record = s
         .record(&IssueId::parse("typst-9").unwrap())
         .await
@@ -414,6 +417,84 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
     assert!(bad.body.contains("lines edited"), "{}", bad.body);
     let no_pr = get(&app, &format!("/jobs/{}/review", stopped.0)).await;
     assert_eq!(no_pr.status, StatusCode::CONFLICT);
+    db.drop().await;
+}
+
+/// #562: the review form records a verdict for the measures and does
+/// nothing to the PR. The form says so, links the PR, and says where it is
+/// approved or merged and how the agent is asked for changes; the job page
+/// says it again once the review is in.
+#[tokio::test]
+async fn the_review_form_says_it_records_a_verdict_not_what_happens_to_the_pr() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let demo = repo(s, "demo", "go").await;
+    let lease = std::time::Duration::from_secs(60);
+    let mut jobs = Vec::new();
+    for (key, pr) in [
+        ("demo-1", "https://github.com/acme/demo/pull/5"),
+        ("demo-2", "https://gitlab.com/acme/demo/-/merge_requests/6"),
+    ] {
+        let id = job(s, demo, key, None, &[call(1.0, Tier::Core)]).await;
+        let claim = s.claim_job("w", lease, 10).await.unwrap().unwrap();
+        assert_eq!(claim.job.id, id);
+        let opened = aegis_store::AttemptEnd::Done {
+            outcome: Outcome::PrOpened,
+            reason: None,
+            pr_url: Some(pr.into()),
+            patch: None,
+            diagnosis: None,
+        };
+        s.finish_attempt(&claim.run, "w", &opened).await.unwrap();
+        jobs.push((id, pr));
+    }
+    let app = app(s).await;
+
+    let (github, github_pr) = jobs[0];
+    let form = get(&app, &format!("/jobs/{}/review", github.0)).await;
+    assert_eq!(form.status, StatusCode::OK, "{}", form.body);
+    for said in [
+        "does not approve, merge or change the pull request",
+        &format!("href=\"{github_pr}\""),
+        "Request changes",
+        "<code>/aegis fix</code>",
+    ] {
+        assert!(form.body.contains(said), "{said}: {}", form.body);
+    }
+    let (gitlab, _) = jobs[1];
+    let form = get(&app, &format!("/jobs/{}/review", gitlab.0)).await;
+    assert!(
+        form.body
+            .contains("does not approve, merge or change the merge request"),
+        "{}",
+        form.body
+    );
+
+    let opened_at = chrono::Utc::now().timestamp_millis() - 60_000;
+    let sig = opened_at_signature(
+        &Signer::new(common::KEY.as_bytes()),
+        github,
+        app.browser.user,
+        opened_at,
+    );
+    let sent = post_form(
+        &app,
+        &format!("/jobs/{}/review", github.0),
+        &format!("verdict=accepted&lines_edited=0&opened_at={opened_at}&opened_sig={sig}"),
+    )
+    .await;
+    assert_eq!(sent.status, StatusCode::SEE_OTHER, "{}", sent.body);
+    let back = get(&app, sent.headers[header::LOCATION].to_str().unwrap()).await;
+    assert!(
+        back.body.contains("Review recorded for the measures"),
+        "{}",
+        back.body
+    );
+    assert!(
+        back.body.contains("The PR itself is unchanged"),
+        "{}",
+        back.body
+    );
     db.drop().await;
 }
 
