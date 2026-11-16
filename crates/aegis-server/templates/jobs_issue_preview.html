@@ -1,0 +1,2 @@
+{%- if let Some(f) = found %}<span class="ok">{{ f }}</span>{% endif -%}
+{%- if let Some(n) = note %}<span{% if bad %} class="bad" role="alert"{% endif %}>{{ n }}</span>{% endif -%}

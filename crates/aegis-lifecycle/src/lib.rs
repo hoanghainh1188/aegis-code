@@ -44,7 +44,7 @@ pub use cve::CveTarget;
 pub use diagnose::TriageLane;
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
-pub use issue::{HiddenTests, IssueInput};
+pub use issue::{HiddenTests, IssueInput, IssueSummary, open_github_issues};
 pub use memory::{
     ExtractedMemory, MemoryLesson, extract_from_merged_pr, fallback_extract_from_merged_pr,
     format_for_bp3,
