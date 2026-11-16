@@ -9,8 +9,10 @@
 #
 # On a terminal it then asks for the site's values that are still unset
 # (#476): public_url, [auth.oidc], the first admin's email, the sandboxes
-# to pull, and the secrets ANTHROPIC_API_KEY, AEGIS_OIDC_CLIENT_SECRET and
-# AEGIS_GITHUB_COMMENT_TOKEN (read without echo). Each can come from the
+# to pull, and the secrets ANTHROPIC_API_KEY, AEGIS_OIDC_CLIENT_SECRET and,
+# unless server.toml has [github_app] (ADR 0017: the app comments, and
+# ./github-app.sh makes it), AEGIS_GITHUB_COMMENT_TOKEN (read without
+# echo). Each can come from the
 # environment instead: AEGIS_PUBLIC_URL, AEGIS_OIDC_ISSUER,
 # AEGIS_OIDC_CLIENT_ID, AEGIS_ADMIN_EMAIL, AEGIS_SANDBOXES and the secrets
 # by name. AEGIS_NONINTERACTIVE=1, or no terminal: nothing is asked.
@@ -120,7 +122,12 @@ ask_secret_file ANTHROPIC_API_KEY "Claude API key (not needed with a local model
 if grep -q '^\[auth.oidc\]$' server.toml; then
   ask_secret_file AEGIS_OIDC_CLIENT_SECRET "OIDC client secret"
 fi
-ask_secret_file AEGIS_GITHUB_COMMENT_TOKEN "GitHub token that comments on upstream issues"
+# With the GitHub App the app comments; repos on the token path still
+# need this token, so it is asked only without the app.
+if ! grep -q '^\[github_app\]$' server.toml; then
+  ask_secret_file AEGIS_GITHUB_COMMENT_TOKEN \
+    "GitHub token that comments on upstream issues (empty if you will use the GitHub App)"
+fi
 
 cat <<'NEXT'
 
@@ -129,6 +136,8 @@ Next (docs/runbook/on-premise.md):
      skipped above is still the example's.
   2. Secrets skipped above, one file each in ./secrets (0600, owned by
      uid 10001). Running ./install.sh again asks for them.
-  3. sudo ./aegis-deploy.sh <version>
-  4. sudo ./add-repo.sh, for each repo.
+  3. To connect GitHub repos with the GitHub App instead of a bot, a fork
+     and tokens per repo: sudo ./github-app.sh (one click on GitHub).
+  4. sudo ./aegis-deploy.sh <version>
+  5. sudo ./add-repo.sh, for each repo.
 NEXT

@@ -114,3 +114,62 @@ set_env() {
     printf '%s=%s\n' "$key" "$value" >> "$file"
   fi
 }
+
+# set_github_app FILE APP_ID [API]: the example's commented [github_app]
+# made a real one (ADR 0017), with the app's id and, for GHES, its API.
+set_github_app() {
+  local file=$1 id=$2 api=${3:-}
+  sed -i.bak \
+    -e "s|^# \[github_app\]$|[github_app]|" \
+    -e "s|^# app_id = .*|app_id = $id|" \
+    "$file"
+  if [ -n "$api" ]; then
+    sed -i.bak "s|^# api = \"https://api.github.com\"$|api = \"$api\"|" "$file"
+  fi
+  rm -f "$file.bak"
+}
+
+# valid_app_name NAME: what GitHub takes as an app's name, kept plain.
+valid_app_name() {
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._\ -]*$ ]] && [ ${#1} -le 34 ]
+}
+
+# github_app_manifest PUBLIC_URL NAME: the manifest of the instance's app
+# (ADR 0017 §3, §5): the permissions of its tokens and no more (no
+# Workflows, no Administration), the events the server handles, its one
+# webhook. GitHub always sends an app its `installation` events.
+github_app_manifest() {
+  local url=$1 name=$2
+  printf '{"name":"%s","url":"%s","hook_attributes":{"url":"%s/webhooks/github","active":true},' \
+    "$name" "$url" "$url"
+  # A page that needs no sign-in, so the code stays in the address bar.
+  printf '"redirect_url":"%s/api/v1/health","public":false,' "$url"
+  printf '"default_permissions":{"metadata":"read","contents":"write","pull_requests":"write","issues":"write","actions":"read"},'
+  printf '"default_events":["issues","issue_comment","pull_request_review","pull_request_review_comment","workflow_run"]}'
+}
+
+# html_attr TEXT: TEXT safe inside a double-quoted HTML attribute.
+html_attr() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/"/\&quot;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# code_of ANSWER: the manifest flow's code, from the address GitHub sent
+# the browser to (`…?code=…&state=…`) or the code itself; empty if none.
+code_of() {
+  local answer=$1 code
+  case "$answer" in
+    *code=*) code=${answer#*code=}; code=${code%%&*} ;;
+    *) code=$answer ;;
+  esac
+  [[ $code =~ ^[A-Za-z0-9_-]{8,128}$ ]] && printf '%s' "$code"
+  return 0
+}
+
+# state_of ANSWER: the `state` the address carries; empty if none.
+state_of() {
+  local answer=$1 state
+  case "$answer" in
+    *state=*) state=${answer#*state=}; printf '%s' "${state%%&*}" ;;
+  esac
+  return 0
+}

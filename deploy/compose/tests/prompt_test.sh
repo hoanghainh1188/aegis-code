@@ -93,5 +93,34 @@ check "env replaced" grep -qx 'AEGIS_SANDBOXES="python rust"' "$TMP/.env"
 check "env added" grep -qx 'AEGIS_ADMIN_EMAIL=dev@example.com' "$TMP/.env"
 check "env kept" grep -qx 'A=1' "$TMP/.env"
 
+# The GitHub App (#542).
+cp "$HERE/../server.toml.example" "$TMP/app.toml"
+set_github_app "$TMP/app.toml" 123
+check "github_app table" grep -qx '\[github_app\]' "$TMP/app.toml"
+check "github_app id" grep -qx 'app_id = 123' "$TMP/app.toml"
+check "github_app api left commented" grep -qx '# api = "https://api.github.com"' "$TMP/app.toml"
+cp "$HERE/../server.toml.example" "$TMP/ghes.toml"
+set_github_app "$TMP/ghes.toml" 7 "https://ghe.acme.jp/api/v3"
+check "github_app api for GHES" grep -qx 'api = "https://ghe.acme.jp/api/v3"' "$TMP/ghes.toml"
+check "app name" valid_app_name "aegis-code acme"
+check "app name no quote" not valid_app_name 'aegis"x'
+check "app name at most 34" not valid_app_name "$(printf 'a%.0s' {1..35})"
+manifest=$(github_app_manifest "https://aegis.acme.jp" "aegis-code acme")
+check "manifest webhook" grep -q '"url":"https://aegis.acme.jp/webhooks/github"' <<<"$manifest"
+check "manifest no workflows" not grep -q 'workflows' <<<"$manifest"
+check "manifest no administration" not grep -q 'administration' <<<"$manifest"
+check "manifest contents write" grep -q '"contents":"write"' <<<"$manifest"
+check "attr escaped" equal "$(html_attr '{"a":"<b>&"}')" '{&quot;a&quot;:&quot;&lt;b&gt;&amp;&quot;}'
+check "manifest returns to a page with no sign-in" grep -q '"redirect_url":"https://aegis.acme.jp/api/v1/health"' <<<"$manifest"
+check "code from address" equal "$(code_of 'https://aegis.acme.jp/api/v1/health?code=abc123XYZ&state=s1')" abc123XYZ
+check "code itself" equal "$(code_of 'abc123XYZ')" abc123XYZ
+check "no code in junk" equal "$(code_of 'https://x/?code=a;rm')" ""
+check "state from address" equal "$(state_of 'https://x/?code=abc123XYZ&state=s1')" s1
+check "no state" equal "$(state_of 'abc123XYZ')" ""
+if command -v python3 >/dev/null; then
+  check "manifest is JSON" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$manifest"
+  check "server.toml with the app parses" python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$TMP/ghes.toml"
+fi
+
 [ "$failures" = 0 ] || { echo "$failures failed"; exit 1; }
 echo "all passed"
