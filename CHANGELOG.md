@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.14.0...v0.15.0) (2026-11-16)
+
+
+### Features
+
+* **deploy:** GitHub App from a manifest, install.sh and runbooks ([#542](https://github.com/hoanghainh1188/aegis-code/issues/542)) ([#547](https://github.com/hoanghainh1188/aegis-code/issues/547)) ([f7b0fd5](https://github.com/hoanghainh1188/aegis-code/commit/f7b0fd542fdf62c25782d49eacd3a29dbe3cdd81))
+* **pr:** GitHub App tokens and a token source per use ([#538](https://github.com/hoanghainh1188/aegis-code/issues/538)) ([#543](https://github.com/hoanghainh1188/aegis-code/issues/543)) ([f78c07d](https://github.com/hoanghainh1188/aegis-code/commit/f78c07d19614b4bf07a67e4be4878c933c8d8902))
+* **server:** bind GitHub App installations to tenants ([#541](https://github.com/hoanghainh1188/aegis-code/issues/541)) ([#546](https://github.com/hoanghainh1188/aegis-code/issues/546)) ([13890d0](https://github.com/hoanghainh1188/aegis-code/commit/13890d0b3d7300f6cceac9f604a8d236f9b01346))
+* **server:** GitHub App config, repo settings and per-use job tokens ([#539](https://github.com/hoanghainh1188/aegis-code/issues/539)) ([#544](https://github.com/hoanghainh1188/aegis-code/issues/544)) ([f5865a0](https://github.com/hoanghainh1188/aegis-code/commit/f5865a0c5094a79e0ba0ef83fb3f7b8b49a9b619))
+* **server:** GitHub App webhook, installation events, comments as the app ([#540](https://github.com/hoanghainh1188/aegis-code/issues/540)) ([#545](https://github.com/hoanghainh1188/aegis-code/issues/545)) ([8ecec11](https://github.com/hoanghainh1188/aegis-code/commit/8ecec110fafcbc3a476b41c09f976daa2299b36d))
+
+
+### Documentation
+
+* ADR 0017 — GitHub App instead of bot, fork and per-repo tokens ([#537](https://github.com/hoanghainh1188/aegis-code/issues/537)) ([7e67e4a](https://github.com/hoanghainh1188/aegis-code/commit/7e67e4ab44bf311437229cb8aa9c20e2da6afd56))
+* pilot plan uses v0.14.0: global pause, output secret scan, checked sources, diagnosis lane off ([#533](https://github.com/hoanghainh1188/aegis-code/issues/533)) ([#534](https://github.com/hoanghainh1188/aegis-code/issues/534)) ([b41684c](https://github.com/hoanghainh1188/aegis-code/commit/b41684c4fa54963961d41c52e792a1ff3a7aa8d0))
+
 ## [0.14.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.13.0...v0.14.0) (2026-11-15)
 
 
