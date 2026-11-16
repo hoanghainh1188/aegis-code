@@ -5,6 +5,7 @@
 //! read what it fetched through read-only mounts.
 
 use std::io::{BufRead, BufReader, Read};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -47,6 +48,10 @@ pub struct EgressSession {
     docker: String,
     network: String,
     proxy: String,
+    /// `http://<address>:3128`: the proxy's address on `network`, not its
+    /// name. Under gVisor the fetch container cannot reach Docker's
+    /// embedded DNS (127.0.0.11), so a name never resolves (#548).
+    proxy_url: String,
 }
 
 fn docker(docker: &str, args: &[&str]) -> Result<String, GateError> {
@@ -78,10 +83,11 @@ impl Egress {
     pub fn start(&self) -> Result<EgressSession, GateError> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let session = EgressSession {
+        let mut session = EgressSession {
             docker: self.docker.clone(),
             network: format!("aegis-fetch-{}-{n}", std::process::id()),
             proxy: format!("aegis-egress-{}-{n}", std::process::id()),
+            proxy_url: String::new(),
         };
         docker(
             &self.docker,
@@ -113,6 +119,22 @@ impl Egress {
             &["network", "connect", &session.network, &session.proxy],
         )?;
         wait_ready(&self.docker, &session.proxy, self.ready_timeout)?;
+        // The network name is ours (`aegis-fetch-…`), safe in the template.
+        let template = format!(
+            "{{{{(index .NetworkSettings.Networks \"{}\").IPAddress}}}}",
+            session.network
+        );
+        let address = docker(
+            &self.docker,
+            &[
+                "container",
+                "inspect",
+                "--format",
+                &template,
+                &session.proxy,
+            ],
+        )?;
+        session.proxy_url = proxy_url(&address)?;
         Ok(session)
     }
 }
@@ -183,6 +205,19 @@ fn wait_ready(docker: &str, proxy: &str, timeout: Duration) -> Result<(), GateEr
     }
 }
 
+/// The proxy's URL from its address on the internal network, as `docker
+/// inspect` prints it (#548).
+fn proxy_url(address: &str) -> Result<String, GateError> {
+    let ip: IpAddr = address.trim().parse().map_err(|_| GateError::Spawn {
+        program: "egress proxy".into(),
+        message: format!("no address on its network (`docker inspect` printed {address:?})"),
+    })?;
+    Ok(match ip {
+        IpAddr::V4(ip) => format!("http://{ip}:{PROXY_PORT}"),
+        IpAddr::V6(ip) => format!("http://[{ip}]:{PROXY_PORT}"),
+    })
+}
+
 /// The last `n` characters of `text`, trimmed.
 fn last_chars(text: &str, n: usize) -> String {
     let text = text.trim();
@@ -207,7 +242,7 @@ impl EgressSession {
         timeout: Duration,
         cancel: CancelToken,
     ) -> Result<Ran, GateError> {
-        let proxy = format!("http://{}:{PROXY_PORT}", self.proxy);
+        let proxy = self.proxy_url.clone();
         let mut fetch = Sandbox {
             network: Some(self.network.clone()),
             read_only_mounts: false,
@@ -319,6 +354,20 @@ mod tests {
         assert!(message.contains("not listening after 500ms"), "{message}");
         assert!(message.contains("starting"), "{message}");
         assert!(took < Duration::from_secs(10), "{took:?}");
+    }
+
+    #[test]
+    fn the_proxy_is_reached_by_its_address_not_its_name() {
+        assert_eq!(proxy_url("172.19.0.2\n").unwrap(), "http://172.19.0.2:3128");
+        assert_eq!(proxy_url("fd00::2").unwrap(), "http://[fd00::2]:3128");
+    }
+
+    #[test]
+    fn a_proxy_without_an_address_on_its_network_is_an_error() {
+        for printed in ["", "<no value>", "aegis-egress-1-0"] {
+            let message = proxy_url(printed).unwrap_err().to_string();
+            assert!(message.contains("no address on its network"), "{message}");
+        }
     }
 
     #[test]

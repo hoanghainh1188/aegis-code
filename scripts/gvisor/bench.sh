@@ -13,11 +13,13 @@
 # next to them.
 #
 # On Docker Desktop runsc cannot write the project's files (file sharing
-# shows them as owned by the reader, the gofer reads as root) and the fetch
-# step cannot resolve the egress proxy (#548). The #322 runs applied
-# `docker-desktop.patch` (not for commit: it widens what ACI inherits) and set
+# shows them as owned by the reader, the gofer reads as root). The #322 runs
+# applied `docker-desktop.patch` (not for commit: it widens what ACI
+# inherits), set
 #   AEGIS_BENCH_RUNSC_USER=0:0 AEGIS_BENCH_FETCH_RUNTIME=runc
-# and rebuilt both `aegis` and `aegis-aci`. AEGIS_BENCH_RUNTIMES picks the
+# and rebuilt both `aegis` and `aegis-aci`. The fetch override was for the
+# proxy's name, which runsc could not resolve; since #548 the fetch step
+# reaches the proxy by its address and may run under runsc too. AEGIS_BENCH_RUNTIMES picks the
 # runtimes (default `runc runsc`).
 set -euo pipefail
 
