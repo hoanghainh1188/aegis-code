@@ -6,3 +6,7 @@ members = ["crates/*"]
 version = "0.17.1"
 license = "Apache-2.0"
 edition = "2024"
+
+# Giam dung luong target/debug: chi giu thong tin so dong khi debug
+[profile.dev]
+debug = "line-tables-only"
