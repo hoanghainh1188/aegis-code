@@ -89,6 +89,7 @@ Mô hình đe doạ ở [ADR 0009](../adr/0009-prompt-injection-threat-model.md)
 | 11-09 | [helm-docker-proxy-kind](2026-11-09-helm-docker-proxy-kind.md) (#411) | `aegis-docker-proxy` trong worker Pod, kiểm trên kind; thiết kế ở [ADR 0010](../adr/0010-docker-socket-proxy.md) |
 | 11-15 | [sidecar-golden-master](2026-11-15-sidecar-golden-master.md) (#454) | Thực nghiệm Golden Master (bắt 6/6 regression so với 0/6 khi thiếu) và PostgreSQL sidecar trong Docker (~4.5s overhead cho start + 3 reset + teardown) |
 | 11-16 | [gvisor-runsc](2026-11-16-gvisor-runsc.md) (#322) | Gate dưới gVisor: chậm ×1.5–1.9 với job ngắn, ×1.07–1.2 với job dài, RAM +10–220 MB mỗi container; giữ runc mặc định, runsc chờ #548 |
+| 11-20 | [gate-container-cost-parallel](2026-11-20-gate-container-cost-parallel.md) (#587) | Container gate tốn ~0,13 s mỗi bước (0,1–3,3% thời gian gate). Chạy song song các bước chỉ nhanh hơn khi thừa lõi (gin 38 → 18 s trên 12 CPU, 37 → 35 s trên 4 CPU), RAM đỉnh ×1,8–3,4 và sai kết quả trên cùng cây mã; NO-GO, giữ gate tuần tự |
 
 ## Thiên lệch (bias) và theo dõi pilot
 
