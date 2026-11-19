@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.2](https://github.com/hoanghainh1188/aegis-code/compare/v0.17.1...v0.17.2) (2026-11-19)
+
+
+### Documentation
+
+* align Phase 2 scope with milestones ([#582](https://github.com/hoanghainh1188/aegis-code/issues/582)) ([8f4c85c](https://github.com/hoanghainh1188/aegis-code/commit/8f4c85c8c54f695044721ffaafc5c32330385086))
+* mark Phase 3 and Phase 4 features as built ([#585](https://github.com/hoanghainh1188/aegis-code/issues/585)) ([02353de](https://github.com/hoanghainh1188/aegis-code/commit/02353de89c486f44d7df94d69b1b770ede290a66))
+* measure gate container cost and step parallelism ([#600](https://github.com/hoanghainh1188/aegis-code/issues/600)) ([bef7756](https://github.com/hoanghainh1188/aegis-code/commit/bef7756a02f9a7d948ed2e45d5743824f0c7518a))
+
 ## [0.17.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.17.0...v0.17.1) (2026-11-16)
 
 
