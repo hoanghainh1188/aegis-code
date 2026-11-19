@@ -16,6 +16,11 @@ ignore = [
     # RSA/EC bí mật nào. Gỡ khi `openidconnect` lên bản đã sửa.
     { id = "RUSTSEC-2023-0071", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
     { id = "RUSTSEC-2026-0387", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
+    # `chrono` unmaintained, mọi phiên bản, không có bản sửa (#579). Không phải
+    # lỗ hổng; ngoài code của mình nó còn bị kéo vào qua `sqlx`, `oauth2`,
+    # `openidconnect`, `rmcp`, `schemars`. Gỡ khi đã chuyển sang `jiff`/`time`
+    # và `chrono` không còn trong Cargo.lock (#578).
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, chưa thay được (#578)" },
 ]
 
 [licenses]
