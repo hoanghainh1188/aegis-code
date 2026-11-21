@@ -16,7 +16,7 @@ use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::worker::{WorkerConfig, run_worker};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Claim, Job, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, RepoId, RepoMode, Store,
+    Claim, Job, JobFilter, JobSource, JobStatus, ModeName, NewJob, NewRepo, Page, RepoId, Store,
 };
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -119,7 +119,7 @@ fn settings(extra: serde_json::Value) -> RepoSettings {
 fn spec(
     slug: &str,
     language: Language,
-    mode: RepoMode,
+    mode: ModeName,
     max: u32,
     extra: serde_json::Value,
 ) -> RepoSpec {
@@ -197,7 +197,7 @@ async fn two_repos_run_side_by_side_each_with_its_own_configuration_and_limit() 
     let internal = modes
         .register(
             s,
-            &spec("scrapy", Language::Python, RepoMode::Poc, 3, json!({})),
+            &spec("scrapy", Language::Python, ModeName::POC, 3, json!({})),
         )
         .await
         .unwrap();
@@ -207,7 +207,7 @@ async fn two_repos_run_side_by_side_each_with_its_own_configuration_and_limit() 
             &spec(
                 "app.jp",
                 Language::Rust,
-                RepoMode::CustomerJp,
+                ModeName::CUSTOMER_JP,
                 1,
                 json!({
                     "image": "registry.local/app-ci:1",
@@ -261,7 +261,7 @@ async fn a_job_of_a_repo_whose_mode_is_not_configured_stops_with_the_reason() {
             url: "https://github.com/me/app".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::CustomerJp,
+            mode: ModeName::CUSTOMER_JP,
             max_concurrent_jobs: 1,
             config: serde_json::to_value(settings(json!({}))).unwrap(),
         })
@@ -273,7 +273,7 @@ async fn a_job_of_a_repo_whose_mode_is_not_configured_stops_with_the_reason() {
             url: "https://github.com/me/broken".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({ "fork": "not a table" }),
         })

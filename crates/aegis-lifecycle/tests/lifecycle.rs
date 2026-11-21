@@ -24,7 +24,7 @@ use aegis_lifecycle::{
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, Role, StopReason, Usage,
 };
-use aegis_store::RepoMode;
+use aegis_store::ModeName;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -2008,7 +2008,7 @@ email = "aegis-bot@example.invalid"
 }
 
 /// A repo of the fixture whose clone is where the registry puts it.
-fn spec(scratch: &Scratch, slug: &str, mode: RepoMode, api: &str, jobs: u32) -> RepoSpec {
+fn spec(scratch: &Scratch, slug: &str, mode: ModeName, api: &str, jobs: u32) -> RepoSpec {
     let clone = scratch.0.join("state/repos").join(slug);
     std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
     std::fs::rename(scratch.0.join("clone"), &clone).unwrap();
@@ -2066,14 +2066,14 @@ async fn two_repos_with_different_modes_run_side_by_side() {
     let a = modes
         .register(
             &db.store,
-            &spec(&internal, "fixture", RepoMode::Poc, &uri, 2),
+            &spec(&internal, "fixture", ModeName::POC, &uri, 2),
         )
         .await
         .unwrap();
     let b = modes
         .register(
             &db.store,
-            &spec(&customer, "fixture.jp", RepoMode::CustomerJp, &uri, 1),
+            &spec(&customer, "fixture.jp", ModeName::CUSTOMER_JP, &uri, 1),
         )
         .await
         .unwrap();

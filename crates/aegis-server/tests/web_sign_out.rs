@@ -145,7 +145,7 @@ async fn tokens_stay_unless_asked_and_only_an_admin_signs_others_out() {
             url: "https://github.com/x/a".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: aegis_store::RepoMode::Poc,
+            mode: aegis_store::ModeName::POC,
             max_concurrent_jobs: 1,
             config: serde_json::json!({}),
         })

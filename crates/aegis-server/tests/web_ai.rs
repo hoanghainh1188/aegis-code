@@ -14,7 +14,7 @@ use aegis_secrets::Secrets;
 use aegis_server::api::{router, router_with};
 use aegis_server::web::RepoAdmin;
 use aegis_store::testing::test_db;
-use aegis_store::{NewRepo, Page, RepoMode, RepoRole};
+use aegis_store::{ModeName, NewRepo, Page, RepoRole};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -220,7 +220,7 @@ async fn only_an_admin_and_only_where_modes_are_loaded() {
             url: "https://github.com/x/a".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({}),
         })

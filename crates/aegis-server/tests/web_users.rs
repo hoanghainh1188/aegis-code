@@ -9,7 +9,7 @@ mod common;
 use aegis_server::api::router;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, ActorKind, NewRepo, Page, RepoId, RepoMode, RepoRole, Store, StoreError, UserKind,
+    Actor, ActorKind, ModeName, NewRepo, Page, RepoId, RepoRole, Store, StoreError, UserKind,
 };
 use axum::Router;
 use axum::body::Body;
@@ -67,7 +67,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/x/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({}),
     })

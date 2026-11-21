@@ -12,7 +12,7 @@ use aegis_ledger::Tier;
 use aegis_provider::ProviderConfig;
 use aegis_router::ModelsConfig;
 use aegis_sonar_batch::PollConfig;
-use aegis_store::{Actor, NewRepo, Repo, RepoId, RepoMode, Store};
+use aegis_store::{Actor, ModeName, NewRepo, Repo, RepoId, Store};
 use aegis_tracker::TrackerConfig;
 use serde::{Deserialize, Serialize};
 
@@ -74,10 +74,12 @@ impl ModeConfig {
     /// The `customer-jp` guard (design §7): Bedrock in Tokyo with the
     /// `jp.` check on, and a `jp.` inference profile for every tier, so a
     /// customer repo cannot be sent anywhere else by a wrong line.
-    pub fn check(&self, mode: RepoMode) -> Result<(), LifecycleError> {
-        match mode {
-            RepoMode::Poc => Ok(()),
-            RepoMode::CustomerJp => self.check_japan_only(),
+    /// Other modes have no guard yet (#592).
+    pub fn check(&self, mode: &ModeName) -> Result<(), LifecycleError> {
+        if *mode == ModeName::CUSTOMER_JP {
+            self.check_japan_only()
+        } else {
+            Ok(())
         }
     }
 
@@ -317,7 +319,7 @@ pub struct RepoSpec {
     pub url: String,
     pub default_branch: String,
     pub language: Language,
-    pub mode: RepoMode,
+    pub mode: ModeName,
     pub max_concurrent_jobs: u32,
     pub settings: RepoSettings,
     /// The contract it is registered in (#525); `None` is the default
@@ -412,7 +414,7 @@ impl Modes {
         customer_jp: Option<ModeConfig>,
     ) -> Result<Self, LifecycleError> {
         if let Some(jp) = &customer_jp {
-            jp.check(RepoMode::CustomerJp)?;
+            jp.check(&ModeName::CUSTOMER_JP)?;
         }
         Ok(Self {
             poc,
@@ -426,14 +428,22 @@ impl Modes {
         Self { github_app, ..self }
     }
 
-    fn mode(&self, mode: RepoMode) -> Result<&ModeConfig, LifecycleError> {
-        let config = match mode {
-            RepoMode::Poc => self.poc.as_ref(),
-            RepoMode::CustomerJp => self.customer_jp.as_ref(),
-        };
-        let config = config.ok_or_else(|| {
-            LifecycleError::Config(format!("no configuration for mode `{}`", mode.as_str()))
-        })?;
+    /// The configuration of `mode`, if the server has one: only `poc`
+    /// and `customer-jp` for now (#592).
+    pub fn config(&self, mode: &ModeName) -> Option<&ModeConfig> {
+        if *mode == ModeName::POC {
+            self.poc.as_ref()
+        } else if *mode == ModeName::CUSTOMER_JP {
+            self.customer_jp.as_ref()
+        } else {
+            None
+        }
+    }
+
+    fn mode(&self, mode: &ModeName) -> Result<&ModeConfig, LifecycleError> {
+        let config = self
+            .config(mode)
+            .ok_or_else(|| LifecycleError::Config(format!("no configuration for mode `{mode}`")))?;
         // Again here: `Modes` has public fields.
         config.check(mode)?;
         Ok(config)
@@ -448,7 +458,7 @@ impl Modes {
             &repo.url,
             &repo.default_branch,
             &repo.language,
-            repo.mode,
+            &repo.mode,
             &repo.config,
             repo.tenant_id,
         )
@@ -461,7 +471,7 @@ impl Modes {
         url: &str,
         default_branch: &str,
         language: &str,
-        mode: RepoMode,
+        mode: &ModeName,
         config: &serde_json::Value,
         tenant: aegis_store::TenantId,
     ) -> Result<RunConfig, LifecycleError> {
@@ -561,7 +571,7 @@ impl Modes {
             url: spec.url.clone(),
             default_branch: spec.default_branch.clone(),
             language: spec.language.id().to_owned(),
-            mode: spec.mode,
+            mode: spec.mode.clone(),
             max_concurrent_jobs: spec.max_concurrent_jobs,
             config: serde_json::to_value(&spec.settings)
                 .map_err(|e| LifecycleError::Config(format!("repo `{}`: {e}", spec.slug)))?,
@@ -575,7 +585,7 @@ impl Modes {
             &new.url,
             &new.default_branch,
             &new.language,
-            new.mode,
+            &new.mode,
             &new.config,
             tenant.map_or(aegis_store::TenantId::DEFAULT, |t| t.id),
         )?;
@@ -781,7 +791,7 @@ mod tests {
 
     #[test]
     fn a_repo_on_the_app_path_pushes_to_itself_with_no_secret() {
-        let shop = repo("shop", RepoMode::Poc, serde_json::json!({"app": {}}));
+        let shop = repo("shop", ModeName::POC, serde_json::json!({"app": {}}));
         let config = modes().run_config(&shop).unwrap();
         let fork = &config.repo.fork;
         assert_eq!((fork.owner.as_str(), fork.name.as_str()), ("me", "shop"));
@@ -791,7 +801,7 @@ mod tests {
 
         let ghes = repo(
             "shop",
-            RepoMode::Poc,
+            ModeName::POC,
             serde_json::json!({"app": {"api": "https://ghe.acme.test/api/v3"}}),
         );
         let config = modes().run_config(&ghes).unwrap();
@@ -799,7 +809,7 @@ mod tests {
 
         // The token path is as it was.
         let token = modes()
-            .run_config(&repo("app", RepoMode::Poc, settings()))
+            .run_config(&repo("app", ModeName::POC, settings()))
             .unwrap();
         assert_eq!(token.repo.fork.token_env, "GITHUB_TOKEN");
         assert_eq!(token.repo.app, None);
@@ -813,12 +823,12 @@ mod tests {
         });
         for (config, says) in [(both, "not both"), (serde_json::json!({}), "needs `fork`")] {
             let err = modes()
-                .run_config(&repo("app", RepoMode::Poc, config))
+                .run_config(&repo("app", ModeName::POC, config))
                 .unwrap_err()
                 .to_string();
             assert!(err.contains(says), "{err}");
         }
-        let mut gitlab = repo("app", RepoMode::Poc, serde_json::json!({"app": {}}));
+        let mut gitlab = repo("app", ModeName::POC, serde_json::json!({"app": {}}));
         gitlab.url = "https://gitlab.example/group/sub/app".into();
         let err = modes().run_config(&gitlab).unwrap_err().to_string();
         assert!(err.contains("not a GitHub repo"), "{err}");
@@ -831,7 +841,7 @@ mod tests {
             url: "https://github.com/me/shop".into(),
             default_branch: "main".into(),
             language: Language::Python,
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             settings: serde_json::from_value(settings).unwrap(),
             tenant: None,
@@ -865,7 +875,7 @@ mod tests {
         }
     }
 
-    fn repo(slug: &str, mode: RepoMode, config: serde_json::Value) -> Repo {
+    fn repo(slug: &str, mode: ModeName, config: serde_json::Value) -> Repo {
         Repo {
             id: RepoId(1),
             slug: slug.into(),
@@ -889,10 +899,10 @@ mod tests {
     #[test]
     fn the_shipped_customer_config_passes_the_guard_and_the_poc_one_does_not() {
         let jp = ModeConfig::from_toml(JP).unwrap();
-        jp.check(RepoMode::CustomerJp).unwrap();
+        jp.check(&ModeName::CUSTOMER_JP).unwrap();
         let poc = ModeConfig::from_toml(POC).unwrap();
-        poc.check(RepoMode::Poc).unwrap();
-        let err = poc.check(RepoMode::CustomerJp).unwrap_err().to_string();
+        poc.check(&ModeName::POC).unwrap();
+        let err = poc.check(&ModeName::CUSTOMER_JP).unwrap_err().to_string();
         assert!(err.contains("must be Bedrock"), "{err}");
     }
 
@@ -904,7 +914,7 @@ mod tests {
         let poc = ModeConfig::from_toml(POC).unwrap();
         assert_eq!(jp.codebase_memory, poc.codebase_memory);
         assert!(jp.codebase_memory.is_some());
-        jp.check(RepoMode::CustomerJp).unwrap();
+        jp.check(&ModeName::CUSTOMER_JP).unwrap();
     }
 
     /// #233: the local mode's $0 cap does not stop a job of free calls
@@ -912,7 +922,7 @@ mod tests {
     #[test]
     fn the_shipped_local_config_runs_free_models() {
         let local = ModeConfig::from_toml(include_str!("../../../config/local.toml")).unwrap();
-        local.check(RepoMode::Poc).unwrap();
+        local.check(&ModeName::POC).unwrap();
         assert!(!local.budget.cost_spent(0.0));
         assert!(local.budget.cost_spent(0.01));
         assert_eq!(local.run.context_window, 32_768);
@@ -951,7 +961,7 @@ mod tests {
         ];
         for (edit, why) in cases {
             let jp = jp_with(edit);
-            let err = jp.check(RepoMode::CustomerJp).unwrap_err().to_string();
+            let err = jp.check(&ModeName::CUSTOMER_JP).unwrap_err().to_string();
             assert!(err.contains(why), "{why}: {err}");
             // Refused before any repo uses it, and again if set by hand.
             assert!(Modes::new(None, Some(jp.clone())).is_err());
@@ -960,7 +970,7 @@ mod tests {
                 customer_jp: Some(jp),
                 github_app: false,
             };
-            let customer = repo("customer", RepoMode::CustomerJp, settings());
+            let customer = repo("customer", ModeName::CUSTOMER_JP, settings());
             assert!(by_hand.run_config(&customer).is_err(), "{why}");
         }
     }
@@ -978,10 +988,10 @@ mod tests {
             "url": "https://sonar.example.jp", "token_env": "SONAR_TOKEN", "project_key": "jp_app"
         });
         let internal = modes
-            .run_config(&repo("scrapy", RepoMode::Poc, settings()))
+            .run_config(&repo("scrapy", ModeName::POC, settings()))
             .unwrap();
         let customer = modes
-            .run_config(&repo("app.jp", RepoMode::CustomerJp, own))
+            .run_config(&repo("app.jp", ModeName::CUSTOMER_JP, own))
             .unwrap();
 
         assert!(matches!(
@@ -1029,13 +1039,13 @@ mod tests {
         let mut own = settings();
         own["budget"] = serde_json::json!({ "max_cost_usd": 2.0 });
         let cfg = capped
-            .run_config(&repo("app", RepoMode::Poc, own.clone()))
+            .run_config(&repo("app", ModeName::POC, own.clone()))
             .unwrap();
         assert_eq!(cfg.budget.max_cost_usd, 2.0);
         assert_eq!(cfg.budget.max_model_calls, Some(25));
 
         let cfg = modes()
-            .run_config(&repo("app", RepoMode::Poc, own))
+            .run_config(&repo("app", ModeName::POC, own))
             .unwrap();
         assert_eq!(cfg.budget.max_model_calls, None);
     }
@@ -1044,18 +1054,31 @@ mod tests {
     fn a_repo_without_its_modes_configuration_or_with_bad_settings_is_refused() {
         let only_poc = Modes::new(Some(ModeConfig::from_toml(POC).unwrap()), None).unwrap();
         let err = only_poc
-            .run_config(&repo("app", RepoMode::CustomerJp, settings()))
+            .run_config(&repo("app", ModeName::CUSTOMER_JP, settings()))
             .unwrap_err()
             .to_string();
         assert!(
             err.contains("no configuration for mode `customer-jp`"),
             "{err}"
         );
+        // A mode the store takes but the server has no configuration for
+        // (#591).
+        let eu = ModeName::parse("customer-eu").unwrap();
+        let err = modes()
+            .run_config(&repo("app", eu.clone(), settings()))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no configuration for mode `customer-eu`"),
+            "{err}"
+        );
+        assert!(modes().config(&eu).is_none());
+        assert!(modes().config(&ModeName::POC).is_some());
 
         let modes = modes();
         let mut unknown = settings();
         unknown["imag"] = "typo".into();
-        let mut no_language = repo("app", RepoMode::Poc, settings());
+        let mut no_language = repo("app", ModeName::POC, settings());
         no_language.language = "cobol".into();
         let mut bad_override = settings();
         bad_override["overrides"] = serde_json::json!({ "no_such_step": ["true"] });
@@ -1073,13 +1096,13 @@ mod tests {
         });
         poll_too_often["sonar_poll"] = serde_json::json!({ "every_s": 5 });
         for bad in [
-            repo("app", RepoMode::Poc, poll_without_sonar),
-            repo("app", RepoMode::Poc, poll_too_often),
-            repo("app", RepoMode::Poc, unknown),
-            repo("app", RepoMode::Poc, serde_json::json!({})),
+            repo("app", ModeName::POC, poll_without_sonar),
+            repo("app", ModeName::POC, poll_too_often),
+            repo("app", ModeName::POC, unknown),
+            repo("app", ModeName::POC, serde_json::json!({})),
             no_language,
-            repo("app", RepoMode::Poc, bad_override),
-            repo("app", RepoMode::Poc, plain_jira),
+            repo("app", ModeName::POC, bad_override),
+            repo("app", ModeName::POC, plain_jira),
         ] {
             let err = modes.run_config(&bad).unwrap_err().to_string();
             assert!(err.contains("repo `app`"), "{err}");
@@ -1113,7 +1136,7 @@ mod tests {
         let cfg = modes()
             .run_config(&repo(
                 "app",
-                RepoMode::Poc,
+                ModeName::POC,
                 serde_json::to_value(&parsed).unwrap(),
             ))
             .unwrap();

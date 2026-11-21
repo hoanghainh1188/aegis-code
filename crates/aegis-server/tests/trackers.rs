@@ -9,7 +9,7 @@ use aegis_server::tracker::{TrackerNotifier, poll_if_due, poll_once, ticket_issu
 use aegis_server::worker::JobNotifier;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, NewRepo, Page, Repo, RepoMode, SlaPriority, Store,
+    Job, JobFilter, JobId, JobSource, JobStatus, ModeName, NewRepo, Page, Repo, SlaPriority, Store,
 };
 use chrono::{TimeZone, Utc};
 use serde_json::{Value, json};
@@ -35,7 +35,7 @@ async fn repo(s: &Store, slug: &str, tracker: Option<Value>) -> Repo {
         url: format!("https://github.com/acme/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config,
     })

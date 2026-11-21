@@ -33,7 +33,7 @@ use aegis_lifecycle::{
 use aegis_pr::{PrError, REPLY_MARKER, TokenSource, TokenUse};
 use aegis_provider::{Observed, Provider};
 use aegis_secrets::{Secret, Secrets};
-use aegis_store::{Claim, Job, JobSource, PgLedger, RepoId, RepoMode, RunId, Store};
+use aegis_store::{Claim, Job, JobSource, ModeName, PgLedger, RepoId, RunId, Store};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -276,12 +276,16 @@ impl LifecycleRunner {
         })
     }
 
-    fn runtime(&self, mode: RepoMode) -> Result<&ModeRuntime, Attempt> {
-        match mode {
-            RepoMode::Poc => self.poc.as_ref(),
-            RepoMode::CustomerJp => self.customer_jp.as_ref(),
-        }
-        .ok_or_else(|| Attempt::Rejected(format!("no configuration for mode `{}`", mode.as_str())))
+    /// Only `poc` and `customer-jp` have one for now (#592).
+    fn runtime(&self, mode: &ModeName) -> Result<&ModeRuntime, Attempt> {
+        let runtime = if *mode == ModeName::POC {
+            self.poc.as_ref()
+        } else if *mode == ModeName::CUSTOMER_JP {
+            self.customer_jp.as_ref()
+        } else {
+            None
+        };
+        runtime.ok_or_else(|| Attempt::Rejected(format!("no configuration for mode `{mode}`")))
     }
 
     /// Secret `name` for repo `slug`'s job: `Rejected` when the store has
@@ -303,7 +307,7 @@ impl LifecycleRunner {
         let span = tracing::Span::current();
         span.record("repo", repo.slug.as_str());
         span.record("language", repo.language.as_str());
-        let runtime = self.runtime(repo.mode)?;
+        let runtime = self.runtime(&repo.mode)?;
         config
             .check_aci_bin()
             .and_then(|()| config.check_codebase_memory())

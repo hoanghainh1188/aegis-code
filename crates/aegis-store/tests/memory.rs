@@ -2,7 +2,7 @@
 
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, MemoryId, MemoryKind, NewRepo, NewRepoMemory, Page, RepoId, RepoMemory, RepoMode,
+    Actor, MemoryId, MemoryKind, ModeName, NewRepo, NewRepoMemory, Page, RepoId, RepoMemory,
     rank_memories, score_repo_memory,
 };
 use chrono::Utc;
@@ -118,7 +118,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
             url: "https://github.com/acme/billing".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::CustomerJp,
+            mode: ModeName::CUSTOMER_JP,
             max_concurrent_jobs: 2,
             config: serde_json::json!({}),
         })
@@ -130,7 +130,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
             url: "https://github.com/acme/portal".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 2,
             config: serde_json::json!({}),
         })
@@ -273,7 +273,7 @@ async fn a_memory_cannot_name_another_repos_job() {
         url: format!("https://github.com/acme/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 2,
         config: serde_json::json!({}),
     };

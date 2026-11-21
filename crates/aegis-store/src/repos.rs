@@ -1,6 +1,6 @@
 use crate::audit::{self, Target};
 use crate::tx;
-use crate::types::{RepoMode, count};
+use crate::types::{ModeName, count};
 use crate::{Actor, NewRepo, Page, PageOf, Repo, RepoId, Store, StoreError};
 
 const MAX_SLUG_LEN: usize = 128;
@@ -93,7 +93,7 @@ impl TryFrom<RepoRow> for Repo {
             url: row.url,
             default_branch: row.default_branch,
             language: row.language,
-            mode: RepoMode::decode("repos.mode", &row.mode)?,
+            mode: ModeName::decode("repos.mode", &row.mode)?,
             max_concurrent_jobs: count("repos.max_concurrent_jobs", row.max_concurrent_jobs)?,
             config: row.config,
             created_at: row.created_at,

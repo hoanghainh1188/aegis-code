@@ -3,8 +3,8 @@
 use aegis_ledger::{IssueId, Review, ReviewVerdict};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, ActorKind, Delivered, JobSource, NewDelivery, NewJob, NewRepo, Page, PendingLogin,
-    RepoId, RepoMode, RepoRole, Store, StoreError, UserKind, WebhookSource,
+    Actor, ActorKind, Delivered, JobSource, ModeName, NewDelivery, NewJob, NewRepo, Page,
+    PendingLogin, RepoId, RepoRole, Store, StoreError, UserKind, WebhookSource,
 };
 use serde_json::json;
 
@@ -15,7 +15,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
             url: format!("https://github.com/x/{slug}"),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({ "budget": 1.0 }),
         },

@@ -7,7 +7,7 @@ mod common;
 use aegis_server::api::router;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, ActorKind, AuditFilter, NewRepo, Page, RepoId, RepoMode, RepoRole, Store, UserKind,
+    Actor, ActorKind, AuditFilter, ModeName, NewRepo, Page, RepoId, RepoRole, Store, UserKind,
 };
 use axum::Router;
 use axum::body::Body;
@@ -37,7 +37,7 @@ async fn repo(s: &Store, slug: &str, url: &str, actor: &Actor) -> RepoId {
             url: url.into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({}),
         },

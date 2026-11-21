@@ -16,8 +16,8 @@ use aegis_server::webhook::{
 };
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, BUDGET_SPENT, BudgetRules, BudgetState, Job, JobFilter, JobSource, JobStatus, NewJob,
-    NewRepo, Page, RepoId, RepoMode, RepoRole, Store, StoreError,
+    Actor, BUDGET_SPENT, BudgetRules, BudgetState, Job, JobFilter, JobSource, JobStatus, ModeName,
+    NewJob, NewRepo, Page, RepoId, RepoRole, Store, StoreError,
 };
 use axum::Router;
 use axum::body::Body;
@@ -39,7 +39,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/acme/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 4,
         config: json!({}),
     })

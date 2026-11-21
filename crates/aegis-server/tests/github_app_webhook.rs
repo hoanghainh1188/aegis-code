@@ -14,7 +14,7 @@ use aegis_server::webhook::{
     DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GitHubNotifier, WebhookConfig, router,
 };
 use aegis_store::testing::test_db;
-use aegis_store::{AppOnRepo, JobFilter, NewRepo, Page, RepoMode, Store};
+use aegis_store::{AppOnRepo, JobFilter, ModeName, NewRepo, Page, Store};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -74,7 +74,7 @@ async fn repo(s: &Store, slug: &str, settings: Value) {
         url: format!("https://github.com/acme/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: settings,
     })

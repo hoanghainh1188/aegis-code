@@ -9,7 +9,7 @@ use aegis_ledger::IssueId;
 use aegis_lifecycle::cache_sweep::{LAST_USED, SweepRules};
 use aegis_server::cache_sweeper::sweep_once;
 use aegis_store::testing::test_db;
-use aegis_store::{JobSource, NewJob, NewRepo, RepoId, RepoMode, Store};
+use aegis_store::{JobSource, ModeName, NewJob, NewRepo, RepoId, Store};
 
 const DAY: Duration = Duration::from_secs(86_400);
 
@@ -19,7 +19,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: serde_json::json!({}),
     })

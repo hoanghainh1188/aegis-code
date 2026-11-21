@@ -3,7 +3,7 @@
 use aegis_ledger::Outcome;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    JobEnd, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, RepoMode, RunEnd, RunStatus,
+    JobEnd, JobFilter, JobSource, JobStatus, ModeName, NewJob, NewRepo, Page, RunEnd, RunStatus,
     SlaPriority, StoreError,
 };
 use chrono::{TimeZone, Utc};
@@ -14,7 +14,7 @@ fn repo(slug: &str) -> NewRepo {
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 2,
         config: serde_json::json!({ "image": "aegis/rust:1" }),
     }
@@ -37,7 +37,7 @@ async fn repos_are_created_found_and_unique_by_slug() {
     let s = &db.store;
     let typst = s.create_repo(&repo("typst")).await.unwrap();
     assert_eq!(typst.slug, "typst");
-    assert_eq!(typst.mode, RepoMode::Poc);
+    assert_eq!(typst.mode, ModeName::POC);
     assert_eq!(typst.config["image"], "aegis/rust:1");
     assert_eq!(typst.max_concurrent_jobs, 2);
     assert_eq!(s.repo(typst.id).await.unwrap(), Some(typst.clone()));

@@ -11,7 +11,7 @@ use aegis_server::config::{AuthSection, OidcSection};
 use aegis_server::web::opened_at_signature;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    ActorKind, JobEnd, JobId, JobSource, NewJob, NewRepo, Page, RepoId, RepoMode, RepoRole, Store,
+    ActorKind, JobEnd, JobId, JobSource, ModeName, NewJob, NewRepo, Page, RepoId, RepoRole, Store,
 };
 use axum::Router;
 use axum::body::Body;
@@ -76,7 +76,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/x/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({}),
     })

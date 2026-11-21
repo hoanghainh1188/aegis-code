@@ -68,9 +68,9 @@ pub use stats::{PRIORITY_LEVELS, PriorityStats, QueueStats};
 pub use tenants::{TENANT_BUDGET_SPENT, Tenant, TenantBudget, TenantId};
 pub use tokens::{MAX_PERSONAL_TOKENS, MAX_TOKEN_DAYS, PersonalToken, ServiceToken};
 pub use types::{
-    ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, NewDelivery, NewJob,
-    NewRepo, Repo, RepoId, RepoMode, RepoRole, Run, RunEnd, RunId, RunStatus, SlaPriority, User,
-    UserId, UserKind, WebhookOutcome, WebhookSource,
+    ActorKind, Delivered, Job, JobEnd, JobFilter, JobId, JobSource, JobStatus, ModeName,
+    NewDelivery, NewJob, NewRepo, Repo, RepoId, RepoRole, Run, RunEnd, RunId, RunStatus,
+    SlaPriority, User, UserId, UserKind, WebhookOutcome, WebhookSource,
 };
 pub use user_list::UserSummary;
 pub use users::{LiveSession, PendingLogin, RepoMember, Session, TokenHash};

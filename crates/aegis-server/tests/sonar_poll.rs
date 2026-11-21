@@ -10,7 +10,7 @@ use aegis_server::runner::Attempt;
 use aegis_server::sonar::{poll_due, poll_repo, sonar_issue};
 use aegis_sonar_batch::parse_search;
 use aegis_store::testing::test_db;
-use aegis_store::{Job, JobFilter, JobSource, JobStatus, NewRepo, Page, Repo, RepoMode, Store};
+use aegis_store::{Job, JobFilter, JobSource, JobStatus, ModeName, NewRepo, Page, Repo, Store};
 use serde_json::{Value, json};
 use wiremock::matchers::{bearer_token, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -37,7 +37,7 @@ async fn repo(s: &Store, slug: &str, sonar: &MockServer, poll: Option<Value>) ->
         url: format!("https://github.com/acme/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config,
     })

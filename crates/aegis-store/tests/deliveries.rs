@@ -3,7 +3,7 @@
 use aegis_ledger::IssueId;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Delivered, JobSource, NewDelivery, NewJob, NewRepo, RepoId, RepoMode, SlaPriority, Store,
+    Delivered, JobSource, ModeName, NewDelivery, NewJob, NewRepo, RepoId, SlaPriority, Store,
     StoreError, WebhookSource,
 };
 use serde_json::json;
@@ -14,7 +14,7 @@ async fn repo(s: &Store, slug: &str, url: &str) -> RepoId {
         url: url.into(),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({}),
     })

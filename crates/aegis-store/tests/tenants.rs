@@ -8,7 +8,7 @@ use std::time::Duration;
 use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Tier, TokenCounts};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, AuditFilter, Job, JobSource, NewJob, NewRepo, Page, RepoId, RepoMode, Store, StoreError,
+    Actor, AuditFilter, Job, JobSource, ModeName, NewJob, NewRepo, Page, RepoId, Store, StoreError,
     TenantId, UserKind,
 };
 
@@ -21,7 +21,7 @@ fn new_repo(slug: &str) -> NewRepo {
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 10,
         config: serde_json::json!({}),
     }

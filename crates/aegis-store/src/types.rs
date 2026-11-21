@@ -1,5 +1,7 @@
 //! Rows and the text values their CHECK constraints allow.
 
+use std::borrow::Cow;
+
 use aegis_ledger::{IssueId, Outcome};
 use chrono::{DateTime, Utc};
 
@@ -43,9 +45,63 @@ macro_rules! text_enum {
     };
 }
 
-text_enum! {
-    /// `customer-jp` keeps the repo's data in Japan (Proposal §7).
-    RepoMode { Poc = "poc", CustomerJp = "customer-jp" }
+/// Longest mode name the `repos.mode` CHECK allows.
+const MAX_MODE_LEN: usize = 64;
+
+/// A repo's mode (#591): which `[modes.<name>]` of the server its jobs
+/// run with. Any name the `repos.mode` CHECK allows: 1–64 of `a-z`,
+/// `0-9`, `_` and `-`, starting with a letter or a digit. Whether the
+/// server has a configuration for it is checked where the repo is
+/// registered and where its jobs run, not here.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModeName(Cow<'static, str>);
+
+impl ModeName {
+    /// The default mode.
+    pub const POC: Self = Self(Cow::Borrowed("poc"));
+    /// Keeps the repo's data in Japan (Proposal §7).
+    pub const CUSTOMER_JP: Self = Self(Cow::Borrowed("customer-jp"));
+
+    /// `text` as a mode name, if the `repos.mode` CHECK allows it.
+    pub fn parse(text: &str) -> Result<Self, StoreError> {
+        if is_mode_name(text) {
+            Ok(Self(Cow::Owned(text.to_owned())))
+        } else {
+            Err(StoreError::Invalid {
+                field: "mode",
+                message: format!(
+                    "`{text}`: 1-{MAX_MODE_LEN} of a-z, 0-9, `_` and `-`, starting with a letter or a digit"
+                ),
+            })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn decode(column: &'static str, text: &str) -> Result<Self, StoreError> {
+        Self::parse(text).map_err(|_| StoreError::Decode {
+            column,
+            value: text.to_owned(),
+        })
+    }
+}
+
+impl std::fmt::Display for ModeName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The `repos.mode` CHECK: `^[a-z0-9][a-z0-9_-]{0,63}$`.
+fn is_mode_name(text: &str) -> bool {
+    let lower_or_digit = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    text.len() <= MAX_MODE_LEN
+        && text.bytes().next().is_some_and(lower_or_digit)
+        && text
+            .bytes()
+            .all(|b| lower_or_digit(b) || matches!(b, b'_' | b'-'))
 }
 
 text_enum! {
@@ -170,7 +226,7 @@ pub struct NewRepo {
     pub url: String,
     pub default_branch: String,
     pub language: String,
-    pub mode: RepoMode,
+    pub mode: ModeName,
     /// Jobs of this repo that may run at the same time, at least 1.
     pub max_concurrent_jobs: u32,
     /// The rest of the repo's settings, as `aegis-lifecycle` reads them.
@@ -184,7 +240,7 @@ pub struct Repo {
     pub url: String,
     pub default_branch: String,
     pub language: String,
-    pub mode: RepoMode,
+    pub mode: ModeName,
     pub max_concurrent_jobs: u32,
     pub config: serde_json::Value,
     pub created_at: DateTime<Utc>,
@@ -376,4 +432,61 @@ pub struct User {
     /// A person's e-mail or a service's name, lower case.
     pub name: String,
     pub is_admin: bool,
+}
+
+#[cfg(test)]
+mod mode_name_tests {
+    use super::*;
+
+    #[test]
+    fn mode_names_follow_the_repos_mode_check() {
+        let longest = "a".repeat(MAX_MODE_LEN);
+        for ok in [
+            "poc",
+            "customer-jp",
+            "customer-eu",
+            "local_airgap",
+            "9",
+            &longest,
+        ] {
+            assert_eq!(ModeName::parse(ok).unwrap().as_str(), ok);
+        }
+        let too_long = "a".repeat(MAX_MODE_LEN + 1);
+        for bad in [
+            "",
+            "-poc",
+            "_poc",
+            "Customer-JP",
+            "customer.eu",
+            "café",
+            " poc",
+            &too_long,
+        ] {
+            assert!(
+                matches!(
+                    ModeName::parse(bad),
+                    Err(StoreError::Invalid { field: "mode", .. })
+                ),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parsed_names_equal_the_constants() {
+        assert_eq!(ModeName::parse("poc").unwrap(), ModeName::POC);
+        assert_eq!(
+            ModeName::parse("customer-jp").unwrap(),
+            ModeName::CUSTOMER_JP
+        );
+        assert_eq!(ModeName::CUSTOMER_JP.to_string(), "customer-jp");
+        let decoded = ModeName::decode("repos.mode", "Bad!");
+        assert!(matches!(
+            decoded,
+            Err(StoreError::Decode {
+                column: "repos.mode",
+                ..
+            })
+        ));
+    }
 }
