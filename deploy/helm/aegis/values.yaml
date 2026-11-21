@@ -60,6 +60,18 @@ config:
     checkSeconds: 60
   reviews:
     maxRounds: 3
+  # ChatOps (#594): Slack or Teams webhooks the workers tell of PRs,
+  # diagnoses, stopped P1 jobs and monthly budgets at warnRatio or 100%.
+  # webhookEnv names a file of the worker's Secret holding the webhook's
+  # URL; never the URL here. tenants / repos (slugs) and events
+  # (pr_opened, diagnosed, p1_stopped, budget) narrow a channel; empty or
+  # left out: all.
+  #   - kind: slack            # or teams
+  #     webhookEnv: AEGIS_SLACK_WEBHOOK_URL
+  #     tenants: [acme]
+  #     events: [pr_opened, p1_stopped, budget]
+  chatops:
+    channels: []
   # Appended to server.toml as is, for sections not above (`[web]`).
   extraToml: ""
 
@@ -87,7 +99,8 @@ worker:
     # installing. true: the chart does, and keeps it on uninstall.
     create: false
   # Required. Files of /run/secrets: AEGIS_DATABASE_URL, the mode's API key,
-  # the comment tokens, each repo's fork, Sonar and tracker tokens. Never
+  # the comment tokens, each repo's fork, Sonar and tracker tokens, the
+  # webhook URLs of config.chatops.channels. Never
   # the API's own (session key, webhook secrets, OIDC client secret).
   secretName: ""
   resources:

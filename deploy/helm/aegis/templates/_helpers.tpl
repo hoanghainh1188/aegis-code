@@ -124,6 +124,21 @@ server.toml: |
 
   [reviews]
   max_rounds = {{ int $c.reviews.maxRounds }}
+  {{- range $c.chatops.channels }}
+
+  [[chatops.channels]]
+  kind = {{ required "config.chatops.channels[].kind is required" .kind | quote }}
+  webhook_env = {{ required "config.chatops.channels[].webhookEnv is required" .webhookEnv | quote }}
+  {{- with .tenants }}
+  tenants = [{{ range $i, $t := . }}{{ if $i }}, {{ end }}{{ $t | quote }}{{ end }}]
+  {{- end }}
+  {{- with .repos }}
+  repos = [{{ range $i, $r := . }}{{ if $i }}, {{ end }}{{ $r | quote }}{{ end }}]
+  {{- end }}
+  {{- with .events }}
+  events = [{{ range $i, $e := . }}{{ if $i }}, {{ end }}{{ $e | quote }}{{ end }}]
+  {{- end }}
+  {{- end }}
   {{- with $c.extraToml }}
 
   {{- . | nindent 2 }}

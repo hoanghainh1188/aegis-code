@@ -147,6 +147,14 @@ struct EvictionLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct ChatLabels {
+    /// `slack` or `teams`.
+    kind: &'static str,
+    /// `sent`, or `failed`: refused, unreachable or too slow.
+    result: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct QueueLabels {
     state: &'static str,
 }
@@ -185,6 +193,7 @@ pub struct Metrics {
     workspace_disk_bytes: Family<DiskLabels, Gauge>,
     cache_disk_limit_bytes: Gauge,
     cache_evictions: Family<EvictionLabels, Counter>,
+    chat_messages: Family<ChatLabels, Counter>,
 }
 
 impl Metrics {
@@ -350,7 +359,14 @@ impl Metrics {
             "Repo caches a sweep removed, by reason: expired or over_limit (#593)",
             cache_evictions.clone(),
         );
+        let chat_messages = Family::default();
+        registry.register(
+            "chat_messages",
+            "ChatOps messages to Slack or Teams webhooks, by kind and result (#594)",
+            chat_messages.clone(),
+        );
         Self {
+            chat_messages,
             workspace_disk_bytes,
             cache_disk_limit_bytes,
             cache_evictions,
@@ -431,6 +447,15 @@ impl Metrics {
             .get_or_create(&EvictionLabels {
                 reason: reason.as_str(),
             })
+            .inc();
+    }
+
+    /// A ChatOps message (#594): `kind` `slack` or `teams`, whether it
+    /// was taken.
+    pub fn chat_message(&self, kind: &'static str, sent: bool) {
+        let result = if sent { "sent" } else { "failed" };
+        self.chat_messages
+            .get_or_create(&ChatLabels { kind, result })
             .inc();
     }
 
@@ -732,6 +757,20 @@ mod tests {
             r#"aegis_workspace_disk_bytes{kind="worktree"} 5242880"#,
             "aegis_cache_disk_limit_bytes 64424509440",
             r#"aegis_cache_evictions_total{reason="over_limit"} 1"#,
+        ] {
+            assert!(line_of(&text, line).is_some(), "{line} in {text}");
+        }
+    }
+
+    #[test]
+    fn chat_messages_count_by_kind_and_result() {
+        let m = Metrics::new();
+        m.chat_message("slack", true);
+        m.chat_message("teams", false);
+        let text = m.render().unwrap();
+        for line in [
+            r#"aegis_chat_messages_total{kind="slack",result="sent"} 1"#,
+            r#"aegis_chat_messages_total{kind="teams",result="failed"} 1"#,
         ] {
             assert!(line_of(&text, line).is_some(), "{line} in {text}");
         }

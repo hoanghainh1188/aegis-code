@@ -116,6 +116,15 @@ check "the proxy takes a mode's Sonar arguments" 1 "$(count '^ +- sonar$' <<<"$s
 offline=$(render --set sandboxImages.source=offline --set sandboxImages.offline.claimName=bundle)
 check "offline loads from the volume" 1 "$(count 'gunzip -c' <<<"$offline")"
 check "offline does not pull" 0 "$(count 'docker pull' <<<"$offline")"
+# ChatOps channels (#594) render as [[chatops.channels]], the URL never.
+chat=$(render --set 'config.chatops.channels[0].kind=slack' \
+  --set 'config.chatops.channels[0].webhookEnv=AEGIS_SLACK_WEBHOOK_URL' \
+  --set 'config.chatops.channels[0].tenants={acme}' | doc ConfigMap aegis-config)
+check "no chat channel by default" 0 "$(count 'chatops' <<<"$config")"
+check "a chat channel names its secret, in both configurations" 2 "$(count '^ +webhook_env = "AEGIS_SLACK_WEBHOOK_URL"$' <<<"$chat")"
+check "a chat channel's tenants, in both configurations" 2 "$(count '^ +tenants = \["acme"\]$' <<<"$chat")"
+fails_with "a chat channel needs its secret's name" "webhookEnv is required" \
+  --set 'config.chatops.channels[0].kind=teams'
 check "none has no image step" 0 "$(count 'name: sandbox-images' <<<"$(render --set sandboxImages.source=none)")"
 check "runtimeClassName" 1 "$(count 'runtimeClassName: kata' <<<"$(render --set worker.runtimeClassName=kata)")"
 check "ServiceMonitor is off by default" 0 "$(count 'kind: ServiceMonitor' <<<"$all")"

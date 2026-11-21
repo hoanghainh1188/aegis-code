@@ -66,6 +66,21 @@ check_s = 60
 [reviews]
 max_rounds = 3
 
+# ChatOps (#594): Slack and Teams incoming webhooks told by the workers of
+# a PR opened, a diagnosis with no PR, a P1 job stopped, and a repo's or
+# tenant's monthly budget at warn_ratio or 100%. Each channel names the
+# secret in [secrets] (a file in /run/secrets) that holds its webhook's URL: the URL is a token and
+# never goes in this file. tenants / repos (slugs) keep a channel to those;
+# events (pr_opened, diagnosed, p1_stopped, budget) to those, all if left
+# out. Each post times out after 5 s; a failure is only logged and counted
+# in aegis_chat_messages_total.
+# [[chatops.channels]]
+# kind = "slack"            # or "teams" (Incoming Webhook or Workflows URL)
+# webhook_env = "AEGIS_SLACK_WEBHOOK_URL"
+# tenants = ["acme"]
+# repos = []
+# events = ["pr_opened", "p1_stopped", "budget"]
+
 # The instance's GitHub App (ADR 0017): repos with [settings.app] take
 # tokens from it, minted per use, instead of a fork and a PAT. Left out,
 # the instance runs as before and refuses repos on the app path. The key
