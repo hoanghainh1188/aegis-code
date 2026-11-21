@@ -92,6 +92,13 @@ retry_base_s = 30
 # long a job has waited lifts it one level, so no job waits for ever behind
 # newer P1s. Without SLAs the queue is first in, first out.
 sla_aging_s = 3600
+# The repos' caches on this worker's disk (#593), under each mode's
+# state_dir: every 15 minutes a sweep removes the caches no job has used for
+# cache_ttl_days, then, above max_cache_disk_gb, the least recently used
+# until they take 85% of it. A repo with a running job keeps its caches.
+# 0 turns either off. aegis_workspace_disk_bytes shows what the disk holds.
+max_cache_disk_gb = 60
+cache_ttl_days = 14
 
 [trackers]
 # The Jira/Backlog filters of the repos (`tracker` in their settings) are

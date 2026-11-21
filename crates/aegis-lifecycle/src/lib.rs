@@ -11,6 +11,7 @@
 
 mod answer;
 mod batch;
+pub mod cache_sweep;
 mod checks;
 pub mod clone;
 mod code_graph;

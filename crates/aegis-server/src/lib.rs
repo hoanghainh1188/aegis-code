@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod cache_sweeper;
 pub mod config;
 pub mod github_app;
 pub mod lifecycle;

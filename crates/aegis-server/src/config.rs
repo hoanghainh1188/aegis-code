@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use aegis_lifecycle::cache_sweep::SweepRules;
 use aegis_store::BudgetRules;
 use openidconnect::url::Url;
 use serde::{Deserialize, Deserializer};
@@ -318,6 +319,15 @@ pub struct WorkerSection {
     /// long a job has waited lifts it one level, so none waits for ever.
     #[serde(default = "default_sla_aging_s")]
     pub sla_aging_s: u64,
+    /// What the repos' caches on this worker may take together, in GB
+    /// (#593): above it, the sweep removes the least recently used. 0: no
+    /// limit.
+    #[serde(default = "default_max_cache_disk_gb")]
+    pub max_cache_disk_gb: u64,
+    /// A repo's caches no job has used for this many days are removed
+    /// (#593). 0: kept however old.
+    #[serde(default = "default_cache_ttl_days")]
+    pub cache_ttl_days: u64,
 }
 
 impl Default for WorkerSection {
@@ -350,6 +360,21 @@ fn default_sla_aging_s() -> u64 {
     3600
 }
 
+fn default_max_cache_disk_gb() -> u64 {
+    60
+}
+
+fn default_cache_ttl_days() -> u64 {
+    14
+}
+
+const GB: u64 = 1 << 30;
+
+/// A cache used this recently is never removed: it may be a job's that was
+/// claimed after the sweep read the running jobs (#593).
+const CACHE_GRACE: Duration = Duration::from_secs(600);
+const DAY: Duration = Duration::from_secs(86_400);
+
 fn default_drain_s() -> u64 {
     600
 }
@@ -379,6 +404,18 @@ impl ServerConfig {
         }
         if w.poll_s == 0 {
             return Err("worker: poll_s must be at least 1".into());
+        }
+        if w.max_cache_disk_gb.checked_mul(GB).is_none() {
+            return Err(format!(
+                "worker: max_cache_disk_gb {} is too large",
+                w.max_cache_disk_gb
+            ));
+        }
+        if u32::try_from(w.cache_ttl_days).is_err() {
+            return Err(format!(
+                "worker: cache_ttl_days {} is too large",
+                w.cache_ttl_days
+            ));
         }
         if let Some(app) = &config.github_app {
             app.issuer()?;
@@ -427,6 +464,20 @@ impl ServerConfig {
             job_reserve_usd: self.worker.max_cost_usd,
             warn_ratio: self.budget.warn_ratio,
         }
+    }
+
+    /// How the worker keeps its caches (#593); `None` when both the limit
+    /// and the TTL are off, and no sweep removes anything.
+    pub fn cache_rules(&self) -> Option<SweepRules> {
+        let w = &self.worker;
+        let max_bytes = w.max_cache_disk_gb.saturating_mul(GB);
+        let days = u32::try_from(w.cache_ttl_days).unwrap_or(u32::MAX);
+        let ttl = (days > 0).then(|| DAY * days);
+        (max_bytes > 0 || ttl.is_some()).then_some(SweepRules {
+            max_bytes,
+            ttl,
+            grace: CACHE_GRACE,
+        })
     }
 
     pub fn worker(&self, worker_id: String) -> WorkerConfig {
@@ -506,6 +557,11 @@ mod tests {
             ("[worker]\nlease_s = 10\nrenew_s = 10\n", "renew_s"),
             ("[worker]\nmax_cost_usd = 0.0\n", "max_cost_usd"),
             ("[worker]\nrepos = []\n", "unknown field"),
+            (
+                "[worker]\nmax_cache_disk_gb = 18446744073709551615\n",
+                "max_cache_disk_gb",
+            ),
+            ("[worker]\ncache_ttl_days = 4294967296\n", "cache_ttl_days"),
         ] {
             let err = ServerConfig::from_toml(bad).unwrap_err();
             assert!(err.contains(why), "{bad}: {err}");
@@ -537,5 +593,23 @@ mod tests {
             ("UTC", 4.0)
         );
         assert!(config.modes.poc.is_none());
+    }
+
+    #[test]
+    fn the_cache_rules_default_to_60_gb_and_14_days_and_zero_turns_each_off() {
+        let rules = ServerConfig::from_toml("").unwrap().cache_rules().unwrap();
+        assert_eq!(rules.max_bytes, 60 * GB);
+        assert_eq!(rules.ttl, Some(14 * DAY));
+        assert_eq!(rules.grace, CACHE_GRACE);
+
+        let no_limit = "[worker]\nmax_cache_disk_gb = 0\n";
+        let rules = ServerConfig::from_toml(no_limit).unwrap().cache_rules();
+        assert_eq!(
+            rules.map(|r| (r.max_bytes, r.ttl)),
+            Some((0, Some(14 * DAY)))
+        );
+
+        let off = "[worker]\nmax_cache_disk_gb = 0\ncache_ttl_days = 0\n";
+        assert_eq!(ServerConfig::from_toml(off).unwrap().cache_rules(), None);
     }
 }

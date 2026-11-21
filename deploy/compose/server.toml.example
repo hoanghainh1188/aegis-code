@@ -51,6 +51,11 @@ poll_s = 5
 # stop_grace_period in docker-compose.yml (11 min) must be longer.
 drain_s = 600
 retry_base_s = 30
+# The repos' build caches under /srv/aegis/.workspace (#593): above this
+# many GB the worker removes the least recently used, and any no job has
+# used for cache_ttl_days. 0 turns either off.
+max_cache_disk_gb = 60
+cache_ttl_days = 14
 
 [trackers]
 poll_s = 300

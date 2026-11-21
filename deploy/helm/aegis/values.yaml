@@ -46,6 +46,14 @@ config:
     # The worker Pod's terminationGracePeriodSeconds is this plus 60.
     drainSeconds: 600
     retryBaseSeconds: 30
+    # The repos' build caches on the worker's workspace volume (#593): the
+    # sweep removes the least recently used above this, in GB, and any not
+    # used for cacheTtlDays. 0 turns either off. Keep it well under
+    # worker.persistence.workspace.size (worktrees share the volume) and
+    # above the largest repo's caches: a Rust repo needs 30–40 GB, so raise
+    # both for one.
+    maxCacheDiskGb: 30
+    cacheTtlDays: 14
   trackers:
     pollSeconds: 300
   sonar:
