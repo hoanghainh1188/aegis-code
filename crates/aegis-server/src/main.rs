@@ -36,7 +36,9 @@
 //! are due; new warnings become a batch job (#27).
 //! Sign-in (#29): `[auth]` in the
 //! configuration; the API needs the secrets `AEGIS_SESSION_KEY` and, with
-//! `[auth.oidc]`, `AEGIS_OIDC_CLIENT_SECRET`.
+//! `[auth.oidc]`, `AEGIS_OIDC_CLIENT_SECRET`. Slack and Teams are told of
+//! jobs' ends through the webhooks of `[[chatops.channels]]` (#594), whose
+//! URLs are the secrets each `webhook_env` names.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -44,6 +46,7 @@ use std::sync::Arc;
 
 use aegis_lifecycle::{ModeConfig, Modes};
 use aegis_server::auth::{self, Auth};
+use aegis_server::chatops::ChatNotifier;
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
@@ -201,12 +204,16 @@ async fn run(args: Args) -> Result<(), String> {
             .with_github_app(github_app(&config, &secrets, &store)?);
         let notifier = Arc::new((
             (
-                GitHubNotifier::from_secrets(&secrets)
-                    .await?
-                    .with_app(github_app(&config, &secrets, &store)?, store.clone()),
-                GitLabNotifier::from_secrets(&secrets).await?,
+                (
+                    GitHubNotifier::from_secrets(&secrets)
+                        .await?
+                        .with_app(github_app(&config, &secrets, &store)?, store.clone()),
+                    GitLabNotifier::from_secrets(&secrets).await?,
+                ),
+                TrackerNotifier::new(store.clone(), secrets.clone()),
             ),
-            TrackerNotifier::new(store.clone(), secrets.clone()),
+            // Slack and Teams (#594), when `[chatops]` has channels.
+            ChatNotifier::from_section(&config.chatops, store.clone(), &secrets).await?,
         ));
         // The caches and worktrees on this worker's disk (#593).
         {

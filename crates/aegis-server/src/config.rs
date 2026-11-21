@@ -14,6 +14,7 @@ use aegis_store::BudgetRules;
 use openidconnect::url::Url;
 use serde::{Deserialize, Deserializer};
 
+use crate::chatops::ChatopsSection;
 use crate::secrets::SecretsSection;
 use crate::worker::WorkerConfig;
 
@@ -42,6 +43,9 @@ pub struct ServerConfig {
     pub reviews: ReviewsSection,
     #[serde(default)]
     pub web: WebSection,
+    /// Slack and Teams told of jobs' ends (#594).
+    #[serde(default)]
+    pub chatops: ChatopsSection,
     /// Required to start; optional here so the file parses without it.
     #[serde(default)]
     pub secrets: Option<SecretsSection>,
@@ -442,6 +446,7 @@ impl ServerConfig {
         if a.oidc.is_some() && a.public_url.is_none() {
             return Err("auth: oidc needs public_url, where the SSO sends people back".into());
         }
+        config.chatops.check()?;
         let b = &config.budget;
         if !(b.warn_ratio > 0.0 && b.warn_ratio <= 1.0) {
             return Err(format!(
@@ -549,6 +554,28 @@ mod tests {
         assert_eq!(worker.max_cost_usd, 4.0);
         let secrets = config.secrets.expect("[secrets] is in the example");
         assert_eq!(secrets.source, crate::secrets::SourceKind::Env);
+    }
+
+    #[test]
+    fn chat_channels_are_read_and_checked() {
+        let ok = ServerConfig::from_toml(
+            "[[chatops.channels]]\nkind = \"teams\"\nwebhook_env = \"AEGIS_TEAMS_WEBHOOK_URL\"\n\
+             events = [\"p1_stopped\"]",
+        )
+        .unwrap();
+        assert_eq!(ok.chatops.channels.len(), 1);
+        assert!(
+            ServerConfig::from_toml("")
+                .unwrap()
+                .chatops
+                .channels
+                .is_empty()
+        );
+        let err = ServerConfig::from_toml(
+            "[[chatops.channels]]\nkind = \"slack\"\nwebhook_env = \"a/b\"",
+        )
+        .unwrap_err();
+        assert!(err.contains("chatops.channels[0]"), "{err}");
     }
 
     #[test]

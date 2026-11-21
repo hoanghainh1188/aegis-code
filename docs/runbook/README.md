@@ -173,6 +173,7 @@ aws secretsmanager put-secret-value --secret-id aegis/<env>/<NAME> --secret-stri
 | `AEGIS_OIDC_CLIENT_SECRET` | Generate secondary client secret in SSO provider (keep both active) $\rightarrow$ update Secret in AWS $\rightarrow$ revoke old SSO secret |
 | `AEGIS_GITHUB_WEBHOOK_SECRET`, `AEGIS_GITLAB_WEBHOOK_TOKEN` | Update value in Secrets Manager first, then update webhook settings in GitHub/GitLab. Requests arriving mid-transition re-trigger secret reload; webhooks can be redelivered from forge UI |
 | `AEGIS_GITHUB_COMMENT_TOKEN`, `AEGIS_GITLAB_COMMENT_TOKEN`, repository tokens (`token_env` in repo settings) | Generate new token $\rightarrow$ update Secret in AWS $\rightarrow$ revoke previous token |
+| ChatOps webhook URLs (`webhook_env` of each `[[chatops.channels]]`, #594) | The URL is the token. Create a new Slack Incoming Webhook or Teams webhook / Workflows URL $\rightarrow$ update the Secret $\rightarrow$ wait `refresh_s` $\rightarrow$ delete the old webhook. A leaked URL lets anyone post to the channel: delete it at Slack/Teams first |
 
 **Compromised Secrets:** Revoke compromised tokens at the issuing provider **first**, then provision new values. Check AWS CloudTrail logs for `GetSecretValue` callers. The RDS master password is automatically rotated by AWS RDS; the application does not consume it.
 
@@ -246,6 +247,16 @@ A worker's `state_dir` must not be shared with CLI runs (`aegis eval`, `aegis ch
 Each sweep logs `removed a repo's caches` with the repo, bytes and reason, and sets `aegis_workspace_disk_bytes{kind="cache"|"worktree"}`, `aegis_cache_disk_limit_bytes` and `aegis_cache_evictions_total{reason}`.
 
 `AegisCacheOverLimit` fires when the caches stay above the limit for an hour: what is left belongs to repos with running or recent jobs. Raise `max_cache_disk_gb` together with the disk, lower `max_workers`, or move repos to another worker. Many evictions with `reason="over_limit"` mean jobs keep building from cold: the limit is too small for the repos on the machine.
+
+### ChatOps Messages Missing
+
+Workers post to the Slack and Teams webhooks of `[[chatops.channels]]` (#594) when a job opens a PR, ends with a diagnosis and no PR, or is a P1 job stopped by its step limit, its budget, the strongest model failing or the platform, and when a job's cost takes its repo's or tenant's monthly budget past `[budget] warn_ratio` (80%) or 100%. A budget alert is sent once per share and month by each worker process: a restart may send it again. Tenants' budgets go only to channels without `repos`.
+
+1. `aegis_chat_messages_total{kind,result="failed"}` rising: the worker logs `chat message not sent` with the kind, event and error, never the URL. `no secret …`: the channel's `webhook_env` is not in the store (the worker warned at start); add it, it is read with the others every `refresh_s`. `answered 404`/`410`: the webhook was deleted or disabled; make a new one. `timed out`: Slack or Teams took more than 5 s; the job is not affected and the message is not retried.
+2. Nothing counted: check the channel's `tenants`, `repos` (slugs) and `events`, and that the job's end is one of the events (a P2 failure, a cancel or a stop without a PR are not told).
+3. The webhook URL must be `https` (`http` only to localhost, for a relay). Workers reach `hooks.slack.com` or the Teams / Power Automate host directly: an egress proxy or firewall must allow it.
+
+Every text from a model, a ticket or a tool is masked for secrets (#509) and made inert before it is sent: no `@channel`, `@here`, link or markup reaches the channel from it.
 
 ### Database Storage Exhaustion
 
