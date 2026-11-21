@@ -965,6 +965,12 @@ pub(crate) fn sandbox(
         std::fs::create_dir_all(&host).map_err(|e| LifecycleError::io(&host, &e))?;
         mounts.push((host, format!("{WORKDIR}/{dir}")));
     }
+    // For the worker's sweep (#593): these caches are used even by a repo
+    // without a build cache. A marker that cannot be written leaves the
+    // sweep the directory's own time; the job goes on.
+    if !mounts.is_empty() {
+        let _ = aegis_gate::mark_used(&cache);
+    }
     Ok(Some(Sandbox {
         docker: cfg.run.docker.clone(),
         image: profile.image.clone(),

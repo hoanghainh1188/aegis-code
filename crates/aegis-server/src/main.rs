@@ -49,7 +49,9 @@ use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::tracker::{self, TrackerNotifier};
 use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
-use aegis_server::{Role, api, metrics, pause_all, repo_cli, sonar, tenant_cli, worker};
+use aegis_server::{
+    Role, api, cache_sweeper, metrics, pause_all, repo_cli, sonar, tenant_cli, worker,
+};
 use aegis_store::Store;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -206,6 +208,27 @@ async fn run(args: Args) -> Result<(), String> {
             ),
             TrackerNotifier::new(store.clone(), secrets.clone()),
         ));
+        // The caches and worktrees on this worker's disk (#593).
+        {
+            let state_dirs: Vec<PathBuf> = {
+                let modes = modes(&config)?;
+                [modes.poc, modes.customer_jp]
+                    .into_iter()
+                    .flatten()
+                    .map(|mode| mode.run.state_dir)
+                    .collect()
+            };
+            let sweep = cache_sweeper::run_sweeper(
+                store.clone(),
+                state_dirs,
+                config.cache_rules(),
+                shutdown.clone(),
+            );
+            parts.spawn(async move {
+                sweep.await;
+                Ok(())
+            });
+        }
         let worker_config = config.worker(worker_id());
         let (store, shutdown) = (store.clone(), shutdown.clone());
         parts.spawn(async move {

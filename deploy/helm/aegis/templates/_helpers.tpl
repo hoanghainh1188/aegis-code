@@ -113,6 +113,8 @@ server.toml: |
   poll_s = {{ int $c.worker.pollSeconds }}
   drain_s = {{ int $c.worker.drainSeconds }}
   retry_base_s = {{ int $c.worker.retryBaseSeconds }}
+  max_cache_disk_gb = {{ int $c.worker.maxCacheDiskGb }}
+  cache_ttl_days = {{ int $c.worker.cacheTtlDays }}
 
   [trackers]
   poll_s = {{ int $c.trackers.pollSeconds }}
