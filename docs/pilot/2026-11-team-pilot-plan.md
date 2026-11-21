@@ -111,7 +111,7 @@ Nếu `<owner/name>` là repo nội bộ và khách đồng ý bằng văn bản
 | Rủi ro | Cách giảm |
 | --- | --- |
 | Test của repo cần DB hoặc mạng, nên không chạy được trong sandbox `--network none` | `check-repo` phát hiện ở bước 2.1. DB, cache: khai báo sidecar (#490). Internet: chọn repo khác |
-| Đĩa đầy vì cache build (một repo Rust lớn cần 30–40 GB) | Kiểm tra `df -h` mỗi ngày (bản Compose không có Grafana), dọn cache build. Máy tối thiểu 100 GB SSD |
+| Đĩa đầy vì cache build (một repo Rust lớn cần 30–40 GB) | Từ bản có #593, worker tự dọn cache build theo `[worker] max_cache_disk_gb` (mặc định 60 GB) và `cache_ttl_days` (14 ngày), xem [runbook](../runbook/README.md#build-cache-disk-usage). Vẫn kiểm tra `df -h` mỗi ngày (bản Compose không có Grafana). Máy tối thiểu 100 GB SSD |
 | API model lỗi (5xx, 429) hàng loạt | Server thử lại 3 lần, giãn cách tăng dần từ 30 giây. Hết lượt thử thì job lỗi; chạy lại bằng `POST /api/v1/jobs/{id}/retry` ([runbook §4](../runbook/README.md#4-troubleshooting)) |
 | Team chỉ giao việc khó, nên tỉ lệ chấp nhận thấp | Chọn issue cùng team trong tuần đầu, và ghi độ khó của từng issue vào bảng tuần |
 | Repo công khai, model có thể đã thấy bản sửa | Ghi rõ trong báo cáo. Ưu tiên repo nội bộ (#157) |

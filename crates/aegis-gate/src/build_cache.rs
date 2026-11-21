@@ -4,11 +4,33 @@
 //! from a copy-on-write clone of the cache, so they share nothing on disk.
 //! Only the base copy writes the cache back: it builds upstream code, never
 //! the patch, so a patch cannot leave anything for a later job.
+//!
+//! Each use writes [`LAST_USED`] in the cache, so the worker's sweep
+//! (#593) removes the caches no job has used for longest.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::GateError;
+
+/// A file in a cache directory whose time is when a job last used it
+/// (#593). Only the cache has it, never a tree started from the cache.
+pub const LAST_USED: &str = ".aegis-cache-last-used";
+
+/// Writes `dir`'s [`LAST_USED`] marker, if `dir` exists.
+pub fn mark_used(dir: &Path) -> std::io::Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    std::fs::write(dir.join(LAST_USED), b"")
+}
+
+/// [`mark_used`] where the job must go on without it: a marker that cannot
+/// be written (a full disk) costs the cache only its place in the sweep's
+/// order, which then goes by the directory's time, not the job.
+pub(crate) fn try_mark_used(dir: &Path) {
+    let _ = mark_used(dir);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildCache {
@@ -57,6 +79,7 @@ impl BuildCache {
                 clone_dir(&from, &to)?;
             }
         }
+        try_mark_used(&self.dir);
         Ok(())
     }
 
@@ -74,6 +97,7 @@ impl BuildCache {
             let _ = std::fs::remove_dir_all(&current);
             std::fs::rename(&fresh, &current).map_err(|e| GateError::io(&current, &e))?;
         }
+        try_mark_used(&self.dir);
         Ok(())
     }
 }
@@ -94,6 +118,15 @@ mod tests {
         std::fs::create_dir_all(base.join("target/debug")).unwrap();
         std::fs::write(base.join("target/debug/lib.rlib"), "built").unwrap();
         cache.refresh_from(&base).unwrap();
+        let marker = cache.dir.join(LAST_USED);
+        assert!(marker.is_file(), "refresh marks the cache used");
+        let long_ago = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        std::fs::File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
 
         let job = root.join("job");
         std::fs::create_dir_all(&job).unwrap();
@@ -102,6 +135,10 @@ mod tests {
             std::fs::read_to_string(job.join("target/debug/lib.rlib")).unwrap(),
             "built"
         );
+        let used = std::fs::metadata(&marker).unwrap().modified().unwrap();
+        assert!(used > long_ago, "seed marks the cache used again");
+        // The marker is the cache's own: a tree never gets it.
+        assert!(!job.join("target").join(LAST_USED).exists());
         // The job's copy is its own: writing it leaves the cache as it was.
         std::fs::write(job.join("target/debug/lib.rlib"), "patched").unwrap();
         assert_eq!(

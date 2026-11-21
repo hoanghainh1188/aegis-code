@@ -32,6 +32,9 @@
 //!   `other`); and each tenant's spend and cap.
 //! - `aegis_paused` (#510), read at each scrape: 1 while every agent is
 //!   paused (intake or emergency), 0 otherwise.
+//! - The worker's disk (#593), set by each cache sweep: bytes of the build
+//!   caches and of the jobs' worktrees (`kind`), the caches' limit, and the
+//!   caches a sweep removed, by `reason` (`expired`, `over_limit`).
 
 use std::net::SocketAddr;
 use std::sync::OnceLock;
@@ -132,6 +135,18 @@ struct PriorityLabels {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct DiskLabels {
+    /// `cache` or `worktree`.
+    kind: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct EvictionLabels {
+    /// `expired` or `over_limit`.
+    reason: &'static str,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct QueueLabels {
     state: &'static str,
 }
@@ -167,6 +182,9 @@ pub struct Metrics {
     ams_resolved: Family<ResolvedLabels, Gauge>,
     tenant_spent_usd: Family<TenantLabels, Gauge<f64, AtomicU64>>,
     tenant_cap_usd: Family<TenantLabels, Gauge<f64, AtomicU64>>,
+    workspace_disk_bytes: Family<DiskLabels, Gauge>,
+    cache_disk_limit_bytes: Gauge,
+    cache_evictions: Family<EvictionLabels, Counter>,
 }
 
 impl Metrics {
@@ -314,7 +332,28 @@ impl Metrics {
             "Each tenant's monthly cap, in $; absent for one without",
             tenant_cap_usd.clone(),
         );
+        let workspace_disk_bytes = Family::default();
+        registry.register(
+            "workspace_disk_bytes",
+            "Bytes on the worker's disk, by kind: cache (build caches) or worktree (#593)",
+            workspace_disk_bytes.clone(),
+        );
+        let cache_disk_limit_bytes = Gauge::default();
+        registry.register(
+            "cache_disk_limit_bytes",
+            "What the build caches may take together; 0 for no limit (#593)",
+            cache_disk_limit_bytes.clone(),
+        );
+        let cache_evictions = Family::default();
+        registry.register(
+            "cache_evictions",
+            "Repo caches a sweep removed, by reason: expired or over_limit (#593)",
+            cache_evictions.clone(),
+        );
         Self {
+            workspace_disk_bytes,
+            cache_disk_limit_bytes,
+            cache_evictions,
             ams_mttr_seconds,
             ams_on_time_ratio,
             ams_overdue_open,
@@ -372,6 +411,27 @@ impl Metrics {
                 place: place.to_owned(),
             })
             .inc_by(u64::from(count));
+    }
+
+    /// What a cache sweep found on the worker's disk (#593), and the
+    /// caches' limit (0: none).
+    pub fn workspace_disk(&self, cache_bytes: u64, worktree_bytes: u64, limit_bytes: u64) {
+        let gauge = |n: u64| i64::try_from(n).unwrap_or(i64::MAX);
+        for (kind, bytes) in [("cache", cache_bytes), ("worktree", worktree_bytes)] {
+            self.workspace_disk_bytes
+                .get_or_create(&DiskLabels { kind })
+                .set(gauge(bytes));
+        }
+        self.cache_disk_limit_bytes.set(gauge(limit_bytes));
+    }
+
+    /// A repo's caches removed by a sweep (#593).
+    pub fn cache_evicted(&self, reason: aegis_lifecycle::cache_sweep::Reason) {
+        self.cache_evictions
+            .get_or_create(&EvictionLabels {
+                reason: reason.as_str(),
+            })
+            .inc();
     }
 
     pub fn attempt_ended(&self, status: &str, seconds: f64) {
@@ -659,6 +719,22 @@ mod tests {
         );
         assert!(line_of(&text, r#"aegis_secrets_blocked_total{place="PR"} 1"#).is_some());
         assert!(line_of(&text, r#"aegis_secrets_blocked_total{place="other"} 1"#).is_some());
+    }
+
+    #[test]
+    fn the_workspace_disk_shows_by_kind_with_the_limit_and_evictions() {
+        let m = Metrics::new();
+        m.workspace_disk(3 << 30, 5 << 20, 60 << 30);
+        m.cache_evicted(aegis_lifecycle::cache_sweep::Reason::OverLimit);
+        let text = m.render().unwrap();
+        for line in [
+            r#"aegis_workspace_disk_bytes{kind="cache"} 3221225472"#,
+            r#"aegis_workspace_disk_bytes{kind="worktree"} 5242880"#,
+            "aegis_cache_disk_limit_bytes 64424509440",
+            r#"aegis_cache_evictions_total{reason="over_limit"} 1"#,
+        ] {
+            assert!(line_of(&text, line).is_some(), "{line} in {text}");
+        }
     }
 
     #[test]

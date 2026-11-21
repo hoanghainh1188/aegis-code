@@ -27,7 +27,7 @@ pub mod secrets;
 mod sidecar;
 mod sonar;
 
-pub use build_cache::BuildCache;
+pub use build_cache::{BuildCache, LAST_USED, mark_used};
 pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner, out_of_memory};
 pub use dependency_policy::{DependencyPolicy, Upgrade, same_package};
 pub use egress::{Egress, EgressSession};

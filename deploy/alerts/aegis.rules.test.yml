@@ -131,6 +131,41 @@ tests:
         alertname: AegisPaused
         exp_alerts: []
 
+  # Cache vượt giới hạn từ phút 10 tới phút 80; máy khác dưới giới hạn,
+  # máy thứ ba không đặt giới hạn (0).
+  - interval: 1m
+    input_series:
+      - series: 'aegis_workspace_disk_bytes{job="aegis",instance="w1",kind="cache"}'
+        values: '50x10 70x70 40x10'
+      - series: 'aegis_cache_disk_limit_bytes{job="aegis",instance="w1"}'
+        values: '60x90'
+      - series: 'aegis_workspace_disk_bytes{job="aegis",instance="w2",kind="cache"}'
+        values: '50x90'
+      - series: 'aegis_cache_disk_limit_bytes{job="aegis",instance="w2"}'
+        values: '60x90'
+      - series: 'aegis_workspace_disk_bytes{job="aegis",instance="w3",kind="cache"}'
+        values: '500x90'
+      - series: 'aegis_cache_disk_limit_bytes{job="aegis",instance="w3"}'
+        values: '0x90'
+    alert_rule_test:
+      # Mới vượt 50 phút.
+      - eval_time: 60m
+        alertname: AegisCacheOverLimit
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: AegisCacheOverLimit
+        exp_alerts:
+          - exp_labels:
+              job: aegis
+              instance: w1
+              severity: warning
+            exp_annotations:
+              summary: "Build cache trên w1 vượt giới hạn"
+              description: "Build cache vẫn vượt max_cache_disk_gb sau 1 giờ dọn. Tăng giới hạn hoặc đĩa, hoặc giảm số repo trên máy: docs/runbook/README.md#build-cache-disk-usage."
+      - eval_time: 85m
+        alertname: AegisCacheOverLimit
+        exp_alerts: []
+
   # Server trả lời đến phút 10, rồi dừng. Prometheus vẫn thấy máy (up = 0).
   - interval: 1m
     input_series:

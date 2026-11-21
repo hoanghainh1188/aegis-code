@@ -229,7 +229,23 @@ Symptoms: jobs remaining in `queued` state for prolonged durations (visible on G
 2. Stalled `running` jobs: leases expire after `lease_s` (60 s), returning abandoned jobs to the queue. Stalled sandbox containers: inspect `sudo docker ps --filter name=aegis-gate`, remove with `sudo docker rm --force --volumes <name>`. The worker removes each gate container once it ends, not `--rm`, so it can first read whether the container ran out of memory (#320). If a worker died mid-step, stopped ones may remain: `sudo docker ps -aq --filter name=aegis-gate --filter status=exited | xargs -r sudo docker rm --volumes`. A step failing with "out of memory" hit `[run.sandbox_limits] memory_mb` (or the profile's `sandbox.memory_mb`): raise it, or lower `CARGO_BUILD_JOBS` and the like in `[run.sandbox_env]`.
 3. Concurrency constraints: check host `max_workers` and repo-specific `repos.max_concurrent_jobs`. If one repo starves the queue: cancel excess tasks (`POST /api/v1/jobs/{id}/cancel`) and verify webhook delivery deduplication.
 4. Host resource exhaustion: on the `worker` machine, inspect `top`, `sudo docker stats`. Scale up `instance_type` (triggers instance replacement, Section 1) or decrease `max_workers`.
-5. Workspace storage exhaustion: check `df -h /data`. Prune obsolete images via `sudo docker image prune -a --filter until=168h` (preserves active images), clean finished workspaces in `/srv/aegis/.workspace` (check active jobs via `GET /api/v1/jobs?status=running`), or expand EBS volume `workspace_volume_gb` (`apply`, then `sudo xfs_growfs /data`).
+5. Workspace storage exhaustion: check `df -h /data`. Build caches are swept on their own ([Build Cache Disk Usage](#build-cache-disk-usage)); `aegis_workspace_disk_bytes` shows caches and worktrees. Prune obsolete images via `sudo docker image prune -a --filter until=168h` (preserves active images), clean finished workspaces in `/srv/aegis/.workspace` (check active jobs via `GET /api/v1/jobs?status=running`), or expand EBS volume `workspace_volume_gb` (`apply`, then `sudo xfs_growfs /data`).
+
+### Build Cache Disk Usage
+
+The repos' build caches (`<state_dir>/cache/<slug>/`, a Rust repo's `target/` reaching 30–40 GB) are kept within `[worker] max_cache_disk_gb` (default 60; 30 in the Helm chart, whose workspace volume is 50 Gi) by a sweep every 15 minutes on each worker (#593):
+
+- caches no job has used for `cache_ttl_days` (default 14) are removed;
+- above the limit, the least recently used are removed until the caches take 85% of it;
+- a repo with a running job on any worker, or whose cache was used in the last 10 minutes, keeps it. The running jobs and the cache's markers are read again just before each removal.
+
+A removed cache costs the repo's next job a cold build, nothing else. Set the limit above the largest single repo's caches (a Rust repo needs 30–40 GB): below it, that repo's cache is removed whenever it is idle, and every job builds from cold. Worktrees are not counted in the limit and share the disk, so leave room for `max_workers` of them.
+
+A worker's `state_dir` must not be shared with CLI runs (`aegis eval`, `aegis check-repo` against the same directory): they have no job in the queue, so only the 10-minute margin protects their caches.
+
+Each sweep logs `removed a repo's caches` with the repo, bytes and reason, and sets `aegis_workspace_disk_bytes{kind="cache"|"worktree"}`, `aegis_cache_disk_limit_bytes` and `aegis_cache_evictions_total{reason}`.
+
+`AegisCacheOverLimit` fires when the caches stay above the limit for an hour: what is left belongs to repos with running or recent jobs. Raise `max_cache_disk_gb` together with the disk, lower `max_workers`, or move repos to another worker. Many evictions with `reason="over_limit"` mean jobs keep building from cold: the limit is too small for the repos on the machine.
 
 ### Database Storage Exhaustion
 

@@ -54,6 +54,21 @@ groups:
           summary: "Hàng đợi job dồn"
           description: "Job sẵn sàng cũ nhất đã chờ hơn 30 phút. Xem aegis_queue_jobs và aegis_jobs_running của các worker."
 
+      # Build cache trên máy worker vẫn vượt giới hạn
+      # (`[worker] max_cache_disk_gb`, #593) sau 4 lượt dọn (15 phút một
+      # lượt): phần còn lại thuộc repo đang có job chạy hoặc vừa dùng, nên
+      # không dọn được. Đĩa sẽ đầy nếu cứ thế.
+      - alert: AegisCacheOverLimit
+        expr: |
+          aegis_workspace_disk_bytes{kind="cache"}
+            > ignoring(kind) (aegis_cache_disk_limit_bytes > 0)
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Build cache trên {{ $labels.instance }} vượt giới hạn"
+          description: "Build cache vẫn vượt max_cache_disk_gb sau 1 giờ dọn. Tăng giới hạn hoặc đĩa, hoặc giảm số repo trên máy: docs/runbook/README.md#build-cache-disk-usage."
+
       # Admin đã dừng mọi agent (#510: `aegis-server pause-all`, trang
       # /admin/pause hoặc POST /api/v1/admin/pause): không job nào chạy cho
       # tới khi tiếp tục. Báo để cả nhóm biết, và để không ai quên tiếp tục.
