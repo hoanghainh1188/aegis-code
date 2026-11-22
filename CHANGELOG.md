@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.18.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.17.1...v0.18.0) (2026-11-22)
+
+
+### Features
+
+* **lang:** add a Kotlin profile run on Gradle ([#586](https://github.com/hoanghainh1188/aegis-code/issues/586)) ([#627](https://github.com/hoanghainh1188/aegis-code/issues/627)) ([a46f905](https://github.com/hoanghainh1188/aegis-code/commit/a46f9058b7ec27d76b19c0d0df609d25ddaacbd1))
+* let repos take any mode slug in the store ([#608](https://github.com/hoanghainh1188/aegis-code/issues/608)) ([c1ea936](https://github.com/hoanghainh1188/aegis-code/commit/c1ea9360297109bfa584e1bee6deeb2f06ca9555))
+* let the server run any mode with its own data residency ([#609](https://github.com/hoanghainh1188/aegis-code/issues/609)) ([f6ae85f](https://github.com/hoanghainh1188/aegis-code/commit/f6ae85f3567d56b734c9c28492578413c7c177cb)), closes [#592](https://github.com/hoanghainh1188/aegis-code/issues/592)
+* **provider:** add Vertex AI, OpenAI-compatible/Azure, and residency-safe failover (ADR 0018) ([#623](https://github.com/hoanghainh1188/aegis-code/issues/623)) ([48052be](https://github.com/hoanghainh1188/aegis-code/commit/48052be485ba211239d9fe28ba9a10a5f2031139))
+* render the dashboard in English, Japanese or Vietnamese ([#624](https://github.com/hoanghainh1188/aegis-code/issues/624)) ([95da9c8](https://github.com/hoanghainh1188/aegis-code/commit/95da9c858d18278ee9e3e29a8035cd8d8c8225dd)), closes [#590](https://github.com/hoanghainh1188/aegis-code/issues/590)
+* resolve each repo's locale from its settings, tenant and server ([#622](https://github.com/hoanghainh1188/aegis-code/issues/622)) ([df1375a](https://github.com/hoanghainh1188/aegis-code/commit/df1375a76e3a85007b6807394da1fe85af9380e9)), closes [#589](https://github.com/hoanghainh1188/aegis-code/issues/589)
+* sweep worker build caches within a disk limit ([#601](https://github.com/hoanghainh1188/aegis-code/issues/601)) ([c3bd6cc](https://github.com/hoanghainh1188/aegis-code/commit/c3bd6cc3d4a73b07a808f0b096a9d24fbaf190b5)), closes [#593](https://github.com/hoanghainh1188/aegis-code/issues/593)
+* tell Slack and Teams of jobs' ends through ChatOps webhooks ([#607](https://github.com/hoanghainh1188/aegis-code/issues/607)) ([6d60b12](https://github.com/hoanghainh1188/aegis-code/commit/6d60b120973c47227f7ac609d547ea86f86dc958)), closes [#594](https://github.com/hoanghainh1188/aegis-code/issues/594)
+* write PRs, review replies and diagnoses in the repo's locale ([#621](https://github.com/hoanghainh1188/aegis-code/issues/621)) ([610edbd](https://github.com/hoanghainh1188/aegis-code/commit/610edbdf2969d3898269cf28a8e8b2476b95e687)), closes [#588](https://github.com/hoanghainh1188/aegis-code/issues/588)
+
+
+### Bug Fixes
+
+* bump url to 2.5.9 for RUSTSEC-2026-0592 ([#628](https://github.com/hoanghainh1188/aegis-code/issues/628)) ([d75c9ba](https://github.com/hoanghainh1188/aegis-code/commit/d75c9ba3dce98877aa1893bdc771cd9fb8f60e6b))
+* keep a batch going past a poisoned lock and drop the crypto-bigint ignore ([#606](https://github.com/hoanghainh1188/aegis-code/issues/606)) ([#631](https://github.com/hoanghainh1188/aegis-code/issues/631)) ([55c4e5a](https://github.com/hoanghainh1188/aegis-code/commit/55c4e5a9aa2a32773f2668f9769508b5805abace))
+
+
+### Code Refactoring
+
+* group long parameter lists into context structs ([#604](https://github.com/hoanghainh1188/aegis-code/issues/604)) ([#629](https://github.com/hoanghainh1188/aegis-code/issues/629)) ([47fe101](https://github.com/hoanghainh1188/aegis-code/commit/47fe101524295c7bca205e7271c60b468361d29d))
+* name aegis-cli's binary aegis-local, apart from the client ([#611](https://github.com/hoanghainh1188/aegis-code/issues/611)) ([be60458](https://github.com/hoanghainh1188/aegis-code/commit/be60458e390dba56b32e87788815f25b52f4aa1f)), closes [#603](https://github.com/hoanghainh1188/aegis-code/issues/603)
+* replace chrono with time across the workspace ([#578](https://github.com/hoanghainh1188/aegis-code/issues/578)) ([#633](https://github.com/hoanghainh1188/aegis-code/issues/633)) ([ab9faff](https://github.com/hoanghainh1188/aegis-code/commit/ab9faff38596e47f0143a57358dada0b06ddcc3e))
+* split gate.rs and run.rs into modules by responsibility ([#605](https://github.com/hoanghainh1188/aegis-code/issues/605)) ([#630](https://github.com/hoanghainh1188/aegis-code/issues/630)) ([efecbbd](https://github.com/hoanghainh1188/aegis-code/commit/efecbbdf2d35156eaa2d8c0893575469c3dc65d3))
+
+
+### Documentation
+
+* add Configuration Reference (docs/configuration.md) ([#618](https://github.com/hoanghainh1188/aegis-code/issues/618)) ([f42fd2e](https://github.com/hoanghainh1188/aegis-code/commit/f42fd2e328574d4e540f6369e52f78d5a700f08b))
+* add docs/README.md hub and sync README §9 and Platform Topology ([#620](https://github.com/hoanghainh1188/aegis-code/issues/620)) ([3f403b8](https://github.com/hoanghainh1188/aegis-code/commit/3f403b8fc11a732604949e1723349ade1891b394))
+* add REST API & Webhook Reference and AMS integrations runbook ([#619](https://github.com/hoanghainh1188/aegis-code/issues/619)) ([067f6a6](https://github.com/hoanghainh1188/aegis-code/commit/067f6a68644730710572eec680b919ca981b2bf9))
+* add Security & Compliance Overview and SECURITY.md ([#617](https://github.com/hoanghainh1188/aegis-code/issues/617)) ([a0b2086](https://github.com/hoanghainh1188/aegis-code/commit/a0b2086daee624d869655fbdc1c62adc404c90e2))
+* align Phase 2 scope with milestones ([#582](https://github.com/hoanghainh1188/aegis-code/issues/582)) ([8f4c85c](https://github.com/hoanghainh1188/aegis-code/commit/8f4c85c8c54f695044721ffaafc5c32330385086))
+* mark Phase 3 and Phase 4 features as built ([#585](https://github.com/hoanghainh1188/aegis-code/issues/585)) ([02353de](https://github.com/hoanghainh1188/aegis-code/commit/02353de89c486f44d7df94d69b1b770ede290a66))
+* measure gate container cost and step parallelism ([#600](https://github.com/hoanghainh1188/aegis-code/issues/600)) ([bef7756](https://github.com/hoanghainh1188/aegis-code/commit/bef7756a02f9a7d948ed2e45d5743824f0c7518a))
+
 ## [0.17.1](https://github.com/hoanghainh1188/aegis-code/compare/v0.17.0...v0.17.1) (2026-11-16)
 
 
