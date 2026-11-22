@@ -18,7 +18,7 @@ use aegis_ledger::{
     ReviewVerdict,
 };
 use aegis_lifecycle::{
-    IssueInput, MemoryLesson, Platform, RunConfig, extract_from_merged_pr, run_issue,
+    IssueInput, MemoryLesson, MergedPrFacts, Platform, RunConfig, extract_from_merged_pr, run_issue,
 };
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, StopReason, Usage,
@@ -287,12 +287,16 @@ async fn light_tier_extracts_merged_pr_and_review_lesson_automatically() {
     let (extracted, resp) = extract_from_merged_pr(
         &provider,
         "light",
-        "Cart accepts a fourth item",
-        "`cart![1, 2, 3].add(4)` returns Ok(())",
-        Some("`add` compared with `>` instead of `>=`"),
-        Some("src/lib.rs:24: compare with `>=`"),
-        &["Please add a regression test for the 4th item in tests/fourth_item.rs".into()],
-        &["src/lib.rs".into()],
+        &MergedPrFacts {
+            issue_title: "Cart accepts a fourth item",
+            issue_body: "`cart![1, 2, 3].add(4)` returns Ok(())",
+            answer_cause: Some("`add` compared with `>` instead of `>=`"),
+            answer_changes: Some("src/lib.rs:24: compare with `>=`"),
+            review_notes: &[
+                "Please add a regression test for the 4th item in tests/fourth_item.rs".into(),
+            ],
+            changed_paths: &["src/lib.rs".into()],
+        },
     )
     .await;
 

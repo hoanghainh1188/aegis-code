@@ -41,7 +41,7 @@ use crate::evidence::check_sources;
 use crate::issue::HiddenTests;
 use crate::job::{self, Worktree};
 use crate::light;
-use crate::publish::{fork_remote, publish, publish_round};
+use crate::publish::{PublishContext, fork_remote, publish, publish_round};
 use crate::review::{MAX_DIFF_CHARS, ReviewRound};
 use crate::{IssueInput, LifecycleError, RunConfig};
 
@@ -728,21 +728,18 @@ where
         Message::user_text(first_message),
         CacheTtl::FiveMinutes,
     );
-    let result = drive(
-        platform,
-        ledger,
+    let context = DriveContext {
         profiles,
         issue,
-        &graph,
-        session,
-        tree.path(),
-        &base,
-        &job_dir,
+        job: JobTree {
+            tree: tree.path(),
+            base: &base,
+            job_dir: &job_dir,
+        },
         finish,
-        (&policy, prepared),
-        cancel,
-    )
-    .await;
+        policy: &policy,
+    };
+    let result = drive(platform, ledger, &graph, session, context, prepared, cancel).await;
     graph.close().await;
     tools.shutdown().await;
     drop(tree);
@@ -996,18 +993,29 @@ fn allowed_packages(cfg: &RunConfig) -> Result<BTreeSet<String>, LifecycleError>
     Ok(names)
 }
 
+/// Where a job's gate runs: its patched `tree`, the `base` commit the
+/// patch is on, and the job's own directory under the state dir.
+#[derive(Clone, Copy)]
+pub(crate) struct JobTree<'a> {
+    pub tree: &'a Path,
+    pub base: &'a str,
+    pub job_dir: &'a Path,
+}
+
 /// The gate on the job's tree, off the async runtime; `cancel` stops it.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn gate(
     cfg: &RunConfig,
     profiles: &RepoProfiles,
-    tree: &Path,
-    base: &str,
-    job_dir: &Path,
+    job: JobTree<'_>,
     answer: &FinalAnswer,
     policy: &DependencyPolicy,
     cancel: &CancellationToken,
 ) -> Result<GateReport, LifecycleError> {
+    let JobTree {
+        tree,
+        base,
+        job_dir,
+    } = job;
     let allowed = allowed_packages(cfg)?;
     let dependency_policy = policy.clone();
     let root = &profiles.parts()[0];
@@ -1282,22 +1290,27 @@ pub(crate) fn gate_run(report: &GateReport, took: Duration) -> GateRun {
 /// before the gate: read a file, edit it, answer again, with one to spare.
 const IMPACT_CALLS: u32 = 4;
 
-/// The Core/Expert loop with gate runs between attempts.
-#[allow(clippy::too_many_arguments)]
+/// The job [`drive`] works on: the repo's profiles, the issue, the tree
+/// the gate runs on, what to do with a patch that passes, and what the
+/// patch may change in the dependencies (#500).
+#[derive(Clone, Copy)]
+struct DriveContext<'a> {
+    profiles: &'a RepoProfiles,
+    issue: &'a IssueInput,
+    job: JobTree<'a>,
+    finish: &'a Finish,
+    policy: &'a DependencyPolicy,
+}
+
+/// The Core/Expert loop with gate runs between attempts. `prepared` is an
+/// answer to check before any agent turn: a CVE job's upgrade (#501).
 async fn drive<P, S, T>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
-    profiles: &RepoProfiles,
-    issue: &IssueInput,
     tools: &CodeGraph<'_, T>,
     session: Session,
-    tree: &Path,
-    base: &str,
-    job_dir: &Path,
-    finish: &Finish,
-    // What the patch may change in the dependencies (#500), and an answer
-    // to check before any agent turn: a CVE job's upgrade (#501).
-    (policy, prepared): (&DependencyPolicy, Option<FinalAnswer>),
+    context: DriveContext<'_>,
+    prepared: Option<FinalAnswer>,
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>
 where
@@ -1305,6 +1318,18 @@ where
     S: LedgerStore + Send + Sync + 'static,
     T: ServerCalls + Sync,
 {
+    let DriveContext {
+        profiles,
+        issue,
+        job,
+        finish,
+        policy,
+    } = context;
+    let JobTree {
+        tree,
+        base,
+        job_dir,
+    } = job;
     let mut prepared = prepared;
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
@@ -1513,7 +1538,7 @@ where
         }
 
         let gate_started = Instant::now();
-        let report = gate(cfg, profiles, tree, base, job_dir, &answer, policy, cancel).await?;
+        let report = gate(cfg, profiles, job, &answer, policy, cancel).await?;
         ledger
             .gate_run(gate_run(&report, gate_started.elapsed()))
             .await?;
@@ -1573,10 +1598,15 @@ where
                 });
             }
             let pr_url = if cfg.run.open_prs {
-                let published = publish(
-                    platform, ledger, profiles, tree, issue, &answer, &report, &flags,
-                )
-                .await?;
+                let fix = PublishContext {
+                    profiles,
+                    tree,
+                    issue,
+                    answer: &answer,
+                    gate: &report,
+                    flags: &flags,
+                };
+                let published = publish(platform, ledger, fix).await?;
                 Some(published.url)
             } else {
                 keep_patch(cfg, job_dir, &report.base, &report.tree)?;

@@ -538,29 +538,33 @@ impl Modes {
         tenant: Option<&aegis_store::Tenant>,
     ) -> Result<RunConfig, LifecycleError> {
         self.build(
-            &repo.slug,
-            &repo.url,
-            &repo.default_branch,
-            &repo.language,
-            &repo.mode,
-            &repo.config,
+            RepoRow {
+                slug: &repo.slug,
+                url: &repo.url,
+                default_branch: &repo.default_branch,
+                language: &repo.language,
+                mode: &repo.mode,
+                config: &repo.config,
+            },
             repo.tenant_id,
             tenant.and_then(|t| t.default_locale.as_deref()),
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn build(
         &self,
-        slug: &str,
-        url: &str,
-        default_branch: &str,
-        language: &str,
-        mode: &ModeName,
-        config: &serde_json::Value,
+        row: RepoRow<'_>,
         tenant: aegis_store::TenantId,
         tenant_locale: Option<&str>,
     ) -> Result<RunConfig, LifecycleError> {
+        let RepoRow {
+            slug,
+            url,
+            default_branch,
+            language,
+            mode,
+            config,
+        } = row;
         let in_repo = |e: String| LifecycleError::Config(format!("repo `{slug}`: {e}"));
         let mode = self.mode(mode)?;
         let settings: RepoSettings =
@@ -671,12 +675,14 @@ impl Modes {
             check_tenant_secrets(t, &new.config)?;
         }
         let config = self.build(
-            &new.slug,
-            &new.url,
-            &new.default_branch,
-            &new.language,
-            &new.mode,
-            &new.config,
+            RepoRow {
+                slug: &new.slug,
+                url: &new.url,
+                default_branch: &new.default_branch,
+                language: &new.language,
+                mode: &new.mode,
+                config: &new.config,
+            },
             tenant.map_or(aegis_store::TenantId::DEFAULT, |t| t.id),
             tenant.and_then(|t| t.default_locale.as_deref()),
         )?;
@@ -815,6 +821,18 @@ fn auth(platform: crate::ForkPlatform, token: Option<&str>) -> Option<(&'static 
         crate::ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
     };
     token.map(|t| (user, t))
+}
+
+/// The stored columns of a repo, registered or about to be, that its
+/// jobs' configuration is built from.
+#[derive(Clone, Copy)]
+struct RepoRow<'a> {
+    slug: &'a str,
+    url: &'a str,
+    default_branch: &'a str,
+    language: &'a str,
+    mode: &'a ModeName,
+    config: &'a serde_json::Value,
 }
 
 #[cfg(test)]

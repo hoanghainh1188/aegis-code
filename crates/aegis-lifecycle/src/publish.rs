@@ -79,21 +79,35 @@ pub(crate) struct Published {
     pub note: Option<String>,
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The fix [`publish`] opens a PR for: the issue, the agent's answer, the
+/// gate that passed it on `tree`, and the input flags the PR tells (#444).
+#[derive(Clone, Copy)]
+pub(crate) struct PublishContext<'a> {
+    pub profiles: &'a RepoProfiles,
+    pub tree: &'a Path,
+    pub issue: &'a IssueInput,
+    pub answer: &'a FinalAnswer,
+    pub gate: &'a GateReport,
+    pub flags: &'a [InputFlag],
+}
+
 pub(crate) async fn publish<P, S>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
-    profiles: &RepoProfiles,
-    tree: &Path,
-    issue: &IssueInput,
-    answer: &FinalAnswer,
-    gate: &GateReport,
-    flags: &[InputFlag],
+    fix: PublishContext<'_>,
 ) -> Result<Published, LifecycleError>
 where
     P: ModelProvider + Sync,
     S: LedgerStore + Sync,
 {
+    let PublishContext {
+        profiles,
+        tree,
+        issue,
+        answer,
+        gate,
+        flags,
+    } = fix;
     let cfg = &platform.config;
     let light = &cfg.models.light;
     let message = write_commit_message(

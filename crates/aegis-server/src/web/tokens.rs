@@ -67,17 +67,35 @@ fn person(access: &Access) -> Result<UserId, WebError> {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What the page tells after a request: a token just made, shown once,
+/// or why none was, with the status it answers with.
+struct Outcome {
+    made: Option<String>,
+    error: Option<String>,
+    status: StatusCode,
+}
+
+impl Outcome {
+    const LISTED: Self = Self {
+        made: None,
+        error: None,
+        status: StatusCode::OK,
+    };
+}
+
 async fn page(
     store: &Store,
     auth: &Auth,
     nonce: &Nonce,
     me: &Me,
     user: UserId,
-    made: Option<String>,
-    error: Option<String>,
-    status: StatusCode,
+    outcome: Outcome,
 ) -> WebResult {
+    let Outcome {
+        made,
+        error,
+        status,
+    } = outcome;
     let tokens = store
         .personal_tokens(user)
         .await?
@@ -105,7 +123,7 @@ pub async fn list(
     Extension(me): Extension<Me>,
 ) -> WebResult {
     let user = person(&access)?;
-    page(&store, &auth, &nonce, &me, user, None, None, StatusCode::OK).await
+    page(&store, &auth, &nonce, &me, user, Outcome::LISTED).await
 }
 
 pub async fn create(
@@ -122,8 +140,12 @@ pub async fn create(
     } else {
         form.days.trim().parse::<u32>()
     };
-    let refused = |why: String| (None, Some(why), StatusCode::UNPROCESSABLE_ENTITY);
-    let (made, error, status) = match days {
+    let refused = |why: String| Outcome {
+        made: None,
+        error: Some(why),
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+    };
+    let outcome = match days {
         Err(_) => refused(format!("Days must be between 1 and {MAX_TOKEN_DAYS}")),
         Ok(days) => {
             let token = random_token().map_err(|e| {
@@ -134,7 +156,10 @@ pub async fn create(
                 .create_personal_token(user, &form.label, days, &token_hash(&token), &access.actor)
                 .await
             {
-                Ok(_) => (Some(token), None, StatusCode::OK),
+                Ok(_) => Outcome {
+                    made: Some(token),
+                    ..Outcome::LISTED
+                },
                 Err(StoreError::Invalid { field: "label", .. }) => {
                     refused("Token label must be between 1 and 64 characters".into())
                 }
@@ -148,7 +173,7 @@ pub async fn create(
             }
         }
     };
-    page(&store, &auth, &nonce, &me, user, made, error, status).await
+    page(&store, &auth, &nonce, &me, user, outcome).await
 }
 
 pub async fn revoke(

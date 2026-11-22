@@ -315,17 +315,27 @@ type Edit<'a> = (&'a str, &'a str, &'a str);
 /// #291: on a base revision where `failing` makes a test fail, a patch that
 /// leaves the tests alone (`harmless`) passes the test step; adding
 /// `breaking` fails it, naming the newly broken test `broken` and only it.
-#[allow(clippy::too_many_arguments)]
+struct BaseFailures<'a> {
+    failing: Edit<'a>,
+    harmless: Edit<'a>,
+    breaking: Edit<'a>,
+    broken: &'a str,
+}
+
+/// [`BaseFailures`] on `fixture` in `language`'s container.
 fn base_failures_are_not_new(
     language: Language,
     overrides: &str,
     fixture: &str,
     ignored: &str,
-    failing: Edit,
-    harmless: Edit,
-    breaking: Edit,
-    broken: &str,
+    case: BaseFailures<'_>,
 ) {
+    let BaseFailures {
+        failing,
+        harmless,
+        breaking,
+        broken,
+    } = case;
     let profile = profile(language, overrides);
     if !docker_ready(&profile.image) {
         return;
@@ -365,14 +375,16 @@ fn the_go_gate_tells_base_failures_from_new_ones() {
         "",
         "go",
         "coverage.out\n",
-        ("cart_test.go", "c.Total() != 3", "c.Total() != 4"),
-        (
-            "cart.go",
-            "// Cart holds prices.",
-            "// Cart holds the prices.",
-        ),
-        ("cart.go", "MaxItems = 3", "MaxItems = 4"),
-        "::TestRefusesAFourthItem",
+        BaseFailures {
+            failing: ("cart_test.go", "c.Total() != 3", "c.Total() != 4"),
+            harmless: (
+                "cart.go",
+                "// Cart holds prices.",
+                "// Cart holds the prices.",
+            ),
+            breaking: ("cart.go", "MaxItems = 3", "MaxItems = 4"),
+            broken: "::TestRefusesAFourthItem",
+        },
     );
 }
 
@@ -383,22 +395,24 @@ fn the_java_gate_tells_base_failures_from_new_ones() {
         "",
         "java",
         "target/\n",
-        (
-            "src/test/java/example/cart/CartTest.java",
-            "assertEquals(3,",
-            "assertEquals(4,",
-        ),
-        (
-            "src/main/java/example/cart/Cart.java",
-            "/** Small class",
-            "/** A small class",
-        ),
-        (
-            "src/main/java/example/cart/Cart.java",
-            "MAX_ITEMS = 3",
-            "MAX_ITEMS = 4",
-        ),
-        "example.cart.CartTest.refusesAFourthItem",
+        BaseFailures {
+            failing: (
+                "src/test/java/example/cart/CartTest.java",
+                "assertEquals(3,",
+                "assertEquals(4,",
+            ),
+            harmless: (
+                "src/main/java/example/cart/Cart.java",
+                "/** Small class",
+                "/** A small class",
+            ),
+            breaking: (
+                "src/main/java/example/cart/Cart.java",
+                "MAX_ITEMS = 3",
+                "MAX_ITEMS = 4",
+            ),
+            broken: "example.cart.CartTest.refusesAFourthItem",
+        },
     );
 }
 
@@ -409,22 +423,24 @@ fn the_kotlin_gate_tells_base_failures_from_new_ones() {
         "",
         "kotlin",
         KOTLIN_IGNORED,
-        (
-            "src/test/kotlin/example/cart/CartTest.kt",
-            "assertEquals(3,",
-            "assertEquals(4,",
-        ),
-        (
-            "src/main/kotlin/example/cart/Cart.kt",
-            "/** Small class",
-            "/** A small class",
-        ),
-        (
-            "src/main/kotlin/example/cart/Cart.kt",
-            "MAX_ITEMS = 3",
-            "MAX_ITEMS = 4",
-        ),
-        "example.cart.CartTest#refusesAFourthItem",
+        BaseFailures {
+            failing: (
+                "src/test/kotlin/example/cart/CartTest.kt",
+                "assertEquals(3,",
+                "assertEquals(4,",
+            ),
+            harmless: (
+                "src/main/kotlin/example/cart/Cart.kt",
+                "/** Small class",
+                "/** A small class",
+            ),
+            breaking: (
+                "src/main/kotlin/example/cart/Cart.kt",
+                "MAX_ITEMS = 3",
+                "MAX_ITEMS = 4",
+            ),
+            broken: "example.cart.CartTest#refusesAFourthItem",
+        },
     );
 }
 
@@ -436,18 +452,20 @@ fn the_csharp_gate_tells_base_failures_from_new_ones() {
             "",
             fixture,
             "bin/\nobj/\nTestResults/\n",
-            (
-                "tests/Cart.Tests/CartTests.cs",
-                "Assert.Equal(3,",
-                "Assert.Equal(4,",
-            ),
-            (
-                "src/Cart/Cart.cs",
-                "/// <summary>Small file",
-                "/// <summary>A small file",
-            ),
-            ("src/Cart/Cart.cs", "MaxItems = 3", "MaxItems = 4"),
-            "RefusesAFourthItem",
+            BaseFailures {
+                failing: (
+                    "tests/Cart.Tests/CartTests.cs",
+                    "Assert.Equal(3,",
+                    "Assert.Equal(4,",
+                ),
+                harmless: (
+                    "src/Cart/Cart.cs",
+                    "/// <summary>Small file",
+                    "/// <summary>A small file",
+                ),
+                breaking: ("src/Cart/Cart.cs", "MaxItems = 3", "MaxItems = 4"),
+                broken: "RefusesAFourthItem",
+            },
         );
     }
 }
@@ -463,14 +481,16 @@ fn the_typescript_gate_tells_base_failures_from_new_ones() {
         VITEST_ONLY,
         "typescript-vitest",
         "node_modules/\n",
-        ("test/cart.test.ts", "toBe(3)", "toBe(4)"),
-        (
-            "src/cart.ts",
-            "/** A cart of prices. */",
-            "/** A cart of the prices. */",
-        ),
-        ("src/cart.ts", "MAX_ITEMS = 3", "MAX_ITEMS = 4"),
-        "test/cart.test.ts > cart > refuses a fourth item",
+        BaseFailures {
+            failing: ("test/cart.test.ts", "toBe(3)", "toBe(4)"),
+            harmless: (
+                "src/cart.ts",
+                "/** A cart of prices. */",
+                "/** A cart of the prices. */",
+            ),
+            breaking: ("src/cart.ts", "MAX_ITEMS = 3", "MAX_ITEMS = 4"),
+            broken: "test/cart.test.ts > cart > refuses a fourth item",
+        },
     );
 }
 

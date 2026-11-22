@@ -131,15 +131,14 @@ impl Repo {
     ) -> GateReport {
         self.gate_full(
             profile,
-            repro,
-            step_timeout,
-            cancel,
-            env,
-            sandbox,
-            &[],
-            &[],
-            AuditPolicy::default(),
-            Default::default(),
+            GateOptions {
+                repro,
+                step_timeout,
+                cancel,
+                env,
+                sandbox,
+                ..GateOptions::default()
+            },
         )
     }
 
@@ -147,15 +146,10 @@ impl Repo {
     pub fn gate_auditing(&self, profile: &ResolvedProfile, audit: AuditPolicy) -> GateReport {
         self.gate_full(
             profile,
-            None,
-            Duration::from_secs(600),
-            CancelToken::new(),
-            vec![],
-            None,
-            &[],
-            &[],
-            audit,
-            Default::default(),
+            GateOptions {
+                audit,
+                ..GateOptions::default()
+            },
         )
     }
 
@@ -163,15 +157,10 @@ impl Repo {
     pub fn gate_allowing(&self, profile: &ResolvedProfile, tests: &[&str]) -> GateReport {
         self.gate_full(
             profile,
-            None,
-            Duration::from_secs(600),
-            CancelToken::new(),
-            vec![],
-            None,
-            tests,
-            &[],
-            AuditPolicy::default(),
-            Default::default(),
+            GateOptions {
+                allowed_tests: tests,
+                ..GateOptions::default()
+            },
         )
     }
 
@@ -187,15 +176,10 @@ impl Repo {
             .collect();
         self.gate_full(
             profile,
-            None,
-            Duration::from_secs(600),
-            CancelToken::new(),
-            vec![],
-            None,
-            &[],
-            &groups,
-            AuditPolicy::default(),
-            Default::default(),
+            GateOptions {
+                reference_groups: &groups,
+                ..GateOptions::default()
+            },
         )
     }
 
@@ -208,15 +192,10 @@ impl Repo {
     ) -> GateReport {
         self.gate_full(
             profile,
-            None,
-            Duration::from_secs(600),
-            CancelToken::new(),
-            vec![],
-            None,
-            &[],
-            &[],
-            AuditPolicy::default(),
-            policy,
+            GateOptions {
+                dependency_policy: policy,
+                ..GateOptions::default()
+            },
         )
     }
 
@@ -236,20 +215,18 @@ impl Repo {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn gate_full(
-        &self,
-        profile: &ResolvedProfile,
-        repro: Option<&Repro>,
-        step_timeout: Duration,
-        cancel: CancelToken,
-        env: Vec<(String, String)>,
-        sandbox: Option<Sandbox>,
-        allowed_tests: &[&str],
-        reference_groups: &[ReferenceGroup],
-        audit: AuditPolicy,
-        dependency_policy: aegis_gate::DependencyPolicy,
-    ) -> GateReport {
+    fn gate_full(&self, profile: &ResolvedProfile, options: GateOptions<'_>) -> GateReport {
+        let GateOptions {
+            repro,
+            step_timeout,
+            cancel,
+            env,
+            sandbox,
+            allowed_tests,
+            reference_groups,
+            audit,
+            dependency_policy,
+        } = options;
         let allowed = BTreeSet::new();
         let dir = self.dir();
         let work = self.work();
@@ -277,6 +254,36 @@ impl Repo {
             dependency_policy,
         })
         .unwrap()
+    }
+}
+
+/// What a test's gate runs with besides the profile; by default ten
+/// minutes a step and nothing declared.
+struct GateOptions<'a> {
+    repro: Option<&'a Repro>,
+    step_timeout: Duration,
+    cancel: CancelToken,
+    env: Vec<(String, String)>,
+    sandbox: Option<Sandbox>,
+    allowed_tests: &'a [&'a str],
+    reference_groups: &'a [ReferenceGroup],
+    audit: AuditPolicy,
+    dependency_policy: aegis_gate::DependencyPolicy,
+}
+
+impl Default for GateOptions<'_> {
+    fn default() -> Self {
+        Self {
+            repro: None,
+            step_timeout: Duration::from_secs(600),
+            cancel: CancelToken::new(),
+            env: vec![],
+            sandbox: None,
+            allowed_tests: &[],
+            reference_groups: &[],
+            audit: AuditPolicy::default(),
+            dependency_policy: Default::default(),
+        }
     }
 }
 

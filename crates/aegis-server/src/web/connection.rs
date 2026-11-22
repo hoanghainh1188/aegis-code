@@ -12,8 +12,10 @@ use aegis_lifecycle::ForkPlatform;
 use aegis_pr::{GitHub, GitLab, HookDone, PrError, RepoAccess};
 use aegis_store::{BadSignatures, Repo, Store};
 use askama::Template;
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::ExtensionRejection;
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::StatusCode;
+use axum::http::request::Parts;
 use axum::response::{IntoResponse, Redirect};
 use axum::{Extension, Form};
 use serde::Deserialize;
@@ -180,17 +182,34 @@ async fn token(admin: &RepoAdmin, name: &str) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Who the page is drawn for: the response's CSP nonce, the signed-in
+/// person and the sign-in config the payload URL is read from.
+pub struct Viewer {
+    nonce: Nonce,
+    me: Me,
+    auth: Auth,
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Viewer {
+    type Rejection = ExtensionRejection;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Extension(nonce) = Extension::<Nonce>::from_request_parts(parts, state).await?;
+        let Extension(me) = Extension::<Me>::from_request_parts(parts, state).await?;
+        let Extension(auth) = Extension::<Auth>::from_request_parts(parts, state).await?;
+        Ok(Self { nonce, me, auth })
+    }
+}
+
 async fn page(
     store: &Store,
     admin: &RepoAdmin,
-    auth: &Auth,
-    nonce: &Nonce,
-    me: &Me,
+    viewer: &Viewer,
     repo: &Repo,
     checks: Option<Vec<CheckRow>>,
     made: Option<&'static str>,
 ) -> WebResult {
+    let Viewer { nonce, me, auth } = viewer;
     let file = RepoFile::of(repo).map_err(|e| {
         tracing::error!(repo = %repo.slug, error = %e, "web: stored repo does not read back");
         WebError::new(
@@ -259,13 +278,10 @@ async fn page(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn show(
     State(store): State<Store>,
-    Extension(nonce): Extension<Nonce>,
     Extension(access): Extension<Access>,
-    Extension(me): Extension<Me>,
-    Extension(auth): Extension<Auth>,
+    viewer: Viewer,
     Extension(admin): RepoAdminExt,
     Path(id): Path<i64>,
     Query(q): Query<MadeQuery>,
@@ -283,7 +299,7 @@ pub async fn show(
         ),
         _ => None,
     };
-    page(&store, &admin, &auth, &nonce, &me, &repo, None, made).await
+    page(&store, &admin, &viewer, &repo, None, made).await
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -294,10 +310,8 @@ pub struct MadeQuery {
 
 pub async fn check(
     State(store): State<Store>,
-    Extension(nonce): Extension<Nonce>,
     Extension(access): Extension<Access>,
-    Extension(me): Extension<Me>,
-    Extension(auth): Extension<Auth>,
+    viewer: Viewer,
     Extension(admin): RepoAdminExt,
     Path(id): Path<i64>,
 ) -> WebResult {
@@ -306,17 +320,7 @@ pub async fn check(
     let repo = repo_of(&store, id).await?;
     let checks = run_checks(&store, &admin, &repo).await;
     tracing::info!(repo = %repo.slug, by = %access.actor.name, "repo connection checked");
-    page(
-        &store,
-        &admin,
-        &auth,
-        &nonce,
-        &me,
-        &repo,
-        Some(checks),
-        None,
-    )
-    .await
+    page(&store, &admin, &viewer, &repo, Some(checks), None).await
 }
 
 /// The webhook form (#376). Not `Debug`: the token is never printed.
