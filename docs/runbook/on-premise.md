@@ -147,9 +147,9 @@ Prometheus metrics listen locally at `127.0.0.1:9464/metrics`. Standard alerting
 
 ## 2. Registering Repositories
 
-### Before Registering: `aegis check-repo`
+### Before Registering: `aegis-local check-repo`
 
-The server image ships `aegis check-repo` (#450, #474), so no Rust toolchain is needed on the host. It runs in the `aegis` container and reaches the daemon through `docker-proxy`, as jobs do: the same uid, the same workspace mounts, the same sandbox images. It checks the profile, the lockfile, the daemon and the profile's sandbox image, the fetch hosts, and runs the root gate (format, lint, tests) in a `--network none` sandbox. Run it before `add-repo.sh`; every blocking item must pass.
+The server image ships `aegis-local check-repo` (#450, #474), so no Rust toolchain is needed on the host. Up to v0.17 the binary was called `aegis`, the same name as the developer client; it is `aegis-local` now (#603), and `aegis` in the image still links to it. It runs in the `aegis` container and reaches the daemon through `docker-proxy`, as jobs do: the same uid, the same workspace mounts, the same sandbox images. It checks the profile, the lockfile, the daemon and the profile's sandbox image, the fetch hosts, and runs the root gate (format, lint, tests) in a `--network none` sandbox. Run it before `add-repo.sh`; every blocking item must pass.
 
 Tests must pass on the base branch (#487): a test that fails there blocks, even though the gate lets a patch through when the base fails the same tests. Format or lint that fails on the base is a warning: the gate judges patches by the findings they add.
 
@@ -187,7 +187,7 @@ From `deploy/compose/`, with the server healthy:
 3. Run the check:
 
    ```bash
-   docker compose exec aegis aegis check-repo --config .workspace/preflight/myrepo.toml
+   docker compose exec aegis aegis-local check-repo --config .workspace/preflight/myrepo.toml
    ```
 
    The command exits non-zero when an item blocks. `--skip-tests` leaves out the baseline gate. Remove `/srv/aegis/.workspace/preflight/myrepo*` afterwards: `add-repo.sh` clones the repo again.
@@ -199,7 +199,7 @@ A repo whose tests connect to PostgreSQL, Redis or MySQL declares them as sideca
 1. Allow each image in the proxy: add `--sidecar-image <image>` to the `docker-proxy` service's `command` in `docker-compose.yml` (systemd: `AEGIS_DOCKER_PROXY_ARGS` in `/etc/aegis/aegis.env`), then `sudo docker compose up -d docker-proxy`. The proxy refuses any other image for a sidecar.
 2. Put the image on the machine: `sudo docker pull postgres:16-alpine`, or, without Internet, `docker save` it elsewhere and `docker load` it here. The offline bundle does not hold sidecar images.
 
-`aegis check-repo` starts the sidecars for its baseline gate, as jobs do.
+`aegis-local check-repo` starts the sidecars for its baseline gate, as jobs do.
 
 ### Registering
 

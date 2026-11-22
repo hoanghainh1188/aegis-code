@@ -1,4 +1,4 @@
-//! The ledger `run.ledger` picks (#22), and `aegis ledger import|export`
+//! The ledger `run.ledger` picks (#22), and `aegis-local ledger import|export`
 //! to move a JSON ledger into PostgreSQL and back. The database URL comes
 //! from `AEGIS_DATABASE_URL`, never from the configuration file.
 //!
@@ -82,7 +82,7 @@ fn summary(verb: &str, report: &CopyReport) -> String {
     )
 }
 
-/// `aegis ledger import`: the JSON ledger at `from` into the database.
+/// `aegis-local ledger import`: the JSON ledger at `from` into the database.
 /// Only reads `from`: it may be the live ledger of real runs.
 pub async fn import(store: &Store, from: &Path) -> Result<String, String> {
     if !from.is_dir() {
@@ -94,7 +94,7 @@ pub async fn import(store: &Store, from: &Path) -> Result<String, String> {
     Ok(summary("imported", &report))
 }
 
-/// `aegis ledger export`: the database's ledger as JSON files under `to`.
+/// `aegis-local ledger export`: the database's ledger as JSON files under `to`.
 pub async fn export(store: &Store, to: &Path) -> Result<String, String> {
     let report = copy_ledger(&store.ledger(), &JsonFileLedger::new(to))
         .await

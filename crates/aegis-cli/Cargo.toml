@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 [[bin]]
-name = "aegis"
+name = "aegis-local"
 path = "src/main.rs"
 
 [dependencies]

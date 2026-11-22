@@ -1,5 +1,5 @@
 //! `/jobs/{id}/review`: the reviewer's verdict on a job's PR, written to
-//! the ledger with [`IssueLedger::reviewed`] as `aegis review` does.
+//! the ledger with [`IssueLedger::reviewed`] as `aegis-local review` does.
 //!
 //! The reviewer does not type the review time (ADR 0005): the form carries
 //! the moment the page was served, signed with the session key for that

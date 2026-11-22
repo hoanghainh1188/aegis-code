@@ -1,6 +1,6 @@
 //! The KPI report of a ledger (#99, #28): every run, or the latest run of
 //! each issue of an eval set, in total and per language (ADR 0004, 0005).
-//! `aegis report` prints it; the dashboard groups the same records by repo,
+//! `aegis-local report` prints it; the dashboard groups the same records by repo,
 //! language and week with [`Kpi::grouped`], so both use one formula.
 
 use std::collections::BTreeMap;
@@ -72,7 +72,7 @@ impl Kpi {
     }
 }
 
-/// What `aegis report` prints.
+/// What `aegis-local report` prints.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Report<L> {
     /// Every run in the ledger.
@@ -90,7 +90,7 @@ impl<L: Ord + Clone> Report<L> {
         Self::All(Kpi::from_records(records))
     }
 
-    /// Other runs in the ledger (a live API check, a manual `aegis run`)
+    /// Other runs in the ledger (a live API check, a manual `aegis-local run`)
     /// would skew the set's numbers, so only runs of the set count.
     pub fn of_set(records: &[IssueRecord], set: &[SetIssue<L>]) -> Self {
         let ids_of = |language: Option<&L>| -> Vec<String> {

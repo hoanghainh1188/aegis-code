@@ -242,7 +242,7 @@ The repos' build caches (`<state_dir>/cache/<slug>/`, a Rust repo's `target/` re
 
 A removed cache costs the repo's next job a cold build, nothing else. Set the limit above the largest single repo's caches (a Rust repo needs 30–40 GB): below it, that repo's cache is removed whenever it is idle, and every job builds from cold. Worktrees are not counted in the limit and share the disk, so leave room for `max_workers` of them.
 
-A worker's `state_dir` must not be shared with CLI runs (`aegis eval`, `aegis check-repo` against the same directory): they have no job in the queue, so only the 10-minute margin protects their caches.
+A worker's `state_dir` must not be shared with CLI runs (`aegis-local eval`, `aegis-local check-repo` against the same directory): they have no job in the queue, so only the 10-minute margin protects their caches.
 
 Each sweep logs `removed a repo's caches` with the repo, bytes and reason, and sets `aegis_workspace_disk_bytes{kind="cache"|"worktree"}`, `aegis_cache_disk_limit_bytes` and `aegis_cache_evictions_total{reason}`.
 

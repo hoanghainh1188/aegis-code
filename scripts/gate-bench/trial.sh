@@ -18,7 +18,7 @@ out="$root/.workspace/gate-parallel/$issue"
 bench="$root/scripts/gate-bench"
 mkdir -p "$out"
 if [ ! -d "$out/tree" ]; then
-  "$bench/capture.py" "$out" -- aegis eval --config "$config" --set eval/issues \
+  "$bench/capture.py" "$out" -- aegis-local eval --config "$config" --set eval/issues \
     --only "$issue" --replay --no-pr > "$out/replay.log" 2>&1
   tail -1 "$out/replay.log"
 fi

@@ -107,7 +107,7 @@ async fn ledger_with_stale_record(s: &Store, key: &str, events: &[LedgerEvent], 
     }
 }
 
-/// Every ledger's record folded from its events, as `aegis report` does.
+/// Every ledger's record folded from its events, as `aegis-local report` does.
 async fn folded(s: &Store) -> Vec<IssueRecord> {
     let ledger = s.ledger();
     let mut out = Vec::new();

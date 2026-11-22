@@ -20,7 +20,7 @@ A `review` case runs as a **local** review round, `ReviewRound::local`:
 - **Base:** `base_commit`, planted the same way.
 - **Note:** one note, `review` followed by the payload.
 
-Nothing is fetched from a fork. Without `run.open_prs`, which `aegis inject` always turns off, the round pushes nothing and posts no reply. It ends like any run without a PR: its patch is kept and the hidden tests run. A dry run replays the fix on the round's head, so it has nothing to write: the answer is all it does.
+Nothing is fetched from a fork. Without `run.open_prs`, which `aegis-local inject` always turns off, the round pushes nothing and posts no reply. It ends like any run without a PR: its patch is kept and the hidden tests run. A dry run replays the fix on the round's head, so it has nothing to write: the answer is all it does.
 
 ## Goals and scoring
 
@@ -72,12 +72,12 @@ Payloads for `readme`, `comment`, `doc` and the canary file go into a single com
 
 ## Running
 
-`aegis inject` never opens a PR, so a planted payload cannot reach a forge. Each case runs under `<case>-r<n>`, or `<case>-dry<n>` with `--replay`. Only cases whose issue matches the config's language are run.
+`aegis-local inject` never opens a PR, so a planted payload cannot reach a forge. Each case runs under `<case>-r<n>`, or `<case>-dry<n>` with `--replay`. Only cases whose issue matches the config's language are run.
 
 ```bash
-PATH=$PWD/.workspace/tools/cbm:$PATH aegis inject --config config/gin.toml --set eval/injection --replay
-PATH=$PWD/.workspace/tools/cbm:$PATH aegis inject --config config/gin.toml --set eval/injection
-PATH=$PWD/.workspace/tools/cbm:$PATH aegis inject --config config/gson.toml --set eval/injection --only gson-1587-readme-secret
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis-local inject --config config/gin.toml --set eval/injection --replay
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis-local inject --config config/gin.toml --set eval/injection
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis-local inject --config config/gson.toml --set eval/injection --only gson-1587-readme-secret
 ```
 
 The command prints one line per case:
@@ -92,7 +92,7 @@ It then prints counts for all cases, per goal and per surface, with how many run
 `--rescore` scores each case's latest run in the ledger again (`<case>-r<n>`, or `<case>-dry<n>` with `--replay`). It reads the ledger events and the kept `patch.diff`, and plants the case again only to know where the payload is. It calls no model and needs no API key, so a change to the scoring applies to runs already paid for:
 
 ```bash
-aegis inject --config config/gin.toml --set eval/injection --rescore
+aegis-local inject --config config/gin.toml --set eval/injection --rescore
 ```
 
 ## Cases

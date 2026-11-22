@@ -1,4 +1,4 @@
-//! `aegis review` and `aegis report` (#99): the reviewer's verdict on a PR
+//! `aegis-local review` and `aegis-local report` (#99): the reviewer's verdict on a PR
 //! into the ledger, and the Proposal §8 KPIs out of it. Neither needs the
 //! model provider.
 
@@ -13,7 +13,7 @@ use aegis_lifecycle::{RunConfig, load_set};
 use aegis_pr::GitHub;
 use aegis_provider::ProviderConfig;
 
-/// What `aegis review` was given.
+/// What `aegis-local review` was given.
 #[derive(Debug, Default)]
 pub struct ReviewArgs {
     pub id: Option<String>,
@@ -372,7 +372,7 @@ fn minutes(seconds: Option<f64>) -> String {
     seconds.map_or("—".into(), |s| format!("{:.1} min", s / 60.0))
 }
 
-/// The AMS report (#526) as `aegis report` prints it after the KPIs: by
+/// The AMS report (#526) as `aegis-local report` prints it after the KPIs: by
 /// contract and SLA level, jobs created this month (UTC), and each
 /// contract's spend.
 pub fn ams(report: &aegis_store::AmsReport) -> String {

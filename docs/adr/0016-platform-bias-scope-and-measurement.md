@@ -55,8 +55,8 @@ Slices with `< 5` samples are still displayed in tables for visibility, without 
 
 ### 4. Measurement cadence & pilot gate (`#158`)
 
-- **Every eval run & `aegis report` invocation:** Automatically emits `LedgerEvent::TicketMeta` on `prepare_and_work` and `review_and_work`; `aegis report` and `/` dashboard (`Dashboard`) display breakdown tables and flag alerts whenever metadata or job records exist.
-- **Weekly during `#158` pilot and upon profile/prompt changes:** Operators review `By ticket language`, `By ticket source`, `By programming language`, and `By repo` on the `/` dashboard or via `aegis report` export. Any slice holding an active flag across two consecutive review cycles opens a targeted profile, prompt, or cap issue (analogous to `#425`, `#426`, `#156`).
+- **Every eval run & `aegis-local report` invocation:** Automatically emits `LedgerEvent::TicketMeta` on `prepare_and_work` and `review_and_work`; `aegis-local report` and `/` dashboard (`Dashboard`) display breakdown tables and flag alerts whenever metadata or job records exist.
+- **Weekly during `#158` pilot and upon profile/prompt changes:** Operators review `By ticket language`, `By ticket source`, `By programming language`, and `By repo` on the `/` dashboard or via `aegis-local report` export. Any slice holding an active flag across two consecutive review cycles opens a targeted profile, prompt, or cap issue (analogous to `#425`, `#426`, `#156`).
 - **Closure boundary for `#511`:** This ADR, the ledger/CLI/dashboard instrumentation, and the 52-issue `eval/issues` baseline establish the measurement definition and baseline. Empirical validation across non-English (`ja`, `vi`) and non-GitHub (`jira`, `jsm`, `servicenow`, `backlog`, `sonar`, `ci`) tickets cannot complete until pilot `#158` produces production/staging job records, and `#511` stays open until that first pilot bias report is appended to `docs/measurements/`.
 
 ## Implementation summary

@@ -199,7 +199,7 @@ async fn the_dashboard_matches_the_ledger_report() {
     };
     s.ledger().append(&cli, &end).await.unwrap();
 
-    // What `aegis report` prints for this ledger.
+    // What `aegis-local report` prints for this ledger.
     let records = report::records(&s.ledger()).await.unwrap();
     let report = Report::<String>::all(&records).to_string();
     assert!(

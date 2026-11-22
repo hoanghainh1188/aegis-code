@@ -1,5 +1,5 @@
 //! `/`: the KPIs of the ledger in total, per language, per repo and per
-//! week, and each repo's budget this month (#31). The total is `aegis report`'s "All runs"; the groups use the same
+//! week, and each repo's budget this month (#31). The total is `aegis-local report`'s "All runs"; the groups use the same
 //! formula ([`Kpi::grouped`]) on the same records, except that a review
 //! round (#245) is not a run: its cost and calls count with its PR, and
 //! the rounds an accepted PR took are shown. The records are read from the saved
@@ -24,7 +24,7 @@ use crate::auth::Access;
 
 /// Weeks the dashboard shows, the latest last.
 const WEEKS_SHOWN: usize = 12;
-/// Runs not started by a job: `aegis run`, eval and CLI runs.
+/// Runs not started by a job: `aegis-local run`, eval and CLI runs.
 pub const OUTSIDE_JOBS: &str = "outside jobs (CLI, eval)";
 
 /// The KPIs of one group of runs.
