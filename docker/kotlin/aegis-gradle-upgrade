@@ -1,0 +1,111 @@
+#!/bin/sh
+# The Kotlin profile's `upgrade` (#501, #586): sets <group:artifact> to
+# <version> in the repo's Gradle version catalogs (`*.versions.toml`), then
+# writes the lockfile again when the repo locks. Build scripts are files no
+# patch may change (profiles/kotlin.toml `protected`), so a dependency
+# declared there, not in a catalog, is not upgraded: the script fails and a
+# person upgrades it.
+#
+#   aegis-gradle-upgrade com.fasterxml.jackson.core:jackson-databind 2.18.2
+#
+# A `version.ref` sets the version in `[versions]`, for every library that
+# shares it.
+set -eu
+
+usage() {
+    echo "usage: aegis-gradle-upgrade <group:artifact> <version>" >&2
+    exit 2
+}
+[ $# -eq 2 ] || usage
+package=$1
+version=$2
+# Plain coordinates and versions only: both go into awk and TOML as text.
+printf '%s\n' "$package" | grep -Eq '^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$' || usage
+printf '%s\n' "$version" | grep -Eq '^[A-Za-z0-9._+-]+$' || usage
+group=${package%%:*}
+name=${package#*:}
+
+catalogs=$(find . -name '*.versions.toml' -not -path '*/build/*' -not -path '*/.gradle/*' -type f)
+changed=
+for catalog in $catalogs; do
+    out=$(mktemp)
+    awk -v group="$group" -v name="$name" -v version="$version" '
+        function section_of(line,    s) {
+            s = line
+            sub(/#.*/, "", s)
+            gsub(/[][ \t]/, "", s)
+            return s
+        }
+        # Whether the [libraries] entry on this line is the package.
+        function is_package(line,    s) {
+            s = line
+            gsub(/[ \t]/, "", s)
+            return index(s, "module=\"" group ":" name "\"") > 0 \
+                || index(s, "\"" group ":" name ":") > 0 \
+                || (index(s, "group=\"" group "\"") > 0 && index(s, "name=\"" name "\"") > 0)
+        }
+        function key_of(line,    k) {
+            k = substr(line, 1, index(line, "=") - 1)
+            gsub(/^[ \t"]+|[ \t"]+$/, "", k)
+            return k
+        }
+        # The first "..." after the `=` of `line` set to the version.
+        function set_value(line,    eq, head, tail) {
+            eq = index(line, "=")
+            head = substr(line, 1, eq)
+            tail = substr(line, eq + 1)
+            if (tail !~ /^[ \t]*"[^"]*"/) return line
+            sub(/"[^"]*"/, "\"" version "\"", tail)
+            return head tail
+        }
+        # Pass 1: the [versions] keys the package refers to.
+        NR == FNR {
+            if ($0 ~ /^[ \t]*\[/) section = section_of($0)
+            if (section == "libraries" && is_package($0) && match($0, /version\.ref[ \t]*=[ \t]*"[^"]*"/)) {
+                ref = substr($0, RSTART, RLENGTH)
+                sub(/^version\.ref[ \t]*=[ \t]*"/, "", ref)
+                sub(/"$/, "", ref)
+                refs[ref] = 1
+            }
+            next
+        }
+        # Pass 2: the file, with the versions set.
+        FNR == 1 { section = "" }
+        {
+            line = $0
+            if (line ~ /^[ \t]*\[/) section = section_of(line)
+            if (section == "versions" && line ~ /=/ && (key_of(line) in refs)) {
+                line = set_value(line)
+            } else if (section == "libraries" && is_package(line)) {
+                # { module = "g:a", version = "1.0" }
+                if (match(line, /version[ \t]*=[ \t]*"[^"]*"/)) {
+                    line = substr(line, 1, RSTART - 1) "version = \"" version "\"" substr(line, RSTART + RLENGTH)
+                }
+                # alias = "g:a:1.0"
+                start = index(line, "\"" group ":" name ":")
+                if (start > 0) {
+                    head = substr(line, 1, start + length(group) + length(name) + 2)
+                    rest = substr(line, length(head) + 1)
+                    end = index(rest, "\"")
+                    if (end > 0) line = head version substr(rest, end)
+                }
+            }
+            print line
+        }
+    ' "$catalog" "$catalog" > "$out"
+    if cmp -s "$out" "$catalog"; then
+        rm -f "$out"
+    else
+        cat "$out" > "$catalog"
+        rm -f "$out"
+        changed=yes
+        echo "set $package to $version in $catalog"
+    fi
+done
+if [ -z "$changed" ]; then
+    echo "no version catalog sets $package: upgrade it by hand" >&2
+    exit 1
+fi
+if [ -f gradle.lockfile ] || [ -f buildscript-gradle.lockfile ]; then
+    exec gradle --no-configuration-cache -q dependencies --write-locks
+fi

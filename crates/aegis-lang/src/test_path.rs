@@ -12,7 +12,12 @@ pub fn is_test_path(relative: &str) -> bool {
             || dir.ends_with(".Tests")
             || dir.ends_with(".Test")
     };
+    // Gradle source sets of tests: `src/jvmTest`, `src/integrationTest`.
+    let source_set = dirs
+        .windows(2)
+        .any(|w| w[0] == "src" && w[1].len() > "Test".len() && w[1].ends_with("Test"));
     dirs.iter().any(test_dir)
+        || source_set
         || stem.starts_with("test_")
         || stem.ends_with("_test")
         || stem.ends_with("_tests")
@@ -37,6 +42,9 @@ mod tests {
             "src/Polly.Core.Tests/Retry/RetryTests.cs",
             "src/Cart.Tests/CartTests.fs",
             "tests/Unit/CartTest.php",
+            "src/test/kotlin/example/cart/CartTest.kt",
+            "core/src/commonTest/kotlin/CartTest.kt",
+            "src/integrationTest/kotlin/ApiIT.kt",
             "tests/src/report",
         ] {
             assert!(is_test_path(path), "{path}");
@@ -52,6 +60,8 @@ mod tests {
             "packages/zod/src/types.ts",
             "src/Polly.Core/Retry/RetryStrategyOptions.cs",
             "contest/score.py",
+            "src/main/kotlin/example/cart/Cart.kt",
+            "src/commonMain/kotlin/Latest.kt",
             "latest.rs",
         ] {
             assert!(!is_test_path(path), "{path}");

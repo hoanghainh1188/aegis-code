@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::{CommandTemplate, LangError, Language, Placeholder};
 
 /// Profiles shipped with the platform, one per [`Language`].
-const BUILTIN: [(&str, &str); 7] = [
+const BUILTIN: [(&str, &str); 8] = [
     (
         "profiles/rust.toml",
         include_str!("../../../profiles/rust.toml"),
@@ -37,6 +37,10 @@ const BUILTIN: [(&str, &str); 7] = [
     (
         "profiles/php.toml",
         include_str!("../../../profiles/php.toml"),
+    ),
+    (
+        "profiles/kotlin.toml",
+        include_str!("../../../profiles/kotlin.toml"),
     ),
 ];
 
@@ -204,6 +208,9 @@ pub enum TestOutput {
     Dotnet,
     /// PHPUnit: numbered `1) Class::method` entries under `FAILURES!` / `ERRORS!`.
     Phpunit,
+    /// Gradle, through the Kotlin image's init script (#586): one
+    /// `aegis-gradle FAILED <Class>#<test>` line per failing test.
+    Gradle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -343,7 +350,7 @@ pub struct Prompt {
 
 /// `prompts/conventions/<name>`, the files a profile's `[prompt]
 /// conventions` may name.
-const CONVENTIONS: [(&str, &str); 7] = [
+const CONVENTIONS: [(&str, &str); 8] = [
     (
         "rust.md",
         include_str!("../../../prompts/conventions/rust.md"),
@@ -368,6 +375,10 @@ const CONVENTIONS: [(&str, &str); 7] = [
     (
         "php.md",
         include_str!("../../../prompts/conventions/php.md"),
+    ),
+    (
+        "kotlin.md",
+        include_str!("../../../prompts/conventions/kotlin.md"),
     ),
 ];
 

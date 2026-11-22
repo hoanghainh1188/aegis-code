@@ -65,11 +65,12 @@ pub fn read_lockfile(
         (Language::CSharp, name) if MSBUILD_FILES.iter().any(|p| glob_match(p, name)) => {
             nuget_lock::msbuild_project(name, text)
         }
-        (Language::Java, name @ ("gradle.lockfile" | "buildscript-gradle.lockfile")) => {
-            maven_lock::gradle_lockfile(name, text)
-        }
+        (
+            Language::Java | Language::Kotlin,
+            name @ ("gradle.lockfile" | "buildscript-gradle.lockfile"),
+        ) => maven_lock::gradle_lockfile(name, text),
         (Language::Java, MAVEN_TREE) => maven_tree::maven_tree(text),
-        (Language::Java, GRADLE_TREE) => maven_tree::gradle_dependencies(text),
+        (Language::Java | Language::Kotlin, GRADLE_TREE) => maven_tree::gradle_dependencies(text),
         (Language::Python, name) if glob_match("requirements*.txt", name) => {
             python_lock::requirements(name, text)
         }

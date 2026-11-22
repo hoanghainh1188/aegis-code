@@ -71,7 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [server, sandbox-python, sandbox-rust, sandbox-node, sandbox-java, sandbox-go, sandbox-dotnet]
+        name: [server, sandbox-python, sandbox-rust, sandbox-node, sandbox-java, sandbox-go, sandbox-dotnet, sandbox-kotlin]
         arch: [amd64, arm64]
         include:
           - { name: server, context: ., file: docker/server/Dockerfile }
@@ -81,6 +81,7 @@ jobs:
           - { name: sandbox-java, context: docker/java, file: docker/java/Dockerfile }
           - { name: sandbox-go, context: docker/go, file: docker/go/Dockerfile }
           - { name: sandbox-dotnet, context: docker/dotnet, file: docker/dotnet/Dockerfile }
+          - { name: sandbox-kotlin, context: docker/kotlin, file: docker/kotlin/Dockerfile }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -129,7 +130,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [server, sandbox-python, sandbox-rust, sandbox-node, sandbox-java, sandbox-go, sandbox-dotnet]
+        name: [server, sandbox-python, sandbox-rust, sandbox-node, sandbox-java, sandbox-go, sandbox-dotnet, sandbox-kotlin]
     steps:
       - uses: actions/download-artifact@v4
         with:

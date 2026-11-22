@@ -22,10 +22,11 @@ pub(crate) enum Grammar {
     FSharp,
     VbNet,
     Php,
+    Kotlin,
 }
 
 impl Grammar {
-    const COUNT: usize = 11;
+    const COUNT: usize = 12;
 
     /// Grammar for a file of `language`; without a path, the language's
     /// main grammar. `None` while the language has no grammar yet.
@@ -50,6 +51,7 @@ impl Grammar {
                 _ => Self::CSharp,
             }),
             Language::Php => Some(Self::Php),
+            Language::Kotlin => Some(Self::Kotlin),
         }
     }
 
@@ -66,6 +68,7 @@ impl Grammar {
             Self::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
             Self::VbNet => tree_sitter_vb_dotnet::LANGUAGE.into(),
             Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            Self::Kotlin => tree_sitter_kt::LANGUAGE.into(),
         }
     }
 
@@ -83,6 +86,7 @@ impl Grammar {
             Self::FSharp => include_str!("../../../profiles/queries/fsharp.scm"),
             Self::VbNet => include_str!("../../../profiles/queries/vbnet.scm"),
             Self::Php => include_str!("../../../profiles/queries/php.scm"),
+            Self::Kotlin => include_str!("../../../profiles/queries/kotlin.scm"),
         }
     }
 
@@ -122,6 +126,7 @@ mod tests {
         Grammar::FSharp,
         Grammar::VbNet,
         Grammar::Php,
+        Grammar::Kotlin,
     ];
 
     #[test]
@@ -155,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn picks_dotnet_and_php_grammars_by_extension() {
+    fn picks_dotnet_php_and_kotlin_grammars_by_extension() {
         let dotnet = |p: &str| Grammar::for_file(Language::CSharp, Some(Path::new(p)));
         assert_eq!(dotnet("Program.cs"), Some(Grammar::CSharp));
         assert_eq!(dotnet("Library.fs"), Some(Grammar::FSharp));
@@ -166,5 +171,8 @@ mod tests {
             Grammar::for_file(Language::Php, Some(Path::new("src/Cart.php"))),
             Some(Grammar::Php)
         );
+        let kotlin = |p: &str| Grammar::for_file(Language::Kotlin, Some(Path::new(p)));
+        assert_eq!(kotlin("src/main/kotlin/Cart.kt"), Some(Grammar::Kotlin));
+        assert_eq!(kotlin("build.gradle.kts"), Some(Grammar::Kotlin));
     }
 }

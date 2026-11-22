@@ -1,0 +1,61 @@
+// Applied to every Gradle build in the Kotlin sandbox (#586), from
+// GRADLE_USER_HOME/init.d, whatever the Gradle version the repo's wrapper
+// pins. Nothing in the repo changes.
+//
+// - Each failing test is printed as `aegis-gradle FAILED <Class>#<test>`,
+//   and a class that fails as a whole (`@BeforeAll`) as
+//   `aegis-gradle FAILED <Class>`, whatever the repo's testLogging: the
+//   gate's `gradle` test output reads these lines.
+// - JaCoCo is applied to every JVM project, its XML report on, so the
+//   coverage step needs no plugin in the build script.
+// - `aegisFetch` resolves every resolvable configuration, so the gate's
+//   steps then run with `--offline`.
+//
+// The listener needs the configuration cache off: the profile's commands
+// pass `--no-configuration-cache`.
+
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestListener
+import org.gradle.api.tasks.testing.TestResult
+
+class AegisFailures implements TestListener {
+    void beforeSuite(TestDescriptor suite) {}
+
+    void afterSuite(TestDescriptor suite, TestResult result) {
+        // A class whose own setup failed: no test of it reported a failure.
+        if (suite.className != null && result.resultType == TestResult.ResultType.FAILURE
+                && result.failedTestCount == 0) {
+            println "aegis-gradle FAILED ${suite.className}"
+        }
+    }
+
+    void beforeTest(TestDescriptor test) {}
+
+    void afterTest(TestDescriptor test, TestResult result) {
+        if (result.resultType == TestResult.ResultType.FAILURE) {
+            println "aegis-gradle FAILED ${test.className}#${test.name}"
+        }
+    }
+}
+
+allprojects {
+    tasks.withType(Test).configureEach {
+        addTestListener(new AegisFailures())
+    }
+    plugins.withId('java') {
+        apply plugin: 'jacoco'
+        tasks.named('jacocoTestReport') {
+            reports.xml.required = true
+        }
+    }
+    tasks.register('aegisFetch') {
+        description = 'Resolves every configuration, for the offline steps after it.'
+        doLast {
+            project.configurations
+                .findAll { it.canBeResolved }
+                .each { conf ->
+                    conf.incoming.artifactView { lenient = true }.files.files
+                }
+        }
+    }
+}

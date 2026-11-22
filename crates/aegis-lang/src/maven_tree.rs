@@ -142,7 +142,16 @@ pub(crate) fn gradle_dependencies(text: &str) -> Result<Vec<LockedDependency>, L
 fn gradle_entry(entry: &str) -> Option<Option<(String, String)>> {
     let mut entry = entry;
     loop {
-        if let Some(rest) = entry.strip_suffix(" (*)").or(entry.strip_suffix(" (n)")) {
+        if let Some(rest) = entry.strip_suffix(" (n)") {
+            // A declaration in a configuration Gradle does not resolve
+            // (`testImplementation`), without a version of its own when a
+            // platform or the Kotlin plugin gives it (#586): the resolved
+            // configurations list it with the version picked.
+            if rest.matches(':').count() == 1 && !rest.contains(' ') {
+                return Some(None);
+            }
+            entry = rest;
+        } else if let Some(rest) = entry.strip_suffix(" (*)") {
             entry = rest;
         } else if entry.ends_with(" (c)") {
             return Some(None);
@@ -260,6 +269,7 @@ testRuntimeClasspath - Runtime classpath of source set 'test'.
 +--- com.google.code.findbugs:jsr305:{strictly 3.0.1} -> 3.0.1
 +--- org.slf4j:slf4j-api:2.0.16 (c)
 +--- org.example:local:1.0 -> project :local
++--- org.jetbrains.kotlin:kotlin-test (n)
 \\--- org.example:unresolved:1.2 (n)
 
 (c) - A dependency constraint, not a dependency. The dependency affected by the constraint occurs elsewhere in the tree.

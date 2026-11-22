@@ -1,5 +1,5 @@
-//! #210: the gate of the TypeScript, Java, Go and C# profiles on their
-//! fixture repos (C# also under Microsoft.Testing.Platform, #228), inside
+//! #210: the gate of the TypeScript, Java, Go, C# and Kotlin (#586)
+//! profiles on their fixture repos (C# also under Microsoft.Testing.Platform, #228), inside
 //! the profile's image with no network, and the reproduction-test command
 //! `run_tests` runs there too. A test the base revision already fails is
 //! told apart from one the patch breaks (#291), which for C# and
@@ -256,6 +256,21 @@ fn the_java_gate_passes_inside_the_container() {
     );
 }
 
+/// What the Kotlin fixture's build writes into the tree.
+const KOTLIN_IGNORED: &str = "build/\n.gradle/\n.kotlin/\n";
+
+#[test]
+fn the_kotlin_gate_passes_inside_the_container() {
+    gate_passes(
+        Language::Kotlin,
+        "",
+        "kotlin",
+        KOTLIN_IGNORED,
+        "CartTest.addsUpPrices",
+        StepStatus::Passed,
+    );
+}
+
 #[test]
 fn the_go_gate_passes_inside_the_container() {
     gate_passes(
@@ -384,6 +399,32 @@ fn the_java_gate_tells_base_failures_from_new_ones() {
             "MAX_ITEMS = 4",
         ),
         "example.cart.CartTest.refusesAFourthItem",
+    );
+}
+
+#[test]
+fn the_kotlin_gate_tells_base_failures_from_new_ones() {
+    base_failures_are_not_new(
+        Language::Kotlin,
+        "",
+        "kotlin",
+        KOTLIN_IGNORED,
+        (
+            "src/test/kotlin/example/cart/CartTest.kt",
+            "assertEquals(3,",
+            "assertEquals(4,",
+        ),
+        (
+            "src/main/kotlin/example/cart/Cart.kt",
+            "/** Small class",
+            "/** A small class",
+        ),
+        (
+            "src/main/kotlin/example/cart/Cart.kt",
+            "MAX_ITEMS = 3",
+            "MAX_ITEMS = 4",
+        ),
+        "example.cart.CartTest#refusesAFourthItem",
     );
 }
 

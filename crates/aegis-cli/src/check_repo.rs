@@ -398,6 +398,8 @@ fn check_lockfile(repo: &RepoConfig, report: &mut PreflightReport) {
         Language::TypeScript => vec!["package-lock.json", "pnpm-lock.yaml", "yarn.lock"],
         Language::CSharp => vec!["packages.lock.json"],
         Language::Php => vec!["composer.lock"],
+        // Without a lockfile the gate compares the resolved tree (#80).
+        Language::Kotlin => vec!["gradle.lockfile", "build.gradle.kts", "build.gradle"],
     };
 
     let mut found = None;

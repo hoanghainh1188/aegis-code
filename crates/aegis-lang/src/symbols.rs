@@ -816,4 +816,75 @@ function helper(int $x): int
             .collect();
         assert_eq!(totals, vec![Some("Priced"), Some("Cart")]);
     }
+
+    #[test]
+    fn finds_kotlin_definitions_and_containers() {
+        let kotlin = r#"package ex.shop
+
+typealias Price = Long
+
+const val LIMIT = 3
+
+interface Priced { fun price(): Long }
+
+enum class Kind { BOOK, FOOD; fun label() = name }
+
+data class Item(val name: String, val price: Long) : Priced {
+    override fun price(): Long = price
+}
+
+object Registry {
+    val items = mutableListOf<Item>()
+    fun add(item: Item) { items += item }
+}
+
+class Cart(private val owner: String) {
+    var total: Long = 0
+    companion object Factory {
+        fun empty() = Cart("anon")
+    }
+    fun add(item: Item) { total += item.price }
+}
+
+fun Cart.size(): Int {
+    val local = 0
+    fun helper() = local
+    return helper()
+}
+"#;
+        let all = symbols(Language::Kotlin, kotlin).unwrap();
+        let kinds = [
+            ("Price", SymbolKind::TypeAlias),
+            ("LIMIT", SymbolKind::Constant),
+            ("Priced", SymbolKind::Interface),
+            ("Kind", SymbolKind::Enum),
+            ("Item", SymbolKind::Class),
+            ("Registry", SymbolKind::Class),
+            ("items", SymbolKind::Variable),
+            ("Cart", SymbolKind::Class),
+            ("total", SymbolKind::Variable),
+            ("Factory", SymbolKind::Class),
+            ("size", SymbolKind::Function),
+        ];
+        for (name, kind) in kinds {
+            assert_eq!(find(&all, name).kind, kind, "{name}");
+        }
+        let methods = |name: &str| -> Vec<Option<&str>> {
+            all.iter()
+                .filter(|s| s.name == name && s.kind == SymbolKind::Method)
+                .map(|s| s.container.as_deref())
+                .collect()
+        };
+        assert_eq!(methods("price"), vec![Some("Priced"), Some("Item")]);
+        assert_eq!(methods("label"), vec![Some("Kind")]);
+        assert_eq!(methods("add"), vec![Some("Registry"), Some("Cart")]);
+        assert_eq!(methods("empty"), vec![Some("Factory")]);
+        assert_eq!(find(&all, "total").container.as_deref(), Some("Cart"));
+        assert_eq!(find(&all, "size").container, None);
+        assert_eq!(find(&all, "size").signature, "fun Cart.size(): Int");
+        assert!(
+            !all.iter().any(|s| s.name == "local" || s.name == "helper"),
+            "locals are no symbols: {all:#?}"
+        );
+    }
 }
