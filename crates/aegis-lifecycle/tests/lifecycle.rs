@@ -2130,7 +2130,7 @@ async fn two_repos_with_different_modes_run_side_by_side() {
     }
 
     // A customer repo is refused where no customer-jp mode is configured.
-    let only_poc = Modes::new(modes.poc.clone(), None).unwrap();
+    let only_poc = Modes::new(modes.config(&ModeName::POC).cloned(), None).unwrap();
     assert!(only_poc.repo_run(&db.store, b.id).await.is_err());
     db.drop().await;
 }

@@ -19,7 +19,7 @@ pub use bedrock::Bedrock;
 pub use claude_api::{API_VERSION, ClaudeApi, DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL};
 pub use config::{Provider, ProviderConfig};
 pub use error::ProviderError;
-pub use guard::ModelPolicy;
+pub use guard::{ModelPolicy, ResidencyConfig};
 pub use local::{LocalModelProvider, LocalProtocol};
 pub use observe::{CallObserver, CallReport, Observed};
 pub use types::{

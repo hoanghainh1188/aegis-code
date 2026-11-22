@@ -6,7 +6,7 @@ pub enum ProviderError {
     InvalidRequest(String),
 
     #[error("model `{model}` refused by policy: {reason}")]
-    PolicyViolation { model: String, reason: &'static str },
+    PolicyViolation { model: String, reason: String },
 
     #[error("rate limited (retry after {retry_after_s:?}s)")]
     RateLimited { retry_after_s: Option<u64> },
@@ -74,7 +74,7 @@ mod tests {
         assert!(
             !ProviderError::PolicyViolation {
                 model: "x".into(),
-                reason: "r"
+                reason: "r".into()
             }
             .is_retryable()
         );

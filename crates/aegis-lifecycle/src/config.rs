@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use aegis_lang::{Language, ProfileOverrides, Profiles, RepoProfiles, check_dir};
-use aegis_provider::ProviderConfig;
+use aegis_provider::{ModelPolicy, ProviderConfig, ResidencyConfig};
 use aegis_router::{BudgetLimits, EscalationRules, ModelsConfig};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,10 @@ pub struct RunConfig {
     /// configured.
     #[serde(default)]
     pub sonar: Option<SonarConfig>,
+    /// Where its code may go (#592): model prefixes or a local provider
+    /// only. Without it, any model and endpoint.
+    #[serde(default)]
+    pub residency: ResidencyConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -552,6 +556,19 @@ impl SonarConfig {
     }
 }
 
+/// `residency`'s policy, refused unless `provider` and the model of every
+/// tier of `models` keep to it.
+pub(crate) fn residency_policy(
+    residency: &ResidencyConfig,
+    provider: &ProviderConfig,
+    models: &ModelsConfig,
+) -> Result<ModelPolicy, LifecycleError> {
+    let ids = [&models.light, &models.core, &models.expert].map(|m| m.id.as_str());
+    residency
+        .check(provider, ids)
+        .map_err(LifecycleError::Config)
+}
+
 impl RunConfig {
     /// The job's caps: `[budget]`, with the call cap of the repo's
     /// language profile (its `language`, not a `[[repo.dirs]]` one) when
@@ -559,6 +576,12 @@ impl RunConfig {
     pub fn budget_limits(&self, builtin: &Profiles) -> Result<BudgetLimits, LifecycleError> {
         let profile = builtin.get(self.repo.language)?;
         Ok(self.budget.limits(profile.budget.max_model_calls))
+    }
+
+    /// The residency policy its provider is built with, once `provider`
+    /// and every tier's model keep to `[residency]` (#592).
+    pub fn model_policy(&self) -> Result<ModelPolicy, LifecycleError> {
+        residency_policy(&self.residency, &self.provider, &self.models)
     }
 
     pub fn from_toml(text: &str) -> Result<Self, LifecycleError> {
@@ -570,6 +593,7 @@ impl RunConfig {
     /// What deserializing alone does not check. A registry slug is a valid
     /// key: `.` is allowed past the first character.
     pub(crate) fn check(self) -> Result<Self, LifecycleError> {
+        self.model_policy()?;
         self.repo.profile_overrides()?;
         self.repo.check_dirs()?;
         let key = &self.repo.key;

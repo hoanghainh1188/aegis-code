@@ -44,7 +44,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use aegis_lifecycle::{ModeConfig, Modes};
+use aegis_lifecycle::Modes;
 use aegis_server::auth::{self, Auth};
 use aegis_server::chatops::ChatNotifier;
 use aegis_server::config::ServerConfig;
@@ -128,21 +128,11 @@ fn on_shutdown_signal() -> CancellationToken {
     shutdown
 }
 
-/// The configuration of each mode in `[modes]`; the `customer-jp` guard
-/// is checked here. Relative paths in them are taken from here.
+/// The configuration of each mode in `[modes]`, relative paths in them
+/// taken from here: [`ServerConfig::load_modes`].
 fn modes(config: &ServerConfig) -> Result<Modes, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("current directory: {e}"))?;
-    let load = |path: &Option<PathBuf>| {
-        path.as_deref()
-            .map(|p| ModeConfig::load(p, &cwd).map_err(|e| format!("{}: {e}", p.display())))
-            .transpose()
-    };
-    let modes = Modes::new(load(&config.modes.poc)?, load(&config.modes.customer_jp)?)
-        .map_err(|e| e.to_string())?;
-    if modes.poc.is_none() && modes.customer_jp.is_none() {
-        return Err("[modes]: a worker needs `poc`, `customer_jp` or both".into());
-    }
-    Ok(modes.with_github_app(config.github_app.is_some()))
+    config.load_modes(&cwd)
 }
 
 /// The instance's GitHub App (ADR 0017), when `[github_app]` is set.
@@ -164,7 +154,7 @@ fn github_app(
 async fn run(args: Args) -> Result<(), String> {
     let config = ServerConfig::load(&args.config)?;
     let section = secrets::section(config.secrets.as_ref())?;
-    let secrets = section.open(config.modes.customer_jp.is_some()).await?;
+    let secrets = section.open(config.modes.contains("customer-jp")).await?;
     secrets::load_at_start(&secrets, args.role, config.github_app.as_ref()).await?;
     if args.role.serves_api() {
         auth::load_at_start(&secrets, &config.auth).await?;
@@ -219,10 +209,9 @@ async fn run(args: Args) -> Result<(), String> {
         {
             let state_dirs: Vec<PathBuf> = {
                 let modes = modes(&config)?;
-                [modes.poc, modes.customer_jp]
-                    .into_iter()
-                    .flatten()
-                    .map(|mode| mode.run.state_dir)
+                modes
+                    .iter()
+                    .map(|(_, mode)| mode.run.state_dir.clone())
                     .collect()
             };
             let sweep = cache_sweeper::run_sweeper(
@@ -326,7 +315,7 @@ async fn run_command(config_path: &std::path::Path, argv: &[String]) -> ExitCode
     let done = async {
         let config = ServerConfig::load(config_path)?;
         let section = secrets::section(config.secrets.as_ref())?;
-        let secrets = section.open(config.modes.customer_jp.is_some()).await?;
+        let secrets = section.open(config.modes.contains("customer-jp")).await?;
         secrets
             .require(&[DATABASE_URL])
             .await

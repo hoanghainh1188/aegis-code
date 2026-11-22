@@ -38,7 +38,8 @@ pub struct RepoAdmin {
     pub(super) gitlab_api: String,
     /// When each mode's provider was last checked (#367), to check at
     /// most once a minute: each check costs a little.
-    pub(super) ai_checks: Arc<std::sync::Mutex<HashMap<&'static str, Instant>>>,
+    /// When each mode was last checked, by [`aegis_store::ModeName::key`].
+    pub(super) ai_checks: Arc<std::sync::Mutex<HashMap<String, Instant>>>,
     /// `[web] make_webhooks` (#376).
     pub(super) make_webhooks: bool,
     /// The instance's GitHub App (ADR 0017), for cloning repos on the app

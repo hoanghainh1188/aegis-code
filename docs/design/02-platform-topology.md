@@ -64,7 +64,7 @@ flowchart LR
     Server <-->|"Fetch alerts & run Sonar Quality Gate"| Sonar
 
     Server -->|"HTTPS / AWS SDK (Prompt Caching BP1–BP4)"| Claude
-    Server -->|"HTTPS / AWS SDK (ModelPolicy::JapanOnly)"| Bedrock
+    Server -->|"HTTPS / AWS SDK (ModelPolicy jp. prefixes)"| Bedrock
     Server -->|"Local HTTP"| Ollama
 
     Server <-->|"ACID transactions, leases, token ledger"| PG
@@ -193,7 +193,7 @@ flowchart TB
 3. **Agent Execution Loop (`aegis-orchestrator`, `aegis-router`, `aegis-provider`, `aegis-ledger`):**
    * `aegis-orchestrator` manages multi-turn agent sessions, dispatches tool calls over MCP (`rmcp` child processes), and compacts older tool observations once context usage exceeds $60\%$.
    * `aegis-router` selects the active tier (`Light` $\rightarrow$ `Core` $\rightarrow$ `Expert`) based on failure signals and enforces the economic circuit breaker ($\$4$ or the call cap) backed by real-time accounting in `aegis-ledger`.
-   * `aegis-provider` serializes requests with deterministic 4-breakpoint prompt caching (`BP1`–`BP4`) and enforces regional routing policies (`ModelPolicy::JapanOnly` for `customer-jp.toml`).
+   * `aegis-provider` serializes requests with deterministic 4-breakpoint prompt caching (`BP1`–`BP4`) and enforces each mode's residency policy (`ModelPolicy::AllowedPrefixes` such as `jp.` for `customer-jp.toml`, or `ModelPolicy::LocalOnly`), declared in the mode file's `[residency]` (#592).
 4. **Code Intelligence & Sandboxed Verification (`aegis-aci`, `aegis-lang`, `aegis-gate`):**
    * `aegis-aci` runs as an MCP tool server providing bounded code windows (`open`, `search_symbol`, `find_definition` via LSP) and syntax-guarded edits (`edit`).
    * `aegis-lang` supplies ecosystem-specific rules (`profiles/*.toml`), Tree-sitter AST grammars, lockfile parsers, and test runners for **Rust, Python, TypeScript/JavaScript, Java, Go, and C#**.

@@ -38,9 +38,16 @@ fn default_api_key_env() -> String {
     DEFAULT_API_KEY_ENV.to_owned()
 }
 
-/// A provider chosen at runtime from [`ProviderConfig`].
+/// A provider chosen at runtime from [`ProviderConfig`], with the
+/// residency policy it checks before every request it sends (#592).
 #[derive(Debug, Clone)]
-pub enum Provider {
+pub struct Provider {
+    backend: Backend,
+    policy: ModelPolicy,
+}
+
+#[derive(Debug, Clone)]
+enum Backend {
     ClaudeApi(ClaudeApi),
     #[cfg(feature = "bedrock")]
     Bedrock(crate::Bedrock),
@@ -62,11 +69,26 @@ impl Provider {
         Self::build(config, Some(secrets)).await
     }
 
+    /// The same provider, refusing what `policy` does not allow. A
+    /// Bedrock provider keeps its own `jp.` check as well.
+    pub fn with_policy(self, policy: ModelPolicy) -> Self {
+        Self { policy, ..self }
+    }
+
+    pub fn policy(&self) -> &ModelPolicy {
+        &self.policy
+    }
+
+    /// Whether requests go to a `local` endpoint.
+    pub fn is_local(&self) -> bool {
+        matches!(self.backend, Backend::Local(_))
+    }
+
     async fn build(
         config: &ProviderConfig,
         secrets: Option<&Secrets>,
     ) -> Result<Self, ProviderError> {
-        match config {
+        let backend = match config {
             ProviderConfig::ClaudeApi {
                 api_key_env,
                 base_url,
@@ -81,21 +103,21 @@ impl Provider {
                     }
                     None => ClaudeApi::from_env(api_key_env)?,
                 };
-                Ok(Self::ClaudeApi(match base_url {
+                Backend::ClaudeApi(match base_url {
                     Some(url) => api.with_base_url(url.as_str())?,
                     None => api,
-                }))
+                })
             }
             ProviderConfig::Bedrock {
                 region,
                 require_jp_profile,
             } => {
                 let policy = if *require_jp_profile {
-                    ModelPolicy::JapanOnly
+                    ModelPolicy::japan_only()
                 } else {
                     ModelPolicy::Any
                 };
-                bedrock(region, policy).await
+                bedrock(region, policy).await?
             }
             ProviderConfig::Local {
                 base_url,
@@ -107,22 +129,25 @@ impl Provider {
                     (Some(env), None) => std::env::var(env).ok(),
                     (None, _) => None,
                 };
-                let local = LocalModelProvider::new(base_url, api_key, *protocol)?;
-                Ok(Self::Local(local))
+                Backend::Local(LocalModelProvider::new(base_url, api_key, *protocol)?)
             }
-        }
+        };
+        Ok(Self {
+            backend,
+            policy: ModelPolicy::Any,
+        })
     }
 }
 
 #[cfg(feature = "bedrock")]
-async fn bedrock(region: &str, policy: ModelPolicy) -> Result<Provider, ProviderError> {
-    Ok(Provider::Bedrock(
+async fn bedrock(region: &str, policy: ModelPolicy) -> Result<Backend, ProviderError> {
+    Ok(Backend::Bedrock(
         crate::Bedrock::from_region(region, policy).await,
     ))
 }
 
 #[cfg(not(feature = "bedrock"))]
-async fn bedrock(_region: &str, _policy: ModelPolicy) -> Result<Provider, ProviderError> {
+async fn bedrock(_region: &str, _policy: ModelPolicy) -> Result<Backend, ProviderError> {
     Err(ProviderError::Config(
         "Bedrock provider requested but aegis-provider was built without the `bedrock` feature"
             .into(),
@@ -131,11 +156,14 @@ async fn bedrock(_region: &str, _policy: ModelPolicy) -> Result<Provider, Provid
 
 impl ModelProvider for Provider {
     async fn send(&self, request: &Request) -> Result<Response, ProviderError> {
-        match self {
-            Self::ClaudeApi(api) => api.send(request).await,
+        self.policy
+            .check_endpoint(&request.model, self.is_local())?;
+        self.policy.check(&request.model)?;
+        match &self.backend {
+            Backend::ClaudeApi(api) => api.send(request).await,
             #[cfg(feature = "bedrock")]
-            Self::Bedrock(bedrock) => bedrock.send(request).await,
-            Self::Local(local) => local.send(request).await,
+            Backend::Bedrock(bedrock) => bedrock.send(request).await,
+            Backend::Local(local) => local.send(request).await,
         }
     }
 }
@@ -193,7 +221,55 @@ mod tests {
     async fn local_provider_builds_without_error() {
         let config = load("local.toml");
         let provider = Provider::from_config(&config).await.unwrap();
-        assert!(matches!(provider, Provider::Local(_)));
+        assert!(provider.is_local());
+        assert_eq!(provider.policy(), &ModelPolicy::Any);
+    }
+
+    fn request(model: &str) -> Request {
+        Request {
+            model: model.into(),
+            max_tokens: 16,
+            effort: None,
+            system: Vec::new(),
+            tools: Vec::new(),
+            messages: vec![crate::Message::user_text("hi")],
+            cache: crate::CachePlan::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_policy_refuses_before_any_call() {
+        // Nothing listens there: a request that got through would fail
+        // with a transport error, not a policy one.
+        let config = ProviderConfig::Local {
+            base_url: "http://127.0.0.1:9/v1".into(),
+            api_key_env: None,
+            protocol: LocalProtocol::OpenAi,
+        };
+        let eu = Provider::from_config(&config)
+            .await
+            .unwrap()
+            .with_policy(ModelPolicy::AllowedPrefixes(vec!["eu.".into()]));
+        let err = eu.send(&request("qwen2.5-coder:32b")).await.unwrap_err();
+        assert!(
+            matches!(err, ProviderError::PolicyViolation { .. }),
+            "{err}"
+        );
+
+        let cloud = ProviderConfig::ClaudeApi {
+            api_key_env: "AEGIS_TEST_KEY_FOR_POLICY".into(),
+            base_url: Some("http://127.0.0.1:9".into()),
+        };
+        let secrets = Secrets::fixed([("AEGIS_TEST_KEY_FOR_POLICY", "k")]);
+        let airgap = Provider::from_config_with_secrets(&cloud, &secrets)
+            .await
+            .unwrap()
+            .with_policy(ModelPolicy::LocalOnly);
+        let err = airgap.send(&request("claude-haiku-5-5")).await.unwrap_err();
+        assert!(
+            matches!(err, ProviderError::PolicyViolation { .. }),
+            "{err}"
+        );
     }
 
     #[test]

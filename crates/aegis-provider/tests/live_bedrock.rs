@@ -27,7 +27,7 @@ async fn provider() -> Option<Bedrock> {
         );
         return None;
     }
-    Some(Bedrock::from_region("ap-northeast-1", ModelPolicy::JapanOnly).await)
+    Some(Bedrock::from_region("ap-northeast-1", ModelPolicy::japan_only()).await)
 }
 
 fn long_system() -> String {

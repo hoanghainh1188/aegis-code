@@ -110,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn japan_only_refuses_global_model_before_any_call() {
-        let provider = Bedrock::new(offline_client(), ModelPolicy::JapanOnly);
+        let provider = Bedrock::new(offline_client(), ModelPolicy::japan_only());
         let request = Request {
             model: "global.anthropic.claude-sonnet-5-5".into(),
             max_tokens: 16,

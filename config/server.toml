@@ -24,12 +24,28 @@ source = "env"
 # Each repo's jobs run with the configuration of its mode (`repos.mode`)
 # and the repo's own settings (`repos.config`, #24). Leave a mode out and
 # its repos' jobs stop with a reason.
+# Each mode a repo may have, by name, and its run configuration (#592). A
+# name is 1-64 of a-z, 0-9, `_` and `-`; `_` and `-` are the same, so
+# `customer_jp` and `customer-jp` name one mode. A mode file's
+# `[residency]` says where its code may go: `allowed_model_prefixes`
+# (every tier's model must start with one) or `local_only = true` (a
+# `local` provider only). The server refuses to start when a mode breaks
+# its own, and its provider checks it again before each request. A
+# `local_only` mode's `base_url` must be on a local network (loopback, a
+# private address, a dotless or `.internal` name, or one in `local_hosts`).
+# Prefixes say which models, not which region: keep a Bedrock region and
+# its prefixes (`eu-central-1` and `eu.`) together.
 [modes]
 poc = "config/poc.toml"
 # Bedrock in Tokyo: build with `--features bedrock`, and deploy where the
 # customer's data may be (ADR 0003 §6). Refused at start unless every call
 # stays in Japan.
-# customer_jp = "config/customer-jp.toml"
+# customer-jp = "config/customer-jp.toml"
+# Any other, e.g. Bedrock in Frankfurt with `[residency]
+# allowed_model_prefixes = ["eu."]`, or an air-gapped local model server
+# with `[residency] local_only = true`:
+# customer-eu = "/etc/aegis/modes/customer-eu.toml"
+# local-airgap = "/etc/aegis/modes/local-airgap.toml"
 
 [api]
 # `/api/v1` takes service tokens and the dashboard a sign-in (#29), so the

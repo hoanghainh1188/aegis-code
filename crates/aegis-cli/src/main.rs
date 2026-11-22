@@ -199,9 +199,13 @@ type Run = Platform<Provider, Ledger>;
 async fn platform(config_path: &Path, open_prs: bool) -> Result<Run, String> {
     let mut config = RunConfig::load(config_path).map_err(|e| e.to_string())?;
     config.run.open_prs = open_prs;
+    // `[residency]` (#592): the models were checked when the file was
+    // read; the provider refuses anything else before it sends.
+    let policy = config.model_policy().map_err(|e| e.to_string())?;
     let provider = Provider::from_config(&config.provider)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .with_policy(policy);
     let github_token = fork_token(&config)?;
     let store = ledger::open(&config).await?;
     finish_platform(config, provider, store, github_token)
