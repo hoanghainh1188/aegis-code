@@ -5,8 +5,8 @@
 //! would. Its queued jobs may be cancelled when it is paused instead.
 //! Resumed, they are claimed again. Both are audited.
 
-use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::budget::WAITING;
@@ -22,7 +22,7 @@ const MAX_REASON_CHARS: usize = 500;
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepoPause {
     pub repo_id: RepoId,
-    pub at: DateTime<Utc>,
+    pub at: OffsetDateTime,
     pub by: String,
     pub reason: Option<String>,
 }
@@ -57,7 +57,7 @@ pub struct Paused {
 
 struct PauseRow {
     id: i64,
-    paused_at: Option<DateTime<Utc>>,
+    paused_at: Option<OffsetDateTime>,
     paused_by: Option<String>,
     pause_reason: Option<String>,
 }
@@ -258,7 +258,7 @@ mod tests {
     fn a_waiting_job_says_who_paused_the_repo_and_why() {
         let pause = RepoPause {
             repo_id: RepoId(1),
-            at: Utc::now(),
+            at: OffsetDateTime::now_utc(),
             by: "admin@x.test".into(),
             reason: Some("runs wild".into()),
         };

@@ -3,8 +3,8 @@
 //! Sessions and tokens are looked up by the SHA-256 of what the client
 //! holds; the token itself is never stored.
 
-use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::tx;
@@ -21,7 +21,7 @@ pub struct Session {
     pub user: User,
     /// What the session's forms send back.
     pub csrf_token: String,
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: OffsetDateTime,
 }
 
 /// What `/auth/callback` needs from `/auth/login`.
@@ -60,7 +60,7 @@ pub struct RepoMember {
     pub kind: UserKind,
     pub name: String,
     pub role: RepoRole,
-    pub granted_at: chrono::DateTime<chrono::Utc>,
+    pub granted_at: time::OffsetDateTime,
 }
 
 fn user_name(kind: UserKind, name: &str) -> Result<String, StoreError> {
@@ -136,8 +136,8 @@ async fn end_sessions_in(
 /// its token or hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSession {
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: time::OffsetDateTime,
+    pub expires_at: time::OffsetDateTime,
 }
 
 impl Store {
@@ -222,7 +222,7 @@ impl Store {
         &self,
         id: &TokenHash,
         login: &PendingLogin,
-        expires_at: DateTime<Utc>,
+        expires_at: OffsetDateTime,
     ) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await?;
         let work = async {
@@ -272,7 +272,7 @@ impl Store {
         user: &User,
         token: &TokenHash,
         csrf_token: &str,
-        expires_at: DateTime<Utc>,
+        expires_at: OffsetDateTime,
     ) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await?;
         let work = async {

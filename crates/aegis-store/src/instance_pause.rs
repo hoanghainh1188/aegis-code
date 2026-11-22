@@ -12,8 +12,8 @@
 //! Resumed, the queued jobs are claimed again; none is lost. Both are
 //! audited (`instance.pause`, `instance.resume`).
 
-use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::budget::WAITING;
@@ -55,7 +55,7 @@ impl PauseLevel {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstancePause {
     pub level: PauseLevel,
-    pub at: DateTime<Utc>,
+    pub at: OffsetDateTime,
     pub by: String,
     pub reason: Option<String>,
 }
@@ -81,7 +81,7 @@ pub struct InstancePaused {
 
 struct Row {
     level: String,
-    paused_at: DateTime<Utc>,
+    paused_at: OffsetDateTime,
     paused_by: String,
     reason: Option<String>,
 }
@@ -269,7 +269,7 @@ mod tests {
     fn a_waiting_job_says_who_paused_the_agents_and_why() {
         let pause = InstancePause {
             level: PauseLevel::Intake,
-            at: Utc::now(),
+            at: OffsetDateTime::now_utc(),
             by: "admin@x.test".into(),
             reason: Some("model acts strangely".into()),
         };

@@ -1,7 +1,10 @@
 //! A ticket and its logs, as the agent reads them.
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use time::format_description::BorrowedFormatItem;
+use time::format_description::well_known::Rfc3339;
+use time::macros::{format_description, time};
+use time::{Date, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 use crate::TrackerError;
 
@@ -80,7 +83,7 @@ impl Priority {
 pub struct SearchTicket {
     pub key: String,
     pub priority: Option<Priority>,
-    pub sla_deadline: Option<DateTime<Utc>>,
+    pub sla_deadline: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +97,7 @@ pub struct Ticket {
     /// Mapped ITSM priority (`P1`–`P3`) when present (#453).
     pub priority: Option<Priority>,
     /// SLA deadline in UTC when present (#453).
-    pub sla_deadline: Option<DateTime<Utc>>,
+    pub sla_deadline: Option<OffsetDateTime>,
 }
 
 /// A text attachment, cut to its last [`MAX_LOG_CHARS`] characters.
@@ -176,25 +179,35 @@ pub fn checked_servicenow_key(key: &str) -> Result<&str, TrackerError> {
     }
 }
 
+/// Jira's `2026-12-01T14:00:00.000+0000`: an offset with no colon, the
+/// fraction optional.
+const JIRA_TIMESTAMP: &[BorrowedFormatItem<'_>] = format_description!(
+    "[year]-[month]-[day]T[hour]:[minute]:[second][optional [.[subsecond]]][offset_hour sign:mandatory][offset_minute]"
+);
+/// ServiceNow's `2026-12-01 08:00:00`, in UTC.
+const SERVICENOW_TIMESTAMP: &[BorrowedFormatItem<'_>] =
+    format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+/// A due date: the deadline is the end of that day, in UTC.
+const DUE_DATE: &[BorrowedFormatItem<'_>] = format_description!("[year]-[month]-[day]");
+
 /// Parse common ITSM deadline formats (RFC 3339, Jira `+0000` offset timestamps,
 /// ServiceNow `YYYY-MM-DD HH:MM:SS` UTC timestamps, or `YYYY-MM-DD` due dates).
-pub(crate) fn parse_deadline(raw: &str) -> Option<DateTime<Utc>> {
+pub(crate) fn parse_deadline(raw: &str) -> Option<OffsetDateTime> {
     let s = raw.trim();
     if s.is_empty() {
         return None;
     }
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return Some(dt.with_timezone(&Utc));
+    if let Ok(dt) = OffsetDateTime::parse(s, &Rfc3339) {
+        return Some(dt.to_offset(UtcOffset::UTC));
     }
-    if let Ok(dt) = DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f%z") {
-        return Some(dt.with_timezone(&Utc));
+    if let Ok(dt) = OffsetDateTime::parse(s, JIRA_TIMESTAMP) {
+        return Some(dt.to_offset(UtcOffset::UTC));
     }
-    if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return Some(Utc.from_utc_datetime(&ndt));
+    if let Ok(dt) = PrimitiveDateTime::parse(s, SERVICENOW_TIMESTAMP) {
+        return Some(dt.assume_utc());
     }
-    if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        let ndt = date.and_hms_opt(23, 59, 59)?;
-        return Some(Utc.from_utc_datetime(&ndt));
+    if let Ok(date) = Date::parse(s, DUE_DATE) {
+        return Some(date.with_time(time!(23:59:59)).assume_utc());
     }
     None
 }
@@ -231,6 +244,33 @@ pub(crate) fn log(name: &str, bytes: &[u8], cut_at_download: bool) -> Log {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every deadline format the trackers send reads as the same UTC
+    /// instant (#453, #578).
+    #[test]
+    fn deadlines_parse_in_every_tracker_format() {
+        use time::macros::datetime;
+        let at = datetime!(2026-12-01 14:00:00 UTC);
+        for raw in [
+            "2026-12-01T14:00:00Z",
+            "2026-12-01T21:00:00+07:00",
+            "2026-12-01T14:00:00+0000",
+            "2026-12-01T14:00:00.000+0000",
+            "2026-12-01T23:00:00.5+0900",
+            " 2026-12-01 14:00:00 ",
+        ] {
+            let parsed = parse_deadline(raw).unwrap_or_else(|| panic!("{raw}"));
+            assert_eq!(parsed.replace_nanosecond(0).unwrap(), at, "{raw}");
+            assert_eq!(parsed.offset(), UtcOffset::UTC, "{raw}");
+        }
+        assert_eq!(
+            parse_deadline("2026-12-01"),
+            Some(datetime!(2026-12-01 23:59:59 UTC))
+        );
+        for bad in ["", "soon", "2026-13-01", "01/12/2026"] {
+            assert_eq!(parse_deadline(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn keys_are_project_dash_number() {

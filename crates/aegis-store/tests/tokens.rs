@@ -17,7 +17,7 @@ async fn a_person_makes_names_and_revokes_tokens_of_their_own() {
         .await
         .unwrap();
     assert_eq!(made.label, "laptop");
-    let days = (made.expires_at - made.created_at).num_days();
+    let days = (made.expires_at - made.created_at).whole_days();
     assert_eq!(days, 30);
     let user = s.token_user(&hash(1)).await.unwrap().unwrap();
     assert_eq!((user.id, user.kind), (lan.id, UserKind::Person));

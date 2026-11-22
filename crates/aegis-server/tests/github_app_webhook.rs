@@ -313,7 +313,9 @@ async fn the_app_checks_who_may_ask_without_a_comment_token() {
         .and(path("/app/installations/5/access_tokens"))
         .respond_with(ResponseTemplate::new(201).set_body_json(json!({
             "token": "ghs_comment",
-            "expires_at": (chrono::Utc::now() + chrono::TimeDelta::hours(1)).to_rfc3339(),
+            "expires_at": (time::OffsetDateTime::now_utc() + time::Duration::hours(1))
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
         })))
         .mount(&github)
         .await;

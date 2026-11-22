@@ -46,7 +46,8 @@ pub fn review_minutes(opened_at_ms: i64, now_ms: i64) -> Result<f64, &'static st
 }
 
 fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    i64::try_from(time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
+        .unwrap_or(i64::MAX)
 }
 
 fn verdict(text: &str) -> Option<ReviewVerdict> {

@@ -2,7 +2,7 @@
 //! page: when the forge last reached the server, and why a delivery made
 //! no job. Never a delivery's content.
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::{Actor, JobId, RepoId, Store, StoreError, WebhookOutcome, WebhookSource};
@@ -36,7 +36,7 @@ pub struct WebhookEvent {
     pub outcome: WebhookOutcome,
     pub reason: Option<String>,
     pub job_id: Option<JobId>,
-    pub received_at: DateTime<Utc>,
+    pub received_at: OffsetDateTime,
 }
 
 /// Deliveries of a source whose signature did not verify, lately.
@@ -44,7 +44,7 @@ pub struct WebhookEvent {
 pub struct BadSignatures {
     pub source: WebhookSource,
     pub count: i64,
-    pub last: DateTime<Utc>,
+    pub last: OffsetDateTime,
 }
 
 fn cut(text: Option<&str>, max: usize) -> Option<String> {

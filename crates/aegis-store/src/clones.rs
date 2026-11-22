@@ -2,7 +2,7 @@
 //! changes a repo from the pages, the clone is made after, and the repo's
 //! page says how it went.
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::{RepoId, Store, StoreError};
 
@@ -44,8 +44,8 @@ pub struct RepoClone {
     pub state: CloneState,
     /// The end of git's output, when it failed.
     pub log_tail: Option<String>,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: Option<DateTime<Utc>>,
+    pub started_at: OffsetDateTime,
+    pub finished_at: Option<OffsetDateTime>,
 }
 
 /// The last [`MAX_CLONE_LOG_BYTES`] of `log`, cut at a character.

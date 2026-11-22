@@ -3,7 +3,7 @@
 //! suspended or removed takes no job, says why, and so the dashboard can
 //! list installed repos not yet registered.
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::tx;
@@ -269,7 +269,7 @@ pub struct Installation {
     pub removed: bool,
     /// `None`: not bound, no token is minted for it.
     pub tenant: Option<TenantId>,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: OffsetDateTime,
 }
 
 /// Why no token of installation `id` is minted for `tenant`'s repo, if it

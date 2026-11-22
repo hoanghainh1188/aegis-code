@@ -111,7 +111,8 @@ async fn pr_job(s: &Store, repo: RepoId, key: &str) -> JobId {
 
 /// The review fields of `who`'s form for `job`, signed `seconds_ago`.
 fn review_fields(who: &Browser, job: JobId, seconds_ago: i64) -> String {
-    let opened_at = chrono::Utc::now().timestamp_millis() - seconds_ago * 1000;
+    let opened_at = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+        - seconds_ago * 1000;
     let sig = opened_at_signature(
         &Signer::new(common::KEY.as_bytes()),
         job,
@@ -571,6 +572,7 @@ mod sso {
 
         /// The token endpoint answers with an ID token for `email`.
         pub async fn will_sign_in(&self, subject: &str, email: &str, nonce: &str) {
+            // openidconnect's claims are chrono types (#578).
             let now = chrono::Utc::now();
             let claims = CoreIdTokenClaims::new(
                 self.issuer(),

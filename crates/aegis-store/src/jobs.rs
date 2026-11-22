@@ -2,7 +2,7 @@
 //! ends once; at most one of its runs is live at a time.
 
 use aegis_ledger::IssueId;
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::budget;
@@ -20,15 +20,15 @@ pub(crate) struct JobRow {
     pub(crate) ledger_key: String,
     pub(crate) source: String,
     pub(crate) priority: Option<String>,
-    pub(crate) sla_deadline: Option<DateTime<Utc>>,
+    pub(crate) sla_deadline: Option<OffsetDateTime>,
     pub(crate) status: String,
     pub(crate) outcome: Option<String>,
     pub(crate) attempts: i32,
     pub(crate) locked_by: Option<String>,
-    pub(crate) locked_until: Option<DateTime<Utc>>,
-    pub(crate) created_at: DateTime<Utc>,
-    pub(crate) updated_at: DateTime<Utc>,
-    pub(crate) run_after: DateTime<Utc>,
+    pub(crate) locked_until: Option<OffsetDateTime>,
+    pub(crate) created_at: OffsetDateTime,
+    pub(crate) updated_at: OffsetDateTime,
+    pub(crate) run_after: OffsetDateTime,
     pub(crate) retries: i32,
     pub(crate) cancel_requested: bool,
     pub(crate) reason: Option<String>,
@@ -79,8 +79,8 @@ pub(crate) struct RunRow {
     pub(crate) attempt: i32,
     pub(crate) status: String,
     pub(crate) error: Option<String>,
-    pub(crate) started_at: DateTime<Utc>,
-    pub(crate) ended_at: Option<DateTime<Utc>>,
+    pub(crate) started_at: OffsetDateTime,
+    pub(crate) ended_at: Option<OffsetDateTime>,
 }
 
 impl TryFrom<RunRow> for Run {

@@ -354,7 +354,7 @@ fork = { owner = "aegis-bot", name = "typst", token_env = "AEGIS_GITHUB_TOKEN" }
             mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: serde_json::to_value(&file.settings).unwrap(),
-            created_at: Default::default(),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
             tenant_id: aegis_store::TenantId::DEFAULT,
         };
         let shown = serde_json::to_string_pretty(&RepoFile::of(&repo).unwrap()).unwrap();

@@ -2,7 +2,7 @@
 //! whether they are admins, how many repos they have a role in, and when
 //! they last signed in.
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::{Page, PageOf, Store, StoreError, User, UserId, UserKind};
 
@@ -15,8 +15,8 @@ pub struct UserSummary {
     /// A person who signed in at least once (the SSO linked them).
     pub signed_in: bool,
     /// When their latest session began.
-    pub last_session: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
+    pub last_session: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
 }
 
 struct SummaryRow {
@@ -24,10 +24,10 @@ struct SummaryRow {
     kind: String,
     name: String,
     is_admin: bool,
-    created_at: DateTime<Utc>,
+    created_at: OffsetDateTime,
     signed_in: bool,
     repos: i64,
-    last_session: Option<DateTime<Utc>>,
+    last_session: Option<OffsetDateTime>,
 }
 
 impl TryFrom<SummaryRow> for UserSummary {

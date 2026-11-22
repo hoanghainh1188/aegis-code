@@ -847,7 +847,7 @@ mod tests {
             monthly_budget_usd: None,
             max_concurrent_jobs: None,
             default_locale: None,
-            created_at: Default::default(),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
         }
     }
 
@@ -995,7 +995,7 @@ mod tests {
             mode,
             max_concurrent_jobs: 1,
             config,
-            created_at: Default::default(),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
             tenant_id: aegis_store::TenantId::DEFAULT,
         }
     }

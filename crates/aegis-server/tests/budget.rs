@@ -22,7 +22,6 @@ use aegis_store::{
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use chrono::Datelike;
 use hmac::{Hmac, KeyInit, Mac};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -238,8 +237,8 @@ async fn the_month_begins_in_the_configured_time_zone() {
     spend(&s, &j, 1.0).await;
     // Tokyo is nine hours ahead and has no daylight saving: from 15:00 UTC
     // on a month's last day it is already in the next month (#339).
-    let now = chrono::Utc::now();
-    let tokyo_ahead = (now + chrono::Duration::hours(9)).month() != now.month();
+    let now = time::OffsetDateTime::now_utc();
+    let tokyo_ahead = (now + time::Duration::hours(9)).month() != now.month();
     // Most of the month, 08:00 on the 1st in Tokyo is still last month in
     // UTC (23:00). In the last hours, 23:00 on the last day in Tokyo is
     // UTC's month (14:00) but not Tokyo's.

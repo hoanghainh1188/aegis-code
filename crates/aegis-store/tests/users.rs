@@ -111,8 +111,8 @@ async fn a_pending_sign_in_is_taken_once_and_only_while_live() {
         next: "/jobs".into(),
     };
     let (live, old) = ([1u8; 32], [2u8; 32]);
-    let soon = chrono::Utc::now() + chrono::Duration::minutes(10);
-    let past = chrono::Utc::now() - chrono::Duration::minutes(1);
+    let soon = time::OffsetDateTime::now_utc() + time::Duration::minutes(10);
+    let past = time::OffsetDateTime::now_utc() - time::Duration::minutes(1);
     s.start_login(&old, &login, past).await.unwrap();
     assert_eq!(s.take_login(&old).await.unwrap(), None, "expired");
     s.start_login(&live, &login, soon).await.unwrap();
@@ -133,8 +133,8 @@ async fn sessions_and_tokens_are_found_by_hash_until_they_end() {
     let user = s.sign_in("sub-1", "dev@x.test", true).await.unwrap();
     let (live, old) = ([1u8; 32], [2u8; 32]);
     let csrf = "c".repeat(64);
-    let soon = chrono::Utc::now() + chrono::Duration::hours(1);
-    let past = chrono::Utc::now() - chrono::Duration::hours(1);
+    let soon = time::OffsetDateTime::now_utc() + time::Duration::hours(1);
+    let past = time::OffsetDateTime::now_utc() - time::Duration::hours(1);
     s.start_session(&user, &live, &csrf, soon).await.unwrap();
     s.start_session(&user, &old, &csrf, past).await.unwrap();
     let session = s.session(&live).await.unwrap().unwrap();

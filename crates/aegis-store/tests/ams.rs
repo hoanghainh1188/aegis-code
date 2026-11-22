@@ -9,7 +9,7 @@ use aegis_store::{
     Actor, AttemptEnd, JobId, JobSource, ModeName, NewJob, NewRepo, RepoId, SlaPriority, Store,
     TenantId,
 };
-use chrono::{TimeDelta, Utc};
+use time::OffsetDateTime;
 
 const LEASE: Duration = Duration::from_secs(60);
 
@@ -45,7 +45,7 @@ async fn job(
         ledger_key: IssueId::parse(format!("r{}-{n}", repo.0)).unwrap(),
         source: JobSource::Jsm,
         priority,
-        sla_deadline: due_in_min.map(|m| Utc::now() + TimeDelta::minutes(m)),
+        sla_deadline: due_in_min.map(|m| OffsetDateTime::now_utc() + time::Duration::minutes(m)),
     })
     .await
     .unwrap()

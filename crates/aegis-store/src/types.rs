@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 
 use aegis_ledger::{IssueId, Outcome};
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::StoreError;
 
@@ -250,7 +250,7 @@ pub struct Repo {
     pub mode: ModeName,
     pub max_concurrent_jobs: u32,
     pub config: serde_json::Value,
-    pub created_at: DateTime<Utc>,
+    pub created_at: OffsetDateTime,
     /// The contract it belongs to (#525).
     pub tenant_id: crate::TenantId,
 }
@@ -266,7 +266,7 @@ pub struct NewJob {
     /// SLA priority (`P1`–`P3`) mapped from an ITSM ticket (#453), if any.
     pub priority: Option<SlaPriority>,
     /// SLA due timestamp from an ITSM ticket (#453), if any.
-    pub sla_deadline: Option<DateTime<Utc>>,
+    pub sla_deadline: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -279,18 +279,18 @@ pub struct Job {
     /// SLA priority (`P1`–`P3`) mapped from an ITSM ticket (#453), if any.
     pub priority: Option<SlaPriority>,
     /// SLA due timestamp from an ITSM ticket (#453), if any.
-    pub sla_deadline: Option<DateTime<Utc>>,
+    pub sla_deadline: Option<OffsetDateTime>,
     pub status: JobStatus,
     /// Set exactly when `status` is `Done`.
     pub outcome: Option<Outcome>,
     /// Runs started so far.
     pub attempts: u32,
     pub locked_by: Option<String>,
-    pub locked_until: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub locked_until: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
     /// Not claimed before this (backoff after an infrastructure failure).
-    pub run_after: DateTime<Utc>,
+    pub run_after: OffsetDateTime,
     /// Infrastructure failures and expired leases so far.
     pub retries: u32,
     pub cancel_requested: bool,
@@ -349,8 +349,8 @@ pub struct Run {
     pub attempt: u32,
     pub status: RunStatus,
     pub error: Option<String>,
-    pub started_at: DateTime<Utc>,
-    pub ended_at: Option<DateTime<Utc>>,
+    pub started_at: OffsetDateTime,
+    pub ended_at: Option<OffsetDateTime>,
 }
 
 /// How a run ends.

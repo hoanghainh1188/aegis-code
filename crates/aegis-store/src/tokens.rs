@@ -3,7 +3,7 @@
 //! end. A request with one acts as that person, with their roles, and is
 //! audited as them. Only the hash is kept, as for service tokens.
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::tx;
@@ -19,7 +19,7 @@ pub const MAX_TOKEN_DAYS: u32 = 90;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceToken {
     pub id: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: OffsetDateTime,
 }
 
 /// A person's live token, as their page lists it; never the token itself.
@@ -27,8 +27,8 @@ pub struct ServiceToken {
 pub struct PersonalToken {
     pub id: i64,
     pub label: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub created_at: OffsetDateTime,
+    pub expires_at: OffsetDateTime,
 }
 
 impl Store {

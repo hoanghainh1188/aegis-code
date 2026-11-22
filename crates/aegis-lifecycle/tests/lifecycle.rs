@@ -2258,7 +2258,9 @@ impl wiremock::Respond for Minting {
         let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         wiremock::ResponseTemplate::new(201).set_body_json(json!({
             "token": format!("ghs_{n}"),
-            "expires_at": (chrono::Utc::now() + chrono::TimeDelta::minutes(9)).to_rfc3339(),
+            "expires_at": (time::OffsetDateTime::now_utc() + time::Duration::minutes(9))
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
         }))
     }
 }

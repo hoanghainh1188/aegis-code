@@ -3,7 +3,6 @@
 use aegis_tracker::{
     Deployment, JsmConfig, Priority, Report, Tracker, TrackerConfig, TrackerError,
 };
-use chrono::{TimeZone, Utc};
 use serde_json::json;
 use wiremock::matchers::{basic_auth, bearer_token, body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -110,14 +109,14 @@ async fn jsm_search_maps_priority_and_sla_deadline() {
     assert_eq!(tickets[0].priority, Some(Priority::P1));
     assert_eq!(
         tickets[0].sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 1, 14, 0, 0).unwrap())
+        Some(time::macros::datetime!(2026-12-01 14:00:00 UTC))
     );
 
     assert_eq!(tickets[1].key, "SD-102");
     assert_eq!(tickets[1].priority, Some(Priority::P2));
     assert_eq!(
         tickets[1].sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 5, 23, 59, 59).unwrap())
+        Some(time::macros::datetime!(2026-12-05 23:59:59 UTC))
     );
 
     assert_eq!(tickets[2].key, "SD-103");
@@ -224,7 +223,7 @@ async fn jsm_ticket_reads_description_logs_and_sla_and_reports_back() {
     assert_eq!(ticket.priority, Some(Priority::P1));
     assert_eq!(
         ticket.sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 11, 20, 9, 30, 0).unwrap())
+        Some(time::macros::datetime!(2026-11-20 09:30:00 UTC))
     );
     assert_eq!(ticket.logs.len(), 1);
     assert_eq!(ticket.logs[0].text, "thread panicked");

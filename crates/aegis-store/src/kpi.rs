@@ -3,7 +3,7 @@
 //! every event of every ledger on each page load.
 
 use aegis_ledger::{IssueId, IssueRecord, LedgerStore};
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 
 use crate::{RepoId, Store, StoreError};
 
@@ -18,7 +18,7 @@ pub struct KpiJob {
     pub language: String,
     /// Ticket origin (`cli`, `github`, `jira`, `jsm`, ...; lowercased).
     pub source: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: OffsetDateTime,
     /// A review round (#245): the ledger of the job that opened the PR,
     /// and which round of it this is.
     pub review_of: Option<IssueId>,

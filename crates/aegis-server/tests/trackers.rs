@@ -11,8 +11,8 @@ use aegis_store::testing::test_db;
 use aegis_store::{
     Job, JobFilter, JobId, JobSource, JobStatus, ModeName, NewRepo, Page, Repo, SlaPriority, Store,
 };
-use chrono::{TimeZone, Utc};
 use serde_json::{Value, json};
+use time::OffsetDateTime;
 use wiremock::matchers::{basic_auth, body_partial_json, body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -89,9 +89,9 @@ fn ended(id: JobId, repo: &Repo, source: JobSource, key: &str, pr: Option<&str>)
         attempts: 1,
         locked_by: None,
         locked_until: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        run_after: Utc::now(),
+        created_at: OffsetDateTime::now_utc(),
+        updated_at: OffsetDateTime::now_utc(),
+        run_after: OffsetDateTime::now_utc(),
         retries: 0,
         cancel_requested: false,
         reason: None,
@@ -447,7 +447,7 @@ async fn itsm_jsm_and_servicenow_poll_store_sla_and_sync_results_back() {
     assert_eq!(stored[0].priority, Some(SlaPriority::P1));
     assert_eq!(
         stored[0].sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 1, 14, 0, 0).unwrap())
+        Some(time::macros::datetime!(2026-12-01 14:00:00 UTC))
     );
 
     assert_eq!(stored[1].source, JobSource::Servicenow);
@@ -455,7 +455,7 @@ async fn itsm_jsm_and_servicenow_poll_store_sla_and_sync_results_back() {
     assert_eq!(stored[1].priority, Some(SlaPriority::P2));
     assert_eq!(
         stored[1].sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 2, 9, 0, 0).unwrap())
+        Some(time::macros::datetime!(2026-12-02 09:00:00 UTC))
     );
 
     let notifier = TrackerNotifier::new(s.clone(), secrets());

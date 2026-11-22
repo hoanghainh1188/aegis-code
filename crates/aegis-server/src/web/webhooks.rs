@@ -87,7 +87,7 @@ impl From<WebhookEvent> for WebhookRow {
         };
         let reason = e.reason.unwrap_or_default();
         Self {
-            received_at: e.received_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+            received_at: crate::when::second(e.received_at),
             source: e.source.as_str(),
             delivery_id: e.delivery_id.unwrap_or_default(),
             event: e.event.unwrap_or_default(),

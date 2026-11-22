@@ -232,7 +232,7 @@ pub async fn login(Extension(auth): Extension<Auth>, Query(q): Query<LoginQuery>
     let Ok(id) = random_token() else {
         return internal("state", "no randomness");
     };
-    let expires = chrono::Utc::now() + chrono::Duration::seconds(LOGIN_TTL_S);
+    let expires = time::OffsetDateTime::now_utc() + time::Duration::seconds(LOGIN_TTL_S);
     if let Err(e) = auth
         .store()
         .start_login(&token_hash(&id), &pending, expires)
@@ -355,8 +355,8 @@ async fn start_session(auth: &Auth, user: &aegis_store::User, next: &str) -> Res
         return internal("session", "no randomness");
     };
     let ttl = auth.session_ttl();
-    let expires = chrono::Utc::now()
-        + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::hours(12));
+    let expires = time::OffsetDateTime::now_utc()
+        + time::Duration::try_from(ttl).unwrap_or(time::Duration::hours(12));
     if let Err(e) = auth
         .store()
         .start_session(user, &token_hash(&token), &csrf, expires)
