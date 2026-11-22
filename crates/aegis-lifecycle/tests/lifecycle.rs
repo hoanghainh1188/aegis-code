@@ -2143,6 +2143,112 @@ async fn two_repos_with_different_modes_run_side_by_side() {
     db.drop().await;
 }
 
+/// "Xong khi" of #589: two repos on one server open their PRs in two
+/// languages. One names no `locale` but its tenant defaults to `ja`; the
+/// other has neither and gets the server's `[web] default_locale`, `en`.
+/// The platform's words and the model's instruction follow each repo.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_repos_open_their_prs_in_their_own_languages() {
+    if !tools_ready() {
+        return;
+    }
+    let Some(db) = aegis_store::testing::test_db().await else {
+        return;
+    };
+    let (japanese, english) = (repo_with_bug(), repo_with_bug());
+    let server = github().await;
+    let modes = Modes::new(
+        Some(mode(&japanese, "[provider]\nkind = \"claude_api\"", "")),
+        None,
+    )
+    .unwrap()
+    .with_default_locale(aegis_pr::Locale::En);
+    let actor = aegis_store::Actor::cli();
+    let acme = db
+        .store
+        .create_tenant_by("acme", "ACME", &actor)
+        .await
+        .unwrap();
+    let acme = db
+        .store
+        .set_tenant_locale_by(acme.id, Some("ja"), &actor)
+        .await
+        .unwrap();
+    let uri = server.uri();
+
+    // The tenant's repo: its clone under the tenant's directory, its
+    // secrets named for it.
+    let mut ja_spec = spec(&japanese, "shop", ModeName::POC, &uri, 1);
+    let state = japanese.0.join("state");
+    let clone = aegis_lifecycle::tenant_state_dir(&state, acme.id).join("repos/shop");
+    std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
+    std::fs::rename(state.join("repos/shop"), &clone).unwrap();
+    if let Some(fork) = ja_spec.settings.fork.as_mut() {
+        fork.token_env = "ACME_UNUSED".into();
+    }
+    ja_spec.tenant = Some(acme);
+    let a = modes.register(&db.store, &ja_spec).await.unwrap();
+    // The other: the same mode's state dir, no tenant, no locale.
+    let en_spec = spec(&english, "app", ModeName::POC, &uri, 1);
+    std::fs::rename(english.0.join("state/repos/app"), state.join("repos/app")).unwrap();
+    let b = modes.register(&db.store, &en_spec).await.unwrap();
+
+    let run_a = modes.repo_run(&db.store, a.id).await.unwrap();
+    let run_b = modes.repo_run(&db.store, b.id).await.unwrap();
+    assert_eq!(run_a.config.repo.locale, aegis_pr::Locale::Ja);
+    assert_eq!(run_b.config.repo.locale, aegis_pr::Locale::En);
+    let (pa, pb) = (
+        platform(run_a.config, to_pr()),
+        platform(run_b.config, to_pr()),
+    );
+    let (ra, rb) = tokio::join!(
+        tokio::spawn({
+            let p = Arc::clone(&pa);
+            async move { run(&p, CancellationToken::new()).await }
+        }),
+        tokio::spawn({
+            let p = Arc::clone(&pb);
+            async move { run(&p, CancellationToken::new()).await }
+        }),
+    );
+    assert_eq!(ra.unwrap().outcome, Outcome::PrOpened);
+    assert_eq!(rb.unwrap().outcome, Outcome::PrOpened);
+
+    let bodies: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "POST" && r.url.path().ends_with("/pulls"))
+        .map(|r| {
+            r.body_json::<Value>().unwrap()["body"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    let ja = bodies
+        .iter()
+        .filter(|b| b.contains("## 根本原因\n"))
+        .count();
+    let en = bodies
+        .iter()
+        .filter(|b| b.contains("## Root cause\n"))
+        .count();
+    assert_eq!((ja, en), (1, 1), "{bodies:?}");
+    let told = |p: &Arc<Platform<Scripted, MemoryLedger>>, language: &str| {
+        p.provider.requests.lock().unwrap().iter().any(|r| {
+            serde_json::to_string(&r.messages[0])
+                .unwrap()
+                .contains(&format!("in {language}. Keep code"))
+        })
+    };
+    assert!(told(&pa, "Japanese") && !told(&pa, "English"));
+    assert!(told(&pb, "English") && !told(&pb, "Japanese"));
+    db.drop().await;
+}
+
 /// A fresh token at each mint: `ghs_1`, `ghs_2`…, each nine minutes from
 /// expiry, so a token minted earlier is never good enough to reuse.
 struct Minting(std::sync::atomic::AtomicU32);

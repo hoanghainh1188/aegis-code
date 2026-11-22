@@ -103,6 +103,8 @@ pub struct PrStrings {
     pub pushed: fn(&str) -> String,
     /// The round ended without a commit; the argument is already inert.
     pub pushed_nothing: fn(&str) -> String,
+    /// The review is not taken (#589); the argument is already inert.
+    pub review_refused: fn(&str) -> String,
     pub line: &'static str,
     pub review: &'static str,
     pub comment: &'static str,
@@ -114,6 +116,25 @@ pub struct PrStrings {
     pub findings: &'static str,
     pub steps: &'static str,
     pub questions: &'static str,
+    // The comment on the issue when its job ends (#589); each follows
+    // `**aegis-code** ` or `aegis-code `.
+    pub pull_request: &'static str,
+    pub merge_request: &'static str,
+    /// The request's kind, and its URL when it is a plain one.
+    pub opened: fn(&str, Option<&str>) -> String,
+    pub looked_into: fn(&str) -> String,
+    pub platform_failed: &'static str,
+    /// The request's kind and why it stopped.
+    pub stopped: fn(&str, &str) -> String,
+    pub budget_refused: &'static str,
+    pub cancelled: &'static str,
+    pub reason: &'static str,
+    pub job: &'static str,
+    pub stop_pr_opened: &'static str,
+    pub stop_budget: &'static str,
+    pub stop_steps: &'static str,
+    pub stop_expert: &'static str,
+    pub stop_diagnosed: &'static str,
 }
 
 impl PrStrings {
@@ -158,6 +179,16 @@ fn pushed_nothing_vi(reason: &str) -> String {
     format!("**aegis-code** không push gì cho lần review này: {reason}.")
 }
 
+fn review_refused_en(why: &str) -> String {
+    format!("**aegis-code** will not take this review: {why}.")
+}
+fn review_refused_ja(why: &str) -> String {
+    format!("**aegis-code** はこのレビューに対応しません: {why}。")
+}
+fn review_refused_vi(why: &str) -> String {
+    format!("**aegis-code** sẽ không nhận lần review này: {why}.")
+}
+
 fn diagnosis_en(category: &str, confidence: f64) -> String {
     format!(
         "**Diagnosis**: {category} (confidence {confidence:.2}). Read-only: nothing was changed."
@@ -170,6 +201,54 @@ fn diagnosis_vi(category: &str, confidence: f64) -> String {
     format!(
         "**Chẩn đoán**: {category} (độ tin cậy {confidence:.2}). Chỉ đọc: không có gì bị thay đổi."
     )
+}
+
+fn opened_en(request: &str, url: Option<&str>) -> String {
+    match url {
+        Some(url) => format!("opened a {request} for this issue: {url}"),
+        None => format!("opened a {request} for this issue."),
+    }
+}
+fn opened_ja(request: &str, url: Option<&str>) -> String {
+    match url {
+        Some(url) => format!("がこの issue の {request} を作成しました: {url}"),
+        None => format!("がこの issue の {request} を作成しました。"),
+    }
+}
+fn opened_vi(request: &str, url: Option<&str>) -> String {
+    match url {
+        Some(url) => format!("đã mở một {request} cho issue này: {url}"),
+        None => format!("đã mở một {request} cho issue này."),
+    }
+}
+
+fn looked_into_en(request: &str) -> String {
+    format!(
+        "looked into this issue: it does not read as a code defect, so no {request} was \
+         opened. What it found is below; a person decides what to do."
+    )
+}
+fn looked_into_ja(request: &str) -> String {
+    format!(
+        "がこの issue を調査しました。コードの不具合ではないと判断したため、{request} は\
+         作成していません。調査結果は以下のとおりです。対応は担当者が判断してください。"
+    )
+}
+fn looked_into_vi(request: &str) -> String {
+    format!(
+        "đã xem xét issue này: đây không giống lỗi trong code, nên không mở {request} nào. \
+         Kết quả nằm bên dưới; người phụ trách sẽ quyết định cách xử lý."
+    )
+}
+
+fn stopped_en(request: &str, why: &str) -> String {
+    format!("stopped without a {request}: {why}.")
+}
+fn stopped_ja(request: &str, why: &str) -> String {
+    format!("は {request} を作成せずに停止しました: {why}。")
+}
+fn stopped_vi(request: &str, why: &str) -> String {
+    format!("đã dừng mà không mở {request}: {why}.")
 }
 
 static EN: PrStrings = PrStrings {
@@ -199,6 +278,7 @@ static EN: PrStrings = PrStrings {
     more: more_en,
     pushed: pushed_en,
     pushed_nothing: pushed_nothing_en,
+    review_refused: review_refused_en,
     line: "line",
     review: "review",
     comment: "comment",
@@ -209,6 +289,21 @@ static EN: PrStrings = PrStrings {
     findings: "Findings, each with the sources it was checked against:",
     steps: "Suggested steps for an operator (not applied):",
     questions: "Questions for the reporter:",
+    pull_request: "pull request",
+    merge_request: "merge request",
+    opened: opened_en,
+    looked_into: looked_into_en,
+    platform_failed: "could not finish this issue: the platform failed. Its operators can see why.",
+    stopped: stopped_en,
+    budget_refused: "did not take this issue: the repository's monthly budget is spent.",
+    cancelled: "cancelled its job for this issue.",
+    reason: "Reason",
+    job: "aegis-code job",
+    stop_pr_opened: "a pull or merge request was opened",
+    stop_budget: "its budget is spent",
+    stop_steps: "it reached its step limit",
+    stop_expert: "even the strongest model could not fix it",
+    stop_diagnosed: "it was diagnosed as needing no code change",
 };
 
 static JA: PrStrings = PrStrings {
@@ -238,6 +333,7 @@ static JA: PrStrings = PrStrings {
     more: more_ja,
     pushed: pushed_ja,
     pushed_nothing: pushed_nothing_ja,
+    review_refused: review_refused_ja,
     line: "行",
     review: "レビュー",
     comment: "コメント",
@@ -248,6 +344,22 @@ static JA: PrStrings = PrStrings {
     findings: "所見 (それぞれ照合したソース付き):",
     steps: "運用担当者向けの推奨手順 (未適用):",
     questions: "報告者への質問:",
+    pull_request: "pull request",
+    merge_request: "merge request",
+    opened: opened_ja,
+    looked_into: looked_into_ja,
+    platform_failed: "はこの issue を完了できませんでした。プラットフォームで障害が発生しました。\
+                      原因は運用担当者が確認できます。",
+    stopped: stopped_ja,
+    budget_refused: "はこの issue を引き受けませんでした。リポジトリの月間予算を使い切っています。",
+    cancelled: "はこの issue のジョブをキャンセルしました。",
+    reason: "理由",
+    job: "aegis-code ジョブ",
+    stop_pr_opened: "pull request または merge request が作成された",
+    stop_budget: "予算を使い切った",
+    stop_steps: "ステップ上限に達した",
+    stop_expert: "最上位のモデルでも修正できなかった",
+    stop_diagnosed: "コード変更は不要と診断された",
 };
 
 static VI: PrStrings = PrStrings {
@@ -277,6 +389,7 @@ static VI: PrStrings = PrStrings {
     more: more_vi,
     pushed: pushed_vi,
     pushed_nothing: pushed_nothing_vi,
+    review_refused: review_refused_vi,
     line: "dòng",
     review: "review",
     comment: "bình luận",
@@ -287,6 +400,22 @@ static VI: PrStrings = PrStrings {
     findings: "Các phát hiện, mỗi mục kèm nguồn đã đối chiếu:",
     steps: "Các bước gợi ý cho người vận hành (chưa áp dụng):",
     questions: "Câu hỏi cho người báo lỗi:",
+    pull_request: "pull request",
+    merge_request: "merge request",
+    opened: opened_vi,
+    looked_into: looked_into_vi,
+    platform_failed: "không thể hoàn thành issue này: platform gặp lỗi. \
+                      Người vận hành có thể xem nguyên nhân.",
+    stopped: stopped_vi,
+    budget_refused: "không nhận issue này: ngân sách tháng của repository đã hết.",
+    cancelled: "đã hủy job của issue này.",
+    reason: "Lý do",
+    job: "job aegis-code",
+    stop_pr_opened: "một pull request hoặc merge request đã được mở",
+    stop_budget: "đã hết ngân sách",
+    stop_steps: "đã chạm giới hạn số bước",
+    stop_expert: "ngay cả model mạnh nhất cũng không sửa được",
+    stop_diagnosed: "được chẩn đoán là không cần sửa code",
 };
 
 /// Non-ASCII letters only Vietnamese uses; tests check English and
@@ -321,10 +450,14 @@ mod tests {
         for l in [Locale::En, Locale::Ja] {
             let s = l.strings();
             let all = format!(
-                "{s:?}{}{}{}{}",
+                "{s:?}{}{}{}{}{}{}{}{}",
                 (s.more)(2),
                 (s.pushed)("abc"),
                 (s.pushed_nothing)("x"),
+                (s.review_refused)("x"),
+                (s.opened)("pull request", Some("https://x")),
+                (s.looked_into)("pull request"),
+                (s.stopped)("pull request", "x"),
                 (s.diagnosis)("x", 0.5)
             );
             assert!(!has_vietnamese(&all), "{l}: {all}");

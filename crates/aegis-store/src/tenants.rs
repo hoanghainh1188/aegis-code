@@ -24,6 +24,9 @@ impl TenantId {
     pub const DEFAULT: TenantId = TenantId(1);
 }
 
+/// The locale codes a tenant may default to, as the column allows.
+pub const LOCALES: [&str; 3] = ["en", "ja", "vi"];
+
 /// How the reason of a job refused, or kept waiting, for its tenant's
 /// monthly budget begins.
 pub const TENANT_BUDGET_SPENT: &str = "the contract's monthly budget is spent";
@@ -39,6 +42,9 @@ pub struct Tenant {
     pub monthly_budget_usd: Option<f64>,
     /// Its jobs that may run at once, over all its repos; `None`: no cap.
     pub max_concurrent_jobs: Option<u32>,
+    /// What its repos write in when a repo names no language (#589): `en`,
+    /// `ja` or `vi`; `None`: the server's default.
+    pub default_locale: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -60,6 +66,7 @@ struct TenantRow {
     name: String,
     monthly_budget_usd: Option<f64>,
     max_concurrent_jobs: Option<i32>,
+    default_locale: Option<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -71,6 +78,7 @@ impl From<TenantRow> for Tenant {
             name: r.name,
             monthly_budget_usd: r.monthly_budget_usd,
             max_concurrent_jobs: r.max_concurrent_jobs.and_then(|n| u32::try_from(n).ok()),
+            default_locale: r.default_locale,
             created_at: r.created_at,
         }
     }
@@ -227,7 +235,7 @@ impl Store {
     pub async fn tenants(&self) -> Result<Vec<Tenant>, StoreError> {
         Ok(sqlx::query_as!(
             TenantRow,
-            "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at
+            "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at
              FROM tenants ORDER BY id"
         )
         .fetch_all(&self.pool)
@@ -240,7 +248,7 @@ impl Store {
     pub async fn tenant(&self, id: TenantId) -> Result<Option<Tenant>, StoreError> {
         Ok(sqlx::query_as!(
             TenantRow,
-            "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at
+            "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at
              FROM tenants WHERE id = $1",
             id.0
         )
@@ -252,7 +260,7 @@ impl Store {
     pub async fn tenant_by_slug(&self, slug: &str) -> Result<Option<Tenant>, StoreError> {
         Ok(sqlx::query_as!(
             TenantRow,
-            "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at
+            "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at
              FROM tenants WHERE slug = $1",
             slug
         )
@@ -282,7 +290,7 @@ impl Store {
             let tenant: Tenant = sqlx::query_as!(
                 TenantRow,
                 "INSERT INTO tenants (slug, name) VALUES ($1, $2)
-                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at",
+                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at",
                 slug,
                 name,
             )
@@ -332,7 +340,7 @@ impl Store {
                 TenantRow,
                 "UPDATE tenants SET monthly_budget_usd = $2, max_concurrent_jobs = $3
                  WHERE id = $1
-                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at",
+                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at",
                 tenant.0,
                 monthly_usd,
                 jobs,
@@ -347,6 +355,44 @@ impl Store {
                 "max_concurrent_jobs": max_concurrent_jobs,
             });
             audit_tenant(&mut tx, actor, "tenant.limits", detail).await?;
+            Ok::<_, StoreError>(tenant)
+        }
+        .await;
+        tx::commit(tx, work).await
+    }
+
+    /// Sets the language `tenant`'s repos write in when a repo names none
+    /// (#589): `en`, `ja` or `vi`, `None` for the server's default;
+    /// audited `tenant.locale`.
+    pub async fn set_tenant_locale_by(
+        &self,
+        tenant: TenantId,
+        locale: Option<&str>,
+        actor: &Actor,
+    ) -> Result<Tenant, StoreError> {
+        if locale.is_some_and(|l| !LOCALES.contains(&l)) {
+            return Err(StoreError::Invalid {
+                field: "default_locale",
+                message: format!("one of {}", LOCALES.join(", ")),
+            });
+        }
+        let mut tx = self.pool.begin().await?;
+        let work = async {
+            let tenant: Tenant = sqlx::query_as!(
+                TenantRow,
+                "UPDATE tenants SET default_locale = $2
+                 WHERE id = $1
+                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, \
+                 default_locale, created_at",
+                tenant.0,
+                locale,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("tenant {}", tenant.0)))?
+            .into();
+            let detail = serde_json::json!({ "tenant": tenant.slug, "default_locale": locale });
+            audit_tenant(&mut tx, actor, "tenant.locale", detail).await?;
             Ok::<_, StoreError>(tenant)
         }
         .await;
@@ -515,6 +561,7 @@ mod tests {
             name: "n".into(),
             monthly_budget_usd: None,
             max_concurrent_jobs: None,
+            default_locale: None,
             created_at: Utc::now(),
         };
         assert_eq!(t(1, "default").secret_prefix(), None);

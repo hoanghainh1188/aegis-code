@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO tenants (slug, name) VALUES ($1, $2)\n                 RETURNING id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at",
+  "query": "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at\n             FROM tenants WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,17 @@
       },
       {
         "ordinal": 5,
+        "name": "default_locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "default_locale"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -72,8 +83,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -82,8 +92,9 @@
       false,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "09b77de5f5e872ddd9ce55608c0f7e23595c9e6216ce4c3741d0d80a66aa55b1"
+  "hash": "dbed57218004c72cdb780eb5b1177acf94cc66e62b36504b078470c3c9e67665"
 }

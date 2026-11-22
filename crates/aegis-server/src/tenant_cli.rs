@@ -6,6 +6,7 @@
 //!   add <slug> <name…>                 # a new contract
 //!   list                               # each with its caps and this month's spend
 //!   limits <slug> [--budget <usd>|none] [--max-jobs <n>|none]
+//!   locale <slug> <en|ja|vi|none>      # what its repos write in when a repo names none
 //!   admin <who> <slug>                 # an admin of its repos (roles, pauses, budgets)
 //!   revoke-admin <who> <slug>
 //!   move <repo-slug> <slug>            # a repo into the tenant; its secrets must be named for it
@@ -29,6 +30,7 @@ aegis-server --config <file> tenant <command>, the command one of:
   add <slug> <name…>
   list
   limits <slug> [--budget <usd>|none] [--max-jobs <n>|none]
+  locale <slug> <en|ja|vi|none>
   admin <who> <slug>
   revoke-admin <who> <slug>
   move <repo-slug> <slug>
@@ -81,6 +83,12 @@ fn limits(rest: &[&str], was: &Tenant) -> Result<(Option<f64>, Option<u32>), Str
     Ok((budget, jobs))
 }
 
+fn shown_locale(t: &Tenant) -> String {
+    t.default_locale
+        .as_deref()
+        .map_or("the server's default".into(), |l| format!("`{l}`"))
+}
+
 fn shown(cap: Option<f64>) -> String {
     cap.map_or("no cap".into(), |c| format!("${c:.2}"))
 }
@@ -110,11 +118,12 @@ pub async fn run(store: &Store, args: &[String]) -> Result<String, String> {
                     .max_concurrent_jobs
                     .map_or("no cap".into(), |n| n.to_string());
                 lines.push(format!(
-                    "{}\t{}\tbudget {} (spent ${:.2})\tjobs at once {jobs}",
+                    "{}\t{}\tbudget {} (spent ${:.2})\tjobs at once {jobs}\tlocale {}",
                     t.slug,
                     t.name,
                     shown(t.monthly_budget_usd),
-                    budget.spent_usd
+                    budget.spent_usd,
+                    shown_locale(&t)
                 ));
             }
             Ok(lines.join("\n"))
@@ -132,6 +141,26 @@ pub async fn run(store: &Store, args: &[String]) -> Result<String, String> {
                 shown(t.monthly_budget_usd),
                 t.max_concurrent_jobs
                     .map_or("no cap".into(), |n| n.to_string())
+            ))
+        }
+        ["locale", slug, code] => {
+            let t = tenant(store, slug).await?;
+            let code = match *code {
+                "none" => None,
+                code => Some(
+                    code.parse::<aegis_pr::Locale>()
+                        .map_err(|e| e.to_string())?
+                        .as_str(),
+                ),
+            };
+            let t = store
+                .set_tenant_locale_by(t.id, code, &actor)
+                .await
+                .map_err(e)?;
+            Ok(format!(
+                "tenant `{}`: its repos write in {} unless a repo names its own `locale`",
+                t.slug,
+                shown_locale(&t)
             ))
         }
         [verb @ ("admin" | "revoke-admin"), who, slug] => {
@@ -245,6 +274,7 @@ mod tests {
             name: "Acme".into(),
             monthly_budget_usd: Some(100.0),
             max_concurrent_jobs: Some(2),
+            default_locale: None,
             created_at: chrono::Utc::now(),
         };
         assert_eq!(limits(&[], &was).unwrap(), (Some(100.0), Some(2)));

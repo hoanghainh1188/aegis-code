@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, created_at\n             FROM tenants WHERE id = $1",
+  "query": "SELECT id, slug, name, monthly_budget_usd, max_concurrent_jobs, default_locale, created_at\n             FROM tenants ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,17 @@
       },
       {
         "ordinal": 5,
+        "name": "default_locale",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tenants",
+            "name": "default_locale"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -71,9 +82,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Int8"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -81,8 +90,9 @@
       false,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "27b5e75950e29807c908f7bc8dba57f6c3d77c3ef724782c3a6f6c5b8c43a150"
+  "hash": "bbea2e765f42cbf873d06129d5052039abc51b35caa22216e9b28fe9addc8ac9"
 }

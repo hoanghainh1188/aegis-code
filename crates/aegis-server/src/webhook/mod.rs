@@ -218,6 +218,8 @@ struct Hooks {
     store: Store,
     config: Arc<WebhookConfig>,
     limit: Arc<RateLimit>,
+    /// The language of each repo's replies (#589).
+    locales: crate::locale::Locales,
 }
 
 /// The endpoints, under `/github` and `/gitlab`; nested at `/webhooks` by
@@ -225,10 +227,24 @@ struct Hooks {
 /// theirs, [`WebhookConfig::max_body_bytes`].
 pub fn router(store: Store, config: WebhookConfig) -> Router {
     let limit = Arc::new(RateLimit::new(config.burst, config.per_minute));
+    // Comments in each repo's language (#589), the server's default from
+    // its modes (`[web] default_locale`); `en` on an API that could not
+    // load them, which runs no job of its own.
+    let locales = crate::locale::Locales::new(
+        store.clone(),
+        config
+            .modes
+            .as_ref()
+            .map_or_else(aegis_pr::Locale::default, |m| m.default_locale),
+    );
     let config = WebhookConfig {
-        notifier: config
-            .notifier
-            .map(|n| n.with_app(config.app.clone(), store.clone())),
+        notifier: config.notifier.map(|n| {
+            n.with_app(config.app.clone(), store.clone())
+                .with_locales(locales.clone())
+        }),
+        gitlab_notifier: config
+            .gitlab_notifier
+            .map(|n| n.with_locales(locales.clone())),
         ..config
     };
     Router::new()
@@ -238,6 +254,7 @@ pub fn router(store: Store, config: WebhookConfig) -> Router {
             store,
             config: Arc::new(config),
             limit,
+            locales,
         })
 }
 
@@ -1018,12 +1035,13 @@ async fn review_round(
             root.id,
         )
         .await;
+    let locale = hooks.locales.of(root.repo_id).await;
     let refused = |why: String| async move {
         tracing::info!(delivery, why, "review round refused");
         let text = format!(
-            "{}\n**aegis-code** will not take this review: {}.",
+            "{}\n{}",
             aegis_pr::REPLY_MARKER,
-            aegis_pr::inert(&why)
+            (locale.strings().review_refused)(&aegis_pr::inert(&why))
         );
         // `group/project!iid` on GitLab, `owner/repo#n` on GitHub.
         match (source, issue_ref.rsplit_once('!')) {
