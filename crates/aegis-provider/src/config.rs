@@ -5,7 +5,10 @@ use aegis_secrets::Secrets;
 use serde::Deserialize;
 
 use crate::claude_api::{ClaudeApi, DEFAULT_API_KEY_ENV};
+use crate::failover::FailoverProvider;
 use crate::local::{LocalModelProvider, LocalProtocol};
+use crate::openai_compat::OpenAiCompatProvider;
+use crate::vertex_ai::VertexAiProvider;
 use crate::{ModelPolicy, ModelProvider, ProviderError, Request, Response};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -32,10 +35,40 @@ pub enum ProviderConfig {
         #[serde(default)]
         protocol: LocalProtocol,
     },
+    /// OpenAI-compatible enterprise gateway or Azure OpenAI deployment (ADR 0018, #595).
+    OpenAiCompat {
+        base_url: String,
+        api_key_env: String,
+        /// When set, sends Azure OpenAI `api-key` header and deployment URL.
+        #[serde(default)]
+        azure_api_version: Option<String>,
+        /// Optional region label validated against `[residency] allowed_regions`.
+        #[serde(default)]
+        region: Option<String>,
+    },
+    /// Google Cloud Vertex AI (Gemini or Claude-on-Vertex, ADR 0018, #595).
+    VertexAi {
+        project: String,
+        region: String,
+        /// Secret or environment variable holding an OAuth2 Bearer access token.
+        access_token_env: String,
+        #[serde(default)]
+        base_url: Option<String>,
+    },
+    /// Ordered residency-safe failover chain (ADR 0018, #595).
+    Failover {
+        #[serde(default = "default_true")]
+        retryable_only: bool,
+        chain: Vec<ProviderConfig>,
+    },
 }
 
 fn default_api_key_env() -> String {
     DEFAULT_API_KEY_ENV.to_owned()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// A provider chosen at runtime from [`ProviderConfig`], with the
@@ -47,11 +80,36 @@ pub struct Provider {
 }
 
 #[derive(Debug, Clone)]
-enum Backend {
+pub(crate) enum LeafBackend {
     ClaudeApi(ClaudeApi),
     #[cfg(feature = "bedrock")]
     Bedrock(crate::Bedrock),
     Local(LocalModelProvider),
+    OpenAiCompat(OpenAiCompatProvider),
+    VertexAi(VertexAiProvider),
+}
+
+impl LeafBackend {
+    pub(crate) fn is_local(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    pub(crate) async fn send(&self, request: &Request) -> Result<Response, ProviderError> {
+        match self {
+            Self::ClaudeApi(api) => api.send(request).await,
+            #[cfg(feature = "bedrock")]
+            Self::Bedrock(bedrock) => bedrock.send(request).await,
+            Self::Local(local) => local.send(request).await,
+            Self::OpenAiCompat(compat) => compat.send(request).await,
+            Self::VertexAi(vertex) => vertex.send(request).await,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Backend {
+    Leaf(LeafBackend),
+    Failover(FailoverProvider),
 }
 
 impl Provider {
@@ -79,16 +137,19 @@ impl Provider {
         &self.policy
     }
 
-    /// Whether requests go to a `local` endpoint.
+    /// Whether requests go exclusively to `local` endpoints.
     pub fn is_local(&self) -> bool {
-        matches!(self.backend, Backend::Local(_))
+        match &self.backend {
+            Backend::Leaf(leaf) => leaf.is_local(),
+            Backend::Failover(f) => f.all_local(),
+        }
     }
 
-    async fn build(
+    async fn build_leaf(
         config: &ProviderConfig,
         secrets: Option<&Secrets>,
-    ) -> Result<Self, ProviderError> {
-        let backend = match config {
+    ) -> Result<LeafBackend, ProviderError> {
+        match config {
             ProviderConfig::ClaudeApi {
                 api_key_env,
                 base_url,
@@ -103,10 +164,10 @@ impl Provider {
                     }
                     None => ClaudeApi::from_env(api_key_env)?,
                 };
-                Backend::ClaudeApi(match base_url {
+                Ok(LeafBackend::ClaudeApi(match base_url {
                     Some(url) => api.with_base_url(url.as_str())?,
                     None => api,
-                })
+                }))
             }
             ProviderConfig::Bedrock {
                 region,
@@ -117,7 +178,7 @@ impl Provider {
                 } else {
                     ModelPolicy::Any
                 };
-                bedrock(region, policy).await?
+                bedrock(region, policy).await
             }
             ProviderConfig::Local {
                 base_url,
@@ -129,8 +190,93 @@ impl Provider {
                     (Some(env), None) => std::env::var(env).ok(),
                     (None, _) => None,
                 };
-                Backend::Local(LocalModelProvider::new(base_url, api_key, *protocol)?)
+                Ok(LeafBackend::Local(LocalModelProvider::new(
+                    base_url, api_key, *protocol,
+                )?))
             }
+            ProviderConfig::OpenAiCompat {
+                base_url,
+                api_key_env,
+                azure_api_version,
+                ..
+            } => {
+                let provider = match secrets {
+                    Some(secrets) => {
+                        secrets
+                            .require(&[api_key_env])
+                            .await
+                            .map_err(|e| ProviderError::Config(e.to_string()))?;
+                        OpenAiCompatProvider::from_secret(
+                            base_url,
+                            secrets,
+                            api_key_env,
+                            azure_api_version.clone(),
+                        )?
+                    }
+                    None => OpenAiCompatProvider::from_env(
+                        base_url,
+                        api_key_env,
+                        azure_api_version.clone(),
+                    )?,
+                };
+                Ok(LeafBackend::OpenAiCompat(provider))
+            }
+            ProviderConfig::VertexAi {
+                project,
+                region,
+                access_token_env,
+                base_url,
+            } => {
+                let provider = match secrets {
+                    Some(secrets) => {
+                        secrets
+                            .require(&[access_token_env])
+                            .await
+                            .map_err(|e| ProviderError::Config(e.to_string()))?;
+                        VertexAiProvider::from_secret(
+                            project,
+                            region,
+                            secrets,
+                            access_token_env,
+                            base_url.clone(),
+                        )?
+                    }
+                    None => VertexAiProvider::from_env(
+                        project,
+                        region,
+                        access_token_env,
+                        base_url.clone(),
+                    )?,
+                };
+                Ok(LeafBackend::VertexAi(provider))
+            }
+            ProviderConfig::Failover { .. } => Err(ProviderError::Config(
+                "nested `failover` inside `chain` is not supported".into(),
+            )),
+        }
+    }
+
+    async fn build(
+        config: &ProviderConfig,
+        secrets: Option<&Secrets>,
+    ) -> Result<Self, ProviderError> {
+        let backend = match config {
+            ProviderConfig::Failover {
+                retryable_only,
+                chain,
+            } => {
+                if chain.is_empty() {
+                    return Err(ProviderError::Config(
+                        "failover provider requires at least one backend in `chain`".into(),
+                    ));
+                }
+                let mut built = Vec::with_capacity(chain.len());
+                for item in chain {
+                    built.push(Self::build_leaf(item, secrets).await?);
+                }
+                Backend::Failover(FailoverProvider::new(built, *retryable_only)?)
+            }
+            other => Backend::Leaf(Self::build_leaf(other, secrets).await?),
         };
         Ok(Self {
             backend,
@@ -140,14 +286,14 @@ impl Provider {
 }
 
 #[cfg(feature = "bedrock")]
-async fn bedrock(region: &str, policy: ModelPolicy) -> Result<Backend, ProviderError> {
-    Ok(Backend::Bedrock(
+async fn bedrock(region: &str, policy: ModelPolicy) -> Result<LeafBackend, ProviderError> {
+    Ok(LeafBackend::Bedrock(
         crate::Bedrock::from_region(region, policy).await,
     ))
 }
 
 #[cfg(not(feature = "bedrock"))]
-async fn bedrock(_region: &str, _policy: ModelPolicy) -> Result<Backend, ProviderError> {
+async fn bedrock(_region: &str, _policy: ModelPolicy) -> Result<LeafBackend, ProviderError> {
     Err(ProviderError::Config(
         "Bedrock provider requested but aegis-provider was built without the `bedrock` feature"
             .into(),
@@ -160,10 +306,8 @@ impl ModelProvider for Provider {
             .check_endpoint(&request.model, self.is_local())?;
         self.policy.check(&request.model)?;
         match &self.backend {
-            Backend::ClaudeApi(api) => api.send(request).await,
-            #[cfg(feature = "bedrock")]
-            Backend::Bedrock(bedrock) => bedrock.send(request).await,
-            Backend::Local(local) => local.send(request).await,
+            Backend::Leaf(leaf) => leaf.send(request).await,
+            Backend::Failover(failover) => failover.send(request).await,
         }
     }
 }

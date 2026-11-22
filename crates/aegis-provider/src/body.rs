@@ -6,6 +6,8 @@ use crate::{CacheTtl, ContentBlock, Message, ProviderError, Request};
 
 /// Bedrock `InvokeModel` body version for Anthropic models.
 pub(crate) const BEDROCK_ANTHROPIC_VERSION: &str = "bedrock-2023-05-31";
+/// Vertex AI `rawPredict` body version for Anthropic Claude models.
+pub(crate) const VERTEX_ANTHROPIC_VERSION: &str = "vertex-2023-10-16";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
@@ -14,6 +16,8 @@ pub(crate) enum Target {
     /// Bedrock: model goes in the URL, BP4 is placed by hand on the last block.
     #[cfg_attr(not(feature = "bedrock"), allow(dead_code))]
     Bedrock,
+    /// Vertex AI Claude `rawPredict`: model goes in the URL, BP4 on the last block.
+    VertexClaude,
 }
 
 pub(crate) fn build_body(request: &Request, target: Target) -> Result<Value, ProviderError> {
@@ -60,6 +64,13 @@ pub(crate) fn build_body(request: &Request, target: Target) -> Result<Value, Pro
         }
         Target::Bedrock => {
             body.insert("anthropic_version".into(), json!(BEDROCK_ANTHROPIC_VERSION));
+            body.insert(
+                "messages".into(),
+                Value::Array(mark_final_block(messages, rolling_marker)),
+            );
+        }
+        Target::VertexClaude => {
+            body.insert("anthropic_version".into(), json!(VERTEX_ANTHROPIC_VERSION));
             body.insert(
                 "messages".into(),
                 Value::Array(mark_final_block(messages, rolling_marker)),
