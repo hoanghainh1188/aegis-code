@@ -145,6 +145,44 @@ async fn config_view(admin: &RepoAdmin, name: &ModeName, mode: &ModeConfig) -> C
             };
             ("Local (OpenAI-compatible)", base_url.clone(), key, None)
         }
+        ProviderConfig::OpenAiCompat {
+            base_url,
+            api_key_env,
+            azure_api_version,
+            ..
+        } => {
+            let label = if azure_api_version.is_some() {
+                "Azure OpenAI"
+            } else {
+                "OpenAI-compatible"
+            };
+            (
+                label,
+                base_url.clone(),
+                Some((api_key_env.clone(), is_set(admin, api_key_env).await)),
+                None,
+            )
+        }
+        ProviderConfig::VertexAi {
+            project,
+            region,
+            access_token_env,
+            ..
+        } => (
+            "Google Vertex AI",
+            format!("{project} ({region})"),
+            Some((
+                access_token_env.clone(),
+                is_set(admin, access_token_env).await,
+            )),
+            None,
+        ),
+        ProviderConfig::Failover { chain, .. } => (
+            "Failover chain",
+            format!("{} backends", chain.len()),
+            None,
+            None,
+        ),
     };
     // The mode was checked when the server loaded it: `ok` is what it
     // loaded with.
@@ -267,9 +305,13 @@ async fn key_value(admin: &RepoAdmin, mode: &ModeConfig) -> Option<String> {
 /// The name of `mode`'s key, when its provider takes one.
 fn key_name(mode: &ModeConfig) -> Option<&str> {
     match &mode.provider {
-        ProviderConfig::ClaudeApi { api_key_env, .. } => Some(api_key_env),
+        ProviderConfig::ClaudeApi { api_key_env, .. }
+        | ProviderConfig::OpenAiCompat { api_key_env, .. } => Some(api_key_env),
+        ProviderConfig::VertexAi {
+            access_token_env, ..
+        } => Some(access_token_env),
         ProviderConfig::Local { api_key_env, .. } => api_key_env.as_deref(),
-        ProviderConfig::Bedrock { .. } => None,
+        ProviderConfig::Bedrock { .. } | ProviderConfig::Failover { .. } => None,
     }
 }
 

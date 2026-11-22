@@ -149,7 +149,7 @@ impl LocalModelProvider {
     }
 }
 
-fn send_error(error: reqwest::Error) -> ProviderError {
+pub(crate) fn send_error(error: reqwest::Error) -> ProviderError {
     if error.is_builder() {
         ProviderError::Config(error.without_url().to_string())
     } else {
@@ -158,7 +158,7 @@ fn send_error(error: reqwest::Error) -> ProviderError {
 }
 
 #[derive(Serialize)]
-struct OpenAiChatRequest<'a> {
+pub(crate) struct OpenAiChatRequest<'a> {
     model: &'a str,
     messages: Vec<OpenAiMessage>,
     max_tokens: u32,
@@ -214,7 +214,9 @@ struct OpenAiFunctionCall {
     arguments: String,
 }
 
-fn build_openai_request<'a>(request: &'a Request) -> Result<OpenAiChatRequest<'a>, ProviderError> {
+pub(crate) fn build_openai_request<'a>(
+    request: &'a Request,
+) -> Result<OpenAiChatRequest<'a>, ProviderError> {
     let mut messages = Vec::new();
 
     if !request.system.is_empty() {
@@ -313,7 +315,7 @@ fn build_openai_request<'a>(request: &'a Request) -> Result<OpenAiChatRequest<'a
 }
 
 #[derive(Deserialize)]
-struct OpenAiChatResponse {
+pub(crate) struct OpenAiChatResponse {
     id: Option<String>,
     model: Option<String>,
     choices: Vec<OpenAiChoice>,
@@ -348,7 +350,7 @@ struct OpenAiPromptTokensDetails {
     cached_tokens: u64,
 }
 
-fn convert_openai_response(
+pub(crate) fn convert_openai_response(
     raw: OpenAiChatResponse,
     fallback_model: &str,
 ) -> Result<Response, ProviderError> {
@@ -422,7 +424,11 @@ struct ErrorDetail {
     kind: String,
 }
 
-fn error_from(status: StatusCode, retry_after_s: Option<u64>, body: &str) -> ProviderError {
+pub(crate) fn error_from(
+    status: StatusCode,
+    retry_after_s: Option<u64>,
+    body: &str,
+) -> ProviderError {
     if status == StatusCode::TOO_MANY_REQUESTS {
         return ProviderError::RateLimited { retry_after_s };
     }

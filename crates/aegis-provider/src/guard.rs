@@ -71,6 +71,11 @@ pub struct ResidencyConfig {
     /// Every model ID must start with one of these (e.g. `["eu."]`).
     #[serde(default)]
     pub allowed_model_prefixes: Option<Vec<String>>,
+    /// Every cloud backend (and every member of a `failover` chain) must
+    /// declare a `region` in this list (e.g. `["ap-northeast-1", "asia-northeast1"]`,
+    /// ADR 0018, #595).
+    #[serde(default)]
+    pub allowed_regions: Option<Vec<String>>,
     /// Only a `local` provider on the deployment's own network: its
     /// `base_url` host is loopback, a private or link-local address, a
     /// name with no dot (a container's), one under `.local`, `.internal`,
@@ -130,7 +135,50 @@ impl ResidencyConfig {
         if !self.local_hosts.is_empty() && !self.local_only {
             return Err("[residency]: `local_hosts` is only read with `local_only = true`".into());
         }
-        if policy == ModelPolicy::LocalOnly {
+        if let Some(regions) = &self.allowed_regions {
+            if self.local_only {
+                return Err("[residency]: set `allowed_regions` or `local_only`, not both".into());
+            }
+            if regions.is_empty() || regions.iter().any(|r| r.trim().is_empty()) {
+                return Err(
+                    "[residency]: `allowed_regions` must contain non-empty region names".into(),
+                );
+            }
+        }
+        self.check_provider(provider, &policy, false)?;
+        for model in models {
+            policy
+                .check(model)
+                .map_err(|e| format!("[residency]: {e}"))?;
+        }
+        Ok(policy)
+    }
+
+    fn check_provider(
+        &self,
+        provider: &ProviderConfig,
+        policy: &ModelPolicy,
+        nested: bool,
+    ) -> Result<(), String> {
+        if let ProviderConfig::Failover { chain, .. } = provider {
+            if nested {
+                return Err(
+                    "[residency]: nested `failover` inside `chain` is not supported".into(),
+                );
+            }
+            if chain.is_empty() {
+                return Err(
+                    "[residency]: `failover` provider requires at least one backend in `chain`"
+                        .into(),
+                );
+            }
+            for item in chain {
+                self.check_provider(item, policy, true)?;
+            }
+            return Ok(());
+        }
+
+        if *policy == ModelPolicy::LocalOnly {
             match provider {
                 ProviderConfig::Local { base_url, .. } => self.check_local_url(base_url)?,
                 _ => {
@@ -141,12 +189,32 @@ impl ResidencyConfig {
                 }
             }
         }
-        for model in models {
-            policy
-                .check(model)
-                .map_err(|e| format!("[residency]: {e}"))?;
+
+        if let Some(allowed) = &self.allowed_regions {
+            let region = match provider {
+                ProviderConfig::Bedrock { region, .. }
+                | ProviderConfig::VertexAi { region, .. } => Some(region.as_str()),
+                ProviderConfig::OpenAiCompat { region, .. } => region.as_deref(),
+                ProviderConfig::ClaudeApi { .. } | ProviderConfig::Local { .. } => None,
+                ProviderConfig::Failover { .. } => unreachable!(),
+            };
+            match region {
+                Some(r) if allowed.iter().any(|a| a.eq_ignore_ascii_case(r)) => {}
+                Some(r) => {
+                    return Err(format!(
+                        "[residency]: provider region `{r}` is not in `allowed_regions` ({})",
+                        allowed.join(", ")
+                    ));
+                }
+                None => {
+                    return Err(
+                        "[residency]: `allowed_regions` requires every provider to declare an allowed `region`"
+                            .into(),
+                    );
+                }
+            }
         }
-        Ok(policy)
+        Ok(())
     }
 
     /// Refuses a `base_url` whose host may be outside the deployment's
@@ -358,5 +426,57 @@ mod tests {
         let stray = residency("local_hosts = [\"vllm.corp.example\"]").unwrap();
         let err = stray.check(&local(), ["m"]).unwrap_err();
         assert!(err.contains("local_hosts"), "{err}");
+    }
+
+    #[test]
+    fn failover_chain_checks_allowed_regions_for_every_member() {
+        let jp = residency("allowed_regions = [\"ap-northeast-1\", \"asia-northeast1\"]").unwrap();
+        let valid_chain = ProviderConfig::Failover {
+            retryable_only: true,
+            chain: vec![
+                bedrock("ap-northeast-1"),
+                ProviderConfig::VertexAi {
+                    project: "acme".into(),
+                    region: "asia-northeast1".into(),
+                    access_token_env: "GCP_TOKEN".into(),
+                    base_url: None,
+                },
+            ],
+        };
+        assert!(jp.check(&valid_chain, ["gemini-2.5-pro"]).is_ok());
+
+        let leaking_chain = ProviderConfig::Failover {
+            retryable_only: true,
+            chain: vec![
+                bedrock("ap-northeast-1"),
+                ProviderConfig::VertexAi {
+                    project: "acme".into(),
+                    region: "us-central1".into(),
+                    access_token_env: "GCP_TOKEN".into(),
+                    base_url: None,
+                },
+            ],
+        };
+        let err = jp.check(&leaking_chain, ["gemini-2.5-pro"]).unwrap_err();
+        assert!(err.contains("us-central1"), "{err}");
+    }
+
+    #[test]
+    fn local_only_refuses_failover_chain_with_any_cloud_backend() {
+        let airgap = residency("local_only = true").unwrap();
+        let mixed = ProviderConfig::Failover {
+            retryable_only: true,
+            chain: vec![
+                local(),
+                ProviderConfig::OpenAiCompat {
+                    base_url: "https://api.openai.com/v1".into(),
+                    api_key_env: "OPENAI_API_KEY".into(),
+                    azure_api_version: None,
+                    region: Some("us-east".into()),
+                },
+            ],
+        };
+        let err = airgap.check(&mixed, ["m"]).unwrap_err();
+        assert!(err.contains("local_only"), "{err}");
     }
 }

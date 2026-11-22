@@ -129,7 +129,11 @@ impl ModeConfig {
             ProviderConfig::Bedrock { .. } => {
                 return refuse("`require_jp_profile` must be true".into());
             }
-            ProviderConfig::ClaudeApi { .. } | ProviderConfig::Local { .. } => {
+            ProviderConfig::ClaudeApi { .. }
+            | ProviderConfig::Local { .. }
+            | ProviderConfig::OpenAiCompat { .. }
+            | ProviderConfig::VertexAi { .. }
+            | ProviderConfig::Failover { .. } => {
                 return refuse(format!("the provider must be Bedrock in `{JAPAN_REGION}`"));
             }
         }

@@ -9,23 +9,29 @@ mod body;
 mod claude_api;
 mod config;
 mod error;
+mod failover;
 mod guard;
 mod local;
 mod observe;
+mod openai_compat;
 mod types;
+mod vertex_ai;
 
 #[cfg(feature = "bedrock")]
 pub use bedrock::Bedrock;
 pub use claude_api::{API_VERSION, ClaudeApi, DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL};
 pub use config::{Provider, ProviderConfig};
 pub use error::ProviderError;
+pub use failover::FailoverProvider;
 pub use guard::{ModelPolicy, ResidencyConfig};
 pub use local::{LocalModelProvider, LocalProtocol};
 pub use observe::{CallObserver, CallReport, Observed};
+pub use openai_compat::OpenAiCompatProvider;
 pub use types::{
     CacheCreation, CachePlan, CacheTtl, ContentBlock, Effort, Message, Request, Response, Role,
     StopReason, ToolDefinition, Usage,
 };
+pub use vertex_ai::VertexAiProvider;
 
 /// One backend that can answer a Messages request.
 ///
