@@ -1,0 +1,253 @@
+//! A job's start: its fresh tree, the module map and the conventions the
+//! agent is told, the tools set up, then the work loop.
+
+use super::*;
+
+pub(super) async fn prepare_and_work<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    issue: &IssueInput,
+    cancel: &CancellationToken,
+) -> Result<Ending, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    let cfg = &platform.config;
+    if cancel.is_cancelled() {
+        return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
+    }
+    // Issue text goes to the model too (design §7).
+    let (title, body) = (redact(&issue.title), redact(&issue.body));
+    ledger
+        .secrets_redacted(count(title.count() + body.count()))
+        .await?;
+    // What the job works on, for its page (#316).
+    ledger.issue_read(&title.text, &issue.url).await?;
+    ledger.ticket_meta(ticket_meta(cfg, issue)).await?;
+    let issue = &IssueInput {
+        title: title.text,
+        body: body.text,
+        ..issue.clone()
+    };
+    // A CVE job (#501): nothing for Light to classify; the platform's
+    // upgrade comes first, in `work`.
+    if let Some(target) = &issue.cve {
+        target.check().map_err(LifecycleError::Config)?;
+        let profiles = cfg.repo.profiles(&platform.profiles)?;
+        return work(
+            platform,
+            ledger,
+            &profiles,
+            issue,
+            String::new(),
+            &Finish::Publish,
+            cancel,
+        )
+        .await;
+    }
+    let (class, response) = match issue.kind {
+        // Its source knows: nothing for Light to decide.
+        Some(kind) => (
+            Classification {
+                kind,
+                // A failed CI run's log is its reproduction (#250).
+                has_repro_info: kind == IssueKind::CiFailure,
+                ..light::default_classification(issue)
+            },
+            None,
+        ),
+        None => light::classify(&platform.provider, &cfg.models.light, issue).await,
+    };
+    if let Some(r) = &response {
+        ledger
+            .model_call(Tier::Light, &cfg.models.light.id, &r.usage)
+            .await?;
+    }
+    ledger.classified(class.kind).await?;
+    // Recorded (#497); the job works on the code whatever it says, unless
+    // the repo turned the diagnosis lane on for it (#451).
+    if let Some(triage) = class.triage.clone() {
+        ledger.triaged(triage.clone()).await?;
+        if cfg.repo.triage_lane.takes(&triage) {
+            return crate::diagnose::diagnose(platform, ledger, issue, &triage).await;
+        }
+    }
+    let profiles = cfg.repo.profiles(&platform.profiles)?;
+    if class.needs_sonar_batching() {
+        return sonar_batch(platform, ledger, &profiles, issue, cancel).await;
+    }
+    let first = issue.first_message(&class.summary, class.has_repro_info);
+    work(
+        platform,
+        ledger,
+        &profiles,
+        issue,
+        first,
+        &Finish::Publish,
+        cancel,
+    )
+    .await
+}
+
+/// Steps 2–10 on the job's own worktree.
+pub(crate) async fn work<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    profiles: &RepoProfiles,
+    issue: &IssueInput,
+    first_message: String,
+    finish: &Finish,
+    cancel: &CancellationToken,
+) -> Result<Ending, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    let cfg = &platform.config;
+    // A review round starts from the PR's head and is still checked
+    // against the PR's base (#243).
+    let (base, start) = match finish {
+        Finish::Update(round) => (
+            round.base(&cfg.repo.path, &cfg.repo.base)?,
+            round.pull.head_sha.clone(),
+        ),
+        _ => {
+            let base = job::resolve(
+                &cfg.repo.path,
+                issue.base.as_deref().unwrap_or(&cfg.repo.base),
+            )?;
+            (base.clone(), base)
+        }
+    };
+    let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
+    let tree = Worktree::create(&cfg.repo.path, &start, &job_dir.join("repo"))?;
+
+    let map = module_map(cfg, profiles, tree.path(), &base)?;
+    let conventions = language_conventions(profiles);
+    let system = system_blocks(&RepoPrompt {
+        language_conventions: conventions.as_deref(),
+        repo_conventions: cfg.repo.conventions.as_deref(),
+        module_summary: Some(&map),
+    });
+
+    for part in profiles.parts() {
+        let dir = tree.path().join(&part.dir);
+        if let Some(why) = fetch_base(cfg, part, &dir, &job_dir, cancel).await? {
+            return Ok(Ending::stop(Outcome::StoppedSteps, why));
+        }
+        // The gate would start the tree's build from the cache anyway; doing
+        // it now spares the agent's first `run_tests` a cold build (#137).
+        if let Some(cache) = build_cache(cfg, part) {
+            tokio::task::spawn_blocking(move || cache.seed(&dir))
+                .await
+                .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
+        }
+    }
+    // A CVE job (#501, ADR 0015): the platform raises the package; the
+    // gate checks that first, and the agent works only if it fails.
+    let (policy, prepared, first_message) = match &issue.cve {
+        None => (DependencyPolicy::Locked, None, first_message),
+        Some(target) => {
+            let root = &profiles.parts()[0];
+            let upgrade =
+                match cve::upgrade(cfg, root, tree.path(), &job_dir, target, cancel).await? {
+                    Ok(upgrade) => upgrade,
+                    Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
+                };
+            let message = cve::first_message(target, &upgrade);
+            let answer = cve::answer(target, &upgrade);
+            (DependencyPolicy::Upgrade(upgrade), Some(answer), message)
+        }
+    };
+    let first_message = first_message + &crate::language::directive(cfg.repo.locale);
+    let tools = McpTools::connect(&tool_specs(cfg, profiles, tree.path(), &job_dir)?).await?;
+    let queries = cfg.codebase_memory.as_ref().map(|c| c.tools.as_slice());
+    let graph = match CodeGraph::open(&tools, queries, tree.path()).await {
+        Ok(graph) => graph,
+        Err(e) => {
+            tools.shutdown().await;
+            return Err(e);
+        }
+    };
+    let session = Session::new(
+        system,
+        Message::user_text(first_message),
+        CacheTtl::FiveMinutes,
+    );
+    let context = DriveContext {
+        profiles,
+        issue,
+        job: JobTree {
+            tree: tree.path(),
+            base: &base,
+            job_dir: &job_dir,
+        },
+        finish,
+        policy: &policy,
+    };
+    let result = drive(platform, ledger, &graph, session, context, prepared, cancel).await;
+    graph.close().await;
+    tools.shutdown().await;
+    drop(tree);
+    result
+}
+
+/// The module map of the repo at `base`, made from the job's fresh
+/// checkout `tree` and kept under the state dir by the digest of the files
+/// the profile reads. BP2 is the same for every issue at the same files
+/// (design §4.4); a new base that changes one of them makes a new map
+/// (#24).
+pub(crate) fn module_map(
+    cfg: &RunConfig,
+    profiles: &RepoProfiles,
+    tree: &Path,
+    base: &str,
+) -> Result<String, LifecycleError> {
+    let digest = job::files_digest(&cfg.repo.path, base, |p| {
+        profiles.owns_file(&p.to_string_lossy())
+    })?;
+    let checkout = Workspace::new(tree, profiles.clone())?;
+    let map_path = cfg
+        .run
+        .state_dir
+        .join("maps")
+        .join(&cfg.repo.key)
+        .join(format!("{digest}.v{MAP_FORMAT}.md"));
+    Ok(load_or_create_summary(&checkout, &map_path)?)
+}
+
+/// The profile's conventions for the system prompt; with directories of
+/// other languages (#71), each language's, and where each goes.
+pub(super) fn language_conventions(profiles: &RepoProfiles) -> Option<String> {
+    let parts = profiles.parts();
+    if parts.len() == 1 {
+        return profiles.root().profile.conventions().map(str::to_owned);
+    }
+    let mut text = String::from(
+        "# Languages of this repo\n\nThis repo has more than one language; each directory below \
+         goes by its own conventions and checks, the rest of the repo by the first:\n",
+    );
+    for part in parts {
+        text.push_str(&format!("- {}\n", part.label()));
+    }
+    text.push_str(
+        "\nName files, and tests given to `run_tests` or as `repro_test`, by their path from \
+         the repo root (`web/tests/cart.test.ts`): a test is then run with its directory's \
+         command, in that directory.\n",
+    );
+    let mut seen = Vec::new();
+    for part in parts {
+        let language = part.profile.language();
+        if seen.contains(&language) {
+            continue;
+        }
+        seen.push(language);
+        if let Some(c) = part.profile.profile.conventions() {
+            text.push('\n');
+            text.push_str(c.trim_end());
+            text.push('\n');
+        }
+    }
+    Some(text)
+}
