@@ -367,8 +367,14 @@ The scope and the measurement milestone of each phase are in [Proposal §9](docs
 * [ADR 0012: L1/L2 Triage and Non-Code Diagnostic Lane](docs/adr/0012-triage-and-diagnostic-lane.md)
 * [ADR 0013: Ephemeral Database Sidecars in Gate Sandbox](docs/adr/0013-ephemeral-database-sidecars.md)
 * [ADR 0014: Per-Language Default Call Cap, 80 for Rust](docs/adr/0014-per-language-call-cap.md)
+* [ADR 0015: CVE Remediation Lane](docs/adr/0015-cve-remediation-lane.md)
+* [ADR 0016: Platform Bias Scope and Measurement](docs/adr/0016-platform-bias-scope-and-measurement.md)
+* [ADR 0017: GitHub App Integration](docs/adr/0017-github-app.md)
 
 ### Detailed Guides & Runbooks
+* [Documentation Hub](docs/README.md) – Full role-based index separating customer/operator docs from internal engineering docs
+* [Security & Compliance Overview](docs/security.md) & [Security Policy](SECURITY.md) – Data residency, sandbox & proxy isolation, prompt injection defense, and vulnerability reporting
+* [Configuration Reference](docs/configuration.md) – Complete schema for `server.toml`, mode TOML, and `repos.config`
 * [Proposal](docs/design/00-proposal.md), [Architecture Specification](docs/design/01-architecture-detail.md) and [Platform Topology](docs/design/02-platform-topology.md) – Scope, the four layers, KPIs, roadmap, system context and crates
 * [Reviewer Guide](docs/reviewing.md) – Reading an Aegis PR, asking for review rounds, recording the verdict
 * [Developer Client Guide (`aegis`)](docs/client.md) – Submitting and monitoring jobs from terminal
@@ -378,8 +384,10 @@ The scope and the measurement milestone of each phase are in [Proposal §9](docs
 * [On-Premise Operations Runbook](docs/runbook/on-premise.md) – Single-machine Docker Compose and systemd management
 * [Adding Repositories](docs/runbook/repos.md) – Registering a repo, roles, budget and webhooks, on every deployment
 * [Kubernetes Operations Runbook](docs/runbook/kubernetes.md) – Helm chart: install, upgrades, rollback
+* [Tenants (Contracts) Runbook](docs/runbook/tenants.md) – Multi-contract isolation and `/ams` MTTR/SLA reporting
+* [Incident Runbook: Pausing Every Agent](docs/runbook/incident.md) – Global kill-switch (`intake` / `emergency`) and recovery
 * [Team Pilot Plan](docs/pilot/2026-11-team-pilot-plan.md) – The four-week on-premise pilot of #158 (in Vietnamese)
-* [Measurement Reports](docs/measurements/) – Dated KPI and experiment reports (in Vietnamese)
+* [Measurement Reports](docs/measurements/README.md) – Dated KPI and experiment reports (in Vietnamese)
 * [Release Operations](docs/release.md) – Release-please, GHCR container images, and offline packages
 * [Contributing & Development Conventions](CLAUDE.md) – Commit formats, branching, and pre-PR verification
 

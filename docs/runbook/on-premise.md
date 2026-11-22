@@ -2,7 +2,7 @@
 
 For operators running Aegis on self-hosted infrastructure without AWS ([ADR 0007](../adr/0007-on-premise-deployment.md), #262). For AWS cloud deployments, see [AWS Runbook](README.md).
 
-> **First install?** Follow [Install Aegis on Premise](../install-on-premise.md): one path from a blank machine to the first PR, including how to make the bot, the tokens and the SSO client, with a check after each step. This runbook is the reference for operating it afterwards.
+> **First install?** Follow [Install Aegis on Premise](../install-on-premise.md): one path from a blank machine to the first PR, including how to make the bot, the tokens and the SSO client, with a check after each step. This runbook is the reference for operating it afterwards (see also [Configuration Reference](../configuration.md) and [Security Overview](../security.md)).
 
 Core operations: [Installation & Setup](#1-installation--setup), [Registering Repositories](#2-registering-repositories), [Upgrades & Rollback](#3-upgrades--rollback), [Backup & Disaster Recovery](#4-backup--disaster-recovery). Two installation methods are supported; the recommended default is **Docker Compose**. The **systemd** method is detailed in [Section 5](#5-systemd-alternative-to-compose).
 
