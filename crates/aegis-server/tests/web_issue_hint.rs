@@ -13,7 +13,7 @@ use aegis_secrets::Secrets;
 use aegis_server::api::router_with;
 use aegis_server::web::RepoAdmin;
 use aegis_store::testing::test_db;
-use aegis_store::{JobFilter, JobSource, NewJob, NewRepo, Page, RepoId, RepoMode, RepoRole, Store};
+use aegis_store::{JobFilter, JobSource, ModeName, NewJob, NewRepo, Page, RepoId, RepoRole, Store};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -71,7 +71,7 @@ async fn repo(s: &Store, api: &str) -> RepoId {
         url: "https://github.com/acme/shop".into(),
         default_branch: "main".into(),
         language: "python".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({ "fork": {
             "owner": "aegis-bot", "name": "shop", "api": api, "token_env": "AEGIS_TEST_FORK_TOKEN"

@@ -8,7 +8,7 @@ use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Outcome};
 use aegis_server::api::router;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, AttemptEnd, JobId, JobSource, NewJob, NewRepo, Patch, RepoId, RepoMode, RepoRole, Store,
+    Actor, AttemptEnd, JobId, JobSource, ModeName, NewJob, NewRepo, Patch, RepoId, RepoRole, Store,
 };
 use axum::Router;
 use axum::body::Body;
@@ -37,7 +37,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/x/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({}),
     })

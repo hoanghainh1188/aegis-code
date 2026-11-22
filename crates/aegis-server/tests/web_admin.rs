@@ -18,7 +18,7 @@ use aegis_server::api::{router, router_with};
 use aegis_server::web::RepoAdmin;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    ActorKind, CloneState, JobSource, NewJob, NewRepo, Page, RepoClone, RepoId, RepoMode, RepoRole,
+    ActorKind, CloneState, JobSource, ModeName, NewJob, NewRepo, Page, RepoClone, RepoId, RepoRole,
     Store,
 };
 use axum::Router;
@@ -77,7 +77,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/x/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 2,
         config: json!({}),
     })
@@ -459,10 +459,12 @@ async fn a_wrong_repo_is_refused_and_a_failed_clone_shows_why() {
     let app = router_with(s.clone(), common::auth(s), Some(repo_admin(&tmp.0)));
     let url = tmp.0.join("upstream").display().to_string();
 
-    // A mode the server has no configuration for, or none at all.
+    // A mode the server has no configuration for, or not a mode name
+    // at all (#591).
     for (mode, why) in [
         ("customer-jp", "no configuration for mode `customer-jp`"),
-        ("nope", "unknown mode `nope`"),
+        ("nope", "no configuration for mode `nope`"),
+        ("Nope!", "`Nope!`: 1-64 of a-z"),
     ] {
         let sent = post(&app, &admin, "/admin/repos", &form(&demo(&url, mode, "1"))).await;
         assert_eq!(

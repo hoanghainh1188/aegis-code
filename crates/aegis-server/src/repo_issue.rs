@@ -97,7 +97,7 @@ mod tests {
             url: url.into(),
             default_branch: "main".into(),
             language: "python".into(),
-            mode: aegis_store::RepoMode::Poc,
+            mode: aegis_store::ModeName::POC,
             max_concurrent_jobs: 1,
             config,
             created_at: chrono::Utc::now(),

@@ -7,7 +7,7 @@ use aegis_ledger::{
     TokenCounts,
 };
 use aegis_store::testing::test_db;
-use aegis_store::{JobEnd, JobSource, KpiRecord, NewJob, NewRepo, RepoId, RepoMode, Store};
+use aegis_store::{JobEnd, JobSource, KpiRecord, ModeName, NewJob, NewRepo, RepoId, Store};
 use serde_json::json;
 
 fn id(text: &str) -> IssueId {
@@ -49,7 +49,7 @@ async fn repo(s: &Store, slug: &str, language: &str) -> RepoId {
         url: format!("https://github.com/x/{slug}"),
         default_branch: "main".into(),
         language: language.into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({}),
     })

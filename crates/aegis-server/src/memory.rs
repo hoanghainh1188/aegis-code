@@ -11,9 +11,7 @@ use aegis_lifecycle::{
 };
 use aegis_provider::Provider;
 use aegis_secrets::Secrets;
-use aegis_store::{
-    Actor, MemoryKind, NewRepoMemory, Repo, RepoId, RepoMemory, RepoMode, Store, StoreError,
-};
+use aegis_store::{Actor, MemoryKind, NewRepoMemory, Repo, RepoId, RepoMemory, Store, StoreError};
 
 /// Maximum number of relevant repository memories recalled into `BP3` per job.
 pub const DEFAULT_RECALL_LIMIT: usize = 5;
@@ -64,10 +62,7 @@ async fn light_of(
     secrets: &Secrets,
     repo: &Repo,
 ) -> Option<(Provider, String)> {
-    let mode = match repo.mode {
-        RepoMode::Poc => modes?.poc.as_ref(),
-        RepoMode::CustomerJp => modes?.customer_jp.as_ref(),
-    }?;
+    let mode = modes?.config(&repo.mode)?;
     match Provider::from_config_with_secrets(&mode.provider, secrets).await {
         Ok(provider) => Some((provider, mode.models.light.id.clone())),
         Err(e) => {

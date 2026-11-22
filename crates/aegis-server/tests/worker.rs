@@ -11,7 +11,7 @@ use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::worker::{WorkerConfig, run_worker};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Claim, Job, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, Patch, RepoId, RepoMode,
+    Claim, Job, JobFilter, JobSource, JobStatus, ModeName, NewJob, NewRepo, Page, Patch, RepoId,
     RunStatus, Store,
 };
 use tokio_util::sync::CancellationToken;
@@ -166,7 +166,7 @@ async fn limited(s: &Store, slug: &str, max: u32) -> RepoId {
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: max,
         config: serde_json::json!({}),
     })

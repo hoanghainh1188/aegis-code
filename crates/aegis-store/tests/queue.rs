@@ -5,7 +5,7 @@ use std::time::Duration;
 use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Outcome};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    AttemptEnd, JobSource, JobStatus, Lease, NewJob, NewRepo, Page, Patch, RepoId, RepoMode,
+    AttemptEnd, JobSource, JobStatus, Lease, ModeName, NewJob, NewRepo, Page, Patch, RepoId,
     RunStatus, Store, StoreError,
 };
 
@@ -25,7 +25,7 @@ async fn limited(s: &Store, slug: &str, max: u32) -> RepoId {
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: max,
         config: serde_json::json!({}),
     })

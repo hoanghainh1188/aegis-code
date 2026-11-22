@@ -14,7 +14,7 @@ use aegis_server::web::RepoAdmin;
 use aegis_server::webhook::{COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    NewRepo, NewWebhookEvent, RepoId, RepoMode, RepoRole, Store, WebhookOutcome, WebhookSource,
+    ModeName, NewRepo, NewWebhookEvent, RepoId, RepoRole, Store, WebhookOutcome, WebhookSource,
 };
 use axum::Router;
 use axum::body::Body;
@@ -66,7 +66,7 @@ async fn repo(s: &Store, api: &str) -> RepoId {
         url: "https://github.com/acme/app".into(),
         default_branch: "main".into(),
         language: "go".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({ "fork": {
             "owner": "aegis-bot", "name": "app", "api": api, "token_env": "AEGIS_TEST_FORK_TOKEN"

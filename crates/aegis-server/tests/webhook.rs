@@ -14,7 +14,7 @@ use aegis_server::webhook::{
 };
 use aegis_server::worker::{WorkerConfig, run_worker_notifying};
 use aegis_store::testing::test_db;
-use aegis_store::{Claim, Job, JobFilter, JobSource, JobStatus, NewRepo, Page, RepoMode, Store};
+use aegis_store::{Claim, Job, JobFilter, JobSource, JobStatus, ModeName, NewRepo, Page, Store};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -50,7 +50,7 @@ async fn repo(s: &Store, slug: &str, url: &str) {
         url: url.into(),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: json!({}),
     })
@@ -861,7 +861,7 @@ async fn an_issue_author_must_be_a_collaborator_when_the_repo_requires_it() {
             url: "https://github.com/org/trusted-repo".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({ "issue_trust": "collaborators" }),
         })
@@ -875,7 +875,7 @@ async fn an_issue_author_must_be_a_collaborator_when_the_repo_requires_it() {
             url: "https://github.com/org/open-repo".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({}),
         })
@@ -980,7 +980,7 @@ async fn a_gitlab_issue_author_must_be_a_developer_when_the_repo_requires_it() {
             url: "https://gitlab.com/group/trusted-gl".into(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: json!({ "issue_trust": "collaborators" }),
         })

@@ -23,7 +23,7 @@ use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::lifecycle::LifecycleRunner;
 use aegis_server::metrics::{self, metrics};
 use aegis_server::worker::{WorkerConfig, run_worker};
-use aegis_store::{JobSource, JobStatus, NewJob, RepoMode};
+use aegis_store::{JobSource, JobStatus, ModeName, NewJob};
 use axum::body::Body;
 use axum::http::Request;
 use http_body_util::BodyExt;
@@ -233,7 +233,7 @@ fn spec(scratch: &Scratch, github_api: &str) -> RepoSpec {
         url: upstream.display().to_string(),
         default_branch: "main".into(),
         language: aegis_lang::Language::Rust,
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         settings,
         tenant: None,

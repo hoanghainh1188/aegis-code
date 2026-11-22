@@ -3,7 +3,7 @@
 //! repo says why, and installed repos not yet registered can be listed.
 
 use aegis_store::testing::test_db;
-use aegis_store::{AppOnRepo, InstallationSeen, NewRepo, RepoMode, RepoSelection, Store};
+use aegis_store::{AppOnRepo, InstallationSeen, ModeName, NewRepo, RepoSelection, Store};
 
 fn seen(id: i64, account: &str, selection: RepoSelection, repos: &[&str]) -> InstallationSeen {
     InstallationSeen {
@@ -20,7 +20,7 @@ async fn register(s: &Store, slug: &str, url: &str) {
         url: url.into(),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 1,
         config: serde_json::json!({"app": {}}),
     })

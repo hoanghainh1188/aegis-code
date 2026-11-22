@@ -16,7 +16,7 @@ use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::worker::{JobNotifier, WorkerConfig, run_worker_notifying};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, Claim, Job, JobFilter, JobSource, JobStatus, NewJob, NewRepo, Page, RepoId, RepoMode,
+    Actor, Claim, Job, JobFilter, JobSource, JobStatus, ModeName, NewJob, NewRepo, Page, RepoId,
     SlaPriority, Store,
 };
 use serde_json::{Value, json};
@@ -364,7 +364,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/acme/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 2,
         config: json!({}),
     })

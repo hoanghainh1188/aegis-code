@@ -6,7 +6,7 @@ use std::time::Duration;
 use aegis_ledger::{IssueId, Outcome};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, AttemptEnd, Job, JobSource, JobStatus, NewJob, NewRepo, RepoMode, Store, StoreError,
+    Actor, AttemptEnd, Job, JobSource, JobStatus, ModeName, NewJob, NewRepo, Store, StoreError,
 };
 use sqlx::{Connection, PgConnection};
 
@@ -20,7 +20,7 @@ async fn setup(s: &Store) -> Job {
             url: "https://github.com/acme/app".into(),
             default_branch: "main".into(),
             language: "go".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 5,
             config: serde_json::json!({}),
         })

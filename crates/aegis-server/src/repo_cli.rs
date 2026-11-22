@@ -18,7 +18,7 @@
 //! url = "https://github.com/typst/typst"
 //! default_branch = "main"             # the default
 //! language = "rust"
-//! mode = "poc"                        # or "customer-jp"; poc by default
+//! mode = "poc"                        # a `[modes.<name>]` of the server; poc by default
 //! max_concurrent_jobs = 1             # the default
 //!
 //! [settings]                          # aegis_lifecycle::RepoSettings
@@ -36,7 +36,7 @@ use std::path::Path;
 use aegis_lang::Language;
 use aegis_lifecycle::{Modes, RepoSettings, RepoSpec};
 use aegis_secrets::Secrets;
-use aegis_store::{Actor, Page, Repo, RepoMode, Store};
+use aegis_store::{Actor, ModeName, Page, Repo, Store};
 use serde::{Deserialize, Serialize};
 
 pub const USAGE: &str = "\
@@ -79,7 +79,7 @@ fn main_branch() -> String {
 }
 
 fn poc() -> String {
-    RepoMode::Poc.as_str().into()
+    ModeName::POC.as_str().into()
 }
 
 fn one() -> u32 {
@@ -100,8 +100,7 @@ impl RepoFile {
     }
 
     pub fn spec(&self) -> Result<RepoSpec, String> {
-        let mode = RepoMode::parse(&self.mode)
-            .ok_or_else(|| format!("unknown mode `{}`: poc, customer-jp", self.mode))?;
+        let mode = ModeName::parse(&self.mode).map_err(|e| e.to_string())?;
         Ok(RepoSpec {
             slug: self.slug.clone(),
             url: self.url.clone(),
@@ -321,7 +320,7 @@ fork = { owner = "aegis-bot", name = "typst", token_env = "AEGIS_GITHUB_TOKEN" }
         let file: RepoFile = toml::from_str(FILE).unwrap();
         let spec = file.spec().unwrap();
         assert_eq!(spec.default_branch, "main");
-        assert_eq!(spec.mode, RepoMode::Poc);
+        assert_eq!(spec.mode, ModeName::POC);
         assert_eq!(spec.max_concurrent_jobs, 1);
         assert_eq!(spec.language, Language::Rust);
 
@@ -329,11 +328,18 @@ fork = { owner = "aegis-bot", name = "typst", token_env = "AEGIS_GITHUB_TOKEN" }
         assert!(toml::from_str::<RepoFile>(&typo).is_err());
         let in_settings = FILE.replace("[settings]", "[settings]\nimag = \"x\"");
         assert!(toml::from_str::<RepoFile>(&in_settings).is_err());
-        let mode = RepoFile {
-            mode: "customer".into(),
+        // Any name the store takes (#591); whether the server has its
+        // configuration is checked when the repo is registered.
+        let eu = RepoFile {
+            mode: "customer-eu".into(),
+            ..file.clone()
+        };
+        assert_eq!(eu.spec().unwrap().mode.as_str(), "customer-eu");
+        let bad = RepoFile {
+            mode: "Customer EU".into(),
             ..file
         };
-        assert!(mode.spec().unwrap_err().contains("unknown mode"));
+        assert!(bad.spec().unwrap_err().contains("mode"));
     }
 
     #[test]
@@ -345,7 +351,7 @@ fork = { owner = "aegis-bot", name = "typst", token_env = "AEGIS_GITHUB_TOKEN" }
             url: file.url.clone(),
             default_branch: "main".into(),
             language: "rust".into(),
-            mode: RepoMode::Poc,
+            mode: ModeName::POC,
             max_concurrent_jobs: 1,
             config: serde_json::to_value(&file.settings).unwrap(),
             created_at: Default::default(),

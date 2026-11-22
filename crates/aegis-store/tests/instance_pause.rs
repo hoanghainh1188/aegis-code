@@ -7,8 +7,8 @@ use std::time::Duration;
 use aegis_ledger::IssueId;
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, ActorKind, JobSource, JobStatus, Lease, NewJob, NewRepo, Page, PauseLevel, RepoId,
-    RepoMode, Store, StoreError,
+    Actor, ActorKind, JobSource, JobStatus, Lease, ModeName, NewJob, NewRepo, Page, PauseLevel,
+    RepoId, Store, StoreError,
 };
 
 const LEASE: Duration = Duration::from_secs(60);
@@ -20,7 +20,7 @@ async fn repo(s: &Store, slug: &str) -> RepoId {
         url: format!("https://github.com/example/{slug}"),
         default_branch: "main".into(),
         language: "rust".into(),
-        mode: RepoMode::Poc,
+        mode: ModeName::POC,
         max_concurrent_jobs: 10,
         config: serde_json::json!({}),
     })
