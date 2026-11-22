@@ -7,6 +7,27 @@ version = "0.17.1"
 license = "Apache-2.0"
 edition = "2024"
 
+# External crates two or more members use, at one version (#602).
+[workspace.dependencies]
+aws-config = "1.13.0"
+aws-lc-rs = "1.18.2"
+base64 = "0.22.1"
+chrono = { version = "0.4.45", default-features = false }
+http-body-util = "0.1.5"
+libc = "0.2.191"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false }
+rmcp = { version = "3.9.0", default-features = false }
+serde = "1.0.229"
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = "1.53.3"
+tokio-util = "0.7.20"
+toml = "1.1.8"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false }
+wiremock = "0.6.5"
+
 # Giam dung luong target/debug: chi giu thong tin so dong khi debug
 [profile.dev]
 debug = "line-tables-only"

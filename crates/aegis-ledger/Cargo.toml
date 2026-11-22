@@ -8,13 +8,13 @@ publish = false
 
 [dependencies]
 aegis-provider = { path = "../aegis-provider" }
-serde = { version = "1.0.229", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 # Read back the exact f64 that was written: costs are summed from many
 # events, and a ledger copied between stores must not drift (#22).
-serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
-thiserror = "2.0.21"
-tokio = { version = "1.53.3", features = ["fs", "io-util"] }
-toml = "1.1.8"
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+toml.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
