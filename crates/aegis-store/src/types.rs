@@ -48,12 +48,12 @@ macro_rules! text_enum {
 /// Longest mode name the `repos.mode` CHECK allows.
 const MAX_MODE_LEN: usize = 64;
 
-/// A repo's mode (#591): which `[modes.<name>]` of the server its jobs
-/// run with. Any name the `repos.mode` CHECK allows: 1–64 of `a-z`,
+/// A repo's mode (#591): which mode of the server's `[modes]` its jobs
+/// run with (#592). Any name the `repos.mode` CHECK allows: 1–64 of `a-z`,
 /// `0-9`, `_` and `-`, starting with a letter or a digit. Whether the
 /// server has a configuration for it is checked where the repo is
 /// registered and where its jobs run, not here.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ModeName(Cow<'static, str>);
 
 impl ModeName {
@@ -78,6 +78,13 @@ impl ModeName {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The name with each `_` as `-`: names with the same key are one
+    /// mode, so `customer_jp` in an older server.toml is `customer-jp`
+    /// (#592).
+    pub fn key(&self) -> String {
+        self.0.replace('_', "-")
     }
 
     pub(crate) fn decode(column: &'static str, text: &str) -> Result<Self, StoreError> {

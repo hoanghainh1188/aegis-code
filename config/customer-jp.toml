@@ -6,6 +6,13 @@ kind = "bedrock"
 region = "ap-northeast-1"
 require_jp_profile = true
 
+# Where this mode's code may go (#592): only `jp.` inference profiles. The
+# server checks every tier's model against it at start and the provider
+# again before each request. Another mode lists its own prefixes
+# (`["eu."]`), or `local_only = true` for a `local` provider only.
+[residency]
+allowed_model_prefixes = ["jp."]
+
 # Model per tier (design §5.1). Read by aegis-router.
 # Core uses Opus with low effort because Sonnet 5.5 has no `jp.` profile on
 # Bedrock yet (checked 2026-10-27, #19). Switch core once that profile exists.

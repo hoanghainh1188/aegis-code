@@ -160,14 +160,18 @@ struct ModeRuntime {
 }
 
 impl ModeRuntime {
-    async fn new(mode: &ModeConfig, secrets: &Secrets) -> Result<Self, String> {
+    /// The provider refuses what `name`'s residency does not allow (#592),
+    /// on top of the check of its models when the mode was loaded.
+    async fn new(name: &ModeName, mode: &ModeConfig, secrets: &Secrets) -> Result<Self, String> {
+        let policy = mode.check(name).map_err(|e| e.to_string())?;
         let prices = PriceTable::load(&mode.run.pricing).map_err(|e| e.to_string())?;
         for model in [&mode.models.light, &mode.models.core, &mode.models.expert] {
             prices.price(&model.id).map_err(|e| e.to_string())?;
         }
         let provider = Provider::from_config_with_secrets(&mode.provider, secrets)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .with_policy(policy);
         Ok(Self { provider, prices })
     }
 }
@@ -178,8 +182,8 @@ pub struct LifecycleRunner {
     ledger: RunLedger,
     profiles: Profiles,
     secrets: Secrets,
-    poc: Option<ModeRuntime>,
-    customer_jp: Option<ModeRuntime>,
+    /// Each configured mode's, by [`Modes::config`]'s name.
+    runtimes: Vec<(ModeName, ModeRuntime)>,
     /// The instance's GitHub App (ADR 0017), for repos on the app path.
     github_app: Option<Arc<crate::github_app::AppHandle>>,
 }
@@ -189,26 +193,20 @@ impl LifecycleRunner {
     /// mode that cannot run (its API key missing from `secrets`) fails the
     /// start, not its jobs.
     pub async fn new(store: Store, modes: Modes, secrets: Secrets) -> Result<Self, String> {
-        let runtime = |mode: Option<ModeConfig>| async {
-            match mode {
-                Some(m) => ModeRuntime::new(&m, &secrets).await.map(Some),
-                None => Ok(None),
-            }
-        };
-        let poc = runtime(modes.poc.clone())
-            .await
-            .map_err(|e| format!("mode poc: {e}"))?;
-        let customer_jp = runtime(modes.customer_jp.clone())
-            .await
-            .map_err(|e| format!("mode customer-jp: {e}"))?;
+        let mut runtimes = Vec::new();
+        for (name, mode) in modes.iter() {
+            let runtime = ModeRuntime::new(name, mode, &secrets)
+                .await
+                .map_err(|e| format!("mode {name}: {e}"))?;
+            runtimes.push((name.clone(), runtime));
+        }
         Ok(Self {
             configs: RepoConfigs::new(modes, store.clone()),
             ledger: RunLedger::new(store.ledger()),
             store,
             profiles: Profiles::builtin().map_err(|e| e.to_string())?,
             secrets,
-            poc,
-            customer_jp,
+            runtimes,
             github_app: None,
         })
     }
@@ -276,16 +274,15 @@ impl LifecycleRunner {
         })
     }
 
-    /// Only `poc` and `customer-jp` have one for now (#592).
+    /// The runtime of `mode`, by the name [`Modes::config`] finds it
+    /// under (`_` and `-` alike).
     fn runtime(&self, mode: &ModeName) -> Result<&ModeRuntime, Attempt> {
-        let runtime = if *mode == ModeName::POC {
-            self.poc.as_ref()
-        } else if *mode == ModeName::CUSTOMER_JP {
-            self.customer_jp.as_ref()
-        } else {
-            None
-        };
-        runtime.ok_or_else(|| Attempt::Rejected(format!("no configuration for mode `{mode}`")))
+        let key = mode.key();
+        self.runtimes
+            .iter()
+            .find(|(name, _)| name.key() == key)
+            .map(|(_, runtime)| runtime)
+            .ok_or_else(|| Attempt::Rejected(format!("no configuration for mode `{mode}`")))
     }
 
     /// Secret `name` for repo `slug`'s job: `Rejected` when the store has

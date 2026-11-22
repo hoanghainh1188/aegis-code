@@ -1,15 +1,17 @@
 //! Many repos (#24): each registered repo (`aegis-store`'s `repos`) runs
-//! with the configuration of its mode, `poc` or `customer-jp`, and its own
+//! with the configuration of its mode (`poc`, `customer-jp`, or any other
+//! the server's `[modes]` names, #592), and its own
 //! settings: language profile and overrides, Docker image, Sonar project,
 //! allow-list, license and advisory policy, conventions for the prompt.
 //! [`Modes::run_config`] puts the two together into the [`RunConfig`] of
 //! one repo's jobs; nothing else is shared between repos.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use aegis_lang::Language;
 use aegis_ledger::Tier;
-use aegis_provider::ProviderConfig;
+use aegis_provider::{ModelPolicy, ProviderConfig, ResidencyConfig};
 use aegis_router::ModelsConfig;
 use aegis_sonar_batch::PollConfig;
 use aegis_store::{Actor, ModeName, NewRepo, Repo, RepoId, Store};
@@ -19,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::LifecycleError;
 use crate::config::{
     BudgetSection, DirConfig, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig,
-    RunSection, SonarConfig,
+    RunSection, SonarConfig, residency_policy,
 };
 
 /// Bedrock in Tokyo for `customer-jp` (design §1, §7).
@@ -40,6 +42,13 @@ pub struct ModeConfig {
     pub identity: IdentityConfig,
     #[serde(default)]
     pub codebase_memory: Option<ExtraServer>,
+    /// Where the mode's code may go (#592); see [`ResidencyConfig`].
+    #[serde(default)]
+    pub residency: ResidencyConfig,
+}
+
+fn is_customer_jp(mode: &ModeName) -> bool {
+    mode.key() == ModeName::CUSTOMER_JP.key()
 }
 
 impl ModeConfig {
@@ -71,20 +80,44 @@ impl ModeConfig {
         Ok(mode)
     }
 
-    /// The `customer-jp` guard (design §7): Bedrock in Tokyo with the
-    /// `jp.` check on, and a `jp.` inference profile for every tier, so a
-    /// customer repo cannot be sent anywhere else by a wrong line.
-    /// Other modes have no guard yet (#592).
-    pub fn check(&self, mode: &ModeName) -> Result<(), LifecycleError> {
-        if *mode == ModeName::CUSTOMER_JP {
-            self.check_japan_only()
-        } else {
-            Ok(())
+    /// The residency policy of `mode`'s provider, once the configuration
+    /// keeps to it: its `[residency]` (#592) for every mode, and for
+    /// `customer-jp` also the guard of design §7 (Bedrock in Tokyo with the
+    /// `jp.` check on, a `jp.` inference profile for every tier), so a
+    /// repo's code cannot be sent anywhere else by a wrong line.
+    pub fn check(&self, mode: &ModeName) -> Result<ModelPolicy, LifecycleError> {
+        // A file that asks for the `jp.` check is a Japan configuration
+        // whatever the mode is called (`custmer_jp`…): it gets the whole
+        // guard, not just the check its provider makes.
+        let claims_japan = matches!(
+            self.provider,
+            ProviderConfig::Bedrock {
+                require_jp_profile: true,
+                ..
+            }
+        );
+        let customer_jp = is_customer_jp(mode) || claims_japan;
+        if customer_jp {
+            self.check_japan_only()?;
         }
+        let policy = residency_policy(&self.residency, &self.provider, &self.models).map_err(
+            |e| match e {
+                LifecycleError::Config(why) => LifecycleError::Config(format!("{mode}: {why}")),
+                other => other,
+            },
+        )?;
+        Ok(match policy {
+            ModelPolicy::Any if customer_jp => ModelPolicy::japan_only(),
+            policy => policy,
+        })
     }
 
     fn check_japan_only(&self) -> Result<(), LifecycleError> {
-        let refuse = |why: String| Err(LifecycleError::Config(format!("customer-jp: {why}")));
+        let refuse = |why: String| {
+            Err(LifecycleError::Config(format!(
+                "customer-jp guard (design §7): {why}"
+            )))
+        };
         match &self.provider {
             ProviderConfig::Bedrock {
                 region,
@@ -396,29 +429,50 @@ impl RepoRun {
     }
 }
 
-/// The configuration of each mode. A mode without one has no repos.
+/// The configuration of each mode, by name (#592). A mode without one has
+/// no repos. Each was checked ([`ModeConfig::check`]) when it was added.
 #[derive(Debug, Clone, Default)]
 pub struct Modes {
-    pub poc: Option<ModeConfig>,
-    pub customer_jp: Option<ModeConfig>,
+    /// By [`ModeName::key`]: the name as `[modes]` gave it, its
+    /// configuration.
+    configs: BTreeMap<String, (ModeName, ModeConfig)>,
     /// Whether the instance has a GitHub App (`[github_app]`, ADR 0017):
     /// without one, a repo on the app path is refused at registration.
     pub github_app: bool,
 }
 
 impl Modes {
-    /// Fails if the `customer-jp` configuration does not pass its guard,
-    /// before any repo uses it.
+    /// The two modes every deployment knows, either one optional.
     pub fn new(
         poc: Option<ModeConfig>,
         customer_jp: Option<ModeConfig>,
     ) -> Result<Self, LifecycleError> {
-        if let Some(jp) = &customer_jp {
-            jp.check(&ModeName::CUSTOMER_JP)?;
+        Self::from_configs(
+            [(ModeName::POC, poc), (ModeName::CUSTOMER_JP, customer_jp)]
+                .into_iter()
+                .filter_map(|(name, config)| config.map(|c| (name, c))),
+        )
+    }
+
+    /// Any modes, by name. Fails if one does not pass its check, before
+    /// any repo uses it, or if two names are the same mode (`a_b` and
+    /// `a-b`).
+    pub fn from_configs(
+        configs: impl IntoIterator<Item = (ModeName, ModeConfig)>,
+    ) -> Result<Self, LifecycleError> {
+        let mut by_key = BTreeMap::new();
+        for (name, config) in configs {
+            config.check(&name)?;
+            let key = name.key();
+            if let Some((first, _)) = by_key.get(&key) {
+                return Err(LifecycleError::Config(format!(
+                    "modes `{first}` and `{name}` are the same mode: `_` and `-` are not told apart"
+                )));
+            }
+            by_key.insert(key, (name, config));
         }
         Ok(Self {
-            poc,
-            customer_jp,
+            configs: by_key,
             github_app: false,
         })
     }
@@ -428,25 +482,23 @@ impl Modes {
         Self { github_app, ..self }
     }
 
-    /// The configuration of `mode`, if the server has one: only `poc`
-    /// and `customer-jp` for now (#592).
+    /// The configuration of `mode`, if the server has one.
     pub fn config(&self, mode: &ModeName) -> Option<&ModeConfig> {
-        if *mode == ModeName::POC {
-            self.poc.as_ref()
-        } else if *mode == ModeName::CUSTOMER_JP {
-            self.customer_jp.as_ref()
-        } else {
-            None
-        }
+        self.configs.get(&mode.key()).map(|(_, config)| config)
+    }
+
+    /// Each mode with its configuration, by name.
+    pub fn iter(&self) -> impl Iterator<Item = (&ModeName, &ModeConfig)> {
+        self.configs.values().map(|(name, config)| (name, config))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.configs.is_empty()
     }
 
     fn mode(&self, mode: &ModeName) -> Result<&ModeConfig, LifecycleError> {
-        let config = self
-            .config(mode)
-            .ok_or_else(|| LifecycleError::Config(format!("no configuration for mode `{mode}`")))?;
-        // Again here: `Modes` has public fields.
-        config.check(mode)?;
-        Ok(config)
+        self.config(mode)
+            .ok_or_else(|| LifecycleError::Config(format!("no configuration for mode `{mode}`")))
     }
 
     /// The configuration of `repo`'s jobs. Its clone is
@@ -536,6 +588,7 @@ impl Modes {
             identity: mode.identity.clone(),
             codebase_memory: mode.codebase_memory.clone(),
             sonar: settings.sonar,
+            residency: mode.residency.clone(),
         }
         .check()
         .map_err(|e| match e {
@@ -963,15 +1016,10 @@ mod tests {
             let jp = jp_with(edit);
             let err = jp.check(&ModeName::CUSTOMER_JP).unwrap_err().to_string();
             assert!(err.contains(why), "{why}: {err}");
-            // Refused before any repo uses it, and again if set by hand.
+            // Refused before any repo uses it, under either spelling.
             assert!(Modes::new(None, Some(jp.clone())).is_err());
-            let by_hand = Modes {
-                poc: None,
-                customer_jp: Some(jp),
-                github_app: false,
-            };
-            let customer = repo("customer", ModeName::CUSTOMER_JP, settings());
-            assert!(by_hand.run_config(&customer).is_err(), "{why}");
+            let underscore = ModeName::parse("customer_jp").unwrap();
+            assert!(Modes::from_configs([(underscore, jp)]).is_err(), "{why}");
         }
     }
 
@@ -1048,6 +1096,119 @@ mod tests {
             .run_config(&repo("app", ModeName::POC, own))
             .unwrap();
         assert_eq!(cfg.budget.max_model_calls, None);
+    }
+
+    /// A mode `customer-eu` on Bedrock in Frankfurt, its models `prefix`.
+    fn eu_mode(prefix: &str) -> ModeConfig {
+        let eu = JP
+            .replace(
+                "allowed_model_prefixes = [\"jp.\"]",
+                "allowed_model_prefixes = [\"eu.\"]",
+            )
+            .replace("ap-northeast-1", "eu-central-1")
+            .replace("require_jp_profile = true", "require_jp_profile = false")
+            .replace("\"jp.", &format!("\"{prefix}"));
+        ModeConfig::from_toml(&eu).unwrap()
+    }
+
+    fn airgap_mode() -> ModeConfig {
+        let local = include_str!("../../../config/local.toml");
+        ModeConfig::from_toml(&format!("{local}\n[residency]\nlocal_only = true\n")).unwrap()
+    }
+
+    /// #592: a mode only the server's configuration names runs its
+    /// repos, with its own residency policy.
+    #[test]
+    fn modes_of_any_name_run_their_repos_within_their_residency() {
+        let eu = ModeName::parse("customer-eu").unwrap();
+        let airgap = ModeName::parse("local-airgap").unwrap();
+        let modes = Modes::from_configs([
+            (ModeName::POC, ModeConfig::from_toml(POC).unwrap()),
+            (eu.clone(), eu_mode("eu.")),
+            (airgap.clone(), airgap_mode()),
+        ])
+        .unwrap();
+        let names: Vec<&str> = modes.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["customer-eu", "local-airgap", "poc"]);
+
+        let config = modes
+            .run_config(&repo("shop.eu", eu.clone(), settings()))
+            .unwrap();
+        assert!(config.models.core.id.starts_with("eu."));
+        assert_eq!(
+            config.model_policy().unwrap(),
+            ModelPolicy::AllowedPrefixes(vec!["eu.".into()])
+        );
+        let config = modes
+            .run_config(&repo("vault", airgap.clone(), settings()))
+            .unwrap();
+        assert!(matches!(config.provider, ProviderConfig::Local { .. }));
+        assert_eq!(config.model_policy().unwrap(), ModelPolicy::LocalOnly);
+        assert_eq!(
+            modes.config(&eu).unwrap().check(&eu).unwrap(),
+            ModelPolicy::AllowedPrefixes(vec!["eu.".into()])
+        );
+        assert_eq!(
+            modes
+                .config(&ModeName::POC)
+                .unwrap()
+                .check(&ModeName::POC)
+                .unwrap(),
+            ModelPolicy::Any
+        );
+    }
+
+    /// #592: a mode whose models leave its prefixes, or whose provider is
+    /// not local under `local_only`, stops the start.
+    #[test]
+    fn a_mode_that_breaks_its_residency_is_refused_before_any_repo_uses_it() {
+        let eu = ModeName::parse("customer-eu").unwrap();
+        let err = Modes::from_configs([(eu.clone(), eu_mode("global."))])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("customer-eu") && err.contains("`eu.`"),
+            "{err}"
+        );
+
+        let cloud = format!("{POC}\n[residency]\nlocal_only = true\n");
+        let airgap = ModeName::parse("local-airgap").unwrap();
+        let err = Modes::from_configs([(airgap, ModeConfig::from_toml(&cloud).unwrap())])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("local_only"), "{err}");
+    }
+
+    /// A Japan configuration under another name (a typo of
+    /// `customer_jp`) keeps the whole guard.
+    #[test]
+    fn a_japan_file_under_any_name_keeps_the_guard() {
+        let typo = ModeName::parse("custmer_jp").unwrap();
+        let tokyo = ModeConfig::from_toml(JP).unwrap();
+        assert_eq!(tokyo.check(&typo).unwrap(), ModelPolicy::japan_only());
+        let virginia = jp_with(|m| {
+            m.provider = ProviderConfig::Bedrock {
+                region: "us-east-1".into(),
+                require_jp_profile: true,
+            }
+        });
+        let err = virginia.check(&typo).unwrap_err().to_string();
+        assert!(err.contains("us-east-1"), "{err}");
+    }
+
+    #[test]
+    fn underscores_and_dashes_name_the_same_mode() {
+        let jp = ModeConfig::from_toml(JP).unwrap();
+        let underscore = ModeName::parse("customer_jp").unwrap();
+        let modes = Modes::from_configs([(underscore.clone(), jp.clone())]).unwrap();
+        assert!(modes.config(&ModeName::CUSTOMER_JP).is_some());
+        assert!(modes.config(&underscore).is_some());
+        // The customer-jp guard holds under either name.
+        assert_eq!(jp.check(&underscore).unwrap(), ModelPolicy::japan_only());
+        let err = Modes::from_configs([(underscore, jp.clone()), (ModeName::CUSTOMER_JP, jp)])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("same mode"), "{err}");
     }
 
     #[test]

@@ -63,8 +63,16 @@ async fn light_of(
     repo: &Repo,
 ) -> Option<(Provider, String)> {
     let mode = modes?.config(&repo.mode)?;
+    // The mode's residency (#592): the memory's text is the repo's too.
+    let policy = match mode.check(&repo.mode) {
+        Ok(policy) => policy,
+        Err(e) => {
+            tracing::warn!(repo = %repo.slug, error = %e, "the mode breaks its residency; using the ledger's summary");
+            return None;
+        }
+    };
     match Provider::from_config_with_secrets(&mode.provider, secrets).await {
-        Ok(provider) => Some((provider, mode.models.light.id.clone())),
+        Ok(provider) => Some((provider.with_policy(policy), mode.models.light.id.clone())),
         Err(e) => {
             tracing::warn!(repo = %repo.slug, error = %e, "no Light model for the memory; using the ledger's summary");
             None

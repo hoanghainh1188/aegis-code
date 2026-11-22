@@ -1,7 +1,7 @@
 //! The AI each mode uses, for the admin (#367): its provider, the model
 //! and effort of each tier, its default budget, the name of its key's
-//! secret and whether the store has it (never its value), and for
-//! `customer-jp` its guard. "Check" sends the smallest request there is
+//! secret and whether the store has it (never its value), and the
+//! residency guard its provider checks (#592). "Check" sends the smallest request there is
 //! through the provider the workers use, audited as `ai.check`, at most
 //! once a minute per mode since each costs a little. Only an admin: for
 //! anyone else it is not found.
@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 
 use aegis_lifecycle::ModeConfig;
 use aegis_provider::{
-    CachePlan, Message, ModelProvider, Provider, ProviderConfig, ProviderError, Request,
+    CachePlan, Message, ModelPolicy, ModelProvider, Provider, ProviderConfig, ProviderError,
+    Request,
 };
-use aegis_store::Store;
+use aegis_store::{ModeName, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::{Path, State};
@@ -24,7 +25,9 @@ use super::repo_admin::{RepoAdmin, RepoAdminExt, editing};
 use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::Access;
 
-const MODES: [&str; 2] = ["poc", "customer-jp"];
+/// Shown even when the server has no file for them: every deployment
+/// knows these two. Any other mode shows when `[modes]` names it.
+const BUILTIN_MODES: [ModeName; 2] = [ModeName::POC, ModeName::CUSTOMER_JP];
 /// The least time between two checks of a mode.
 const CHECK_EVERY: Duration = Duration::from_secs(60);
 /// Tokens the check's answer may take: it only needs to come back.
@@ -37,7 +40,7 @@ struct TierRow {
 }
 
 struct ModeView {
-    name: &'static str,
+    name: String,
     /// `None`: the server has no configuration for this mode.
     config: Option<ConfigView>,
     check: Option<CheckView>,
@@ -50,7 +53,7 @@ struct ConfigView {
     /// The key's secret and whether the store has it; `None` when the
     /// provider takes none (Bedrock uses the server's role).
     key: Option<(String, bool)>,
-    guard: Option<&'static str>,
+    guard: Option<String>,
     tiers: Vec<TierRow>,
     max_cost_usd: String,
     /// The mode's call cap, or the language profile's when it sets none
@@ -71,12 +74,35 @@ struct AiPage<'a> {
     modes: Vec<ModeView>,
 }
 
-fn mode_config<'a>(admin: &'a RepoAdmin, name: &str) -> Option<&'a ModeConfig> {
-    let modes = admin.modes();
-    match name {
-        "poc" => modes.poc.as_ref(),
-        "customer-jp" => modes.customer_jp.as_ref(),
-        _ => None,
+fn mode_config<'a>(admin: &'a RepoAdmin, name: &ModeName) -> Option<&'a ModeConfig> {
+    admin.modes().config(name)
+}
+
+/// The configured modes, then the built-in ones the server has no file
+/// for.
+fn mode_names(admin: &RepoAdmin) -> Vec<ModeName> {
+    let mut names: Vec<ModeName> = admin.modes().iter().map(|(n, _)| n.clone()).collect();
+    for builtin in BUILTIN_MODES {
+        if admin.modes().config(&builtin).is_none() {
+            names.push(builtin);
+        }
+    }
+    names
+}
+
+/// What `policy` lets through, said plainly.
+fn guard_text(policy: &ModelPolicy) -> Option<String> {
+    const CHECKED: &str = "checked when the server starts, which refuses to start otherwise, and again before each request";
+    match policy {
+        ModelPolicy::Any => None,
+        ModelPolicy::AllowedPrefixes(prefixes) => {
+            let list: Vec<String> = prefixes.iter().map(|p| format!("`{p}`")).collect();
+            Some(format!(
+                "only models whose IDs start with {}; {CHECKED}",
+                list.join(", ")
+            ))
+        }
+        ModelPolicy::LocalOnly => Some(format!("only the local provider; {CHECKED}")),
     }
 }
 
@@ -84,7 +110,7 @@ async fn is_set(admin: &RepoAdmin, name: &str) -> bool {
     matches!(admin.secrets.get_or_load(name).await, Ok(Some(_)))
 }
 
-async fn config_view(admin: &RepoAdmin, name: &str, mode: &ModeConfig) -> ConfigView {
+async fn config_view(admin: &RepoAdmin, name: &ModeName, mode: &ModeConfig) -> ConfigView {
     let (provider, target, key, guard) = match &mode.provider {
         ProviderConfig::ClaudeApi {
             api_key_env,
@@ -104,9 +130,9 @@ async fn config_view(admin: &RepoAdmin, name: &str, mode: &ModeConfig) -> Config
             "Amazon Bedrock",
             format!("region {region}"),
             None,
-            require_jp_profile.then_some(
-                "only `jp.` inference profiles; checked when the server starts, which refuses to start otherwise",
-            ),
+            require_jp_profile.then(|| {
+                "only `jp.` inference profiles; checked when the server starts, which refuses to start otherwise".to_owned()
+            }),
         ),
         ProviderConfig::Local {
             base_url,
@@ -120,7 +146,15 @@ async fn config_view(admin: &RepoAdmin, name: &str, mode: &ModeConfig) -> Config
             ("Local (OpenAI-compatible)", base_url.clone(), key, None)
         }
     };
-    let guard = guard.or((name == "customer-jp").then_some("checked when the server starts"));
+    // The mode was checked when the server loaded it: `ok` is what it
+    // loaded with.
+    let residency = match mode.check(name) {
+        Ok(policy) => guard_text(&policy),
+        Err(e) => Some(format!(
+            "the configuration breaks it, so nothing is sent: {e}"
+        )),
+    };
+    let guard = residency.or(guard);
     let tier = |tier, id: &str, effort: Option<aegis_provider::Effort>| TierRow {
         tier,
         model: id.to_owned(),
@@ -148,21 +182,21 @@ async fn page(
     admin: &RepoAdmin,
     nonce: &Nonce,
     me: &Me,
-    checked: Option<(&str, CheckView)>,
+    checked: Option<(&ModeName, CheckView)>,
 ) -> WebResult {
     let mut checked = checked;
     let mut modes = Vec::new();
-    for name in MODES {
-        let config = match mode_config(admin, name) {
-            Some(mode) => Some(config_view(admin, name, mode).await),
+    for name in mode_names(admin) {
+        let config = match mode_config(admin, &name) {
+            Some(mode) => Some(config_view(admin, &name, mode).await),
             None => None,
         };
         let check = match &checked {
-            Some((m, _)) if *m == name => checked.take().map(|(_, c)| c),
+            Some((m, _)) if m.key() == name.key() => checked.take().map(|(_, c)| c),
             _ => None,
         };
         modes.push(ModeView {
-            name,
+            name: name.to_string(),
             config,
             check,
         });
@@ -239,8 +273,9 @@ fn key_name(mode: &ModeConfig) -> Option<&str> {
     }
 }
 
-/// Sends the smallest request there is to `mode`'s light model.
-async fn run_check(admin: &RepoAdmin, mode: &ModeConfig) -> CheckView {
+/// Sends the smallest request there is to `mode`'s light model, through
+/// a provider with the mode's residency policy, as the workers use it.
+async fn run_check(admin: &RepoAdmin, name: &ModeName, mode: &ModeConfig) -> CheckView {
     let secret = key_value(admin, mode).await;
     if let (Some(name), None) = (key_name(mode), &secret) {
         return CheckView {
@@ -249,8 +284,17 @@ async fn run_check(admin: &RepoAdmin, mode: &ModeConfig) -> CheckView {
         };
     }
     let model = mode.models.light.id.clone();
+    let policy = match mode.check(name) {
+        Ok(policy) => policy,
+        Err(e) => {
+            return CheckView {
+                ok: false,
+                detail: e.to_string(),
+            };
+        }
+    };
     let provider = match Provider::from_config_with_secrets(&mode.provider, &admin.secrets).await {
-        Ok(p) => p,
+        Ok(p) => p.with_policy(policy),
         Err(e) => {
             return CheckView {
                 ok: false,
@@ -294,36 +338,41 @@ pub async fn check(
 ) -> WebResult {
     admin_only(&access)?;
     let admin = editing(admin)?;
-    let Some(name) = MODES.into_iter().find(|m| *m == name) else {
-        return Err(WebError::not_found(format!("mode `{name}`")));
-    };
-    let Some(mode) = mode_config(&admin, name) else {
-        return Err(WebError::new(
-            StatusCode::CONFLICT,
-            format!("this server has no configuration for mode `{name}`"),
-        ));
+    let not_found = || WebError::not_found(format!("mode `{name}`"));
+    let name = ModeName::parse(&name).map_err(|_| not_found())?;
+    let Some(mode) = mode_config(&admin, &name) else {
+        if BUILTIN_MODES.iter().any(|b| b.key() == name.key()) {
+            return Err(WebError::new(
+                StatusCode::CONFLICT,
+                format!("this server has no configuration for mode `{name}`"),
+            ));
+        }
+        return Err(not_found());
     };
     {
         let mut last = admin
             .ai_checks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(at) = last.get(name).filter(|at| at.elapsed() < CHECK_EVERY) {
+        if let Some(at) = last
+            .get(&name.key())
+            .filter(|at| at.elapsed() < CHECK_EVERY)
+        {
             let wait = (CHECK_EVERY - at.elapsed()).as_secs() + 1;
             return Err(WebError::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 format!("mode `{name}` was checked a moment ago; check again in {wait} s"),
             ));
         }
-        last.insert(name, Instant::now());
+        last.insert(name.key(), Instant::now());
     }
-    let result = run_check(&admin, mode).await;
+    let result = run_check(&admin, &name, mode).await;
     let detail = json!({
-        "mode": name,
+        "mode": name.as_str(),
         "model": mode.models.light.id,
         "ok": result.ok,
         "result": result.detail,
     });
     store.audit_event(&access.actor, "ai.check", detail).await?;
-    page(&admin, &nonce, &me, Some((name, result))).await
+    page(&admin, &nonce, &me, Some((&name, result))).await
 }

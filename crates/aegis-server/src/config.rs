@@ -5,12 +5,14 @@
 //! and the monthly budget, whose month `[budget]` sets (#31). No
 //! secret is in it, only where they are read: `[secrets]` (#30).
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use aegis_lifecycle::cache_sweep::SweepRules;
-use aegis_store::BudgetRules;
+use aegis_lifecycle::{ModeConfig, Modes};
+use aegis_store::{BudgetRules, ModeName};
 use openidconnect::url::Url;
 use serde::{Deserialize, Deserializer};
 
@@ -100,16 +102,56 @@ impl GithubAppSection {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModesSection {
-    /// `config/poc.toml`.
-    #[serde(default)]
-    pub poc: Option<PathBuf>,
-    /// `config/customer-jp.toml`; refused at start unless it keeps every
-    /// call in Japan (design §7).
-    #[serde(default)]
-    pub customer_jp: Option<PathBuf>,
+/// `[modes]`: each mode's run configuration, by name (#592), e.g.
+/// `poc = "config/poc.toml"`, `customer-eu = "config/customer-eu.toml"`.
+/// A name is a `repos.mode` one; `_` and `-` are the same, so the
+/// `customer_jp = "…"` of an older server.toml is `customer-jp`, whose
+/// configuration is refused at start unless it keeps every call in Japan
+/// (design §7).
+#[derive(Debug, Clone, Default)]
+pub struct ModesSection(BTreeMap<ModeName, PathBuf>);
+
+impl ModesSection {
+    /// Each mode's name and the path of its configuration.
+    pub fn iter(&self) -> impl Iterator<Item = (&ModeName, &PathBuf)> {
+        self.0.iter()
+    }
+
+    /// The path of `mode`'s configuration, under either spelling.
+    pub fn get(&self, mode: &str) -> Option<&PathBuf> {
+        let key = ModeName::parse(mode).ok()?.key();
+        self.0
+            .iter()
+            .find(|(name, _)| name.key() == key)
+            .map(|(_, path)| path)
+    }
+
+    pub fn contains(&self, mode: &str) -> bool {
+        self.get(mode).is_some()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'de> Deserialize<'de> for ModesSection {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = BTreeMap::<String, PathBuf>::deserialize(deserializer)?;
+        let mut modes = BTreeMap::new();
+        let mut keys = BTreeMap::new();
+        for (name, path) in raw {
+            let mode = ModeName::parse(&name)
+                .map_err(|e| serde::de::Error::custom(format!("[modes]: mode name {e}")))?;
+            if let Some(first) = keys.insert(mode.key(), name.clone()) {
+                return Err(serde::de::Error::custom(format!(
+                    "[modes]: `{first}` and `{name}` are the same mode: `_` and `-` are not told apart"
+                )));
+            }
+            modes.insert(mode, path);
+        }
+        Ok(Self(modes))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -388,6 +430,28 @@ fn default_retry_base_s() -> u64 {
 }
 
 impl ServerConfig {
+    /// The configuration of each mode in `[modes]`, relative paths in
+    /// them taken from `base`: each checked against its `[residency]`
+    /// (#592) and `customer-jp` against its guard, so a worker whose mode
+    /// would send code where it may not go does not start.
+    pub fn load_modes(&self, base: &Path) -> Result<Modes, String> {
+        if self.modes.is_empty() {
+            return Err("[modes]: a worker needs at least one mode, e.g. `poc`".into());
+        }
+        let configs = self
+            .modes
+            .iter()
+            .map(|(name, path)| {
+                let path = base.join(path);
+                ModeConfig::load(&path, base)
+                    .map(|mode| (name.clone(), mode))
+                    .map_err(|e| format!("{}: {e}", path.display()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let modes = Modes::from_configs(configs).map_err(|e| format!("[modes]: {e}"))?;
+        Ok(modes.with_github_app(self.github_app.is_some()))
+    }
+
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let config: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         let w = &config.worker;
@@ -539,11 +603,43 @@ mod tests {
         }
     }
 
+    /// #592: any mode by name; the older `customer_jp` key still names
+    /// `customer-jp`.
+    #[test]
+    fn modes_take_any_name_and_the_old_spelling() {
+        let config = ServerConfig::from_toml(
+            "[modes]\npoc = \"config/poc.toml\"\ncustomer_jp = \"config/customer-jp.toml\"\n\
+             customer-eu = \"config/customer-eu.toml\"\nlocal-airgap = \"config/airgap.toml\"\n",
+        )
+        .unwrap();
+        let names: Vec<&str> = config.modes.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["customer-eu", "customer_jp", "local-airgap", "poc"]);
+        assert_eq!(
+            config.modes.get("customer-jp"),
+            Some(&PathBuf::from("config/customer-jp.toml"))
+        );
+        assert!(config.modes.contains("customer_eu"));
+        for (bad, says) in [
+            ("[modes]\nCustomer = \"x.toml\"\n", "mode name"),
+            ("[modes]\n\"\" = \"x.toml\"\n", "mode name"),
+            (
+                "[modes]\ncustomer_jp = \"a.toml\"\ncustomer-jp = \"b.toml\"\n",
+                "same mode",
+            ),
+        ] {
+            let err = ServerConfig::from_toml(bad).unwrap_err();
+            assert!(err.contains(says), "{bad}: {err}");
+        }
+    }
+
     #[test]
     fn the_example_configuration_loads() {
         let config = ServerConfig::from_toml(include_str!("../../../config/server.toml")).unwrap();
-        assert_eq!(config.modes.poc, Some(PathBuf::from("config/poc.toml")));
-        assert_eq!(config.modes.customer_jp, None);
+        assert_eq!(
+            config.modes.get("poc"),
+            Some(&PathBuf::from("config/poc.toml"))
+        );
+        assert!(!config.modes.contains("customer-jp"));
         assert!(config.api.listen.ip().is_loopback());
         assert_eq!(config.metrics.listen.port(), 9464);
         assert!(config.auth.oidc.is_none());
@@ -619,7 +715,7 @@ mod tests {
             (rules.time_zone.as_str(), rules.job_reserve_usd),
             ("UTC", 4.0)
         );
-        assert!(config.modes.poc.is_none());
+        assert!(config.modes.is_empty());
     }
 
     #[test]
