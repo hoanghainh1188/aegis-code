@@ -448,7 +448,7 @@ mod tests {
     use super::*;
     use aegis_ledger::IssueId;
     use aegis_store::{JobId, RepoId};
-    use chrono::Utc;
+    use time::OffsetDateTime;
 
     fn job(status: JobStatus, outcome: Option<Outcome>) -> Job {
         Job {
@@ -464,9 +464,9 @@ mod tests {
             attempts: 1,
             locked_by: None,
             locked_until: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            run_after: Utc::now(),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            run_after: OffsetDateTime::now_utc(),
             retries: 0,
             cancel_requested: false,
             reason: None,

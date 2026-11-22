@@ -3,8 +3,8 @@
 //! written in the transaction of what it records, so neither lands
 //! without the other.
 
-use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use time::OffsetDateTime;
 
 use crate::{ActorKind, Job, JobId, Page, PageOf, RepoId, Store, StoreError, User, UserId};
 
@@ -58,7 +58,7 @@ impl Actor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditEntry {
     pub id: i64,
-    pub at: DateTime<Utc>,
+    pub at: OffsetDateTime,
     pub actor: Actor,
     pub action: String,
     pub repo_id: Option<RepoId>,

@@ -25,7 +25,7 @@ struct Row {
 
 impl From<PersonalToken> for Row {
     fn from(t: PersonalToken) -> Self {
-        let day = |d: chrono::DateTime<chrono::Utc>| d.format("%Y-%m-%d").to_string();
+        let day = |d: time::OffsetDateTime| crate::when::day(d);
         Self {
             id: t.id,
             label: t.label,

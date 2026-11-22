@@ -79,7 +79,7 @@ struct RepoRow {
     mode: String,
     max_concurrent_jobs: i32,
     config: serde_json::Value,
-    created_at: chrono::DateTime<chrono::Utc>,
+    created_at: time::OffsetDateTime,
     tenant_id: i64,
 }
 

@@ -169,7 +169,7 @@ pub async fn list(
         .items
         .iter()
         .map(|e| EntryRow {
-            at: e.at.format("%Y-%m-%d %H:%M:%S").to_string(),
+            at: crate::when::second(e.at),
             who: e.actor.name.clone(),
             via: via(e.actor.kind),
             action: e.action.clone(),

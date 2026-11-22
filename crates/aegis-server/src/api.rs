@@ -309,7 +309,7 @@ impl From<Job> for JobView {
             ledger_key: j.ledger_key.as_str().to_owned(),
             source: j.source.as_str(),
             priority: j.priority.map(SlaPriority::as_str),
-            sla_deadline: j.sla_deadline.map(|t| t.to_rfc3339()),
+            sla_deadline: j.sla_deadline.map(crate::when::rfc3339),
             status: j.status.as_str(),
             outcome: j.outcome,
             reason: j.reason,
@@ -321,10 +321,10 @@ impl From<Job> for JobView {
             review_of: j.review_of.map(|r| r.0),
             review_round: j.review_round,
             locked_by: j.locked_by,
-            locked_until: j.locked_until.map(|t| t.to_rfc3339()),
-            run_after: j.run_after.to_rfc3339(),
-            created_at: j.created_at.to_rfc3339(),
-            updated_at: j.updated_at.to_rfc3339(),
+            locked_until: j.locked_until.map(crate::when::rfc3339),
+            run_after: crate::when::rfc3339(j.run_after),
+            created_at: crate::when::rfc3339(j.created_at),
+            updated_at: crate::when::rfc3339(j.updated_at),
         }
     }
 }
@@ -348,8 +348,8 @@ impl From<Run> for RunView {
             attempt: r.attempt,
             status: r.status.as_str(),
             error: r.error,
-            started_at: r.started_at.to_rfc3339(),
-            ended_at: r.ended_at.map(|t| t.to_rfc3339()),
+            started_at: crate::when::rfc3339(r.started_at),
+            ended_at: r.ended_at.map(crate::when::rfc3339),
         }
     }
 }
@@ -777,8 +777,8 @@ impl From<RepoMemory> for MemoryView {
             paths: m.paths,
             keywords: m.keywords,
             job_id: m.job_id.map(|j| j.0),
-            created_at: m.created_at.to_rfc3339(),
-            updated_at: m.updated_at.to_rfc3339(),
+            created_at: crate::when::rfc3339(m.created_at),
+            updated_at: crate::when::rfc3339(m.updated_at),
         }
     }
 }

@@ -8,19 +8,19 @@ publish = false
 
 [dependencies]
 aegis-ledger = { path = "../aegis-ledger" }
-chrono = { workspace = true, features = ["clock", "std"] }
 serde.workspace = true
 serde_json.workspace = true
 sqlx = { version = "0.9.0", default-features = false, features = [
-    "chrono",
     "json",
     "macros",
     "migrate",
     "postgres",
     "runtime-tokio",
+    "time",
     "tls-rustls-aws-lc-rs",
 ] }
 thiserror.workspace = true
+time.workspace = true
 tracing.workspace = true
 
 [features]

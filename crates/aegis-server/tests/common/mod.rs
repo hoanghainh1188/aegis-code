@@ -35,7 +35,7 @@ pub async fn sign_in(store: &Store, email: &str) -> Browser {
         .await
         .unwrap();
     let (token, csrf) = (random_token().unwrap(), random_token().unwrap());
-    let expires = chrono::Utc::now() + chrono::Duration::hours(1);
+    let expires = time::OffsetDateTime::now_utc() + time::Duration::hours(1);
     store
         .start_session(&user, &token_hash(&token), &csrf, expires)
         .await

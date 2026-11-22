@@ -171,8 +171,8 @@ pub fn budget_message(
 
 fn wall_time(job: &Job, facts: &JobFacts<'_>) -> f64 {
     facts.wall_time_s.unwrap_or_else(|| {
-        let ms = (job.updated_at - job.created_at).num_milliseconds();
-        ms.max(0) as f64 / 1000.0
+        let s = (job.updated_at - job.created_at).as_seconds_f64();
+        s.max(0.0)
     })
 }
 
@@ -221,10 +221,10 @@ mod tests {
     use super::*;
     use aegis_ledger::IssueId;
     use aegis_store::{JobId, JobSource, RepoId};
-    use chrono::{Duration, Utc};
+    use time::{Duration, OffsetDateTime};
 
     pub(crate) fn job(status: JobStatus, outcome: Option<Outcome>) -> Job {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         Job {
             id: JobId(42),
             repo_id: RepoId(1),

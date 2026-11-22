@@ -20,9 +20,9 @@ use aws_lc_rs::rsa::KeyPair;
 use aws_lc_rs::signature::RSA_PKCS1_SHA256;
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
+use time::OffsetDateTime;
 
 use crate::PrError;
 use crate::github::{checked_api, plain_name};
@@ -106,9 +106,9 @@ impl AppKey {
 
     /// The app's JWT, issued by `issuer` (the app id or its client id)
     /// at `now`.
-    pub fn jwt(&self, issuer: &str, now: DateTime<Utc>) -> Result<String, PrError> {
+    pub fn jwt(&self, issuer: &str, now: OffsetDateTime) -> Result<String, PrError> {
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
-        let iat = now.timestamp() - JWT_BACKDATE_S;
+        let iat = now.unix_timestamp() - JWT_BACKDATE_S;
         let claims = json!({ "iat": iat, "exp": iat + JWT_LIFE_S, "iss": issuer });
         let claims = URL_SAFE_NO_PAD.encode(claims.to_string());
         let signed = format!("{header}.{claims}");
@@ -154,13 +154,14 @@ struct Installation {
 #[derive(Deserialize)]
 struct Minted {
     token: String,
-    expires_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    expires_at: OffsetDateTime,
 }
 
 #[derive(Clone)]
 struct Cached {
     token: String,
-    expires_at: DateTime<Utc>,
+    expires_at: OffsetDateTime,
 }
 
 /// The instance's GitHub App: its id, key and API root, with the caches of
@@ -226,7 +227,7 @@ impl GitHubApp {
     }
 
     fn jwt(&self) -> Result<String, PrError> {
-        self.key.jwt(&self.issuer, Utc::now())
+        self.key.jwt(&self.issuer, OffsetDateTime::now_utc())
     }
 
     /// Drops what is known of `owner/repo`'s installation: an
@@ -291,8 +292,9 @@ impl GitHubApp {
             gate(installation, holder).await.map_err(PrError::App)?;
         }
         let key = (installation, repo.to_owned(), use_);
-        let fresh =
-            |c: &Cached| c.expires_at - Utc::now() > chrono::TimeDelta::seconds(TOKEN_MARGIN_S);
+        let fresh = |c: &Cached| {
+            c.expires_at - OffsetDateTime::now_utc() > time::Duration::seconds(TOKEN_MARGIN_S)
+        };
         if let Some(c) = lock(&self.tokens).get(&key).filter(|c| fresh(c)) {
             return Ok(c.token.clone());
         }
@@ -458,9 +460,7 @@ mod tests {
     #[test]
     fn the_jwt_is_rs256_backdated_short_lived_and_verifies() {
         let (key, public) = test_key();
-        let now = DateTime::parse_from_rfc3339("2026-11-15T10:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
+        let now = time::macros::datetime!(2026-11-15 10:00:00 UTC);
         let jwt = key.jwt("123456", now).unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();
         assert_eq!(parts.len(), 3);
@@ -470,8 +470,8 @@ mod tests {
         let claims: serde_json::Value =
             serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
         let iat = claims["iat"].as_i64().unwrap();
-        assert_eq!(iat, now.timestamp() - 60);
-        assert!(claims["exp"].as_i64().unwrap() - now.timestamp() <= 600);
+        assert_eq!(iat, now.unix_timestamp() - 60);
+        assert!(claims["exp"].as_i64().unwrap() - now.unix_timestamp() <= 600);
         assert_eq!(claims["iss"], "123456");
         let signature = URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
         aws_lc_rs::signature::UnparsedPublicKey::new(

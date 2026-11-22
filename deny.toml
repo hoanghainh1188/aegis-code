@@ -17,10 +17,11 @@ ignore = [
     # (`crypto-bigint` 0.5, RUSTSEC-2026-0387, đã hết từ `openidconnect` 4.1.)
     { id = "RUSTSEC-2023-0071", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
     # `chrono` unmaintained, mọi phiên bản, không có bản sửa (#579). Không phải
-    # lỗ hổng; ngoài code của mình nó còn bị kéo vào qua `sqlx`, `oauth2`,
-    # `openidconnect`, `rmcp`, `schemars`. Gỡ khi đã chuyển sang `jiff`/`time`
-    # và `chrono` không còn trong Cargo.lock (#578).
-    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, chưa thay được (#578)" },
+    # lỗ hổng. Code của mình đã chuyển sang `time` (#578), `sqlx` cũng vậy;
+    # nó chỉ còn bị kéo vào qua `oauth2`, `openidconnect`, `rmcp`, `schemars`
+    # (và test OIDC dựng claims bằng kiểu của `openidconnect`). Gỡ khi
+    # `chrono` không còn trong Cargo.lock.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, còn qua oauth2/openidconnect/rmcp/schemars (#578)" },
 ]
 
 [licenses]

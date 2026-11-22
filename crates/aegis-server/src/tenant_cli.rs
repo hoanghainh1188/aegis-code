@@ -275,7 +275,7 @@ mod tests {
             monthly_budget_usd: Some(100.0),
             max_concurrent_jobs: Some(2),
             default_locale: None,
-            created_at: chrono::Utc::now(),
+            created_at: time::OffsetDateTime::now_utc(),
         };
         assert_eq!(limits(&[], &was).unwrap(), (Some(100.0), Some(2)));
         assert_eq!(

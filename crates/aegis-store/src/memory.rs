@@ -4,8 +4,8 @@
 
 use std::collections::BTreeSet;
 
-use chrono::{DateTime, Utc};
 use serde_json::json;
+use time::OffsetDateTime;
 
 use crate::audit::{self, Actor, Target};
 use crate::tx;
@@ -89,8 +89,8 @@ pub struct RepoMemory {
     pub paths: Vec<String>,
     pub keywords: String,
     pub job_id: Option<JobId>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 struct MemoryRow {
@@ -103,8 +103,8 @@ struct MemoryRow {
     paths: Vec<String>,
     keywords: String,
     job_id: Option<i64>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
 }
 
 impl TryFrom<MemoryRow> for RepoMemory {

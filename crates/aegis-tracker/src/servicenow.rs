@@ -2,10 +2,10 @@
 //! mapped severity (`P1`–`P3`) and SLA deadlines, reads descriptions & log
 //! attachments, and writes work notes/comments + state updates on completion.
 
-use chrono::{DateTime, Utc};
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use time::OffsetDateTime;
 
 use crate::config::{ServiceNowConfig, site_url};
 use crate::http::{self, client};
@@ -166,7 +166,7 @@ fn extract_priority(record: &Value) -> Option<Priority> {
     }
 }
 
-fn extract_sla_deadline(record: &Value) -> Option<DateTime<Utc>> {
+fn extract_sla_deadline(record: &Value) -> Option<OffsetDateTime> {
     for field in ["sla_due", "due_date"] {
         let Some(v) = record.get(field) else {
             continue;

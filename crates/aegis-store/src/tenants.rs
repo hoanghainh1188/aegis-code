@@ -6,8 +6,8 @@
 //! `max_concurrent_jobs` of its jobs run at once, and the claim shares
 //! workers between tenants. Every change is audited.
 
-use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::budget::{BudgetRules, BudgetState, WAITING};
@@ -45,7 +45,7 @@ pub struct Tenant {
     /// What its repos write in when a repo names no language (#589): `en`,
     /// `ja` or `vi`; `None`: the server's default.
     pub default_locale: Option<String>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: OffsetDateTime,
 }
 
 impl Tenant {
@@ -67,7 +67,7 @@ struct TenantRow {
     monthly_budget_usd: Option<f64>,
     max_concurrent_jobs: Option<i32>,
     default_locale: Option<String>,
-    created_at: DateTime<Utc>,
+    created_at: OffsetDateTime,
 }
 
 impl From<TenantRow> for Tenant {
@@ -562,7 +562,7 @@ mod tests {
             monthly_budget_usd: None,
             max_concurrent_jobs: None,
             default_locale: None,
-            created_at: Utc::now(),
+            created_at: OffsetDateTime::now_utc(),
         };
         assert_eq!(t(1, "default").secret_prefix(), None);
         assert_eq!(t(2, "acme-jp").secret_prefix().as_deref(), Some("ACME_JP_"));

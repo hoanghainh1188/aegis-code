@@ -440,7 +440,7 @@ pub struct CloneView {
 
 impl From<RepoClone> for CloneView {
     fn from(c: RepoClone) -> Self {
-        let at = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M:%S").to_string();
+        let at = |t: time::OffsetDateTime| crate::when::second(t);
         Self {
             state: match c.state {
                 CloneState::Cloning => "being made",

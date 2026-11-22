@@ -68,7 +68,7 @@ async fn the_report_shows_the_contracts_one_may_see() {
             source: JobSource::Jsm,
             priority: Some(SlaPriority::P1),
             // Already overdue, still queued.
-            sla_deadline: Some(chrono::Utc::now() - chrono::TimeDelta::minutes(5)),
+            sla_deadline: Some(time::OffsetDateTime::now_utc() - time::Duration::minutes(5)),
         })
         .await
         .unwrap();

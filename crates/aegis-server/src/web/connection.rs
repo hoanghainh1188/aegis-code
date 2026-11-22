@@ -140,7 +140,7 @@ impl From<BadSignatures> for BadRow {
         Self {
             source: b.source.as_str(),
             count: b.count,
-            last: b.last.format("%Y-%m-%d %H:%M:%S").to_string(),
+            last: crate::when::second(b.last),
         }
     }
 }

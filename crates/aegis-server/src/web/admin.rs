@@ -109,7 +109,7 @@ impl From<RepoMember> for MemberRow {
             service: m.kind == UserKind::Service,
             name: m.name,
             role: m.role.as_str(),
-            granted_at: m.granted_at.format("%Y-%m-%d %H:%M").to_string(),
+            granted_at: crate::when::minute(m.granted_at),
         }
     }
 }
@@ -143,7 +143,7 @@ struct PauseView {
 impl From<RepoPause> for PauseView {
     fn from(p: RepoPause) -> Self {
         Self {
-            at: p.at.format("%Y-%m-%d %H:%M").to_string(),
+            at: crate::when::minute(p.at),
             by: p.by,
             reason: p.reason,
         }

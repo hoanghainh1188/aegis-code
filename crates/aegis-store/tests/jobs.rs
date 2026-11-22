@@ -6,7 +6,6 @@ use aegis_store::{
     JobEnd, JobFilter, JobSource, JobStatus, ModeName, NewJob, NewRepo, Page, RunEnd, RunStatus,
     SlaPriority, StoreError,
 };
-use chrono::{TimeZone, Utc};
 
 fn repo(slug: &str) -> NewRepo {
     NewRepo {
@@ -217,7 +216,7 @@ async fn itsm_priority_and_sla_deadline_persist_across_reads_and_retries() {
     let Some(db) = test_db().await else { return };
     let s = &db.store;
     let r = s.create_repo(&repo("itsm")).await.unwrap();
-    let deadline = Utc.with_ymd_and_hms(2026, 12, 1, 15, 30, 0).unwrap();
+    let deadline = time::macros::datetime!(2026-12-01 15:30:00 UTC);
 
     for (idx, (source, priority, sla_deadline)) in [
         (JobSource::Jsm, Some(SlaPriority::P1), Some(deadline)),

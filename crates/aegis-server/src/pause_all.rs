@@ -55,7 +55,7 @@ impl PauseView {
             Some(p) => Self {
                 paused: true,
                 level: Some(p.level.as_str()),
-                paused_at: Some(p.at.to_rfc3339()),
+                paused_at: Some(crate::when::rfc3339(p.at)),
                 paused_by: Some(p.by),
                 reason: p.reason,
                 cancelled: None,

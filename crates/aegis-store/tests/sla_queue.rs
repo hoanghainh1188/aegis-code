@@ -7,7 +7,7 @@ use std::time::Duration;
 use aegis_ledger::IssueId;
 use aegis_store::testing::test_db;
 use aegis_store::{JobId, JobSource, ModeName, NewJob, NewRepo, RepoId, SlaPriority, Store};
-use chrono::{TimeDelta, Utc};
+use time::OffsetDateTime;
 
 const LEASE: Duration = Duration::from_secs(60);
 const ANY: u32 = 10;
@@ -40,7 +40,7 @@ async fn job(
         ledger_key: IssueId::parse(format!("r{}-{n}", repo.0)).unwrap(),
         source: JobSource::Jsm,
         priority,
-        sla_deadline: due_in_h.map(|h| Utc::now() + TimeDelta::hours(h)),
+        sla_deadline: due_in_h.map(|h| OffsetDateTime::now_utc() + time::Duration::hours(h)),
     })
     .await
     .unwrap()

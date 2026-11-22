@@ -5,7 +5,7 @@ use aegis_store::{
     Actor, MemoryId, MemoryKind, ModeName, NewRepo, NewRepoMemory, Page, RepoId, RepoMemory,
     rank_memories, score_repo_memory,
 };
-use chrono::Utc;
+use time::OffsetDateTime;
 
 fn sample_memory(
     id: i64,
@@ -16,7 +16,7 @@ fn sample_memory(
     paths: &[&str],
     keywords: &str,
 ) -> RepoMemory {
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     RepoMemory {
         id: MemoryId(id),
         repo_id: RepoId(1),

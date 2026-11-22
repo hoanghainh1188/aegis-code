@@ -206,7 +206,7 @@ pub async fn dashboard_kpis_within(
         }
     });
     let mut weeks = groups(&records, &rounds, |r| {
-        job_of(r).map(|job| job.created_at.format("%G-W%V").to_string())
+        job_of(r).map(|job| crate::when::iso_week(job.created_at))
     });
     weeks.drain(..weeks.len().saturating_sub(WEEKS_SHOWN));
     Ok(Dashboard {
@@ -354,7 +354,7 @@ mod tests {
                 tenant: "default".into(),
                 language: "go".into(),
                 source: "cli".into(),
-                created_at: Default::default(),
+                created_at: time::OffsetDateTime::UNIX_EPOCH,
                 review_of: review_of.map(|k| IssueId::parse(k.to_owned()).unwrap()),
                 review_round: round,
             }),

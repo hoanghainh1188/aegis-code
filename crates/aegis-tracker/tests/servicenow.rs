@@ -1,7 +1,6 @@
 //! Wiremock integration tests for ServiceNow ITSM (`servicenow`, #453).
 
 use aegis_tracker::{Priority, Report, ServiceNowConfig, Tracker, TrackerConfig, TrackerError};
-use chrono::{TimeZone, Utc};
 use serde_json::json;
 use wiremock::matchers::{basic_auth, bearer_token, body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -104,14 +103,14 @@ async fn servicenow_search_maps_priority_matrix_and_sla_due() {
     assert_eq!(found[0].priority, Some(Priority::P1));
     assert_eq!(
         found[0].sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 1, 8, 0, 0).unwrap())
+        Some(time::macros::datetime!(2026-12-01 08:00:00 UTC))
     );
 
     assert_eq!(found[1].key, "INC0010002");
     assert_eq!(found[1].priority, Some(Priority::P2));
     assert_eq!(
         found[1].sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 2, 10, 15, 0).unwrap())
+        Some(time::macros::datetime!(2026-12-02 10:15:00 UTC))
     );
 
     assert_eq!(found[2].key, "INC0010003");
@@ -189,7 +188,7 @@ async fn servicenow_ticket_reads_attachments_and_patches_work_notes_and_state() 
     assert_eq!(ticket.priority, Some(Priority::P2));
     assert_eq!(
         ticket.sla_deadline,
-        Some(Utc.with_ymd_and_hms(2026, 12, 3, 18, 0, 0).unwrap())
+        Some(time::macros::datetime!(2026-12-03 18:00:00 UTC))
     );
     assert!(
         ticket

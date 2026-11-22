@@ -131,13 +131,13 @@ dependencies = [
  "aegis-tracker",
  "aws-lc-rs",
  "base64 0.22.1",
- "chrono",
  "futures",
  "regex",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-util",
  "toml",
@@ -165,11 +165,11 @@ dependencies = [
  "aegis-provider",
  "aws-lc-rs",
  "base64 0.22.1",
- "chrono",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "toml",
  "wiremock",
@@ -249,6 +249,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "subtle",
+ "time",
  "tokio",
  "tokio-util",
  "toml",
@@ -279,11 +280,11 @@ version = "0.17.1"
 dependencies = [
  "aegis-ledger",
  "aegis-store",
- "chrono",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tracing",
 ]
@@ -292,11 +293,11 @@ dependencies = [
 name = "aegis-tracker"
 version = "0.17.1"
 dependencies = [
- "chrono",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "wiremock",
 ]
@@ -3737,7 +3738,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "cfg-if",
- "chrono",
  "crc",
  "crossbeam-queue",
  "either",
@@ -3758,6 +3758,7 @@ dependencies = [
  "sha2 0.10.9",
  "smallvec",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -3813,7 +3814,6 @@ dependencies = [
  "bitflags 2.13.2",
  "byteorder",
  "bytes",
- "chrono",
  "crc",
  "digest 0.11.3",
  "dotenvy",
@@ -3828,6 +3828,7 @@ dependencies = [
  "sha2 0.11.1",
  "sqlx-core",
  "thiserror 2.0.21",
+ "time",
  "tracing",
 ]
 
@@ -3841,7 +3842,6 @@ dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.2",
  "byteorder",
- "chrono",
  "crc",
  "dotenvy",
  "etcetera",
@@ -3863,6 +3863,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.21",
+ "time",
  "tracing",
  "whoami",
 ]
@@ -3874,7 +3875,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488e99c397a62007e4229aec669a179816339afc6d2620ca6fa420dbee2e982c"
 dependencies = [
  "atoi",
- "chrono",
  "flume",
  "form_urlencoded",
  "futures-channel",
@@ -3888,6 +3888,7 @@ dependencies = [
  "serde",
  "sqlx-core",
  "thiserror 2.0.21",
+ "time",
  "tracing",
  "url",
 ]

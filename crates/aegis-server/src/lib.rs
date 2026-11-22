@@ -34,6 +34,7 @@ pub mod tracker;
 pub mod umask;
 pub mod web;
 pub mod webhook;
+pub mod when;
 pub mod worker;
 
 /// What a process runs.

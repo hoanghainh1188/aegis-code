@@ -10,8 +10,9 @@ use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der};
 use aws_lc_rs::rsa::{KeyPair, KeySize};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use chrono::{TimeDelta, Utc};
 use serde_json::json;
+use time::format_description::well_known::Rfc3339;
+use time::{Duration, OffsetDateTime};
 use wiremock::matchers::{body_partial_json, header, header_regex, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -41,10 +42,10 @@ async fn installed(server: &MockServer, times: u64) {
         .await;
 }
 
-fn minted(token: &str, life: TimeDelta) -> ResponseTemplate {
+fn minted(token: &str, life: Duration) -> ResponseTemplate {
     ResponseTemplate::new(201).set_body_json(json!({
         "token": token,
-        "expires_at": (Utc::now() + life).to_rfc3339(),
+        "expires_at": (OffsetDateTime::now_utc() + life).format(&Rfc3339).unwrap(),
     }))
 }
 
@@ -69,7 +70,7 @@ async fn a_token_is_minted_for_one_repo_and_use_then_cached() {
             "repositories": ["shop"],
             "permissions": {"contents": "read", "issues": "read", "metadata": "read"},
         })))
-        .respond_with(minted("ghs_read", TimeDelta::hours(1)))
+        .respond_with(minted("ghs_read", Duration::hours(1)))
         .expect(1)
         .mount(&server)
         .await;
@@ -98,7 +99,7 @@ async fn each_use_gets_its_own_token_with_its_permissions() {
         .and(body_partial_json(json!({
             "permissions": {"contents": "write", "pull_requests": "write"},
         })))
-        .respond_with(minted("ghs_publish", TimeDelta::hours(1)))
+        .respond_with(minted("ghs_publish", Duration::hours(1)))
         .expect(1)
         .mount(&server)
         .await;
@@ -107,7 +108,7 @@ async fn each_use_gets_its_own_token_with_its_permissions() {
         .and(body_partial_json(
             json!({"permissions": {"actions": "read"}}),
         ))
-        .respond_with(minted("ghs_ci", TimeDelta::hours(1)))
+        .respond_with(minted("ghs_ci", Duration::hours(1)))
         .expect(1)
         .mount(&server)
         .await;
@@ -128,7 +129,7 @@ async fn a_token_ten_minutes_from_expiry_is_minted_again() {
     installed(&server, 1).await;
     Mock::given(method("POST"))
         .and(path("/app/installations/7/access_tokens"))
-        .respond_with(minted("ghs_short", TimeDelta::minutes(9)))
+        .respond_with(minted("ghs_short", Duration::minutes(9)))
         .expect(2)
         .mount(&server)
         .await;
@@ -191,7 +192,7 @@ async fn an_api_error_on_the_app_path_never_carries_the_token() {
     installed(&server, 1).await;
     Mock::given(method("POST"))
         .and(path("/app/installations/7/access_tokens"))
-        .respond_with(minted("ghs_secret_value", TimeDelta::hours(1)))
+        .respond_with(minted("ghs_secret_value", Duration::hours(1)))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -247,7 +248,7 @@ async fn the_gate_is_asked_before_every_token_and_can_refuse_it() {
     installed(&server, 1).await;
     Mock::given(method("POST"))
         .and(path("/app/installations/7/access_tokens"))
-        .respond_with(minted("ghs_gated", TimeDelta::hours(1)))
+        .respond_with(minted("ghs_gated", Duration::hours(1)))
         .expect(1)
         .mount(&server)
         .await;

@@ -387,7 +387,7 @@ impl ChatNotifier {
 
     /// Whether this alert is the first of its month here.
     fn first_alert(&self, of: BudgetOf, id: i64, threshold: f64) -> bool {
-        let month = chrono::Utc::now().format("%Y-%m").to_string();
+        let month = crate::when::month(time::OffsetDateTime::now_utc());
         let percent = (threshold * 100.0).round() as u32;
         self.alerted
             .lock()

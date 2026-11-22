@@ -48,7 +48,9 @@ async fn mints(github: &MockServer, id: i64, token: &str, times: u64) {
         .and(path(format!("/app/installations/{id}/access_tokens")))
         .respond_with(ResponseTemplate::new(201).set_body_json(json!({
             "token": token,
-            "expires_at": (chrono::Utc::now() + chrono::TimeDelta::hours(1)).to_rfc3339(),
+            "expires_at": (time::OffsetDateTime::now_utc() + time::Duration::hours(1))
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
         })))
         .expect(times)
         .mount(github)

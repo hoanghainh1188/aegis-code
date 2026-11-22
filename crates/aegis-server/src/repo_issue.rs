@@ -100,7 +100,7 @@ mod tests {
             mode: aegis_store::ModeName::POC,
             max_concurrent_jobs: 1,
             config,
-            created_at: chrono::Utc::now(),
+            created_at: time::OffsetDateTime::now_utc(),
             tenant_id: aegis_store::TenantId::DEFAULT,
         }
     }

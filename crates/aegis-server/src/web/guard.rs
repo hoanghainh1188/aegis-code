@@ -64,7 +64,7 @@ impl From<aegis_store::InstancePause> for PausedBand {
         Self {
             emergency: p.level == aegis_store::PauseLevel::Emergency,
             by: p.by,
-            at: p.at.format("%Y-%m-%d %H:%M").to_string(),
+            at: crate::when::minute(p.at),
             reason: p.reason,
         }
     }

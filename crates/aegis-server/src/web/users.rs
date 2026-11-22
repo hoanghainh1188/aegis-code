@@ -36,7 +36,7 @@ struct UserRow {
 fn seen(u: &UserSummary) -> String {
     match (u.user.kind, u.signed_in, u.last_session) {
         (UserKind::Service, _, _) => "API tokens".into(),
-        (_, _, Some(at)) => format!("signed in {}", at.format("%Y-%m-%d %H:%M")),
+        (_, _, Some(at)) => format!("signed in {}", crate::when::minute(at)),
         (_, true, None) => "signed in before".into(),
         (_, false, None) => "never signed in".into(),
     }
@@ -225,7 +225,7 @@ pub(super) async fn user_page(
             role: role.as_str(),
         })
         .collect();
-    let at = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M").to_string();
+    let at = |t: time::OffsetDateTime| crate::when::minute(t);
     let sessions = store
         .live_sessions(user.user.id)
         .await?
@@ -253,7 +253,7 @@ pub(super) async fn user_page(
         me,
         is_self: access.actor.user == Some(user.user.id),
         audit_link: format!("/admin/audit?actor={}", encoded(&user.user.name)),
-        created_at: user.created_at.format("%Y-%m-%d %H:%M").to_string(),
+        created_at: crate::when::minute(user.created_at),
         user: UserRow::from(&user),
         roles,
         notice,

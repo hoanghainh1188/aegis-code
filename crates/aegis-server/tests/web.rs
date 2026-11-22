@@ -352,7 +352,8 @@ async fn a_review_from_the_form_lands_in_the_ledger() {
 
     assert!(form.body.contains("name=\"_csrf\""));
     // The form signed a time 90 s ago for this job and this reviewer.
-    let opened_at = chrono::Utc::now().timestamp_millis() - 90_000;
+    let opened_at =
+        (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64 - 90_000;
     let sig = opened_at_signature(
         &Signer::new(common::KEY.as_bytes()),
         id,
@@ -470,7 +471,8 @@ async fn the_review_form_says_it_records_a_verdict_not_what_happens_to_the_pr() 
         form.body
     );
 
-    let opened_at = chrono::Utc::now().timestamp_millis() - 60_000;
+    let opened_at =
+        (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64 - 60_000;
     let sig = opened_at_signature(
         &Signer::new(common::KEY.as_bytes()),
         github,

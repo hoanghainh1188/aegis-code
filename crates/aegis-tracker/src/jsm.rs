@@ -2,8 +2,8 @@
 //! mapped severity (`P1`–`P3`) and SLA deadlines, reads request context & log
 //! attachments, and writes internal/public Service Desk updates + transitions.
 
-use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
+use time::OffsetDateTime;
 
 use crate::config::JsmConfig;
 use crate::http;
@@ -44,7 +44,7 @@ fn extract_priority(fields: &Value) -> Option<Priority> {
     Priority::parse_label(raw)
 }
 
-fn parse_jsm_sla_value(val: &Value) -> Option<DateTime<Utc>> {
+fn parse_jsm_sla_value(val: &Value) -> Option<OffsetDateTime> {
     if let Some(s) = val.as_str() {
         return parse_deadline(s);
     }
@@ -68,7 +68,7 @@ fn parse_jsm_sla_value(val: &Value) -> Option<DateTime<Utc>> {
     None
 }
 
-fn extract_sla_deadline(fields: &Value, sla_field: Option<&str>) -> Option<DateTime<Utc>> {
+fn extract_sla_deadline(fields: &Value, sla_field: Option<&str>) -> Option<OffsetDateTime> {
     if let Some(field) = sla_field
         && let Some(val) = fields.get(field)
         && let Some(dt) = parse_jsm_sla_value(val)

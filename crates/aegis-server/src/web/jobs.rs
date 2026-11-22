@@ -169,7 +169,7 @@ pub async fn list(
             tiers: tiers(&record),
             cost: dollars(record.cost_usd),
             wall_time: seconds(record.wall_time_s),
-            created_at: job.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            created_at: crate::when::minute(job.created_at),
             title: record.issue_title.clone().unwrap_or_default(),
             pr_url: pr_link(job),
             can_review: can_review(job, &access),
@@ -391,7 +391,7 @@ async fn rounds_of(store: &Store, job: &Job) -> Result<(Vec<RoundRow>, String), 
             outcome: outcome(&j),
             model_calls: r.model_calls,
             cost: dollars(r.cost_usd),
-            created_at: j.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            created_at: crate::when::minute(j.created_at),
             current: j.id == job.id,
         });
     }
@@ -531,7 +531,7 @@ pub async fn detail(
     let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
     let events = store.ledger().events(&job.ledger_key).await?;
     let record = IssueRecord::from_events(job.ledger_key.clone(), &events);
-    let time = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%d %H:%M:%S").to_string();
+    let time = |t: time::OffsetDateTime| crate::when::second(t);
     let runs = store
         .list_runs(job.id, Page::first(Page::MAX_LIMIT))
         .await?
