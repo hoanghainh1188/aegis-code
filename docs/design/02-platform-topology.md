@@ -113,7 +113,7 @@ flowchart TB
 
     subgraph Entrypoints["1. Entrypoints & Clients"]
         Client["aegis-client<br/>(aegis CLI)"]:::entry
-        LocalCLI["aegis-cli<br/>(aegis local & eval runner)"]:::entry
+        LocalCLI["aegis-cli<br/>(aegis-local: local & eval runner)"]:::entry
     end
 
     subgraph ServiceLayer["2. Platform Service Layer (aegis-server)"]

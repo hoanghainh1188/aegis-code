@@ -23,7 +23,7 @@
 //! one, and makes read-only directories writable before deleting them: Go
 //! writes its module cache read-only.
 //!
-//! The running jobs are those in the queue. A CLI run (`aegis eval`,
+//! The running jobs are those in the queue. A CLI run (`aegis-local eval`,
 //! `check-repo`) has no job row: a worker's `state_dir` must not be shared
 //! with one, or the sweep may remove a cache under it.
 

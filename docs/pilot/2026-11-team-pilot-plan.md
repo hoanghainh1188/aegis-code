@@ -9,7 +9,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 | Mục | Giá trị |
 | --- | --- |
 | Máy | `<host-ssh>`: Linux x86_64 hoặc arm64, tối thiểu 4 vCPU, 16 GB RAM, 100 GB SSD, chỉ dùng cho aegis ([runbook on-premise](../runbook/on-premise.md#prerequisites)) |
-| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.14.0** (có `aegis check-repo` trong image server, #474; sidecar DB cho gate và `run_tests`, #490, #491; triage chạy ngầm, #497; luồng CVE, #455; dừng mọi agent khi có sự cố, #510; quét secret ở đầu ra, #509; kiểm nguồn của câu trả lời, #508) |
+| Cách triển khai | Docker Compose (`deploy/compose/`), bản **v0.14.0** (có `aegis-local check-repo` trong image server, #474; sidecar DB cho gate và `run_tests`, #490, #491; triage chạy ngầm, #497; luồng CVE, #455; dừng mọi agent khi có sự cố, #510; quét secret ở đầu ra, #509; kiểm nguồn của câu trả lời, #508) |
 | Repo | `<owner/name>` trên GitHub. Issue và lỗi CI đến qua webhook (#25) |
 | Ngôn ngữ | `<language>`. Trần lượt gọi theo profile: 80 cho Rust, 40 cho các ngôn ngữ khác ([ADR 0014](../adr/0014-per-language-call-cap.md)) |
 | Ngân sách | **$100 mỗi tháng** cho repo (#31), $4 mỗi job (`[worker] max_cost_usd`) |
@@ -21,7 +21,7 @@ Mốc đo của Phase 2 ([Proposal §9](../design/00-proposal.md)) là: team dù
 
 ## Bước 0: chuẩn bị (trước ngày triển khai)
 
-1. **Phát hành v0.14.0.** Merge PR release của release-please để có tag `v0.14.0` cùng image trên GHCR. Từ v0.11.0, image server có `aegis check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Từ v0.12.0, test cần PostgreSQL hay Redis chạy được trong gate và trong `run_tests` của agent (sidecar, #490, #491). Từ v0.13.0, mỗi ticket được Light phân loại ngầm (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) để đo trong pilot (#497); job bug-fix không được đổi phiên bản nào trong lockfile, và phụ thuộc được nâng bằng một job CVE (#455, [runbook repos](../runbook/repos.md#registration-and-cloning) bước 8). Từ v0.14.0:
+1. **Phát hành v0.14.0.** Merge PR release của release-please để có tag `v0.14.0` cùng image trên GHCR. Từ v0.11.0, image server có `aegis-local check-repo` (#450, #474), nên máy pilot không cần Rust toolchain. Từ v0.12.0, test cần PostgreSQL hay Redis chạy được trong gate và trong `run_tests` của agent (sidecar, #490, #491). Từ v0.13.0, mỗi ticket được Light phân loại ngầm (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) để đo trong pilot (#497); job bug-fix không được đổi phiên bản nào trong lockfile, và phụ thuộc được nâng bằng một job CVE (#455, [runbook repos](../runbook/repos.md#registration-and-cloning) bước 8). Từ v0.14.0:
    - admin dừng được mọi agent bằng một thao tác khi có sự cố, rồi cho chạy tiếp mà không mất job trong hàng đợi (#510, [runbook incident](../runbook/incident.md));
    - gate có bước `secrets`, làm hỏng bản vá thêm khoá hay token; mọi văn bản đăng lên forge hay tracker đều được che secret (#509). Repo có fixture chứa khoá giả cần khai báo ngoại lệ ([runbook repos](../runbook/repos.md#registration-and-cloning) bước 9);
    - câu trả lời của agent phải trích nguồn có thật trong repo; nguồn sai thì agent được hỏi lại, hết lượt thì không mở PR (#508);
@@ -54,10 +54,10 @@ Làm theo [runbook on-premise §1](../runbook/on-premise.md#1-installation--setu
 
 Làm theo [runbook on-premise §2](../runbook/on-premise.md#2-registering-repositories):
 
-1. **Kiểm tra repo bằng `aegis check-repo`** ([runbook §2, Before Registering](../runbook/on-premise.md#before-registering-aegis-check-repo)). Lệnh có sẵn trong image server và chạy trong container `aegis` qua `docker-proxy`, giống job thật. Clone `<owner/name>` vào `/srv/aegis/.workspace/preflight/`, viết config từ config của mode kèm `[repo]` trỏ tới bản clone đó, rồi chạy:
+1. **Kiểm tra repo bằng `aegis-local check-repo`** ([runbook §2, Before Registering](../runbook/on-premise.md#before-registering-aegis-local-check-repo)). Lệnh có sẵn trong image server và chạy trong container `aegis` qua `docker-proxy`, giống job thật. Clone `<owner/name>` vào `/srv/aegis/.workspace/preflight/`, viết config từ config của mode kèm `[repo]` trỏ tới bản clone đó, rồi chạy:
 
    ```bash
-   docker compose exec aegis aegis check-repo --config .workspace/preflight/<slug>.toml
+   docker compose exec aegis aegis-local check-repo --config .workspace/preflight/<slug>.toml
    ```
 
    Lệnh này kiểm profile, lockfile, Docker và image sandbox, bước fetch, và chạy gate gốc trong sandbox `--network none` (format, lint, test). Mọi mục chặn phải qua trước khi đăng ký repo. Nếu test của repo cần PostgreSQL, Redis hay MySQL thì khai báo chúng là sidecar trong file repo (`[[settings.sidecars]]`, [runbook repos](../runbook/repos.md#registration-and-cloning) bước 7; #490) và cho image qua proxy (`--sidecar-image`). Nếu test cần Internet thì repo này chưa hợp để chạy thử. Test hỏng trên base cũng chặn (#487). Format hay lint hỏng trên base chỉ là cảnh báo, vì gate chấm bản vá theo các lỗi mà bản vá thêm vào.
@@ -116,6 +116,6 @@ Nếu `<owner/name>` là repo nội bộ và khách đồng ý bằng văn bản
 | Team chỉ giao việc khó, nên tỉ lệ chấp nhận thấp | Chọn issue cùng team trong tuần đầu, và ghi độ khó của từng issue vào bảng tuần |
 | Repo công khai, model có thể đã thấy bản sửa | Ghi rõ trong báo cáo. Ưu tiên repo nội bộ (#157) |
 | Gate hỏng ở bước `secrets` vì fixture của test chứa khoá hay token giả (#509) | Thêm `[[settings.secrets.allow]]` theo đường dẫn và loại, kèm lý do ([runbook repos](../runbook/repos.md#registration-and-cloning) bước 9), rồi chạy lại job. Ghi số ca vào báo cáo |
-| Job dừng vì câu trả lời không có nguồn kiểm được (#508) | Xem trang job (dòng "check sources"). Đếm các ca này riêng trong báo cáo: dashboard và `aegis report` có số "Held: no verifiable sources" |
+| Job dừng vì câu trả lời không có nguồn kiểm được (#508) | Xem trang job (dòng "check sources"). Đếm các ca này riêng trong báo cáo: dashboard và `aegis-local report` có số "Held: no verifiable sources" |
 | Agent gây sự cố (PR lạ hàng loạt, tốn tiền bất thường) | Admin dừng mọi agent (`/admin/pause` hoặc `aegis-server pause-all`), xử lý theo [runbook incident](../runbook/incident.md), rồi tiếp tục |
 | Bug mà bản sửa cần nâng một phụ thuộc: gate của job bug-fix hỏng vì lockfile bị khoá (#500) | Chạy một job CVE (hoặc job nâng) cho phụ thuộc đó trước, rồi chạy lại job bug-fix. Ghi số ca như vậy vào báo cáo |

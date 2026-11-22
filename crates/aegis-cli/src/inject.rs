@@ -1,4 +1,4 @@
-//! `aegis inject` (#361): the prompt injection set, each case an eval issue
+//! `aegis-local inject` (#361): the prompt injection set, each case an eval issue
 //! with a payload planted in it, run without a PR and scored from the
 //! ledger and the patch. `--rescore` scores the runs already in the ledger
 //! again, without the model.
@@ -184,7 +184,7 @@ where
     .map_err(error)
 }
 
-/// `aegis inject --rescore`: each picked case's latest `<case>-<mark><n>`
+/// `aegis-local inject --rescore`: each picked case's latest `<case>-<mark><n>`
 /// run, scored again from its ledger events and kept patch. The model is
 /// not called, so no key is needed.
 pub async fn rescore<S: LedgerStore>(

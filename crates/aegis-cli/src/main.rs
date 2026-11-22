@@ -1,16 +1,16 @@
 //! Command-line entry point: run one issue or a batch.
 //!
 //! ```text
-//! aegis run   --config config/poc.toml --issue scrapy/scrapy#6123
-//! aegis run   --config config/poc.toml --issue-file issue.md --id local-1
-//! aegis batch --config config/poc.toml --issues issues.txt
-//! aegis eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …] [--no-pr]
-//! aegis eval  --config config/poc.toml --set eval/issues --replay --no-pr
-//! aegis inject --config config/gin.toml --set eval/injection [--only <case> …] [--replay] [--rescore]
-//! aegis review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
-//! aegis report --config config/poc.toml [--set eval/issues]
-//! aegis ledger import --config config/poc.toml [--from .workspace/state/ledger]
-//! aegis ledger export --config config/poc.toml --to exported-ledger
+//! aegis-local run   --config config/poc.toml --issue scrapy/scrapy#6123
+//! aegis-local run   --config config/poc.toml --issue-file issue.md --id local-1
+//! aegis-local batch --config config/poc.toml --issues issues.txt
+//! aegis-local eval  --config config/poc.toml --set eval/issues [--only scrapy-7604 …] [--no-pr]
+//! aegis-local eval  --config config/poc.toml --set eval/issues --replay --no-pr
+//! aegis-local inject --config config/gin.toml --set eval/injection [--only <case> …] [--replay] [--rescore]
+//! aegis-local review --config config/poc.toml --id scrapy-7604-r1 --verdict accepted --lines 0 --minutes 6
+//! aegis-local report --config config/poc.toml [--set eval/issues]
+//! aegis-local ledger import --config config/poc.toml [--from .workspace/state/ledger]
+//! aegis-local ledger export --config config/poc.toml --to exported-ledger
 //! ```
 //!
 //! `issues.txt` has one `owner/repo#number` per line (`#` comments allowed).
@@ -22,12 +22,12 @@
 //! `--no-pr` stops where the PR would be opened, with or without `--replay`
 //! (#111); the fork token is then not needed.
 //!
-//! `aegis inject` runs the prompt injection set (#361) and never opens a
+//! `aegis-local inject` runs the prompt injection set (#361) and never opens a
 //! PR: a planted payload must not reach a forge.
 //!
 //! `run.ledger = "postgres"` keeps the ledger of real runs in the database
 //! named by `AEGIS_DATABASE_URL` (#22); dry runs keep their own JSON
-//! ledger either way. `aegis ledger import|export` copies between the two.
+//! ledger either way. `aegis-local ledger import|export` copies between the two.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -50,17 +50,17 @@ use ledger::Ledger;
 use tokio_util::sync::CancellationToken;
 
 const USAGE: &str = "usage:
-  aegis run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
-  aegis batch --config <file> --issues <file>
-  aegis eval  --config <file> --set <dir> [--only <id>]... [--replay] [--no-pr]
-  aegis inject --config <file> --set <dir> [--only <case>]... [--replay] [--rescore]
-  aegis review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
+  aegis-local run   --config <file> (--issue <owner/repo#number> | --issue-file <file> --id <id>)
+  aegis-local batch --config <file> --issues <file>
+  aegis-local eval  --config <file> --set <dir> [--only <id>]... [--replay] [--no-pr]
+  aegis-local inject --config <file> --set <dir> [--only <case>]... [--replay] [--rescore]
+  aegis-local review --config <file> --id <run> --verdict accepted|accepted_with_edits|rejected
                (--lines <n> | --from-pr <url>) --minutes <m> [--broke-tests] [--replace]
-  aegis report --config <file> [--set <dir>]
-  aegis check-repo --config <file> [--no-sandbox] [--skip-tests]
-  aegis cve   --config <file> --package <name> --version <v> --advisory <id> [--id <id>]
-  aegis ledger import --config <file> [--from <dir>]
-  aegis ledger export --config <file> --to <dir>";
+  aegis-local report --config <file> [--set <dir>]
+  aegis-local check-repo --config <file> [--no-sandbox] [--skip-tests]
+  aegis-local cve   --config <file> --package <name> --version <v> --advisory <id> [--id <id>]
+  aegis-local ledger import --config <file> [--from <dir>]
+  aegis-local ledger export --config <file> --to <dir>";
 
 #[derive(Debug, Default)]
 struct Args {
@@ -74,16 +74,16 @@ struct Args {
     only: Vec<String>,
     replay: bool,
     no_pr: bool,
-    /// `aegis inject`: score the runs in the ledger again, no model.
+    /// `aegis-local inject`: score the runs in the ledger again, no model.
     rescore: bool,
     review: kpi::ReviewArgs,
-    /// `import` or `export` after `aegis ledger`.
+    /// `import` or `export` after `aegis-local ledger`.
     action: Option<String>,
     from: Option<PathBuf>,
     to: Option<PathBuf>,
     no_sandbox: bool,
     skip_tests: bool,
-    /// `aegis cve` (#501): what to raise, to which version, for which
+    /// `aegis-local cve` (#501): what to raise, to which version, for which
     /// advisory.
     package: Option<String>,
     version: Option<String>,
@@ -103,7 +103,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         ..Args::default()
     };
     if parsed.command == "ledger" {
-        parsed.action = Some(args.next().ok_or("`aegis ledger` needs import or export")?);
+        parsed.action = Some(
+            args.next()
+                .ok_or("`aegis-local ledger` needs import or export")?,
+        );
     }
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -137,7 +140,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(parsed)
 }
 
-/// The job of `aegis cve` (#501): the target checked before anything
+/// The job of `aegis-local cve` (#501): the target checked before anything
 /// runs; its id, unless given, from the package and version.
 fn cve_issue(args: &Args) -> Result<IssueInput, String> {
     let need = |v: &Option<String>, flag: &str| v.clone().ok_or(format!("{flag} is required"));
@@ -333,14 +336,14 @@ fn line(report: &IssueReport) -> String {
 fn check_flags(args: &Args) -> Result<(), String> {
     let cve_flags = args.package.is_some() || args.version.is_some() || args.advisory.is_some();
     if cve_flags && args.command != "cve" {
-        return Err("--package, --version and --advisory are for `aegis cve`".into());
+        return Err("--package, --version and --advisory are for `aegis-local cve`".into());
     }
     let eval = args.command == "eval";
     let inject = args.command == "inject";
     if (args.replay && !eval && !inject) || (args.no_pr && !eval) || (args.rescore && !inject) {
         return Err(
-            "--replay is for `aegis eval` and `aegis inject`, --no-pr for `aegis eval`, \
-                    --rescore for `aegis inject`"
+            "--replay is for `aegis-local eval` and `aegis-local inject`, --no-pr for `aegis-local eval`, \
+                    --rescore for `aegis-local inject`"
                 .into(),
         );
     }
@@ -415,7 +418,7 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
             }
             (_, action) => {
                 return Err(format!(
-                    "`aegis ledger` takes import or export, not `{}`",
+                    "`aegis-local ledger` takes import or export, not `{}`",
                     action.unwrap_or_default()
                 ));
             }
@@ -501,7 +504,7 @@ async fn main_inner(mut args: Args) -> Result<bool, String> {
     }
 }
 
-/// `aegis inject`, with the model or replayed, and no PR either way.
+/// `aegis-local inject`, with the model or replayed, and no PR either way.
 async fn run_inject(config: &Path, args: &Args) -> Result<bool, String> {
     let set = args.set.as_deref().ok_or("--set is required")?;
     if args.rescore {
@@ -593,7 +596,7 @@ async fn main() -> ExitCode {
     let args = match parse_args(raw_args) {
         Ok(args) => args,
         Err(e) => {
-            eprintln!("aegis: {e}\n{USAGE}");
+            eprintln!("aegis-local: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -601,7 +604,7 @@ async fn main() -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::from(1),
         Err(e) => {
-            eprintln!("aegis: {e}");
+            eprintln!("aegis-local: {e}");
             ExitCode::from(2)
         }
     }

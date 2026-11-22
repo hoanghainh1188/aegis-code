@@ -1,4 +1,4 @@
-//! Startup banner, styling, and usage formatting for the aegis CLI.
+//! Startup banner, styling, and usage formatting for the aegis-local CLI.
 
 /// Terminal styling constants using standard ANSI escape sequences.
 pub mod style {
@@ -39,7 +39,7 @@ pub fn print_banner() {
 pub fn print_help() {
     print_banner();
     println!("{}USAGE:{}", style::BOLD, style::RESET);
-    println!("  aegis <COMMAND> [OPTIONS]\n");
+    println!("  aegis-local <COMMAND> [OPTIONS]\n");
 
     println!("{}COMMANDS:{}", style::BOLD, style::RESET);
     let commands = [
@@ -81,17 +81,17 @@ pub fn print_help() {
 
     println!("\n{}EXAMPLES:{}", style::BOLD, style::RESET);
     println!(
-        "  {DIM}# Run a single issue:{RESET}\n  aegis run --config config/poc.toml --issue scrapy/scrapy#6123\n",
+        "  {DIM}# Run a single issue:{RESET}\n  aegis-local run --config config/poc.toml --issue scrapy/scrapy#6123\n",
         DIM = style::DIM,
         RESET = style::RESET,
     );
     println!(
-        "  {DIM}# Run an eval set with dry-run replay:{RESET}\n  aegis eval --config config/poc.toml --set eval/issues --replay --no-pr\n",
+        "  {DIM}# Run an eval set with dry-run replay:{RESET}\n  aegis-local eval --config config/poc.toml --set eval/issues --replay --no-pr\n",
         DIM = style::DIM,
         RESET = style::RESET,
     );
     println!(
-        "  {DIM}# View KPI metrics report:{RESET}\n  aegis report --config config/poc.toml\n",
+        "  {DIM}# View KPI metrics report:{RESET}\n  aegis-local report --config config/poc.toml\n",
         DIM = style::DIM,
         RESET = style::RESET,
     );

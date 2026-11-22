@@ -78,7 +78,7 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
 6. **Writing Effective Conventions:** Detail commands required to execute a **single** test and specify where reproduction tests should be authored. General language test conventions already exist in `prompts/conventions/`; repository conventions should focus on project-specific guidelines.
 
-7. **Services the tests need (#490, [ADR 0013](../adr/0013-ephemeral-database-sidecars.md)):** tests that connect to PostgreSQL, Redis or MySQL fail in the gate's `--network none` sandbox, and `aegis check-repo` reports them under "Network & DB Isolation". Declare each service in the repo file, under `[settings]`:
+7. **Services the tests need (#490, [ADR 0013](../adr/0013-ephemeral-database-sidecars.md)):** tests that connect to PostgreSQL, Redis or MySQL fail in the gate's `--network none` sandbox, and `aegis-local check-repo` reports them under "Network & DB Isolation". Declare each service in the repo file, under `[settings]`:
 
    ```toml
    [[settings.sidecars]]
@@ -113,7 +113,7 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    Without a server, from a run configuration:
 
    ```bash
-   aegis cve --config <file> --package requests --version 2.32.4 --advisory GHSA-9wx4-h78v-vm56
+   aegis-local cve --config <file> --package requests --version 2.32.4 --advisory GHSA-9wx4-h78v-vm56
    ```
 
    The job counts against the repo's budget like any other; one job per target may be queued or running at a time.
@@ -134,7 +134,7 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
    Keep exceptions narrow: a path that also holds real config hides real leaks. Texts the platform posts (commit message, PR, review replies, issue and tracker comments) are masked in any case; there is no exception for them.
 
-10. **Diagnosis instead of a PR (#451, [ADR 0012](../adr/0012-triage-and-diagnostic-lane.md)):** off by default. Every ticket gets a shadow triage (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) that changes nothing; once the pilot's triage table (`aegis report`, the dashboard) shows a category is rarely a code defect read wrong, turn it on for the repository:
+10. **Diagnosis instead of a PR (#451, [ADR 0012](../adr/0012-triage-and-diagnostic-lane.md)):** off by default. Every ticket gets a shadow triage (`code_bug`, `ops_or_config`, `data_issue`, `needs_info`) that changes nothing; once the pilot's triage table (`aegis-local report`, the dashboard) shows a category is rarely a code defect read wrong, turn it on for the repository:
 
    ```toml
    [settings.triage_lane]

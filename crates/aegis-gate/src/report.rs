@@ -110,7 +110,7 @@ pub struct StepReport {
     /// Passed only because the base revision fails it the same way: the
     /// command fails there too and the patch adds no finding (format, lint,
     /// typecheck), or the failing tests fail on the base too (#104). On a
-    /// tree with no patch, as `aegis check-repo` runs, such a step fails
+    /// tree with no patch, as `aegis-local check-repo` runs, such a step fails
     /// (#487).
     pub fails_on_base: bool,
 }

@@ -302,7 +302,7 @@ Skip this on the bot path (A1–A3). You need an owner of the GitHub organizatio
 
 ### C1. Register the repo
 
-**First, check it** (optional, recommended for a pilot): `aegis check-repo` is in the server image. It runs the repo's gate once in a sandbox and says what would stop jobs (no lockfile, no sandbox image, tests that need a network). See the [Runbook](runbook/on-premise.md#before-registering-aegis-check-repo).
+**First, check it** (optional, recommended for a pilot): `aegis-local check-repo` is in the server image. It runs the repo's gate once in a sandbox and says what would stop jobs (no lockfile, no sandbox image, tests that need a network). See the [Runbook](runbook/on-premise.md#before-registering-aegis-check-repo).
 
 **From the machine** (#476), in `deploy/compose`:
 

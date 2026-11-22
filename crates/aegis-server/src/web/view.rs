@@ -1,4 +1,4 @@
-//! Values as the pages show them, formatted like `aegis report` prints
+//! Values as the pages show them, formatted like `aegis-local report` prints
 //! them so the two can be compared by eye.
 
 use aegis_ledger::{

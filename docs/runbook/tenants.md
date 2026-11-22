@@ -39,4 +39,4 @@ The **AMS** page (`/ams`) shows, for the jobs created this month (the budget's m
 - **Triage / PR:** the share resolved by a diagnosis on the ticket (#451), and by a PR.
 - **Cost per contract:** what each tenant's repos spent this month, against its cap.
 
-A person sees the contracts of the repos they have a role in; platform admins see all of them. `aegis report` prints the same tables when the ledger is in PostgreSQL, with the month in UTC. Prometheus has the same figures: `aegis_ams_mttr_seconds`, `aegis_ams_sla_on_time_ratio`, `aegis_ams_overdue_open_jobs` and `aegis_ams_resolved_jobs{by}`, by `tenant` and `priority`, and `aegis_tenant_budget_spent_usd` / `_cap_usd` by `tenant`.
+A person sees the contracts of the repos they have a role in; platform admins see all of them. `aegis-local report` prints the same tables when the ledger is in PostgreSQL, with the month in UTC. Prometheus has the same figures: `aegis_ams_mttr_seconds`, `aegis_ams_sla_on_time_ratio`, `aegis_ams_overdue_open_jobs` and `aegis_ams_resolved_jobs{by}`, by `tenant` and `priority`, and `aegis_tenant_budget_spent_usd` / `_cap_usd` by `tenant`.

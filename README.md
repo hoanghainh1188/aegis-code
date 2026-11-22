@@ -172,7 +172,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ### 3.4 For Contributors (Build & Test from Source)
 * **Prerequisites:** Rust stable (edition 2024, 1.85+) and Docker.
 ```bash
-# Build core CLI and tool daemon
+# Build the local runner (`aegis-local`) and tool daemon
 cargo build --release -p aegis-cli -p aegis-aci
 
 # Run formatting and clippy linter checks
@@ -289,7 +289,7 @@ aegis-code/
 ├── crates/
 │   ├── # 1. Entrypoints & Developer Clients
 │   ├── aegis-client/         # Developer CLI binary `aegis`: submit, watch, cancel jobs via REST API (ADR 0006)
-│   ├── aegis-cli/            # Local CLI binary `aegis`: single-issue runner and evaluation benchmark harness
+│   ├── aegis-cli/            # Local CLI binary `aegis-local`: single-issue runner and evaluation benchmark harness
 │   │
 │   ├── # 2. Platform Service, State & Secrets
 │   ├── aegis-server/         # Unified service (`--role api|worker|all`): HTTP API, webhooks, pollers, workers, SSR UI (ADR 0003)
@@ -335,7 +335,7 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
 * ✅ **Phase 0 – Setup** (Completed): CI/CD pipelines, Docker sandbox hardening, build time benchmarking, 30–50 issue evaluation set ([Proposal §9](docs/design/00-proposal.md)).
 * ✅ **Phase 1 – MVP / PoC** (Completed): Core agent loop, Rust and Python language profiles, empirical validation against 3 Core KPIs ([ADR 0002](docs/adr/0002-full-platform-mvp-as-checkpoint.md), [ADR 0005](docs/adr/0005-kpi-thresholds-after-phase-1.md)).
 * 🚧 **Phase 2 – Platform Service** (~95% Completed – Final Stage):
-  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425, C# 50% in #448); per-language call cap ([ADR 0014](docs/adr/0014-per-language-call-cap.md)); `aegis check-repo` pre-flight check (#450), shipped in the server image (#474); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC and RBAC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)); gVisor sandbox cost measurement, keeping `runc` as the default (#322, [report](docs/measurements/2026-11-16-gvisor-runsc.md)).
+  - **Completed:** TypeScript/JavaScript, Java, Go, C#/.NET profiles and KPI evaluation (#259, Java ≥ 35% in #425, C# 50% in #448); per-language call cap ([ADR 0014](docs/adr/0014-per-language-call-cap.md)); `aegis-local check-repo` pre-flight check (#450), shipped in the server image (#474); unified `aegis-server` service; PostgreSQL transactional queue (`SKIP LOCKED`); GitHub/GitLab webhooks; Jira/Backlog polling; Askama + htmx dashboard with OIDC and RBAC; Prometheus/Grafana monitoring; automated review rounds; developer CLI `aegis` on npm; on-premise Docker Compose and systemd bundles; Kubernetes Helm chart + `aegis-docker-proxy` ([ADR 0008](docs/adr/0008-gate-sandbox-on-kubernetes.md), [ADR 0010](docs/adr/0010-docker-socket-proxy.md)); prompt injection evaluation across issue, CI log, code comment, and review notes ([report](docs/measurements/2026-11-12-injection-review-notes.md)); gVisor sandbox cost measurement, keeping `runc` as the default (#322, [report](docs/measurements/2026-11-16-gvisor-runsc.md)).
   - **In Progress / Remaining:** real-world team pilot on-premise (#158, [plan](docs/pilot/2026-11-team-pilot-plan.md)) and internal repo KPI validation (#157). These two are the Phase 2 measurement milestone ([Proposal §9](docs/design/00-proposal.md#9-implementation-roadmap)); staging cloud deployment via OpenTofu (#33) moved to Phase 3.
 * 🚧 **Phase 3 – Expansion & AMS Readiness** (Features built, `Phase 3 – Mở rộng`):
   - **Completed** (started before the pilot under the [ADR 0011](docs/adr/0011-ams-direction.md) amendments): triage and diagnostic lane, off by default (#451, [ADR 0012](docs/adr/0012-triage-and-diagnostic-lane.md)); APM intake from Sentry, Datadog, CloudWatch (#452); ITSM intake from ServiceNow and Jira Service Management with P1–P3 and SLA deadline (#453); database sidecars and Golden Master (#454, [ADR 0013](docs/adr/0013-ephemeral-database-sidecars.md), [report](docs/measurements/2026-11-15-sidecar-golden-master.md)); controlled CVE remediation (#455, [ADR 0015](docs/adr/0015-cve-remediation-lane.md)); more languages (#37).

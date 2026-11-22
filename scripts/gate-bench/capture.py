@@ -3,7 +3,7 @@
 
 Run it next to a replay; it stops when the replay's command ends:
 
-    scripts/gate-bench/capture.py OUT -- aegis eval --config config/gin.toml \
+    scripts/gate-bench/capture.py OUT -- aegis-local eval --config config/gin.toml \
         --set eval/issues --only gin-4851 --replay --no-pr
 
 OUT/containers.jsonl gets `docker inspect` of every `aegis-gate-*` container

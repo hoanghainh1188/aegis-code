@@ -64,7 +64,7 @@ run() {
   echo "== $label"
   start=$(date +%s)
   set +e
-  aegis eval --config "$cfg" --set eval/issues --only "$issue" --replay --no-pr > "$log" 2>&1
+  aegis-local eval --config "$cfg" --set eval/issues --only "$issue" --replay --no-pr > "$log" 2>&1
   rc=$?
   set -e
   local took=$(( $(date +%s) - start ))

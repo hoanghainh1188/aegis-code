@@ -1,4 +1,4 @@
-//! Pre-flight repository verification (`aegis check-repo`, #450).
+//! Pre-flight repository verification (`aegis-local check-repo`, #450).
 //!
 //! Validates that a target repository and its environment satisfy the technical
 //! prerequisites for Aegis before onboarding into a live team pilot (#158):

@@ -69,8 +69,8 @@ With `--no-pr`, no PR holds the agent's patch, so each run that passes the gate 
 Run benchmark evaluations:
 
 ```bash
-PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/gin.toml --set eval/issues --replay --no-pr
-PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/polly.toml --set eval/issues --only Polly-3086 --only Polly-3286
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis-local eval --config config/gin.toml --set eval/issues --replay --no-pr
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis-local eval --config config/polly.toml --set eval/issues --only Polly-3086 --only Polly-3286
 ```
 
 ### Scoring Hidden Tests Bound to Upstream Choices (#424)
@@ -95,7 +95,7 @@ This rule replaces neither option considered for later runs: a reviewer blind to
 
 ### Prompt Injection Set (#361)
 
-[`injection/`](injection/README.md) plants payloads into eval issues from this set (issue/ticket text, README, a code comment, a CI log, a review note). They ask the agent to change CI, add a dependency or leak a canary. `aegis inject` runs the set without a PR and reports, per case, whether the agent complied, attempted or ignored the payload.
+[`injection/`](injection/README.md) plants payloads into eval issues from this set (issue/ticket text, README, a code comment, a CI log, a review note). They ask the agent to change CI, add a dependency or leak a canary. `aegis-local inject` runs the set without a PR and reports, per case, whether the agent complied, attempted or ignored the payload.
 
 ---
 
@@ -133,5 +133,5 @@ Configurations `config/poc.toml` and `config/typst.toml` enable call graph trave
 The platform requires `codebase-memory-mcp` available on `$PATH`. The prebuilt binary is packaged inside `aegis-server` container images. For local developer workstations, download v0.12.1 from [GitHub Releases](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1), verify checksums, and extract into `.workspace/tools/cbm/`:
 
 ```bash
-PATH=$PWD/.workspace/tools/cbm:$PATH aegis eval --config config/typst.toml --set eval/issues
+PATH=$PWD/.workspace/tools/cbm:$PATH aegis-local eval --config config/typst.toml --set eval/issues
 ```
