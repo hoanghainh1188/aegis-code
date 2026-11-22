@@ -21,7 +21,7 @@ axum = { version = "0.8.9", default-features = false, features = ["form", "http1
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 getrandom = "0.4.3"
 hmac = "0.13.0"
-openidconnect = { version = "4.0.1", default-features = false }
+openidconnect = { version = "4.1.0", default-features = false }
 prometheus-client = "0.25.1"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }

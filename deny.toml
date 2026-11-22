@@ -10,12 +10,12 @@ all-features = true
 yanked = "deny"
 unmaintained = "all"
 ignore = [
-    # `rsa` và `crypto-bigint` 0.5, kéo vào bởi `openidconnect` (#29): hai
-    # advisory về rò rỉ thời gian khi dùng khóa bí mật (giải mã, ký). Server
-    # chỉ kiểm chữ ký ID token bằng khóa công khai của SSO, không giữ khóa
-    # RSA/EC bí mật nào. Gỡ khi `openidconnect` lên bản đã sửa.
+    # `rsa` 0.9, kéo vào bởi `openidconnect` 4.1 (#29): Marvin, rò rỉ thời
+    # gian khi giải mã hay ký bằng khóa bí mật; nhánh 0.9 không có bản sửa.
+    # Server chỉ kiểm chữ ký ID token bằng khóa công khai của SSO, không giữ
+    # khóa RSA bí mật nào. Gỡ khi `openidconnect` lên `rsa` 0.10 (#606).
+    # (`crypto-bigint` 0.5, RUSTSEC-2026-0387, đã hết từ `openidconnect` 4.1.)
     { id = "RUSTSEC-2023-0071", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
-    { id = "RUSTSEC-2026-0387", reason = "chỉ kiểm chữ ký bằng khóa công khai (#29)" },
     # `chrono` unmaintained, mọi phiên bản, không có bản sửa (#579). Không phải
     # lỗ hổng; ngoài code của mình nó còn bị kéo vào qua `sqlx`, `oauth2`,
     # `openidconnect`, `rmcp`, `schemars`. Gỡ khi đã chuyển sang `jiff`/`time`
