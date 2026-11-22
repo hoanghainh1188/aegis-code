@@ -223,6 +223,11 @@ pub struct RepoConfig {
     /// 0013): `[[repo.sidecars]]`. They run only with `run.sandbox`.
     #[serde(default)]
     pub sidecars: Vec<aegis_gate::SidecarSpec>,
+    /// The language of the PR description, review replies and diagnosis
+    /// reports, the platform's words and the model's (#588): `en`, `ja` or
+    /// `vi`; `en` when unset.
+    #[serde(default)]
+    pub locale: aegis_pr::Locale,
     /// Where the agent pushes and opens PRs. On the app path (ADR 0017)
     /// the upstream repo itself, with no `token_env`.
     pub fork: ForkConfig,

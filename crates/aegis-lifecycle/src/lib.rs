@@ -25,6 +25,7 @@ pub mod flags;
 pub mod injection;
 mod issue;
 mod job;
+mod language;
 mod light;
 pub mod memory;
 mod publish;

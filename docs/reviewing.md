@@ -10,18 +10,18 @@ PRs are opened in the configured **fork** (a bot-owned fork, or the upstream rep
 
 ## 2. Reading the PR
 
-The PR body has fixed sections (currently with Vietnamese headings; [example](../assets/screenshots/trial-pull-request.png)):
+The PR body has fixed sections, in the repo's language (`[repo] locale`: `en` by default, `ja` or `vi`; [example](../assets/screenshots/trial-pull-request.png), in Vietnamese). The headings below are the English ones, with the Japanese and Vietnamese after them:
 
-| Section | Heading in the PR | What to check |
+| Section | Heading in the PR (`en` / `ja` / `vi`) | What to check |
 | --- | --- | --- |
 | Issue | `## Issue` | The link is the issue you expect. |
-| Root cause | `## Nguyên nhân` | The explanation names the actual cause, not the symptom. If the cause is wrong, the fix usually is too, whatever the tests say. |
-| Changes | `## Thay đổi (theo từng đoạn)` | One line per changed hunk (`file:lines — note`). Every hunk should follow from the root cause; unrelated edits are a reason to ask for changes. |
-| Tests | `## Test` | *Test tái hiện*: the reproducing test that failed before the patch and passes after. Read it: does it test the behaviour the issue describes? *Test được phép đổi*: existing tests the patch was allowed to change, each with a reason. Any entry here deserves attention: it is a deliberate behaviour change. |
-| Gate | `## Kết quả gate` | One mark per step: `✔` passed, `✘` failed, `–` skipped. A PR only exists if no step failed. |
-| Cost | `## Chi phí` | Models used, number of calls, USD spent. |
+| Root cause | `## Root cause` / `## 根本原因` / `## Nguyên nhân` | The explanation names the actual cause, not the symptom. If the cause is wrong, the fix usually is too, whatever the tests say. |
+| Changes | `## Changes (by hunk)` / `## 変更内容 (ハンクごと)` / `## Thay đổi (theo từng đoạn)` | One line per changed hunk (`file:lines — note`). Every hunk should follow from the root cause; unrelated edits are a reason to ask for changes. |
+| Tests | `## Tests` / `## テスト` / `## Test` | *Reproduction test*: the reproducing test that failed before the patch and passes after. Read it: does it test the behaviour the issue describes? *Tests allowed to change*: existing tests the patch was allowed to change, each with a reason. Any entry here deserves attention: it is a deliberate behaviour change. |
+| Gate | `## Gate result` / `## Gate 結果` / `## Kết quả gate` | One mark per step: `✔` passed, `✘` failed, `–` skipped. A PR only exists if no step failed. |
+| Cost | `## Cost` / `## コスト` / `## Chi phí` | Models used, number of calls, USD spent. |
 
-If a gate reference (a stored expected output) was updated, the Tests section adds *Tham chiếu gate đã cập nhật, người duyệt cần xác nhận*: the files and tests whose reference changed. Confirm each one is an intended change.
+If a gate reference (a stored expected output) was updated, the Tests section adds *Gate references updated, the reviewer should confirm*: the files and tests whose reference changed. Confirm each one is an intended change.
 
 Then read the diff as you would any colleague's. The dashboard's job page (`/jobs/<id>`) shows how the agent got there: every model call, tool call, escalation and gate run.
 

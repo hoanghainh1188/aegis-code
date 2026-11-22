@@ -582,6 +582,8 @@ impl Modes {
                 secrets: settings.secrets,
                 triage_lane: settings.triage_lane,
                 sidecars: settings.sidecars,
+                // Resolved per repo, tenant and server by #589.
+                locale: aegis_pr::Locale::default(),
                 fork,
                 app,
             },

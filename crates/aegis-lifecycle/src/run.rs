@@ -713,6 +713,7 @@ where
             (DependencyPolicy::Upgrade(upgrade), Some(answer), message)
         }
     };
+    let first_message = first_message + &crate::language::directive(cfg.repo.locale);
     let tools = McpTools::connect(&tool_specs(cfg, profiles, tree.path(), &job_dir)?).await?;
     let queries = cfg.codebase_memory.as_ref().map(|c| c.tools.as_slice());
     let graph = match CodeGraph::open(&tools, queries, tree.path()).await {

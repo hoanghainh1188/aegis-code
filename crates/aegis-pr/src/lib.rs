@@ -24,6 +24,7 @@ mod git;
 mod github;
 mod gitlab;
 mod hooks;
+mod locale;
 mod review;
 
 use std::path::Path;
@@ -46,6 +47,7 @@ pub use git::{GITHUB_USER, GITLAB_USER, Identity, Remote, token_env, token_env_a
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};
 pub use hooks::HookDone;
+pub use locale::{Locale, PrStrings, UnknownLocale};
 pub use review::{GITLAB_DEVELOPER, NoteAt, PullState, REPLY_MARKER, ReviewNote};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

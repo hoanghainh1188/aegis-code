@@ -177,6 +177,7 @@ where
                 excerpt: f.excerpt.clone(),
             })
             .collect(),
+        locale: cfg.repo.locale,
     });
     let body = masked(ledger, "PR", &body).await?;
     let title = commit_message.lines().next().unwrap_or("fix").to_owned();
@@ -288,7 +289,12 @@ where
     })?;
     // The commit is on the PR: a reply that fails to post is told, not
     // an error.
-    let reply = masked(ledger, "review reply", &round.reply(&pushed.commit, answer)).await?;
+    let reply = masked(
+        ledger,
+        "review reply",
+        &round.reply(&pushed.commit, answer, cfg.repo.locale),
+    )
+    .await?;
     let note = fork_forge(platform)?
         .comment_on_request(round.pull.number, &reply)
         .await
