@@ -1,52 +1,52 @@
 {% extends "base.html" %}
-{% block title %}Pause all agents{% endblock %}
+{% block title %}{{ crate::t("Pause all agents") }}{% endblock %}
 {% block content %}
 <section aria-labelledby="pause-heading">
-  <p class="eyebrow">Admin · <a href="/admin/repos">Repos</a> · <a href="/admin/users">Users</a> · <a href="/admin/audit">Audit log</a> · <a href="/admin/ai">AI</a></p>
-  <h1 id="pause-heading">Pause all agents</h1>
+  <p class="eyebrow">{{ crate::t("Admin ·") }} <a href="/admin/repos">{{ crate::t("Repos") }}</a> · <a href="/admin/users">{{ crate::t("Users") }}</a> · <a href="/admin/audit">{{ crate::t("Audit log") }}</a> · <a href="/admin/ai">AI</a></p>
+  <h1 id="pause-heading">{{ crate::t("Pause all agents") }}</h1>
   {% if let Some(n) = notice %}<p class="notice">{{ n }}</p>{% endif %}
   {% if let Some(p) = me.paused %}
-  <p class="notice bad"><span class="check fail">{% if p.emergency %}Emergency stop{% else %}Paused{% endif %}</span> by {{ p.by }} at {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}. Queued jobs wait and new ones are recorded; none runs until the agents are resumed.</p>
+  <p class="notice bad"><span class="check fail">{% if p.emergency %}{{ crate::t("Emergency stop") }}{% else %}{{ crate::t("Paused") }}{% endif %}</span> {{ crate::t("by") }} {{ p.by }} {{ crate::t("at") }} {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}{{ crate::t(". Queued jobs wait and new ones are recorded; none runs until the agents are resumed.") }}</p>
   <details class="confirm">
-    <summary class="button">Resume all agents…</summary>
+    <summary class="button">{{ crate::t("Resume all agents…") }}</summary>
     <form method="post" action="/admin/resume" class="inline">
       {% include "form_guard.html" %}
-      <p class="note">Workers claim the queued jobs again at once, oldest first, within each repo's limits. Check the cause is fixed first.</p>
-      <button type="submit">Yes, resume all agents</button>
+      <p class="note">{{ crate::t("Workers claim the queued jobs again at once, oldest first, within each repo's limits. Check the cause is fixed first.") }}</p>
+      <button type="submit">{{ crate::t("Yes, resume all agents") }}</button>
     </form>
   </details>
   {% if !p.emergency %}
   <details class="confirm">
-    <summary class="button ghost">Escalate to an emergency stop…</summary>
+    <summary class="button ghost">{{ crate::t("Escalate to an emergency stop…") }}</summary>
     <form method="post" action="/admin/pause" class="inline">
       {% include "form_guard.html" %}
       <input type="hidden" name="level" value="emergency">
-      <label>Why (optional)
+      <label>{{ crate::t("Why (optional)") }}
         <input type="text" name="reason" maxlength="500" autocomplete="off">
       </label>
-      <p class="note">Every running job is asked to cancel; each stops at its worker's next lease renewal.</p>
-      <button type="submit" class="danger">Yes, stop every running job</button>
+      <p class="note">{{ crate::t("Every running job is asked to cancel; each stops at its worker's next lease renewal.") }}</p>
+      <button type="submit" class="danger">{{ crate::t("Yes, stop every running job") }}</button>
     </form>
   </details>
   {% endif %}
   {% else %}
-  <p class="note"><span class="check pass">Running</span> For an incident that is not one repo's: a model acting strangely, a prompt injection spreading, a provider billing wrong. Webhooks, trackers and Sonar still record jobs while paused; nothing in the queue is lost. To hold one repo, pause it from its own page.</p>
+  <p class="note"><span class="check pass">{{ crate::t("Running") }}</span> {{ crate::t("For an incident that is not one repo's: a model acting strangely, a prompt injection spreading, a provider billing wrong. Webhooks, trackers and Sonar still record jobs while paused; nothing in the queue is lost. To hold one repo, pause it from its own page.") }}</p>
   <details class="confirm">
-    <summary class="button ghost">Pause all agents…</summary>
+    <summary class="button ghost">{{ crate::t("Pause all agents…") }}</summary>
     <form method="post" action="/admin/pause" class="inline">
       {% include "form_guard.html" %}
-      <label>Why (optional)
-        <input type="text" name="reason" maxlength="500" placeholder="model acts strangely" autocomplete="off">
+      <label>{{ crate::t("Why (optional)") }}
+        <input type="text" name="reason" maxlength="500" placeholder="{{ crate::t("model acts strangely") }}" autocomplete="off">
       </label>
       <fieldset>
-        <legend>How far</legend>
-        <label class="choice"><input type="radio" name="level" value="intake" checked> Stop taking jobs: running jobs finish</label>
-        <label class="choice"><input type="radio" name="level" value="emergency"> Emergency stop: running jobs are cancelled too</label>
+        <legend>{{ crate::t("How far") }}</legend>
+        <label class="choice"><input type="radio" name="level" value="intake" checked> {{ crate::t("Stop taking jobs: running jobs finish") }}</label>
+        <label class="choice"><input type="radio" name="level" value="emergency"> {{ crate::t("Emergency stop: running jobs are cancelled too") }}</label>
       </fieldset>
-      <button type="submit" class="danger">Yes, pause all agents</button>
+      <button type="submit" class="danger">{{ crate::t("Yes, pause all agents") }}</button>
     </form>
   </details>
   {% endif %}
-  <p class="note">The same as <code>aegis-server pause-all [--emergency] [--reason …]</code> and <code>resume-all</code>, or <code>POST /api/v1/admin/pause|resume</code>, for when this page cannot be reached. See the incident runbook.</p>
+  <p class="note">{{ crate::t("The same as") }} <code>aegis-server pause-all [--emergency] [--reason …]</code> {{ crate::t("and") }} <code>resume-all</code>{{ crate::t(", or") }} <code>POST /api/v1/admin/pause|resume</code>{{ crate::t(", for when this page cannot be reached. See the incident runbook.") }}</p>
 </section>
 {% endblock %}

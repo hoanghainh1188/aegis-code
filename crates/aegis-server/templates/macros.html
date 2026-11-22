@@ -4,17 +4,17 @@
   <thead>
     <tr>
       <th scope="col">{{ heading }}</th>
-      <th scope="col" class="num">Runs</th>
-      <th scope="col" class="num">PRs opened</th>
-      <th scope="col" class="num">Awaiting review</th>
-      <th scope="col" class="num">Accepted PRs</th>
-      <th scope="col" class="num">Stopped</th>
-      <th scope="col" class="num">Broke tests</th>
-      <th scope="col" class="num">Cost / issue</th>
-      <th scope="col" class="num">Review time</th>
-      <th scope="col" class="num">Cache read</th>
-      <th scope="col" class="num">Escalated</th>
-      <th scope="col" class="num" title="Average review fix rounds per accepted PR">Review rounds / PR</th>
+      <th scope="col" class="num">{{ crate::t("Runs") }}</th>
+      <th scope="col" class="num">{{ crate::t("PRs opened") }}</th>
+      <th scope="col" class="num">{{ crate::t("Awaiting review") }}</th>
+      <th scope="col" class="num">{{ crate::t("Accepted PRs") }}</th>
+      <th scope="col" class="num">{{ crate::t("Stopped") }}</th>
+      <th scope="col" class="num">{{ crate::t("Broke tests") }}</th>
+      <th scope="col" class="num">{{ crate::t("Cost / issue") }}</th>
+      <th scope="col" class="num">{{ crate::t("Review time") }}</th>
+      <th scope="col" class="num">{{ crate::t("Cache read") }}</th>
+      <th scope="col" class="num">{{ crate::t("Escalated") }}</th>
+      <th scope="col" class="num" title="{{ crate::t("Average review fix rounds per accepted PR") }}">{{ crate::t("Review rounds / PR") }}</th>
     </tr>
   </thead>
   <tbody>
@@ -34,7 +34,7 @@
       <td class="num">{{ r.rounds }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="12" class="empty">No runs yet.</td></tr>
+    <tr><td colspan="12" class="empty">{{ crate::t("No runs yet.") }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -50,7 +50,7 @@
   <rect class="bar {{ r.accept_class }}" x="120" y="{{ loop.index0 * 26 + 5 }}" width="{{ r.accept_bar }}" height="16"></rect>
   {%- endfor %}
   <line class="threshold" x1="{{ 120 + min }}" x2="{{ 120 + min }}" y1="0" y2="{{ rows.len() * 26 + 6 }}"></line>
-  <text class="tick" x="{{ 120 + min }}" y="{{ rows.len() * 26 + 19 }}">target</text>
+  <text class="tick" x="{{ 120 + min }}" y="{{ rows.len() * 26 + 19 }}">{{ crate::t("target") }}</text>
 </svg>
 {%- endif %}
 

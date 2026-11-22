@@ -5,6 +5,13 @@
 //! gate containers.
 
 pub mod api;
+
+/// The page's text for `en`, in the request's language (#590); what
+/// templates call as `crate::t("…")`.
+pub fn t(en: &'static str) -> &'static str {
+    web::i18n::t(en)
+}
+
 pub mod auth;
 pub mod cache_sweeper;
 pub mod chatops;

@@ -15,6 +15,7 @@ mod budget;
 mod connection;
 mod dashboard;
 mod guard;
+pub mod i18n;
 mod installations;
 mod issue_hint;
 mod jobs;
@@ -165,7 +166,9 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
             get(|| async { asset(HTMX, "text/javascript", IMMUTABLE) }),
         )
         .route("/static/app.css", get(css))
+        .route("/lang/{code}", get(i18n::switch))
         .layer(middleware::from_fn_with_state(auth.clone(), guard::guard))
+        .layer(middleware::from_fn_with_state(auth.clone(), i18n::layer))
         .layer(Extension(auth))
         .layer(Extension(repos))
 }
@@ -249,8 +252,12 @@ struct ErrorPage<'a> {
 impl IntoResponse for WebError {
     fn into_response(self) -> Response {
         // An error page loads no script, so it needs no nonce.
+        // The platform's own fixed messages are in the catalog; one built
+        // from what was asked for stays as it was made.
+        let message =
+            i18n::translate(i18n::locale(), &self.message).unwrap_or(self.message.as_str());
         let page = ErrorPage {
-            message: &self.message,
+            message,
             link: self
                 .link
                 .as_ref()

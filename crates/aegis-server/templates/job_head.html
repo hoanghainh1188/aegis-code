@@ -4,37 +4,37 @@
   <p class="eyebrow">{{ head.repo }} ·
     {%- if let Some(url) = head.issue_url %} <a class="ref" href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ head.issue_ref }}</a>
     {%- else %} <span class="ref">{{ head.issue_ref }}</span>{% endif %}</p>
-  <h1 id="job-heading">Job #{{ head.id }} <span class="status s-{{ head.status }}">{{ head.status }}</span></h1>
+  <h1 id="job-heading">{{ crate::t("Job #") }}{{ head.id }} <span class="status s-{{ head.status }}">{{ head.status }}</span></h1>
   {% if let Some(t) = head.title %}<p class="job-title">{{ t }}</p>{% endif %}
   <dl class="facts">
-    <div><dt>Outcome</dt><dd>{{ head.outcome }}</dd></div>
-    <div><dt>Model tiers</dt><dd>{{ head.tiers }}</dd></div>
-    <div><dt>Model calls</dt><dd>{{ head.model_calls }}</dd></div>
-    <div><dt>Cost</dt><dd>{{ head.cost }}</dd></div>
-    <div><dt>Wall time</dt><dd>{{ head.wall_time }}</dd></div>
-    <div><dt>Ledger</dt><dd><code>{{ head.ledger_key }}</code></dd></div>
+    <div><dt>{{ crate::t("Outcome") }}</dt><dd>{{ head.outcome }}</dd></div>
+    <div><dt>{{ crate::t("Model tiers") }}</dt><dd>{{ head.tiers }}</dd></div>
+    <div><dt>{{ crate::t("Model calls") }}</dt><dd>{{ head.model_calls }}</dd></div>
+    <div><dt>{{ crate::t("Cost") }}</dt><dd>{{ head.cost }}</dd></div>
+    <div><dt>{{ crate::t("Wall time") }}</dt><dd>{{ head.wall_time }}</dd></div>
+    <div><dt>{{ crate::t("Ledger") }}</dt><dd><code>{{ head.ledger_key }}</code></dd></div>
   </dl>
-  {% if !head.reason.is_empty() %}<p class="note">Termination reason: {{ head.reason }}</p>{% endif %}
-  {% if let Some(old) = head.retry_of %}<p class="note">Runs <a href="/jobs/{{ old }}">job #{{ old }}</a> again.</p>{% endif %}
-  {% if let Some(root) = head.review_of %}<p class="note">Review fix round for PR opened by <a href="/jobs/{{ root }}">job #{{ root }}</a>; PR is reviewed there.</p>{% endif %}
+  {% if !head.reason.is_empty() %}<p class="note">{{ crate::t("Termination reason:") }} {{ head.reason }}</p>{% endif %}
+  {% if let Some(old) = head.retry_of %}<p class="note">{{ crate::t("Runs again") }} <a href="/jobs/{{ old }}">{{ crate::t("job #") }}{{ old }}</a>.</p>{% endif %}
+  {% if let Some(root) = head.review_of %}<p class="note">{{ crate::t("Review fix round for PR opened by") }} <a href="/jobs/{{ root }}">{{ crate::t("job #") }}{{ root }}</a>{{ crate::t("; PR is reviewed there.") }}</p>{% endif %}
   <p class="actions">
-    {%- if let Some(url) = head.pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">Open PR</a>{% endif %}
-    {%- if head.can_review %} <a class="button" href="/jobs/{{ head.id }}/review">Review PR</a>{% endif -%}
+    {%- if let Some(url) = head.pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ crate::t("Open PR") }}</a>{% endif %}
+    {%- if head.can_review %} <a class="button" href="/jobs/{{ head.id }}/review">{{ crate::t("Review PR") }}</a>{% endif -%}
   </p>
   {% if head.can_retry %}
   <form method="post" action="/jobs/{{ head.id }}/retry" class="inline">
     {% include "form_guard.html" %}
-    <button type="submit">Retry as a new job</button>
+    <button type="submit">{{ crate::t("Retry as a new job") }}</button>
   </form>
   {% endif %}
   {% if head.can_cancel %}
   {#- Two steps without script: the summary opens the real button. hx-preserve keeps it open across polls. -#}
   <details class="confirm" id="cancel-confirm" hx-preserve="true">
-    <summary class="button ghost">Cancel job…</summary>
+    <summary class="button ghost">{{ crate::t("Cancel job…") }}</summary>
     <form method="post" action="/jobs/{{ head.id }}/cancel" class="inline">
       {% include "form_guard.html" %}
-      <p class="note">A queued job is cancelled at once; a running one stops when its worker next checks in.</p>
-      <button type="submit" class="danger">Yes, cancel job #{{ head.id }}</button>
+      <p class="note">{{ crate::t("A queued job is cancelled at once; a running one stops when its worker next checks in.") }}</p>
+      <button type="submit" class="danger">{{ crate::t("Yes, cancel job #") }}{{ head.id }}</button>
     </form>
   </details>
   {% endif %}

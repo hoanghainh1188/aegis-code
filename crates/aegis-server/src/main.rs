@@ -275,7 +275,8 @@ async fn run(args: Args) -> Result<(), String> {
             .await
             .map_err(|e| format!("listen on {}: {e}", config.api.listen))?;
         tracing::info!(listen = %config.api.listen, "API listening");
-        let auth = Auth::new(store.clone(), config.auth.clone(), secrets.clone())?;
+        let auth = Auth::new(store.clone(), config.auth.clone(), secrets.clone())?
+            .with_default_locale(config.web.default_locale);
         // The admin pages add and change repos against the modes (#330); an
         // API that cannot load them still serves everything else.
         let repos = match modes(&config) {

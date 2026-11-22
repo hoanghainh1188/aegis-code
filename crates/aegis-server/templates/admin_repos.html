@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Repos{% endblock %}
+{% block title %}{{ crate::t("Repos") }}{% endblock %}
 {% block content %}
 <section aria-labelledby="repos-heading">
-  <p class="eyebrow">Admin · <a href="/admin/users">Users</a> · <a href="/admin/audit">Audit log</a> · <a href="/admin/ai">AI</a> · <a href="/admin/pause">Pause all</a> · <a href="/admin/installations">GitHub App</a></p>
-  <h1 id="repos-heading">Repos</h1>
-  <p class="note">Every registered repo. Open one to see its settings and clone, change it, and change who has which role in it.</p>
-  {% if can_edit %}<p><a class="button" href="/admin/repos/new">Add a repo</a></p>{% else %}<p class="note">This server has not loaded the modes' configuration: add repos with <code>aegis-server repo add</code>.</p>{% endif %}
+  <p class="eyebrow">{{ crate::t("Admin ·") }} <a href="/admin/users">{{ crate::t("Users") }}</a> · <a href="/admin/audit">{{ crate::t("Audit log") }}</a> · <a href="/admin/ai">AI</a> · <a href="/admin/pause">{{ crate::t("Pause all") }}</a> · <a href="/admin/installations">{{ crate::t("GitHub App") }}</a></p>
+  <h1 id="repos-heading">{{ crate::t("Repos") }}</h1>
+  <p class="note">{{ crate::t("Every registered repo. Open one to see its settings and clone, change it, and change who has which role in it.") }}</p>
+  {% if can_edit %}<p><a class="button" href="/admin/repos/new">{{ crate::t("Add a repo") }}</a></p>{% else %}<p class="note">{{ crate::t("This server has not loaded the modes' configuration: add repos with") }} <code>aegis-server repo add</code>.</p>{% endif %}
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Repo</th><th scope="col">URL</th><th scope="col">Language</th><th scope="col">Mode</th><th scope="col" class="num">Jobs at once</th><th scope="col">State</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Repo") }}</th><th scope="col">URL</th><th scope="col">{{ crate::t("Language") }}</th><th scope="col">{{ crate::t("Mode") }}</th><th scope="col" class="num">{{ crate::t("Jobs at once") }}</th><th scope="col">{{ crate::t("State") }}</th></tr></thead>
     <tbody>
     {% for r in repos %}
       <tr>
@@ -17,10 +17,10 @@
         <td>{{ r.language }}</td>
         <td>{{ r.mode.as_str() }}</td>
         <td class="num">{{ r.max_concurrent_jobs }}</td>
-        <td>{% if self.is_paused(r.id) %}<span class="check fail">Paused</span>{% else %}<span class="check pass">Running</span>{% endif %}</td>
+        <td>{% if self.is_paused(r.id) %}<span class="check fail">{{ crate::t("Paused") }}</span>{% else %}<span class="check pass">{{ crate::t("Running") }}</span>{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="empty">No repo registered yet.</td></tr>
+      <tr><td colspan="6" class="empty">{{ crate::t("No repo registered yet.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

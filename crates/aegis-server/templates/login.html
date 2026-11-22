@@ -1,19 +1,19 @@
 {#- Sign-in messages (#29): no session, so no script and no nonce. -#}
 <!doctype html>
-<html lang="en">
+<html lang="{{ crate::web::i18n::lang() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in · aegis</title>
+<title>{{ crate::t("Sign in · aegis") }}</title>
 <link rel="stylesheet" href="{{ crate::web::css_href() }}">
 </head>
 <body>
 <header class="masthead"><a class="brand" href="/">aegis<span>ledger</span></a></header>
 <main>
   <section class="notice">
-    <h1>Sign in</h1>
+    <h1>{{ crate::t("Sign in") }}</h1>
     <p>{{ message }}</p>
-    {% if retry %}<p><a class="button" href="/auth/login">Sign in with SSO</a></p>{% endif %}
+    {% if retry %}<p><a class="button" href="/auth/login">{{ crate::t("Sign in with SSO") }}</a></p>{% endif %}
   </section>
 </main>
 </body>

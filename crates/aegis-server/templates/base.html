@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ crate::web::i18n::lang() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,26 +11,34 @@
 <body>
 <header class="masthead">
   <a class="brand" href="/">aegis<span>ledger</span></a>
-  <nav aria-label="Main">
+  <nav aria-label="{{ crate::t("Main") }}">
     <a href="/">KPIs</a>
-    <a href="/jobs">Jobs</a>
+    <a href="/jobs">{{ crate::t("Jobs") }}</a>
     <a href="/ams">AMS</a>
-    <a href="/me/tokens">Tokens</a>
+    <a href="/me/tokens">{{ crate::t("Tokens") }}</a>
     {%- if me.is_admin || me.tenant_admin %}
-    <a href="/admin/repos">Admin</a>
+    <a href="/admin/repos">{{ crate::t("Admin") }}</a>
     {%- endif %}
+  </nav>
+  <nav class="lang" aria-label="{{ crate::t("Language") }}">
+    {%- for (code, name) in crate::web::i18n::SWITCH %}
+    {%- if code == crate::web::i18n::lang() %}
+    <span aria-current="true">{{ name }}</span>
+    {%- else %}
+    <a href="/lang/{{ code }}" referrerpolicy="same-origin" hreflang="{{ code }}" lang="{{ code }}">{{ name }}</a>
+    {%- endif %}
+    {%- endfor %}
   </nav>
   <form class="session" method="post" action="/auth/logout">
     {% include "form_guard.html" %}
     <span class="who">{{ me.name }}</span>
-    <button type="submit" class="ghost">Sign out</button>
+    <button type="submit" class="ghost">{{ crate::t("Sign out") }}</button>
   </form>
 </header>
 {%- if let Some(p) = me.paused %}
-<section class="halted" role="alert" aria-label="All agents paused">
-  <p><strong>{% if p.emergency %}Emergency stop{% else %}All agents paused{% endif %}</strong> by {{ p.by }} at {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}.
-  No new job runs; queued jobs wait{% if p.emergency %} and running ones were asked to cancel{% endif %}.
-  {%- if me.is_admin %} <a href="/admin/pause">Resume</a>{% endif %}</p>
+<section class="halted" role="alert" aria-label="{{ crate::t("All agents paused") }}">
+  <p><strong>{% if p.emergency %}{{ crate::t("Emergency stop") }}{% else %}{{ crate::t("All agents paused") }}{% endif %}</strong> {{ crate::t("by") }} {{ p.by }} {{ crate::t("at") }} {{ p.at }} UTC{% if let Some(why) = p.reason %}: {{ why }}{% endif %}{{ crate::t(". No new job runs; queued jobs wait") }}{% if p.emergency %} {{ crate::t("and running ones were asked to cancel") }}{% endif %}.
+  {%- if me.is_admin %} <a href="/admin/pause">{{ crate::t("Resume") }}</a>{% endif %}</p>
 </section>
 {%- endif %}
 <main>
