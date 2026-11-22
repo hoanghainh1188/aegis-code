@@ -66,28 +66,36 @@ struct RawExtraction {
     keywords: String,
 }
 
+/// What a merged agent PR tells memory (#456): the issue, the fix
+/// ledger's cause and changes, the review rounds' notes and the paths the
+/// PR changed.
+#[derive(Debug, Clone, Copy)]
+pub struct MergedPrFacts<'a> {
+    pub issue_title: &'a str,
+    pub issue_body: &'a str,
+    pub answer_cause: Option<&'a str>,
+    pub answer_changes: Option<&'a str>,
+    pub review_notes: &'a [String],
+    pub changed_paths: &'a [String],
+}
+
 /// Extracts `MergedPr` and optional `ReviewLesson` memory using `Tier::Light`,
 /// falling back deterministically to the ledger summary if the model call
 /// fails or returns invalid JSON.
-#[allow(clippy::too_many_arguments)]
 pub async fn extract_from_merged_pr<P: ModelProvider + Sync>(
     provider: &P,
     light_model: &str,
-    issue_title: &str,
-    issue_body: &str,
-    answer_cause: Option<&str>,
-    answer_changes: Option<&str>,
-    review_notes: &[String],
-    changed_paths: &[String],
+    facts: &MergedPrFacts<'_>,
 ) -> (ExtractedMemory, Option<Response>) {
-    let fallback = fallback_extract_from_merged_pr(
+    let fallback = fallback_extract_from_merged_pr(facts);
+    let MergedPrFacts {
         issue_title,
         issue_body,
         answer_cause,
         answer_changes,
         review_notes,
         changed_paths,
-    );
+    } = *facts;
 
     let mut prompt = format!(
         "<issue>\n<title>{}</title>\n{}\n</issue>\n",
@@ -181,14 +189,15 @@ pub async fn extract_from_merged_pr<P: ModelProvider + Sync>(
 
 /// Deterministic extraction from the job's ledger and review rounds when no
 /// live `Light` model is configured or when the model output cannot be parsed.
-pub fn fallback_extract_from_merged_pr(
-    issue_title: &str,
-    issue_body: &str,
-    answer_cause: Option<&str>,
-    answer_changes: Option<&str>,
-    review_notes: &[String],
-    changed_paths: &[String],
-) -> ExtractedMemory {
+pub fn fallback_extract_from_merged_pr(facts: &MergedPrFacts<'_>) -> ExtractedMemory {
+    let MergedPrFacts {
+        issue_title,
+        issue_body,
+        answer_cause,
+        answer_changes,
+        review_notes,
+        changed_paths,
+    } = *facts;
     let title = {
         let clean = sanitize_field(issue_title, MAX_TITLE_CHARS);
         if clean.is_empty() {
@@ -383,14 +392,14 @@ mod tests {
 
     #[test]
     fn fallback_extract_includes_review_lesson_and_paths() {
-        let extracted = fallback_extract_from_merged_pr(
-            "Fix JPY tax rounding in tax_calc.rs",
-            "10% consumption tax rounds per line instead of per rate bucket.",
-            Some("tax_calc::round_line rounded each line item separately."),
-            Some("Grouped items by rate bucket before rounding in tax_calc.rs."),
-            &["Keep zero-decimal invariant for JPY and add bucket unit test.".into()],
-            &["src/billing/tax_calc.rs".into()],
-        );
+        let extracted = fallback_extract_from_merged_pr(&MergedPrFacts {
+            issue_title: "Fix JPY tax rounding in tax_calc.rs",
+            issue_body: "10% consumption tax rounds per line instead of per rate bucket.",
+            answer_cause: Some("tax_calc::round_line rounded each line item separately."),
+            answer_changes: Some("Grouped items by rate bucket before rounding in tax_calc.rs."),
+            review_notes: &["Keep zero-decimal invariant for JPY and add bucket unit test.".into()],
+            changed_paths: &["src/billing/tax_calc.rs".into()],
+        });
         assert_eq!(extracted.title, "Fix JPY tax rounding in tax_calc.rs");
         assert!(extracted.summary.contains("Root cause:"));
         assert!(extracted.summary.contains("Fix:"));

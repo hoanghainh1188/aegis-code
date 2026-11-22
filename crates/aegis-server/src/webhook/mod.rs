@@ -632,17 +632,13 @@ async fn deliver(
         }
     };
     if let Kind::ReviewRound { pr_url, sender } = &wanted.kind {
-        return review_round(
-            hooks,
+        let at = DeliveryMeta {
             source,
             via,
             delivery,
             event,
-            &wanted.issue_ref,
-            pr_url,
-            sender,
-        )
-        .await;
+        };
+        return review_round(hooks, at, &wanted.issue_ref, pr_url, sender).await;
     }
     if let Kind::PrMerged { pr_url } = &wanted.kind {
         return pr_merged(hooks, source, via, delivery, pr_url).await;
@@ -959,21 +955,33 @@ async fn pr_merged(
     }
 }
 
+/// Where a delivery came from: the forge, the way it reached the server
+/// (#244), its id and its event name.
+#[derive(Clone, Copy)]
+struct DeliveryMeta<'a> {
+    source: WebhookSource,
+    via: Option<Via>,
+    delivery: &'a str,
+    event: &'a str,
+}
+
 /// A review round asked for on the agent's PR (#244): the job that opened
 /// it is found by the PR's URL, the sender must be able to write to the
 /// job's repo, and the store queues the round, within the PR's rounds.
 /// A refused round is told on the PR.
-#[allow(clippy::too_many_arguments)]
 async fn review_round(
     hooks: &Hooks,
-    source: WebhookSource,
-    via: Option<Via>,
-    delivery: &str,
-    event: &str,
+    at: DeliveryMeta<'_>,
     issue_ref: &str,
     pr_url: &str,
     sender: &str,
 ) -> Handled {
+    let DeliveryMeta {
+        source,
+        via,
+        delivery,
+        event,
+    } = at;
     let root = match hooks.store.job_by_pr_url(pr_url).await {
         Ok(Some(job)) => job,
         Ok(None) => return ignored(delivery, "no job opened this pull request"),

@@ -635,18 +635,18 @@ impl<'a> Run<'a> {
             .filter(|&(j, _)| j != i)
             .map(|(j, p)| (self.dirs[j].as_str(), *p))
             .collect();
-        let checked = deps::check(
-            &self.part.profile.profile,
-            self.req.repo,
-            &self.part.dir,
-            &self.base,
-            &self.part.changes,
-            &self.part.ignored,
-            self.req.allowed,
-            tree.map_or(&[], |t| t.on_change.as_slice()),
-            &others,
-            &self.req.dependency_policy,
-        )?;
+        let checked = deps::check(&deps::DependencyCheck {
+            profile: &self.part.profile.profile,
+            repo: self.req.repo,
+            dir: &self.part.dir,
+            base: &self.base,
+            changes: &self.part.changes,
+            ignored: &self.part.ignored,
+            allowed: self.req.allowed,
+            tree: tree.map_or(&[], |t| t.on_change.as_slice()),
+            others: &others,
+            policy: &self.req.dependency_policy,
+        })?;
         Ok(match checked {
             None => StepReport::skipped(name, Skip::NoDependencyChange),
             Some(Ok(())) => self.fetch_checked(tree)?,

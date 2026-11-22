@@ -153,25 +153,40 @@ fn foreign(profile: &Profile, dir: &str, changed: &[String], others: &Others<'_>
         .collect()
 }
 
+/// One part's patch as the dependency step checks it. `changes` and
+/// `ignored` (the paths git ignores in the patched tree) are relative to
+/// `dir`, the part of `repo` that `profile` owns (#71); `others` are the
+/// repo's other profiles. `tree` are the `on_change` patterns of the
+/// dependency tree the gate resolves after this check, if it does.
+#[derive(Clone, Copy)]
+pub(crate) struct DependencyCheck<'a> {
+    pub profile: &'a Profile,
+    pub repo: &'a Path,
+    pub dir: &'a str,
+    pub base: &'a str,
+    pub changes: &'a [Change],
+    pub ignored: &'a [String],
+    pub allowed: &'a BTreeSet<String>,
+    pub tree: &'a [String],
+    pub others: &'a Others<'a>,
+    pub policy: &'a DependencyPolicy,
+}
+
 /// `Ok(None)` when no manifest, lockfile or protected path changed;
-/// `Ok(Some(Err(reason)))` when the step fails. `changes` and `ignored`
-/// (the paths git ignores in the patched tree) are relative to `dir`, the
-/// part of `repo` that `profile` owns (#71); `others` are the repo's other
-/// profiles. `tree` are the `on_change` patterns of the dependency tree the
-/// gate resolves after this check, if it does.
-#[allow(clippy::too_many_arguments)]
-pub fn check(
-    profile: &Profile,
-    repo: &Path,
-    dir: &str,
-    base: &str,
-    changes: &[Change],
-    ignored: &[String],
-    allowed: &BTreeSet<String>,
-    tree: &[String],
-    others: &Others<'_>,
-    policy: &DependencyPolicy,
-) -> Result<Option<Result<(), String>>, GateError> {
+/// `Ok(Some(Err(reason)))` when the step fails.
+pub(crate) fn check(check: &DependencyCheck<'_>) -> Result<Option<Result<(), String>>, GateError> {
+    let DependencyCheck {
+        profile,
+        repo,
+        dir,
+        base,
+        changes,
+        ignored,
+        allowed,
+        tree,
+        others,
+        policy,
+    } = *check;
     let shown = |path: &str| join_dir(dir, path);
     let nested: Vec<String> = changes
         .iter()

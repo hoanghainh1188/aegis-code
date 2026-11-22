@@ -7,7 +7,8 @@
 use aegis_ledger::{AnswerChange, IssueId, IssueRecord, LedgerStore};
 use aegis_lifecycle::Modes;
 use aegis_lifecycle::{
-    IssueInput, MemoryLesson, extract_from_merged_pr, fallback_extract_from_merged_pr,
+    IssueInput, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
+    fallback_extract_from_merged_pr,
 };
 use aegis_provider::Provider;
 use aegis_secrets::Secrets;
@@ -128,29 +129,17 @@ pub async fn extract_and_store(
     changed_paths.sort();
     changed_paths.dedup();
 
+    let facts = MergedPrFacts {
+        issue_title: &issue_title,
+        issue_body: &root.issue_ref,
+        answer_cause: answer_cause.as_deref(),
+        answer_changes: answer_changes.as_deref(),
+        review_notes: &review_notes,
+        changed_paths: &changed_paths,
+    };
     let extracted = match light {
-        Some((provider, model)) => {
-            let (ext, _) = extract_from_merged_pr(
-                provider,
-                model,
-                &issue_title,
-                &root.issue_ref,
-                answer_cause.as_deref(),
-                answer_changes.as_deref(),
-                &review_notes,
-                &changed_paths,
-            )
-            .await;
-            ext
-        }
-        None => fallback_extract_from_merged_pr(
-            &issue_title,
-            &root.issue_ref,
-            answer_cause.as_deref(),
-            answer_changes.as_deref(),
-            &review_notes,
-            &changed_paths,
-        ),
+        Some((provider, model)) => extract_from_merged_pr(provider, model, &facts).await.0,
+        None => fallback_extract_from_merged_pr(&facts),
     };
 
     let mut saved = Vec::with_capacity(2);

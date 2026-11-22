@@ -29,8 +29,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::answer::{FinalAnswer, Status};
 use crate::job::{self, Worktree};
-use crate::publish::publish;
-use crate::run::{Ending, Finish, Kept, gate, gate_run, module_map, sonar_step, work};
+use crate::publish::{PublishContext, publish};
+use crate::run::{Ending, Finish, JobTree, Kept, gate, gate_run, module_map, sonar_step, work};
 use crate::untrusted::defang;
 use crate::{IssueInput, LifecycleError, Platform, RunConfig};
 
@@ -202,9 +202,11 @@ where
             let report = gate(
                 &self.platform.config,
                 self.profile,
-                tree,
-                self.base,
-                self.job_dir,
+                JobTree {
+                    tree,
+                    base: self.base,
+                    job_dir: self.job_dir,
+                },
                 &answer,
                 &aegis_gate::DependencyPolicy::Locked,
                 self.cancel,
@@ -445,19 +447,17 @@ where
         id: branch.trim_start_matches("agent/").to_owned(),
         ..issue.clone()
     };
-    let published = publish(
-        platform,
-        ledger,
-        profile,
-        checkout.path(),
-        &batch,
-        &answer,
-        report,
+    let fix = PublishContext {
+        profiles: profile,
+        tree: checkout.path(),
+        issue: &batch,
+        answer: &answer,
+        gate: report,
         // A Sonar batch's input is the analyser's own messages, and its
         // groups ran as jobs of their own: nothing here to flag (#444).
-        &[],
-    )
-    .await?;
+        flags: &[],
+    };
+    let published = publish(platform, ledger, fix).await?;
     let patch = crate::job::patch(checkout.path(), &report.base, &report.tree)?;
     drop(checkout);
     Ok(Ending {

@@ -170,7 +170,6 @@ fn postgres_sidecar() -> SidecarSpec {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute_gate(
     repo: &TempRepo,
     prof: &aegis_lang::ResolvedProfile,
