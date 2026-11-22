@@ -7,6 +7,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -73,13 +74,43 @@ fn read_message(out: &mut impl BufRead) -> Option<Value> {
     serde_json::from_slice(&body).ok()
 }
 
+/// A container this test started, removed when dropped (#610): killing
+/// the `docker run` client leaves the container running, and jdtls does
+/// not exit when its stdin closes, so `--rm` alone never fires. Dropped on
+/// a panic or a timeout too.
+struct Container(String);
+
+impl Container {
+    fn named() -> Self {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        Self(format!(
+            "aegis-lsp-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+}
+
+impl Drop for Container {
+    fn drop(&mut self) {
+        let _ = Command::new("docker")
+            .args(["rm", "--force", "--volumes", &self.0])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 /// The server's answer to `initialize`, or why there is none.
 fn initialize(profile: &Profile) -> Result<Value, String> {
     let lsp = profile.aci.lsp.as_ref().expect("checked by the caller");
+    let container = Container::named();
     let mut argv: Vec<String> = [
         "run",
         "-i",
         "--rm",
+        "--name",
+        &container.0,
         "--network",
         "none",
         "--cap-drop",
@@ -130,6 +161,7 @@ fn initialize(profile: &Profile) -> Result<Value, String> {
         }
     });
     let answer = rx.recv_timeout(TIMEOUT);
+    drop(container);
     let _ = child.kill();
     let _ = child.wait();
     let mut errors = String::new();
