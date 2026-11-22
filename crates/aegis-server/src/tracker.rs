@@ -330,11 +330,22 @@ pub async fn poll_if_due(
 pub struct TrackerNotifier {
     store: Store,
     secrets: Secrets,
+    /// The language of each repo's comments (#589).
+    locales: crate::locale::Locales,
 }
 
 impl TrackerNotifier {
     pub fn new(store: Store, secrets: Secrets) -> Self {
-        Self { store, secrets }
+        Self {
+            store,
+            secrets,
+            locales: crate::locale::Locales::default(),
+        }
+    }
+
+    /// Each repo's comments in its language (#589); English otherwise.
+    pub fn with_locales(self, locales: crate::locale::Locales) -> Self {
+        Self { locales, ..self }
     }
 
     async fn report(&self, job: &Job, diagnosis: Option<&str>) -> Result<(), String> {
@@ -350,7 +361,8 @@ impl TrackerNotifier {
             .ok_or("the repo has no tracker now")?;
         // No secret leaves for the tracker (#509): the job's reason may
         // quote what the agent or a tool said.
-        let comment = aegis_pr::masked(&plain_comment_with(job, diagnosis));
+        let locale = self.locales.of(job.repo_id).await;
+        let comment = aegis_pr::masked(&plain_comment_with(job, diagnosis, locale));
         let report = Report {
             comment: &comment,
             pr_url: pr_url(job),

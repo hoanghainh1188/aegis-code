@@ -8,11 +8,12 @@ use aegis_ledger::Outcome;
 use std::sync::Arc;
 
 use aegis_lifecycle::PLATFORM_ERROR;
-use aegis_pr::{GitHub, GitLab, TokenSource, TokenUse, inert};
+use aegis_pr::{GitHub, GitLab, Locale, TokenSource, TokenUse, inert};
 use aegis_secrets::Secrets;
 use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store, TenantId};
 
 use crate::github_app::AppHandle;
+use crate::locale::Locales;
 
 use crate::lifecycle::parse_issue_ref;
 use crate::worker::JobNotifier;
@@ -42,6 +43,8 @@ pub struct GitHubNotifier {
     app: Option<Arc<AppHandle>>,
     /// …told apart by their settings, read here for a job's end.
     store: Option<Store>,
+    /// The language of each repo's comments (#589).
+    locales: Locales,
 }
 
 /// Whether a repo with these settings is on the app path (ADR 0017).
@@ -56,7 +59,13 @@ impl GitHubNotifier {
             secrets,
             app: None,
             store: None,
+            locales: Locales::default(),
         }
+    }
+
+    /// Each repo's comments in its language (#589); English otherwise.
+    pub fn with_locales(self, locales: Locales) -> Self {
+        Self { locales, ..self }
     }
 
     /// With the instance's GitHub App: repos on the app path are
@@ -196,9 +205,10 @@ impl JobNotifier for GitHubNotifier {
             return;
         };
         let on_app = self.job_on_app(job).await;
+        let locale = self.locales.of(job.repo_id).await;
         let posted = match self.client(&owner, &repo, on_app, TokenUse::Comment).await {
             Ok(Some(github)) => github
-                .comment_on_issue(number, &comment_with(job, diagnosis))
+                .comment_on_issue(number, &comment_with(job, diagnosis, locale))
                 .await
                 .map(|_| ())
                 .map_err(|e| e.to_string()),
@@ -217,6 +227,8 @@ pub struct GitLabNotifier {
     api: String,
     /// Where [`GITLAB_COMMENT_TOKEN_ENV`] is read, at each comment.
     secrets: Secrets,
+    /// The language of each repo's comments (#589).
+    locales: Locales,
 }
 
 impl GitLabNotifier {
@@ -224,7 +236,13 @@ impl GitLabNotifier {
         Self {
             api: api.to_owned(),
             secrets,
+            locales: Locales::default(),
         }
+    }
+
+    /// Each repo's comments in its language (#589); English otherwise.
+    pub fn with_locales(self, locales: Locales) -> Self {
+        Self { locales, ..self }
     }
 
     /// The API root from [`GITLAB_API_ENV`]; the token is read from
@@ -294,9 +312,10 @@ impl JobNotifier for GitLabNotifier {
             tracing::warn!(job = job.id.0, "not an issue to comment on");
             return;
         };
+        let locale = self.locales.of(job.repo_id).await;
         let posted = match GitLab::new(&self.api, project, token.expose()) {
             Ok(gitlab) => gitlab
-                .comment_on_issue(iid, &comment_with(job, diagnosis))
+                .comment_on_issue(iid, &comment_with(job, diagnosis, locale))
                 .await
                 .map(|_| ()),
             Err(e) => Err(e),
@@ -318,101 +337,87 @@ fn gitlab_issue_ref(text: &str) -> Option<(&str, u64)> {
 /// The comment on the issue: the job's status, and for a job the
 /// diagnosis lane took (#451) its report, which the lifecycle built from
 /// checked sources and made inert item by item.
-pub fn comment_with(job: &Job, diagnosis: Option<&str>) -> String {
+pub fn comment_with(job: &Job, diagnosis: Option<&str>, locale: Locale) -> String {
     match diagnosis.filter(|_| job.outcome == Some(Outcome::Diagnosed)) {
         Some(report) => {
-            let status = status_comment(job);
+            let status = status_comment(job, locale);
             let (head, foot) = status.rsplit_once("\n\n").unwrap_or((&status, ""));
             format!("{head}\n\n{report}\n\n{foot}")
         }
-        None => status_comment(job),
+        None => status_comment(job, locale),
     }
 }
 
 /// [`comment_with`] in plain text, for the trackers.
-pub fn plain_comment_with(job: &Job, diagnosis: Option<&str>) -> String {
+pub fn plain_comment_with(job: &Job, diagnosis: Option<&str>, locale: Locale) -> String {
     match diagnosis.filter(|_| job.outcome == Some(Outcome::Diagnosed)) {
         Some(report) => {
-            let status = plain_status_comment(job);
+            let status = plain_status_comment(job, locale);
             let (head, foot) = status.rsplit_once("\n\n").unwrap_or((&status, ""));
             format!("{head}\n\n{report}\n\n{foot}")
         }
-        None => plain_status_comment(job),
+        None => plain_status_comment(job, locale),
     }
 }
 
 /// What the comment says, in Markdown. The stop reason may hold model
 /// text: it is made inert. Infrastructure failures are not detailed in
 /// public.
-pub fn status_comment(job: &Job) -> String {
-    let (what, reason) = status_parts(job);
+pub fn status_comment(job: &Job, locale: Locale) -> String {
+    let t = locale.strings();
+    let (what, reason) = status_parts(job, locale);
     let mut text = format!("**aegis-code** {what}");
     if let Some(reason) = reason {
-        text.push_str(&format!("\n\nReason: {reason}"));
+        text.push_str(&format!("\n\n{}: {reason}", t.reason));
     }
-    text.push_str(&format!("\n\n<sub>aegis-code job {}</sub>", job.id.0));
+    text.push_str(&format!("\n\n<sub>{} {}</sub>", t.job, job.id.0));
     text
 }
 
 /// [`status_comment`] in plain text, for Jira and Backlog (#26), whose
 /// markup is not Markdown.
-pub fn plain_status_comment(job: &Job) -> String {
-    let (what, reason) = status_parts(job);
+pub fn plain_status_comment(job: &Job, locale: Locale) -> String {
+    let t = locale.strings();
+    let (what, reason) = status_parts(job, locale);
     let mut text = format!("aegis-code {what}");
     if let Some(reason) = reason {
-        text.push_str(&format!("\n\nReason: {reason}"));
+        text.push_str(&format!("\n\n{}: {reason}", t.reason));
     }
-    text.push_str(&format!("\n\n(aegis-code job {})", job.id.0));
+    text.push_str(&format!("\n\n({} {})", t.job, job.id.0));
     text
 }
 
-/// What a job the platform failed says; why is for its operators.
-const PLATFORM_FAILED: &str =
-    "could not finish this issue: the platform failed. Its operators can see why.";
-
 /// What happened, and the reason made inert.
-fn status_parts(job: &Job) -> (String, Option<String>) {
+fn status_parts(job: &Job, locale: Locale) -> (String, Option<String>) {
+    let t = locale.strings();
     // GitLab's issues get a merge request (#252).
     let request = if job.source == JobSource::Gitlab {
-        "merge request"
+        t.merge_request
     } else {
-        "pull request"
+        t.pull_request
     };
+    // What a job the platform failed says; why is for its operators.
+    let platform_failed = || t.platform_failed.to_owned();
     let (what, reason) = match (job.status, job.outcome) {
-        (JobStatus::Done, Some(Outcome::PrOpened)) => {
-            let what = match pr_url(job) {
-                Some(url) => format!("opened a {request} for this issue: {url}"),
-                None => format!("opened a {request} for this issue."),
-            };
-            (what, None)
-        }
-        (JobStatus::Done, Some(Outcome::Diagnosed)) => (
-            format!(
-                "looked into this issue: it does not read as a code defect, so no {request} \
-                 was opened. What it found is below; a person decides what to do."
-            ),
-            None,
-        ),
+        (JobStatus::Done, Some(Outcome::PrOpened)) => ((t.opened)(request, pr_url(job)), None),
+        (JobStatus::Done, Some(Outcome::Diagnosed)) => ((t.looked_into)(request), None),
         (JobStatus::Done, Some(Outcome::StoppedSteps))
             if job
                 .reason
                 .as_deref()
                 .is_some_and(|r| r.starts_with(PLATFORM_ERROR)) =>
         {
-            (PLATFORM_FAILED.into(), None)
+            (platform_failed(), None)
         }
         (JobStatus::Done, Some(outcome)) => (
-            format!("stopped without a {request}: {}.", stop(outcome)),
+            (t.stopped)(request, stop(outcome, locale)),
             job.reason.as_deref(),
         ),
         (JobStatus::Cancelled, _) => match job.reason.as_deref() {
-            Some(r) if r.starts_with(BUDGET_SPENT) => (
-                "did not take this issue: the repository's monthly budget is spent.".into(),
-                Some(r),
-            ),
-            _ => ("cancelled its job for this issue.".into(), None),
+            Some(r) if r.starts_with(BUDGET_SPENT) => (t.budget_refused.to_owned(), Some(r)),
+            _ => (t.cancelled.to_owned(), None),
         },
-        _ => (PLATFORM_FAILED.into(), None),
+        _ => (platform_failed(), None),
     };
     (what, reason.map(inert).filter(|r| !r.is_empty()))
 }
@@ -427,13 +432,14 @@ pub(crate) fn pr_url(job: &Job) -> Option<&str> {
         .filter(|u| u.starts_with("https://") && !u.contains(char::is_whitespace))
 }
 
-fn stop(outcome: Outcome) -> &'static str {
+fn stop(outcome: Outcome, locale: Locale) -> &'static str {
+    let t = locale.strings();
     match outcome {
-        Outcome::PrOpened => "a pull or merge request was opened",
-        Outcome::StoppedBudget => "its budget is spent",
-        Outcome::StoppedSteps => "it reached its step limit",
-        Outcome::StoppedExpertFail => "even the strongest model could not fix it",
-        Outcome::Diagnosed => "it was diagnosed as needing no code change",
+        Outcome::PrOpened => t.stop_pr_opened,
+        Outcome::StoppedBudget => t.stop_budget,
+        Outcome::StoppedSteps => t.stop_steps,
+        Outcome::StoppedExpertFail => t.stop_expert,
+        Outcome::Diagnosed => t.stop_diagnosed,
     }
 }
 
@@ -475,7 +481,7 @@ mod tests {
     fn a_diagnosed_job_writes_its_report_back_with_no_request() {
         let done = job(JobStatus::Done, Some(Outcome::Diagnosed));
         let report = "**Diagnosis**: ops_or_config (confidence 0.90). Read-only.";
-        let text = comment_with(&done, Some(report));
+        let text = comment_with(&done, Some(report), Locale::En);
         assert!(
             text.starts_with("**aegis-code** looked into this issue: it does not read as a code defect, so no pull request was opened."),
             "{text}"
@@ -484,15 +490,18 @@ mod tests {
             text.contains(&format!("\n\n{report}\n\n<sub>aegis-code job 7</sub>")),
             "{text}"
         );
-        let plain = plain_comment_with(&done, Some(report));
+        let plain = plain_comment_with(&done, Some(report), Locale::En);
         assert!(
             plain.contains(report) && plain.ends_with("(aegis-code job 7)"),
             "{plain}"
         );
         // A report goes only with a diagnosed job.
         let stopped = job(JobStatus::Done, Some(Outcome::StoppedSteps));
-        assert!(!comment_with(&stopped, Some(report)).contains("Diagnosis"));
-        assert_eq!(comment_with(&done, None), status_comment(&done));
+        assert!(!comment_with(&stopped, Some(report), Locale::En).contains("Diagnosis"));
+        assert_eq!(
+            comment_with(&done, None, Locale::En),
+            status_comment(&done, Locale::En)
+        );
     }
 
     #[test]
@@ -513,7 +522,7 @@ mod tests {
             pr_url: Some("https://gitlab.com/acme/app/-/merge_requests/4".into()),
             ..job(JobStatus::Done, Some(Outcome::PrOpened))
         };
-        let text = status_comment(&mr);
+        let text = status_comment(&mr, Locale::En);
         assert!(
             text.contains("opened a merge request for this issue: https://gitlab.com/acme/app/-/merge_requests/4"),
             "{text}"
@@ -522,7 +531,7 @@ mod tests {
             source: JobSource::Gitlab,
             ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
         };
-        assert!(status_comment(&stopped).contains("stopped without a merge request"));
+        assert!(status_comment(&stopped, Locale::En).contains("stopped without a merge request"));
     }
 
     /// #557: a job the platform failed (its tools did not start, say) is
@@ -536,7 +545,10 @@ mod tests {
             )),
             ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
         };
-        for text in [status_comment(&failed), plain_status_comment(&failed)] {
+        for text in [
+            status_comment(&failed, Locale::En),
+            plain_status_comment(&failed, Locale::En),
+        ] {
             assert!(text.contains("the platform failed"), "{text}");
             assert!(!text.contains("step limit"), "{text}");
             assert!(!text.contains("codebase-memory"), "{text}");
@@ -547,7 +559,7 @@ mod tests {
             reason: Some("the model gave up".into()),
             ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
         };
-        let text = status_comment(&stopped);
+        let text = status_comment(&stopped, Locale::En);
         assert!(
             text.contains("step limit") && text.contains("Reason: the model gave up"),
             "{text}"
@@ -560,7 +572,7 @@ mod tests {
             pr_url: Some("https://github.com/me/typst/pull/3".into()),
             ..job(JobStatus::Done, Some(Outcome::PrOpened))
         };
-        let text = status_comment(&pr);
+        let text = status_comment(&pr, Locale::En);
         assert!(
             text.contains("https://github.com/me/typst/pull/3"),
             "{text}"
@@ -571,7 +583,7 @@ mod tests {
             reason: Some("@everyone see `x`\nhttps://evil.example".into()),
             ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
         };
-        let text = status_comment(&stopped);
+        let text = status_comment(&stopped, Locale::En);
         assert!(text.contains("step limit"), "{text}");
         assert!(
             !text.contains("@everyone"),
@@ -583,7 +595,7 @@ mod tests {
             reason: Some(format!("{BUDGET_SPENT}: $97.00 of $100.00 used")),
             ..job(JobStatus::Cancelled, None)
         };
-        let text = status_comment(&refused);
+        let text = status_comment(&refused, Locale::En);
         assert!(text.contains("monthly budget"), "{text}");
         assert!(text.contains("$97.00 of $100.00"), "{text}");
 
@@ -591,7 +603,7 @@ mod tests {
             reason: Some("database: connection refused at 10.0.0.3".into()),
             ..job(JobStatus::Failed, None)
         };
-        assert!(!status_comment(&failed).contains("10.0.0.3"));
+        assert!(!status_comment(&failed, Locale::En).contains("10.0.0.3"));
     }
 
     #[test]
@@ -600,7 +612,7 @@ mod tests {
             pr_url: Some("https://github.com/me/app/pull/3".into()),
             ..job(JobStatus::Done, Some(Outcome::PrOpened))
         };
-        let text = plain_status_comment(&pr);
+        let text = plain_status_comment(&pr, Locale::En);
         assert!(
             text.starts_with("aegis-code opened a pull request"),
             "{text}"
@@ -615,6 +627,47 @@ mod tests {
             ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
         };
         assert_eq!(pr_url(&stopped), None, "only a job that opened it");
-        assert!(!plain_status_comment(&stopped).contains("https://evil"));
+        assert!(!plain_status_comment(&stopped, Locale::En).contains("https://evil"));
+    }
+
+    #[test]
+    fn the_comment_is_in_the_repos_language_and_its_reason_stays_inert() {
+        let opened = Job {
+            pr_url: Some("https://github.com/bot/typst/pull/3".into()),
+            ..job(JobStatus::Done, Some(Outcome::PrOpened))
+        };
+        let stopped = Job {
+            reason: Some("ping @admin".into()),
+            ..job(JobStatus::Done, Some(Outcome::StoppedSteps))
+        };
+        let ja = status_comment(&opened, Locale::Ja);
+        assert_eq!(
+            ja,
+            "**aegis-code** がこの issue の pull request を作成しました: \
+             https://github.com/bot/typst/pull/3\n\n<sub>aegis-code ジョブ 7</sub>"
+        );
+        let ja = plain_status_comment(&stopped, Locale::Ja);
+        assert!(ja.contains("ステップ上限に達した"), "{ja}");
+        assert!(ja.contains("理由: ping @\u{200b}admin"), "{ja}");
+        assert!(ja.ends_with("(aegis-code ジョブ 7)"), "{ja}");
+        let vi = status_comment(&stopped, Locale::Vi);
+        assert!(vi.contains("đã chạm giới hạn số bước"), "{vi}");
+        assert!(vi.contains("Lý do: ping @\u{200b}admin"), "{vi}");
+        for outcome in [
+            Outcome::PrOpened,
+            Outcome::StoppedBudget,
+            Outcome::StoppedSteps,
+            Outcome::StoppedExpertFail,
+            Outcome::Diagnosed,
+        ] {
+            let j = job(JobStatus::Done, Some(outcome));
+            for locale in [Locale::En, Locale::Ja] {
+                let text = comment_with(&j, Some("report"), locale);
+                assert!(
+                    !text.chars().any(|c| "ăâđêôơư".contains(c)),
+                    "{locale}: {text}"
+                );
+            }
+        }
     }
 }

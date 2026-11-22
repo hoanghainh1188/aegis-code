@@ -26,6 +26,7 @@ pub mod injection;
 mod issue;
 mod job;
 mod language;
+pub use language::resolve_locale;
 mod light;
 pub mod memory;
 mod publish;

@@ -207,6 +207,11 @@ pub struct RepoSettings {
     /// `[[repo.sidecars]]` of a run configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sidecars: Vec<aegis_gate::SidecarSpec>,
+    /// The language of its PRs, review replies, diagnoses and issue
+    /// comments (#589); its tenant's `default_locale`, then the server's
+    /// `[web] default_locale`, when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<aegis_pr::Locale>,
     /// The token path (ADR 0017 §1): the fork, or the upstream repo itself,
     /// with the secret of its token. Exactly one of `fork` and `app`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -439,6 +444,9 @@ pub struct Modes {
     /// Whether the instance has a GitHub App (`[github_app]`, ADR 0017):
     /// without one, a repo on the app path is refused at registration.
     pub github_app: bool,
+    /// What a repo writes in when neither it nor its tenant names a
+    /// language: the server's `[web] default_locale` (#589).
+    pub default_locale: aegis_pr::Locale,
 }
 
 impl Modes {
@@ -474,12 +482,22 @@ impl Modes {
         Ok(Self {
             configs: by_key,
             github_app: false,
+            default_locale: aegis_pr::Locale::default(),
         })
     }
 
     /// The same modes, on an instance that has a GitHub App or not.
     pub fn with_github_app(self, github_app: bool) -> Self {
         Self { github_app, ..self }
+    }
+
+    /// The same modes, on an instance whose `[web] default_locale` is
+    /// `locale`.
+    pub fn with_default_locale(self, locale: aegis_pr::Locale) -> Self {
+        Self {
+            default_locale: locale,
+            ..self
+        }
     }
 
     /// The configuration of `mode`, if the server has one.
@@ -505,6 +523,16 @@ impl Modes {
     /// `<state_dir>/repos/<slug>`; module maps, caches and the
     /// Codebase-Memory index are under its slug.
     pub fn run_config(&self, repo: &Repo) -> Result<RunConfig, LifecycleError> {
+        self.run_config_in(repo, None)
+    }
+
+    /// [`Self::run_config`] for a repo of `tenant`, whose
+    /// `default_locale` stands in for a locale the repo does not name.
+    pub fn run_config_in(
+        &self,
+        repo: &Repo,
+        tenant: Option<&aegis_store::Tenant>,
+    ) -> Result<RunConfig, LifecycleError> {
         self.build(
             &repo.slug,
             &repo.url,
@@ -513,6 +541,7 @@ impl Modes {
             &repo.mode,
             &repo.config,
             repo.tenant_id,
+            tenant.and_then(|t| t.default_locale.as_deref()),
         )
     }
 
@@ -526,6 +555,7 @@ impl Modes {
         mode: &ModeName,
         config: &serde_json::Value,
         tenant: aegis_store::TenantId,
+        tenant_locale: Option<&str>,
     ) -> Result<RunConfig, LifecycleError> {
         let in_repo = |e: String| LifecycleError::Config(format!("repo `{slug}`: {e}"));
         let mode = self.mode(mode)?;
@@ -582,8 +612,8 @@ impl Modes {
                 secrets: settings.secrets,
                 triage_lane: settings.triage_lane,
                 sidecars: settings.sidecars,
-                // Resolved per repo, tenant and server by #589.
-                locale: aegis_pr::Locale::default(),
+                locale: crate::resolve_locale(settings.locale, tenant_locale, self.default_locale)
+                    .map_err(in_repo)?,
                 fork,
                 app,
             },
@@ -606,7 +636,8 @@ impl Modes {
             .repo(id)
             .await?
             .ok_or_else(|| LifecycleError::Config(format!("no repo with id {}", id.0)))?;
-        let config = self.run_config(&repo)?;
+        let tenant = store.tenant(repo.tenant_id).await?;
+        let config = self.run_config_in(&repo, tenant.as_ref())?;
         Ok(RepoRun { repo, config })
     }
 
@@ -643,6 +674,7 @@ impl Modes {
             &new.mode,
             &new.config,
             tenant.map_or(aegis_store::TenantId::DEFAULT, |t| t.id),
+            tenant.and_then(|t| t.default_locale.as_deref()),
         )?;
         Ok((new, config))
     }
@@ -792,6 +824,7 @@ mod tests {
             name: slug.into(),
             monthly_budget_usd: None,
             max_concurrent_jobs: None,
+            default_locale: None,
             created_at: Default::default(),
         }
     }

@@ -11,6 +11,7 @@ pub mod chatops;
 pub mod config;
 pub mod github_app;
 pub mod lifecycle;
+pub mod locale;
 pub mod logs;
 pub mod memory;
 pub mod metrics;

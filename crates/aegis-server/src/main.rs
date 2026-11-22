@@ -49,6 +49,7 @@ use aegis_server::auth::{self, Auth};
 use aegis_server::chatops::ChatNotifier;
 use aegis_server::config::ServerConfig;
 use aegis_server::lifecycle::LifecycleRunner;
+use aegis_server::locale::Locales;
 use aegis_server::secrets::{self, DATABASE_URL};
 use aegis_server::tracker::{self, TrackerNotifier};
 use aegis_server::webhook::{GitHubNotifier, GitLabNotifier};
@@ -192,15 +193,19 @@ async fn run(args: Args) -> Result<(), String> {
         let runner = LifecycleRunner::new(store.clone(), modes(&config)?, secrets.clone())
             .await?
             .with_github_app(github_app(&config, &secrets, &store)?);
+        let locales = Locales::new(store.clone(), config.web.default_locale);
         let notifier = Arc::new((
             (
                 (
                     GitHubNotifier::from_secrets(&secrets)
                         .await?
-                        .with_app(github_app(&config, &secrets, &store)?, store.clone()),
-                    GitLabNotifier::from_secrets(&secrets).await?,
+                        .with_app(github_app(&config, &secrets, &store)?, store.clone())
+                        .with_locales(locales.clone()),
+                    GitLabNotifier::from_secrets(&secrets)
+                        .await?
+                        .with_locales(locales.clone()),
                 ),
-                TrackerNotifier::new(store.clone(), secrets.clone()),
+                TrackerNotifier::new(store.clone(), secrets.clone()).with_locales(locales),
             ),
             // Slack and Teams (#594), when `[chatops]` has channels.
             ChatNotifier::from_section(&config.chatops, store.clone(), &secrets).await?,
@@ -243,7 +248,8 @@ async fn run(args: Args) -> Result<(), String> {
         let poller = tracker::run_poller(
             store.clone(),
             secrets.clone(),
-            TrackerNotifier::new(store.clone(), secrets.clone()),
+            TrackerNotifier::new(store.clone(), secrets.clone())
+                .with_locales(Locales::new(store.clone(), config.web.default_locale)),
             std::time::Duration::from_secs(config.trackers.poll_s),
             shutdown.clone(),
         );

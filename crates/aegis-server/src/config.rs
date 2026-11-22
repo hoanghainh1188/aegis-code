@@ -207,6 +207,11 @@ pub struct WebSection {
     /// turned on, as that token can do more than the agent's.
     #[serde(default)]
     pub make_webhooks: bool,
+    /// The language of PRs, replies, diagnoses and issue comments for a
+    /// repo whose settings and tenant name none (#589): `en`, `ja` or
+    /// `vi`; `en` when unset.
+    #[serde(default)]
+    pub default_locale: aegis_pr::Locale,
 }
 
 /// Review rounds on the agent's PRs (#243).
@@ -449,7 +454,9 @@ impl ServerConfig {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let modes = Modes::from_configs(configs).map_err(|e| format!("[modes]: {e}"))?;
-        Ok(modes.with_github_app(self.github_app.is_some()))
+        Ok(modes
+            .with_github_app(self.github_app.is_some())
+            .with_default_locale(self.web.default_locale))
     }
 
     pub fn from_toml(text: &str) -> Result<Self, String> {
