@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::future::Future;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use aegis_gate::{GateReport, SonarIssue, open_issues};
@@ -158,11 +158,37 @@ struct BatchSteps<'a, P, S> {
     reruns: Mutex<Vec<IssueId>>,
 }
 
+/// The data behind `lock`, though a panic elsewhere poisoned it (#606).
+/// Every critical section of the batch is one push, insert or read, so
+/// what the lock holds stays whole: one group's panic does not take the
+/// batch's other groups down with it.
+fn locked<'a, T>(lock: &'a Mutex<T>, what: &str) -> MutexGuard<'a, T> {
+    lock.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!(
+            lock = what,
+            "batch lock poisoned by a panic; its data is kept"
+        );
+        poisoned.into_inner()
+    })
+}
+
+/// [`locked`] for a lock the batch is done with.
+fn unlocked<T>(lock: Mutex<T>, what: &str) -> T {
+    lock.into_inner()
+        .unwrap_or_else(|poisoned: PoisonError<T>| {
+            tracing::warn!(
+                lock = what,
+                "batch lock poisoned by a panic; its data is kept"
+            );
+            poisoned.into_inner()
+        })
+}
+
 impl<P, S> BatchSteps<'_, P, S> {
     /// The answer the gate is given: no repro test, every test a group
     /// was allowed to change.
     fn gate_answer(&self) -> FinalAnswer {
-        let answers = self.answers.lock().expect("answers lock");
+        let answers = locked(&self.answers, "answers");
         FinalAnswer {
             status: Status::Fixed,
             cause: String::new(),
@@ -212,10 +238,7 @@ where
                 self.cancel,
             )
             .await?;
-            self.gate_runs
-                .lock()
-                .expect("gate runs lock")
-                .push(gate_run(&report, started.elapsed()));
+            locked(&self.gate_runs, "gate runs").push(gate_run(&report, started.elapsed()));
             Ok(Checked {
                 passed: report.passed() && !self.cancel.is_cancelled(),
                 report,
@@ -241,12 +264,9 @@ where
             self.cancel,
         )
         .await?;
-        self.reruns.lock().expect("reruns lock").push(id);
+        locked(&self.reruns, "reruns").push(id);
         Ok(kept.map(|k| {
-            self.answers
-                .lock()
-                .expect("answers lock")
-                .insert(group.id.clone(), k.answer);
+            locked(&self.answers, "answers").insert(group.id.clone(), k.answer);
             k.commit
         }))
     }
@@ -414,9 +434,9 @@ where
         reruns: Mutex::new(Vec::new()),
     };
     let done = integrate(&steps, &tree, branches).await;
-    let reruns = std::mem::take(&mut *steps.reruns.lock().expect("reruns lock"));
+    let reruns = std::mem::take(&mut *locked(&steps.reruns, "reruns"));
     absorb(&platform.store, ledger, &reruns).await?;
-    let runs = std::mem::take(&mut *steps.gate_runs.lock().expect("gate runs lock"));
+    let runs = std::mem::take(&mut *locked(&steps.gate_runs, "gate runs"));
     for run in runs {
         ledger.gate_run(run).await?;
     }
@@ -424,7 +444,7 @@ where
     if cancel.is_cancelled() {
         return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
     }
-    let answers = steps.answers.into_inner().expect("answers lock");
+    let answers = unlocked(steps.answers, "answers");
     let answer = batch_answer(&groups, &left_out, &done, &answers);
     let Some(report) = &done.report else {
         return Ok(Ending::stop(
@@ -473,6 +493,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A lock a panicking thread held still gives its data (#606).
+    #[test]
+    fn a_poisoned_lock_keeps_its_data() {
+        let runs = Mutex::new(vec![1]);
+        std::thread::scope(|s| {
+            let held = s.spawn(|| {
+                let mut guard = runs.lock().unwrap();
+                guard.push(2);
+                panic!("a group's step panics");
+            });
+            assert!(held.join().is_err());
+        });
+        assert!(runs.is_poisoned());
+        locked(&runs, "runs").push(3);
+        assert_eq!(*locked(&runs, "runs"), [1, 2, 3]);
+        assert_eq!(unlocked(runs, "runs"), [1, 2, 3]);
+    }
 
     #[test]
     fn the_warnings_come_from_the_first_json_fence() {
