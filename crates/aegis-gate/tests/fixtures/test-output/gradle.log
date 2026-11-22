@@ -1,0 +1,47 @@
+> Task :compileTestKotlin UP-TO-DATE
+> Task :compileTestJava NO-SOURCE
+> Task :processTestResources NO-SOURCE
+> Task :testClasses UP-TO-DATE
+
+> Task :test FAILED
+aegis-gradle FAILED example.cart.BrokenTest#failsAssert()
+
+BrokenTest > failsAssert() FAILED
+    org.opentest4j.AssertionFailedError at BrokenTest.kt:12
+aegis-gradle FAILED example.cart.BrokenTest#param(int)[2]
+
+BrokenTest > param(int) > [2] 2 FAILED
+    org.opentest4j.AssertionFailedError at BrokenTest.kt:22
+aegis-gradle FAILED example.cart.BrokenTest#has spaces in its name()
+
+BrokenTest > has spaces in its name() FAILED
+    org.opentest4j.AssertionFailedError at BrokenTest.kt:15
+aegis-gradle FAILED example.cart.BrokenTest#throwsError()
+
+BrokenTest > throwsError() FAILED
+    java.lang.IllegalStateException at BrokenTest.kt:18
+aegis-gradle FAILED example.cart.BrokenTest$Inner#innerFails()
+
+BrokenTest > Inner > innerFails() FAILED
+    org.opentest4j.AssertionFailedError at BrokenTest.kt:27
+aegis-gradle FAILED example.cart.SetupTest#initializationError
+
+SetupTest > initializationError FAILED
+    java.lang.IllegalStateException at BrokenTest.kt:-1
+aegis-gradle FAILED example.other.CartTest#addsUpPrices()
+
+CartTest > addsUpPrices() FAILED
+    org.opentest4j.AssertionFailedError at CartTest.kt:8
+
+10 tests completed, 7 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///work/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 2s

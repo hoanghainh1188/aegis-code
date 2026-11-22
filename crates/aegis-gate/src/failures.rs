@@ -4,6 +4,7 @@
 
 mod dotnet;
 mod go_test;
+mod gradle;
 mod js;
 mod phpunit;
 mod surefire;
@@ -70,6 +71,7 @@ pub fn failing_tests_with(
         TestOutput::JestVitest => js::failing(output),
         TestOutput::Dotnet => dotnet::failing(output),
         TestOutput::Phpunit => phpunit::failing(output),
+        TestOutput::Gradle => gradle::failing(output),
     }
 }
 
@@ -84,6 +86,7 @@ pub(crate) fn names_test(format: TestOutput, id: &str, test: &str) -> bool {
         TestOutput::JestVitest => js::names(id, test),
         TestOutput::Dotnet => dotnet::names(id, test),
         TestOutput::Phpunit => phpunit::names(id, test),
+        TestOutput::Gradle => gradle::names(id, test),
     }
 }
 
@@ -106,6 +109,7 @@ pub(crate) fn selector(format: TestOutput, ids: &BTreeSet<String>) -> Option<Str
         TestOutput::JestVitest => js::selector(ids),
         TestOutput::Dotnet => dotnet::selector(ids),
         TestOutput::Phpunit => phpunit::selector(ids),
+        TestOutput::Gradle => gradle::selector(ids),
     }
 }
 
@@ -122,7 +126,10 @@ pub(crate) fn ran_nothing(format: TestOutput, output: &str) -> bool {
         TestOutput::GoTest => go_test::ran_nothing(output),
         TestOutput::Dotnet => dotnet::ran_nothing(output),
         TestOutput::Phpunit => phpunit::ran_nothing(output),
-        TestOutput::Pytest | TestOutput::Surefire | TestOutput::JestVitest => false,
+        // Gradle fails a `--tests` filter that matches nothing.
+        TestOutput::Pytest | TestOutput::Surefire | TestOutput::JestVitest | TestOutput::Gradle => {
+            false
+        }
     }
 }
 
@@ -176,7 +183,8 @@ pub fn ran_tests(format: TestOutput, output: &str) -> Option<BTreeSet<String>> {
         | TestOutput::Surefire
         | TestOutput::JestVitest
         | TestOutput::Dotnet
-        | TestOutput::Phpunit => None,
+        | TestOutput::Phpunit
+        | TestOutput::Gradle => None,
     }
 }
 

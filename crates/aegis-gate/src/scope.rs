@@ -50,7 +50,7 @@ pub fn is_test_file(path: &str) -> bool {
     // Check if in test directory
     let in_test_dir = parts.iter().any(|&p| {
         p == "test" || p == "tests" || p == "__tests__" || p == "testdata" || p == "testing"
-    });
+    }) || source_set_of_tests(&parts);
 
     if in_test_dir {
         return true;
@@ -73,12 +73,22 @@ pub fn is_test_file(path: &str) -> bool {
             || file_name.ends_with("test.java")
             || file_name.ends_with("tests.java")
             || file_name.ends_with("test.cs")
-            || file_name.ends_with("tests.cs"))
+            || file_name.ends_with("tests.cs")
+            || file_name.ends_with("test.kt")
+            || file_name.ends_with("tests.kt"))
     {
         return true;
     }
 
     false
+}
+
+/// A Gradle source set of tests (`src/jvmTest`, `src/commonTest`,
+/// `src/integrationTest`, #586), lower-cased.
+fn source_set_of_tests(parts: &[&str]) -> bool {
+    parts
+        .windows(2)
+        .any(|w| w[0] == "src" && w[1].len() > "test".len() && w[1].ends_with("test"))
 }
 
 /// Directory of a path (empty string if at root).

@@ -1,0 +1,117 @@
+# Language profile Kotlin (ADR 0004, #586). Lệnh là mảng argv, không qua shell.
+# Mặc định cho Gradle, Kotlin DSL hay Groovy DSL; repo Maven hoặc có
+# formatter/linter riêng (ktlint, detekt, Spotless) thì ghi đè trong RepoConfig.
+# Placeholder: `{test}` ở gate.repro_test (mẫu `--tests` của Gradle,
+# `Class.method`), `{lockfile}` / `{licenses}` / `{osv_config}` ở audit.
+#
+# `gradle` trong image (docker/kotlin/gradle) chạy `./gradlew` của repo khi
+# có, nên build dùng đúng phiên bản Gradle repo ghim. Init script của image
+# (docker/kotlin/aegis.init.gradle, trong GRADLE_USER_HOME/init.d, áp cho mọi
+# bản Gradle) in tên test fail dạng `aegis-gradle FAILED <Class>#<test>`, bật
+# JaCoCo cho mọi project JVM và thêm task `aegisFetch`; build script của repo
+# không đổi. Listener của nó cần tắt configuration cache, nên mọi lệnh có
+# `--no-configuration-cache`. Gate chạy không mạng nên các lệnh sau bước
+# lấy phụ thuộc có `--offline`.
+
+language = "kotlin"
+display_name = "Kotlin"
+
+[detect]
+# Repo Java dùng Gradle cũng có các marker này: phát hiện chỉ là gợi ý,
+# RepoConfig chọn profile.
+markers = ["build.gradle.kts", "settings.gradle.kts", "build.gradle", "settings.gradle"]
+extensions = ["kt", "kts"]
+
+[aci]
+# fwcd kotlin-language-server, nói LSP trên stdio.
+lsp = ["kotlin-language-server"]
+
+# Không có formatter chung cho Kotlin; repo có ktlint hay Spotless thì ghi
+# đè edit_format và gate.format (ví dụ `gradle --offline spotlessApply` /
+# `spotlessCheck`).
+[edit]
+
+[gate]
+# Lỗi biên dịch, kể cả test, chặn bản vá ngay.
+lint = ["gradle", "--offline", "--no-configuration-cache", "-q", "testClasses"]
+repro_test = ["gradle", "--offline", "--no-configuration-cache", "-q", "test", "--tests", "{test}"]
+# `--continue`: test của một project fail sẵn ở nhánh gốc không chặn test
+# của các project khác.
+test = ["gradle", "--offline", "--no-configuration-cache", "-q", "--continue", "test"]
+test_output = "gradle"
+coverage = ["gradle", "--offline", "--no-configuration-cache", "-q", "test", "jacocoTestReport"]
+
+[coverage]
+format = "jacoco"
+# Project gốc; repo nhiều project ghi đè bằng report gộp của chính nó.
+path = "build/reports/jacoco/test/jacocoTestReport.xml"
+
+[dependencies]
+# libs.versions.toml: version catalog của Gradle, đổi phiên bản mà không chạm
+# build script.
+manifests = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties", "*.versions.toml"]
+lockfiles = ["gradle.lockfile", "buildscript-gradle.lockfile"]
+official_source = "https://repo.maven.apache.org/maven2"
+# Lấy mọi configuration resolve được và biên dịch cả test: plugin Kotlin,
+# compiler, JaCoCo và runtime của test đều vào cache trước các bước offline.
+fetch = ["gradle", "--no-configuration-cache", "-q", "aegisFetch", "testClasses"]
+# Registry hosts the fetch container may reach (#66, #279): plugins from the
+# Gradle Plugin Portal (its artifacts redirect to plugins-artifacts and
+# Maven Central), dependencies from Maven Central, and the Gradle
+# distribution a repo's wrapper pins. Gradle reads the proxy from the
+# system properties the image's `gradle` passes (docker/kotlin/gradle).
+fetch_hosts = [
+    "repo.maven.apache.org",
+    "plugins.gradle.org",
+    "plugins-artifacts.gradle.org",
+    "services.gradle.org",
+    "downloads.gradle.org",
+]
+audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
+# OSV advisories and deps.dev license data; nothing else (#159).
+audit_hosts = ["api.osv.dev", "api.deps.dev"]
+# The platform's upgrade of a CVE job (#501, ADR 0015), through fetch_hosts:
+# the dependency's version in the repo's version catalog
+# (docker/kotlin/aegis-gradle-upgrade). Build scripts are protected, so a
+# dependency declared only there is upgraded by a person.
+upgrade = ["aegis-gradle-upgrade", "{package}", "{version}"]
+# Bản vá chạm vào là bị chặn (#83): build script, wrapper và cấu hình Gradle
+# ngoài build script, không đọc được như một danh sách phụ thuộc.
+# Script plugins (`apply from:`), convention plugins (buildSrc, an included
+# `build-logic`) và cấu hình kiểm tra chữ ký của Gradle cũng là build.
+protected = [
+    "*.gradle",
+    "*.gradle.kts",
+    "gradle.properties",
+    "gradle-daemon-jvm.properties",
+    "**/buildSrc/**",
+    "**/build-logic/**",
+    "**/gradle/wrapper/**",
+    "gradle/verification-metadata.xml",
+    "gradle/verification-keyring.*",
+    "gradlew",
+    "gradlew.bat",
+]
+
+# Cây phụ thuộc đã resolve (#80): repo Gradle thường không bật locking nên
+# build script không cho thấy phụ thuộc bắc cầu. Gate chạy lệnh trong
+# container lấy phụ thuộc, qua proxy, cho nhánh chính và cho bản vá, rồi so
+# như lockfile. `gradle dependencies` chỉ in một project; repo nhiều project
+# ghi đè `command` liệt kê từng project (`… dependencies :core:dependencies`).
+# Repo đã lock mọi phụ thuộc thì đặt `tree = false`.
+[dependencies.tree]
+file = "gradle-dependencies.txt"
+command = ["sh", "-c", "gradle --no-configuration-cache -q dependencies > {output}"]
+on_change = ["*.versions.toml", "gradle.properties", "gradle.lockfile"]
+
+[sandbox]
+image = "aegis-sandbox-kotlin"
+cache_dirs = ["build", "/home/aegis/.gradle/caches", "/home/aegis/.gradle/wrapper"]
+# Ngoài các thư mục trên, image chỉ đọc (#320); Gradle và language server ghi vào HOME.
+writable = ["/home/aegis"]
+
+[sonar.properties]
+"sonar.coverage.jacoco.xmlReportPaths" = "build/reports/jacoco/test/jacocoTestReport.xml"
+
+[prompt]
+conventions = "kotlin.md"

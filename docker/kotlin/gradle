@@ -1,0 +1,68 @@
+#!/bin/sh
+# `gradle` in the Kotlin sandbox (#586). The build runs on the Gradle
+# version the repo's wrapper pins when it has one, else on the image's.
+#
+# - The fetch step fills /home/aegis/.gradle/caches and .../wrapper; the
+#   gate's other steps get them read-only, where Gradle cannot take its
+#   locks. There Gradle runs from a writable home of its own with the
+#   fetched artifacts as its read-only dependency cache
+#   (GRADLE_RO_DEP_CACHE), and the wrapper's distribution is run directly:
+#   the wrapper itself locks its download too.
+# - Gradle takes no proxy from the environment (#279): in the fetch
+#   container, whose only way out is the egress proxy named by HTTPS_PROXY
+#   (#66), the wrapper's download and the build both get it as system
+#   properties.
+set -eu
+home=${GRADLE_USER_HOME:-/home/aegis/.gradle}
+image_gradle=/opt/gradle/bin/gradle
+
+# The distribution the wrapper pins, as the fetch step's wrapper unpacked
+# it: dists/<name>/<hash>/gradle-<version>/bin/gradle. Empty when none.
+pinned() {
+    wrapper=gradle/wrapper/gradle-wrapper.properties
+    [ -f "$wrapper" ] || return 0
+    url=$(sed -n 's/^distributionUrl[[:space:]]*=[[:space:]]*//p' "$wrapper" | tr -d '\r')
+    name=${url##*/}
+    name=${name%.zip}
+    for bin in "$home"/wrapper/dists/"$name"/*/*/bin/gradle; do
+        if [ -x "$bin" ]; then
+            printf '%s\n' "$bin"
+            return 0
+        fi
+    done
+    # None cached: the image's Gradle, offline.
+    return 0
+}
+
+props=
+if [ -n "${HTTPS_PROXY:-}" ]; then
+    hostport=${HTTPS_PROXY#*://}
+    hostport=${hostport%%/*}
+    host=${hostport%:*}
+    port=${hostport##*:}
+    props="-Dhttps.proxyHost=$host -Dhttps.proxyPort=$port -Dhttp.proxyHost=$host -Dhttp.proxyPort=$port"
+    # The wrapper's own JVM reads JAVA_OPTS; the build's takes `-D` flags.
+    JAVA_OPTS="${JAVA_OPTS:-} $props"
+    export JAVA_OPTS
+fi
+
+if [ -d "$home/caches" ] && [ ! -w "$home/caches" ]; then
+    run_home=/tmp/aegis-gradle-home
+    mkdir -p "$run_home"
+    # The init script must come along: the gate reads the failing tests
+    # it prints.
+    cp -R "$home/init.d" "$home/gradle.properties" "$run_home/"
+    GRADLE_RO_DEP_CACHE=$home/caches
+    GRADLE_USER_HOME=$run_home
+    export GRADLE_RO_DEP_CACHE GRADLE_USER_HOME
+    bin=$(pinned)
+    # shellcheck disable=SC2086 # one argument per property
+    exec "${bin:-$image_gradle}" $props "$@"
+fi
+# $props unquoted: one argument per property.
+if [ -f ./gradlew ]; then
+    # shellcheck disable=SC2086
+    exec sh ./gradlew $props "$@"
+fi
+# shellcheck disable=SC2086
+exec "$image_gradle" $props "$@"

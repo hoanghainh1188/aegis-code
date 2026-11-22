@@ -141,6 +141,27 @@ mod tests {
         ));
     }
 
+    /// Valid Kotlin the grammar must not refuse, one-line bodies included:
+    /// an edit is refused on any syntax error (#586).
+    #[test]
+    fn kotlin_one_line_bodies_parse() {
+        for ok in [
+            "class A { val x = 1 }",
+            "class A { fun f(): Int }",
+            "interface P { fun price(): Long }",
+            "enum class K { A, B; fun f() = 1 }",
+            "object O { const val X = 1 }",
+            "suspend fun f(): Flow<Int> = flow { emit(1) }",
+            "fun <T : Comparable<T>> List<T>.top(): T? = maxOrNull()",
+            "val s = \"a ${1 + 2} b\"",
+        ] {
+            assert!(
+                syntax_errors(Language::Kotlin, ok).unwrap().is_empty(),
+                "{ok}"
+            );
+        }
+    }
+
     #[test]
     fn every_language_has_a_grammar() {
         assert!(Language::ALL.into_iter().all(has_grammar));
@@ -150,6 +171,7 @@ mod tests {
             (Language::CSharp, "class A { void F( }"),
             (Language::Go, "package x\nfunc ( {"),
             (Language::Php, "<?php\nfunction f( {"),
+            (Language::Kotlin, "class A { fun f( }"),
         ] {
             assert!(
                 !syntax_errors(language, broken).unwrap().is_empty(),

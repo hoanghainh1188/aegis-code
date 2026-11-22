@@ -80,6 +80,10 @@ fn is_public(language: Language, symbol: &Symbol) -> bool {
                 || matches!(language, Language::Php) && symbol.container.is_none()
         }
         Language::TypeScript => signature.starts_with("export"),
+        // Public unless said otherwise.
+        Language::Kotlin => !signature
+            .split_whitespace()
+            .any(|w| matches!(w, "private" | "internal" | "protected")),
     }
 }
 
