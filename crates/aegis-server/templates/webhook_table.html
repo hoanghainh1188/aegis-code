@@ -1,6 +1,6 @@
 <div class="scroll">
 <table class="webhooks">
-  <thead><tr><th scope="col" class="when">Received (UTC)</th><th scope="col">From</th><th scope="col">Event</th><th scope="col">Delivery</th><th scope="col">Outcome</th><th scope="col" class="why">Why, and what to do</th></tr></thead>
+  <thead><tr><th scope="col" class="when">{{ crate::t("Received (UTC)") }}</th><th scope="col">{{ crate::t("From") }}</th><th scope="col">{{ crate::t("Event") }}</th><th scope="col">{{ crate::t("Delivery") }}</th><th scope="col">{{ crate::t("Outcome") }}</th><th scope="col" class="why">{{ crate::t("Why, and what to do") }}</th></tr></thead>
   <tbody>
   {% for w in webhooks %}
     <tr>
@@ -8,11 +8,11 @@
       <td>{{ w.source }}</td>
       <td><code>{{ w.event }}</code></td>
       <td><span class="ref">{{ w.delivery_id }}</span></td>
-      <td class="outcome">{% if w.good %}<span class="check pass">{{ w.outcome }}</span>{% else %}<span class="check fail">{{ w.outcome }}</span>{% endif %}{% if let Some(j) = w.job_id %} <a href="/jobs/{{ j }}">job {{ j }}</a>{% endif %}</td>
+      <td class="outcome">{% if w.good %}<span class="check pass">{{ w.outcome }}</span>{% else %}<span class="check fail">{{ w.outcome }}</span>{% endif %}{% if let Some(j) = w.job_id %} <a href="/jobs/{{ j }}">{{ crate::t("job") }} {{ j }}</a>{% endif %}</td>
       <td class="why">{{ w.reason }}{% if let Some(h) = w.hint %}<span class="hint">{{ h }}</span>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="empty">No webhook from this repo yet. GitHub sends a ping when the webhook is made; GitLab's "Test" sends a sample event.</td></tr>
+    <tr><td colspan="6" class="empty">{{ crate::t("No webhook from this repo yet. GitHub sends a ping when the webhook is made; GitLab's \"Test\" sends a sample event.") }}</td></tr>
   {% endfor %}
   </tbody>
 </table>

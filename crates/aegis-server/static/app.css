@@ -85,6 +85,17 @@ code, .ref { font-family: var(--font-num); font-size: 0.92em; }
 .masthead nav a:hover { color: var(--accent); }
 .masthead .session { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0; min-width: 0; }
 .masthead .who { color: var(--ink-soft); font-size: var(--text-small); overflow-wrap: anywhere; }
+/* The language switch (#590): quiet, each language in its own name; the
+   current one is plain text, the others links. */
+.masthead nav.lang { gap: var(--space-1) var(--space-2); font-size: var(--text-small); }
+.masthead nav.lang a { font-weight: 400; color: var(--ink-soft); }
+.masthead nav.lang a:hover, .masthead nav.lang a:focus-visible { color: var(--accent); }
+.masthead nav.lang [aria-current] { font-weight: 700; color: var(--ink); }
+/* Japanese pages read in a Japanese face where the system has one. */
+:root:lang(ja) {
+  --font-text: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo",
+    "Noto Sans JP", "Avenir Next", "Segoe UI", sans-serif;
+}
 
 /* Narrow screens (#365): the nav takes a row of its own so no link is pushed
    off the edge; rows keep the source order, so Tab order matches the eye. */

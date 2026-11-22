@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Job #{{ head.id }}{% endblock %}
+{% block title %}{{ crate::t("Job #") }}{{ head.id }}{% endblock %}
 {% block content %}
 {% include "job_head.html" %}
 {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
 {% if !input_flags.is_empty() %}
 <section aria-labelledby="flags-heading" class="band flags">
-  <h2 id="flags-heading">Embedded instructions in what the job read</h2>
+  <h2 id="flags-heading">{{ crate::t("Embedded instructions in what the job read") }}</h2>
   <ul class="changes">
     {% for f in input_flags %}<li>{{ f.source }}, <code>{{ f.location }}</code>: {{ f.excerpt }}</li>{% endfor %}
   </ul>
-  <p class="note">Found by the platform, not reported by the agent. The repo or the issue may be targeted: check the source.</p>
+  <p class="note">{{ crate::t("Found by the platform, not reported by the agent. The repo or the issue may be targeted: check the source.") }}</p>
 </section>
 {% endif %}
 {% if let Some(a) = answer %}
 <section aria-labelledby="answer-heading" class="band answer">
-  <h2 id="answer-heading">What the agent did</h2>
+  <h2 id="answer-heading">{{ crate::t("What the agent did") }}</h2>
   {% if a.fixed %}
     {% if !a.cause.is_empty() %}<p class="cause">{{ a.cause }}</p>{% endif %}
     {% if !a.changes.is_empty() %}
@@ -22,38 +22,38 @@
       {% for c in a.changes %}<li><code>{{ c.location }}</code> {{ c.note }}</li>{% endfor %}
     </ul>
     {% endif %}
-    {% if let Some(t) = a.repro_test %}<p class="note">Reproduction test: <code>{{ t }}</code></p>{% endif %}
+    {% if let Some(t) = a.repro_test %}<p class="note">{{ crate::t("Reproduction test:") }} <code>{{ t }}</code></p>{% endif %}
   {% else %}
-    <p class="cause">Stopped{% if let Some(why) = a.stop_reason %}: {{ why }}{% endif %}</p>
+    <p class="cause">{{ crate::t("Stopped") }}{% if let Some(why) = a.stop_reason %}: {{ why }}{% endif %}</p>
   {% endif %}
   {% if !a.review_replies.is_empty() %}
-  <h3>Replies to the review</h3>
+  <h3>{{ crate::t("Replies to the review") }}</h3>
   <ul class="changes">
-    {% for r in a.review_replies %}<li>Note {{ r.note }} · {% if r.done %}done{% else %}not done{% endif %}{% if !r.reply.is_empty() %} · {{ r.reply }}{% endif %}</li>{% endfor %}
+    {% for r in a.review_replies %}<li>{{ crate::t("Note") }} {{ r.note }} · {% if r.done %}{{ crate::t("done") }}{% else %}{{ crate::t("not done") }}{% endif %}{% if !r.reply.is_empty() %} · {{ r.reply }}{% endif %}</li>{% endfor %}
   </ul>
   {% endif %}
   {% if !a.suspicious_input.is_empty() %}
-  <h3>Embedded instructions the agent reported</h3>
+  <h3>{{ crate::t("Embedded instructions the agent reported") }}</h3>
   <ul class="changes">
     {% for s in a.suspicious_input %}<li><code>{{ s.location }}</code> {{ s.request }}</li>{% endfor %}
   </ul>
   {% endif %}
-  <p class="note">As the agent wrote it in its final answer; the gate checked the patch, not this text.</p>
+  <p class="note">{{ crate::t("As the agent wrote it in its final answer; the gate checked the patch, not this text.") }}</p>
 </section>
 {% endif %}
 
 {% if !rounds.is_empty() %}
 <section aria-labelledby="rounds-heading" class="band">
-  <h2 id="rounds-heading">Review fix rounds</h2>
+  <h2 id="rounds-heading">{{ crate::t("Review fix rounds") }}</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Round</th><th scope="col">Job</th><th scope="col">Status</th><th scope="col">Outcome</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Cost</th><th scope="col">Created at</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Round") }}</th><th scope="col">{{ crate::t("Job") }}</th><th scope="col">{{ crate::t("Status") }}</th><th scope="col">{{ crate::t("Outcome") }}</th><th scope="col" class="num">{{ crate::t("Calls") }}</th><th scope="col" class="num">{{ crate::t("Cost") }}</th><th scope="col">{{ crate::t("Created at") }}</th></tr></thead>
     <tbody>
     {% for r in rounds %}
       <tr{% if r.current %} aria-current="true"{% endif %}><td>{% if r.round == 0 %}PR{% else %}{{ r.round }}{% endif %}</td><td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td><td><span class="status s-{{ r.status }}">{{ r.status }}</span></td><td>{{ r.outcome }}</td><td class="num">{{ r.model_calls }}</td><td class="num">{{ r.cost }}</td><td>{{ r.created_at }}</td></tr>
     {% endfor %}
     </tbody>
-    <tfoot><tr><th scope="row" colspan="5">Total PR</th><td class="num">{{ rounds_cost }}</td><td></td></tr></tfoot>
+    <tfoot><tr><th scope="row" colspan="5">{{ crate::t("Total PR") }}</th><td class="num">{{ rounds_cost }}</td><td></td></tr></tfoot>
   </table>
   </div>
 </section>
@@ -61,23 +61,23 @@
 
 {% if let Some(d) = diagnosis %}
 <section aria-labelledby="diagnosis-heading" class="band">
-  <h2 id="diagnosis-heading">Diagnosis</h2>
-  <p class="note">Written back to the ticket instead of a pull request (#451). Read-only: aegis changed nothing; each finding was checked against the source it cites.</p>
+  <h2 id="diagnosis-heading">{{ crate::t("Diagnosis") }}</h2>
+  <p class="note">{{ crate::t("Written back to the ticket instead of a pull request (#451). Read-only: aegis changed nothing; each finding was checked against the source it cites.") }}</p>
   <pre class="diagnosis">{{ d }}</pre>
 </section>
 {% endif %}
 {% include "patch.html" %}
 
 <section aria-labelledby="runs-heading" class="band">
-  <h2 id="runs-heading">Attempts</h2>
+  <h2 id="runs-heading">{{ crate::t("Attempts") }}</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Attempt</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Ended</th><th scope="col">Error</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Attempt") }}</th><th scope="col">{{ crate::t("Status") }}</th><th scope="col">{{ crate::t("Started") }}</th><th scope="col">{{ crate::t("Ended") }}</th><th scope="col">{{ crate::t("Error") }}</th></tr></thead>
     <tbody>
     {% for r in runs %}
       <tr><td>{{ r.attempt }}</td><td>{{ r.status }}</td><td>{{ r.started_at }}</td><td>{{ r.ended_at }}</td><td>{{ r.error }}</td></tr>
     {% else %}
-      <tr><td colspan="5" class="empty">No attempts yet.</td></tr>
+      <tr><td colspan="5" class="empty">{{ crate::t("No attempts yet.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -85,12 +85,12 @@
 </section>
 
 <section aria-labelledby="events-heading" class="band">
-  <h2 id="events-heading">Ledger history</h2>
+  <h2 id="events-heading">{{ crate::t("Ledger history") }}</h2>
   <ol class="timeline">
   {% for e in events %}
     <li><span class="kind">{{ e.kind }}</span><span class="detail">{{ e.detail }}</span><span class="cost">{{ e.cost }}</span></li>
   {% else %}
-    <li class="empty">No events in ledger yet.</li>
+    <li class="empty">{{ crate::t("No events in ledger yet.") }}</li>
   {% endfor %}
   </ol>
 </section>

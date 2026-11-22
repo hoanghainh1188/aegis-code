@@ -1,36 +1,36 @@
 {% extends "base.html" %}
-{% block title %}{{ row.label }} budget{% endblock %}
+{% block title %}{{ row.label }} {{ crate::t("budget") }}{% endblock %}
 {% block content %}
 <section aria-labelledby="budget-heading">
-  <p class="eyebrow"><a href="/">KPIs</a> · Monthly budget</p>
+  <p class="eyebrow"><a href="/">KPIs</a> {{ crate::t("· Monthly budget") }}</p>
   <h1 id="budget-heading">{{ row.label }}</h1>
   <dl class="facts">
-    <div><dt>Spent this month</dt><dd>{{ row.spent }}</dd></div>
-    <div><dt>Cap</dt><dd>{% if row.capped %}{{ row.cap }}{% else %}None of its own{% endif %}</dd></div>
-    <div><dt>Remaining</dt><dd>{{ row.left }}</dd></div>
-    <div><dt>Status</dt><dd class="{{ row.class }}">{{ row.state }}</dd></div>
+    <div><dt>{{ crate::t("Spent this month") }}</dt><dd>{{ row.spent }}</dd></div>
+    <div><dt>{{ crate::t("Cap") }}</dt><dd>{% if row.capped %}{{ row.cap }}{% else %}{{ crate::t("None of its own") }}{% endif %}</dd></div>
+    <div><dt>{{ crate::t("Remaining") }}</dt><dd>{{ row.left }}</dd></div>
+    <div><dt>{{ crate::t("Status") }}</dt><dd class="{{ row.class }}">{{ row.state }}</dd></div>
   </dl>
   {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
-  {% if waits %}<p class="notice bad">Less than {{ reserve }} is left under this cap, so no new job of this repo runs: queued jobs wait until next month, or until the cap is raised.</p>{% endif %}
-  <p class="note">The month is counted in the {{ time_zone }} time zone. A job may spend up to {{ reserve }}, so with less than that left under the cap no new job runs; jobs already running finish.</p>
+  {% if waits %}<p class="notice bad">{{ crate::t("Less than") }} {{ reserve }} {{ crate::t("is left under this cap, so no new job of this repo runs: queued jobs wait until next month, or until the cap is raised.") }}</p>{% endif %}
+  <p class="note">{{ crate::t("The month is counted in the") }} {{ time_zone }} {{ crate::t("time zone. A job may spend up to") }} {{ reserve }}{{ crate::t(", so with less than that left under the cap no new job runs; jobs already running finish.") }}</p>
 </section>
 
 {% if can_edit %}
 <section aria-labelledby="change-heading" class="band">
-  <h2 id="change-heading">Change the cap</h2>
-  <p class="note">In US dollars a month; {{ row.spent }} is spent so far. Leave it empty for no cap of the repo's own, so that only each job's cap and the mode's budget apply.</p>
+  <h2 id="change-heading">{{ crate::t("Change the cap") }}</h2>
+  <p class="note">{{ crate::t("In US dollars a month;") }} {{ row.spent }} {{ crate::t("is spent so far. Leave it empty for no cap of the repo's own, so that only each job's cap and the mode's budget apply.") }}</p>
   <form method="post" action="/repos/{{ id }}/budget" class="inline">
     {% include "form_guard.html" %}
-    <label>Cap (USD / month)
-      <input type="number" name="monthly_usd" min="0" step="0.01" value="{{ cap_value }}" inputmode="decimal" placeholder="no cap">
+    <label>{{ crate::t("Cap (USD / month)") }}
+      <input type="number" name="monthly_usd" min="0" step="0.01" value="{{ cap_value }}" inputmode="decimal" placeholder="{{ crate::t("no cap") }}">
     </label>
-    <button type="submit">Save cap</button>
+    <button type="submit">{{ crate::t("Save cap") }}</button>
   </form>
   {% if row.capped %}
   <form method="post" action="/repos/{{ id }}/budget" class="inline">
     {% include "form_guard.html" %}
     <input type="hidden" name="monthly_usd" value="">
-    <button type="submit" class="ghost">Remove the cap</button>
+    <button type="submit" class="ghost">{{ crate::t("Remove the cap") }}</button>
   </form>
   {% endif %}
 </section>

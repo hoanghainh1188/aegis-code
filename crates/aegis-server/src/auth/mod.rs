@@ -87,6 +87,9 @@ pub fn token_hash(token: &str) -> TokenHash {
 #[derive(Clone)]
 pub struct Auth {
     inner: Arc<Inner>,
+    /// The pages' language when neither the cookie nor the browser names
+    /// one of ours: `[web] default_locale` (#590).
+    default_locale: aegis_pr::Locale,
 }
 
 struct Inner {
@@ -118,7 +121,20 @@ impl Auth {
                 failures,
                 config,
             }),
+            default_locale: aegis_pr::Locale::default(),
         })
+    }
+
+    /// The same, its pages in `locale` by default (#590).
+    pub fn with_default_locale(self, locale: aegis_pr::Locale) -> Self {
+        Self {
+            default_locale: locale,
+            ..self
+        }
+    }
+
+    pub fn default_locale(&self) -> aegis_pr::Locale {
+        self.default_locale
     }
 
     pub fn store(&self) -> &Store {

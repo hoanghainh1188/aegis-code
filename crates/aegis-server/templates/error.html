@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ crate::web::i18n::lang() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Error · aegis</title>
+<title>{{ crate::t("Error · aegis") }}</title>
 <link rel="stylesheet" href="{{ crate::web::css_href() }}">
 </head>
 <body>
 <header class="masthead"><a class="brand" href="/">aegis<span>ledger</span></a></header>
 <main>
-  <section class="notice bad"><h1>Unable to load page</h1><p>{{ message }}{% if let Some((href, text)) = link %} <a href="{{ href }}">{{ text }}</a>{% endif %}</p></section>
+  <section class="notice bad"><h1>{{ crate::t("Unable to load page") }}</h1><p>{{ message }}{% if let Some((href, text)) = link %} <a href="{{ href }}">{{ text }}</a>{% endif %}</p></section>
 </main>
 </body>
 </html>

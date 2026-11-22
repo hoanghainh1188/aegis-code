@@ -2,42 +2,42 @@
 {% block title %}{{ user.name }}{% endblock %}
 {% block content %}
 <section aria-labelledby="user-heading">
-  <p class="eyebrow"><a href="/admin/users">Users</a></p>
+  <p class="eyebrow"><a href="/admin/users">{{ crate::t("Users") }}</a></p>
   <h1 id="user-heading">{{ user.name }}</h1>
   <dl class="facts">
-    <div><dt>Kind</dt><dd>{% if user.service %}service{% else %}person{% endif %}</dd></div>
-    <div><dt>Admin</dt><dd>{% if user.admin %}yes{% else %}no{% endif %}</dd></div>
-    <div><dt>Last seen (UTC)</dt><dd>{{ user.seen }}</dd></div>
-    <div><dt>Since (UTC)</dt><dd>{{ created_at }}</dd></div>
+    <div><dt>{{ crate::t("Kind") }}</dt><dd>{% if user.service %}{{ crate::t("service") }}{% else %}{{ crate::t("person") }}{% endif %}</dd></div>
+    <div><dt>{{ crate::t("Admin") }}</dt><dd>{% if user.admin %}{{ crate::t("yes") }}{% else %}{{ crate::t("no") }}{% endif %}</dd></div>
+    <div><dt>{{ crate::t("Last seen (UTC)") }}</dt><dd>{{ user.seen }}</dd></div>
+    <div><dt>{{ crate::t("Since (UTC)") }}</dt><dd>{{ created_at }}</dd></div>
   </dl>
   {% if let Some(n) = notice %}<p class="notice" role="status">{{ n }}</p>{% endif %}
-  <p><a href="{{ audit_link }}">What they did, in the audit log</a></p>
+  <p><a href="{{ audit_link }}">{{ crate::t("What they did, in the audit log") }}</a></p>
 </section>
 
 <section aria-labelledby="admin-heading" class="band">
-  <h2 id="admin-heading">Admin right</h2>
+  <h2 id="admin-heading">{{ crate::t("Admin right") }}</h2>
   {% if user.admin %}
     {% if is_self %}
-    <p class="note">This is you. Another admin can take your admin right; the last admin keeps it.</p>
+    <p class="note">{{ crate::t("This is you. Another admin can take your admin right; the last admin keeps it.") }}</p>
     {% else %}
     <details class="confirm">
-      <summary class="button ghost">Take the admin right…</summary>
+      <summary class="button ghost">{{ crate::t("Take the admin right…") }}</summary>
       <form method="post" action="/admin/users/{{ user.id }}/admin" class="inline">
         {% include "form_guard.html" %}
         <input type="hidden" name="admin" value="false">
-        <p class="note">They keep their roles in each repo. The last admin cannot lose the right.</p>
-        <button type="submit" class="danger">Yes, take it from {{ user.name }}</button>
+        <p class="note">{{ crate::t("They keep their roles in each repo. The last admin cannot lose the right.") }}</p>
+        <button type="submit" class="danger">{{ crate::t("Yes, take it from") }} {{ user.name }}</button>
       </form>
     </details>
     {% endif %}
   {% else %}
   <details class="confirm">
-    <summary class="button ghost">Make admin…</summary>
+    <summary class="button ghost">{{ crate::t("Make admin…") }}</summary>
     <form method="post" action="/admin/users/{{ user.id }}/admin" class="inline">
       {% include "form_guard.html" %}
       <input type="hidden" name="admin" value="true">
-      <p class="note">An admin may do everything in every repo, these pages included.</p>
-      <button type="submit" class="danger">Yes, make {{ user.name }} an admin</button>
+      <p class="note">{{ crate::t("An admin may do everything in every repo, these pages included.") }}</p>
+      <button type="submit" class="danger">{{ crate::t("Yes, make") }} {{ user.name }} {{ crate::t("an admin") }}</button>
     </form>
   </details>
   {% endif %}
@@ -45,14 +45,14 @@
 
 {% if !user.service %}
 <section aria-labelledby="sessions-heading" class="band">
-  <h2 id="sessions-heading">Sessions</h2>
+  <h2 id="sessions-heading">{{ crate::t("Sessions") }}</h2>
   {% if sessions.is_empty() %}
-  <p class="note">No live session: they are signed out everywhere.</p>
+  <p class="note">{{ crate::t("No live session: they are signed out everywhere.") }}</p>
   {% else %}
-  <p class="note">{{ sessions.len() }} live session{% if sessions.len() != 1 %}s{% endif %}, one per browser they signed in with.</p>
+  <p class="note">{{ sessions.len() }} {% if sessions.len() == 1 %}{{ crate::t("live session") }}{% else %}{{ crate::t("live sessions") }}{% endif %}{{ crate::t(", one per browser they signed in with.") }}</p>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Began (UTC)</th><th scope="col">Ends (UTC)</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Began (UTC)") }}</th><th scope="col">{{ crate::t("Ends (UTC)") }}</th></tr></thead>
     <tbody>
     {% for s in sessions %}<tr><td>{{ s.created_at }}</td><td>{{ s.expires_at }}</td></tr>{% endfor %}
     </tbody>
@@ -60,12 +60,12 @@
   </div>
   {% endif %}
   <details class="confirm">
-    <summary class="button ghost">Sign out everywhere…</summary>
+    <summary class="button ghost">{{ crate::t("Sign out everywhere…") }}</summary>
     <form method="post" action="/admin/users/{{ user.id }}/sign-out" class="stack">
       {% include "form_guard.html" %}
-      <label class="choice"><input type="checkbox" name="tokens"> Also revoke their personal tokens, so the <code>aegis</code> CLI stops working for them</label>
-      <p class="note">For a lost device, an account at risk, or someone leaving. They can sign in again unless the SSO stops them{% if is_self %}; this signs you out too{% endif %}.</p>
-      <button type="submit" class="danger">Yes, sign {% if is_self %}me{% else %}{{ user.name }}{% endif %} out everywhere</button>
+      <label class="choice"><input type="checkbox" name="tokens"> {{ crate::t("Also revoke their personal tokens, so the") }} <code>aegis</code> {{ crate::t("CLI stops working for them") }}</label>
+      <p class="note">{{ crate::t("For a lost device, an account at risk, or someone leaving. They can sign in again unless the SSO stops them") }}{% if is_self %}{{ crate::t("; this signs you out too") }}{% endif %}.</p>
+      <button type="submit" class="danger">{{ crate::t("Yes, sign") }} {% if is_self %}{{ crate::t("me") }}{% else %}{{ user.name }}{% endif %} {{ crate::t("out everywhere") }}</button>
     </form>
   </details>
 </section>
@@ -73,24 +73,24 @@
 
 {% if user.service %}
 <section aria-labelledby="tokens-heading" class="band">
-  <h2 id="tokens-heading">API tokens</h2>
+  <h2 id="tokens-heading">{{ crate::t("API tokens") }}</h2>
   {% if let Some(t) = new_token %}
   <div class="notice" role="status">
-    <p><strong>The new token, shown this once.</strong> Copy it now into the service's secret store; only its hash is kept here.</p>
+    <p><strong>{{ crate::t("The new token, shown this once.") }}</strong> {{ crate::t("Copy it now into the service's secret store; only its hash is kept here.") }}</p>
     <pre class="token"><code>{{ t }}</code></pre>
-    <p class="note">The service sends it as <code>Authorization: Bearer &lt;token&gt;</code> to <code>/api/v1</code>, with the roles it has in each repo.</p>
+    <p class="note">{{ crate::t("The service sends it as") }} <code>Authorization: Bearer &lt;token&gt;</code> {{ crate::t("to") }} <code>/api/v1</code>{{ crate::t(", with the roles it has in each repo.") }}</p>
   </div>
   {% endif %}
   {% if tokens.is_empty() %}
-  <p class="note">No live token.</p>
+  <p class="note">{{ crate::t("No live token.") }}</p>
   {% else %}
-  <p class="note">{{ tokens.len() }} live token{% if tokens.len() != 1 %}s{% endif %}. A token does not end by itself: revoke one that is no longer used.</p>
+  <p class="note">{{ tokens.len() }} {% if tokens.len() == 1 %}{{ crate::t("live token") }}{% else %}{{ crate::t("live tokens") }}{% endif %}{{ crate::t(". A token does not end by itself: revoke one that is no longer used.") }}</p>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Token</th><th scope="col">Made (UTC)</th><th scope="col"><span class="visually-hidden">Revoke</span></th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Token") }}</th><th scope="col">{{ crate::t("Made (UTC)") }}</th><th scope="col"><span class="visually-hidden">{{ crate::t("Revoke") }}</span></th></tr></thead>
     <tbody>
     {% for t in tokens %}
-      <tr><td>#{{ t.id }}</td><td>{{ t.created_at }}</td><td><form method="post" action="/admin/users/{{ user.id }}/tokens/{{ t.id }}/revoke">{% include "form_guard.html" %}<button type="submit" class="ghost">Revoke</button></form></td></tr>
+      <tr><td>#{{ t.id }}</td><td>{{ t.created_at }}</td><td><form method="post" action="/admin/users/{{ user.id }}/tokens/{{ t.id }}/revoke">{% include "form_guard.html" %}<button type="submit" class="ghost">{{ crate::t("Revoke") }}</button></form></td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -98,15 +98,15 @@
   {% endif %}
   <form method="post" action="/admin/users/{{ user.id }}/tokens" class="inline">
     {% include "form_guard.html" %}
-    <button type="submit">Make a token</button>
+    <button type="submit">{{ crate::t("Make a token") }}</button>
   </form>
   {% if !tokens.is_empty() %}
   <details class="confirm">
-    <summary class="button ghost">Revoke every token…</summary>
+    <summary class="button ghost">{{ crate::t("Revoke every token…") }}</summary>
     <form method="post" action="/admin/users/{{ user.id }}/tokens/revoke-all" class="stack">
       {% include "form_guard.html" %}
-      <p class="note">For a token that leaked, or a service no longer used. What uses them stops at once.</p>
-      <button type="submit" class="danger">Yes, revoke every token of {{ user.name }}</button>
+      <p class="note">{{ crate::t("For a token that leaked, or a service no longer used. What uses them stops at once.") }}</p>
+      <button type="submit" class="danger">{{ crate::t("Yes, revoke every token of") }} {{ user.name }}</button>
     </form>
   </details>
   {% endif %}
@@ -114,16 +114,16 @@
 {% endif %}
 
 <section aria-labelledby="roles-heading" class="band">
-  <h2 id="roles-heading">Roles</h2>
-  {% if user.admin %}<p class="note">As an admin they may do everything in every repo, whatever their roles.</p>{% endif %}
+  <h2 id="roles-heading">{{ crate::t("Roles") }}</h2>
+  {% if user.admin %}<p class="note">{{ crate::t("As an admin they may do everything in every repo, whatever their roles.") }}</p>{% endif %}
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Repo</th><th scope="col">Role</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Repo") }}</th><th scope="col">{{ crate::t("Role") }}</th></tr></thead>
     <tbody>
     {% for r in roles %}
       <tr><td><a href="/admin/repos/{{ r.repo_id }}">{{ r.repo }}</a></td><td>{{ r.role }}</td></tr>
     {% else %}
-      <tr><td colspan="2" class="empty">No role in any repo. Give one on the repo's page.</td></tr>
+      <tr><td colspan="2" class="empty">{{ crate::t("No role in any repo. Give one on the repo's page.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

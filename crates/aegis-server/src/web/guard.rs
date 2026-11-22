@@ -107,7 +107,9 @@ fn refuse(status: StatusCode, why: &'static str) -> Response {
 }
 
 fn needs_session(path: &str) -> bool {
-    !(path.starts_with("/static/") || path.starts_with("/auth/") && path != "/auth/logout")
+    !(path.starts_with("/static/")
+        || path.starts_with("/lang/")
+        || path.starts_with("/auth/") && path != "/auth/logout")
 }
 
 /// `/auth/login?next=<this page>`.

@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% block title %}AMS report{% endblock %}
+{% block title %}{{ crate::t("AMS report") }}{% endblock %}
 {% block content %}
 <section class="hero" aria-labelledby="ams-heading">
-  <p class="eyebrow">Ledger · jobs created this month</p>
-  <h1 id="ams-heading">AMS report</h1>
-  <p class="note">By contract and SLA level (#526). MTTR runs from the ticket coming in to the end of its job's last run, for the jobs that ended with a result. On time: of those with an SLA deadline, the ones that ended by it. Triage: resolved by a diagnosis on the ticket, with no PR.</p>
+  <p class="eyebrow">{{ crate::t("Ledger · jobs created this month") }}</p>
+  <h1 id="ams-heading">{{ crate::t("AMS report") }}</h1>
+  <p class="note">{{ crate::t("By contract and SLA level (#526). MTTR runs from the ticket coming in to the end of its job's last run, for the jobs that ended with a result. On time: of those with an SLA deadline, the ones that ended by it. Triage: resolved by a diagnosis on the ticket, with no PR.") }}</p>
 </section>
 
 <section aria-labelledby="sla-heading" class="band">
-  <h2 id="sla-heading">MTTR and SLA</h2>
+  <h2 id="sla-heading">{{ crate::t("MTTR and SLA") }}</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Contract</th><th scope="col">Level</th><th scope="col" class="num">Done</th><th scope="col" class="num">MTTR</th><th scope="col" class="num">On time</th><th scope="col" class="num">Open, overdue</th><th scope="col" class="num">Triage</th><th scope="col" class="num">PR</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Contract") }}</th><th scope="col">{{ crate::t("Level") }}</th><th scope="col" class="num">{{ crate::t("Done") }}</th><th scope="col" class="num">MTTR</th><th scope="col" class="num">{{ crate::t("On time") }}</th><th scope="col" class="num">{{ crate::t("Open, overdue") }}</th><th scope="col" class="num">{{ crate::t("Triage") }}</th><th scope="col" class="num">PR</th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr{% if r.total %} class="total"{% endif %}>
@@ -25,7 +25,7 @@
         <td class="num">{{ r.prs }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="8" class="empty">No job created this month yet.</td></tr>
+      <tr><td colspan="8" class="empty">{{ crate::t("No job created this month yet.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -33,10 +33,10 @@
 </section>
 
 <section aria-labelledby="cost-heading" class="band">
-  <h2 id="cost-heading">Cost per contract</h2>
+  <h2 id="cost-heading">{{ crate::t("Cost per contract") }}</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Contract</th><th scope="col" class="num">Spent this month</th><th scope="col" class="num">Monthly cap</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Contract") }}</th><th scope="col" class="num">{{ crate::t("Spent this month") }}</th><th scope="col" class="num">{{ crate::t("Monthly cap") }}</th></tr></thead>
     <tbody>
     {% for c in contracts %}
       <tr>

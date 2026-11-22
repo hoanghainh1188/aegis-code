@@ -1,62 +1,62 @@
 {% extends "base.html" %}
-{% block title %}{{ repo.slug }} · connection{% endblock %}
+{% block title %}{{ repo.slug }} {{ crate::t("· connection") }}{% endblock %}
 {% block content %}
 <section aria-labelledby="conn-heading">
-  <p class="eyebrow"><a href="/admin/repos">Repos</a> · <a href="/admin/repos/{{ repo.id.0 }}">{{ repo.slug }}</a></p>
-  <h1 id="conn-heading">Connection to {{ forge.name }}</h1>
-  <p class="note">Whether the forge can reach this server and the tokens can do their part, without labelling a real issue to try.</p>
+  <p class="eyebrow"><a href="/admin/repos">{{ crate::t("Repos") }}</a> · <a href="/admin/repos/{{ repo.id.0 }}">{{ repo.slug }}</a></p>
+  <h1 id="conn-heading">{{ crate::t("Connection to") }} {{ forge.name }}</h1>
+  <p class="note">{{ crate::t("Whether the forge can reach this server and the tokens can do their part, without labelling a real issue to try.") }}</p>
 </section>
 
 <section aria-labelledby="hook-heading" class="band">
-  <h2 id="hook-heading">Webhooks to make</h2>
+  <h2 id="hook-heading">{{ crate::t("Webhooks to make") }}</h2>
   <dl class="facts">
-    <div><dt>Payload URL</dt><dd class="ref">{{ payload_url }}</dd></div>
-    <div><dt>Content type</dt><dd>application/json</dd></div>
-    <div><dt>Secret</dt><dd>the value of <code>{{ forge.webhook_secret }}</code></dd></div>
+    <div><dt>{{ crate::t("Payload URL") }}</dt><dd class="ref">{{ payload_url }}</dd></div>
+    <div><dt>{{ crate::t("Content type") }}</dt><dd>application/json</dd></div>
+    <div><dt>{{ crate::t("Secret") }}</dt><dd>{{ crate::t("the value of") }} <code>{{ forge.webhook_secret }}</code></dd></div>
   </dl>
-  {% if no_public_url %}<p class="notice bad">The server's <code>[auth] public_url</code> is not set: put the address people reach this server at in place of <code>&lt;public_url&gt;</code>, and set it in the configuration.</p>{% endif %}
+  {% if no_public_url %}<p class="notice bad">{{ crate::t("The server's") }} <code>[auth] public_url</code> {{ crate::t("is not set: put the address people reach this server at in place of") }} <code>&lt;public_url&gt;</code>{{ crate::t(", and set it in the configuration.") }}</p>{% endif %}
   <div class="row-2">
     <div>
-      <h3>On <span class="ref">{{ repo.url }}</span></h3>
+      <h3>{{ crate::t("On") }} <span class="ref">{{ repo.url }}</span></h3>
       <ul>{% for e in forge.repo_events %}<li>{{ e }}</li>{% endfor %}</ul>
     </div>
     <div>
-      <h3>On the fork <span class="ref">{{ fork }}</span></h3>
+      <h3>{{ crate::t("On the fork") }} <span class="ref">{{ fork }}</span></h3>
       <ul>{% for e in forge.fork_events %}<li>{{ e }}</li>{% endfor %}</ul>
-      <p class="note">For review rounds on the agent's pull requests.</p>
+      <p class="note">{{ crate::t("For review rounds on the agent's pull requests.") }}</p>
     </div>
   </div>
   {% if let Some(m) = made %}<p class="notice" role="status">{{ m }}</p>{% endif %}
   {% if can_make_webhooks %}
-  <h3 id="make-heading">Make them from here</h3>
-  <p class="note">Give a token that may manage webhooks there: {{ forge.hook_right }}. It is used for this request only, then dropped: not kept, logged or recorded. The webhook is signed with the server's own <code>{{ forge.webhook_secret }}</code>, which never comes through your browser. A webhook already pointing at this server is updated instead of doubled.</p>
+  <h3 id="make-heading">{{ crate::t("Make them from here") }}</h3>
+  <p class="note">{{ crate::t("Give a token that may manage webhooks there:") }} {{ forge.hook_right }}{{ crate::t(". It is used for this request only, then dropped: not kept, logged or recorded. The webhook is signed with the server's own") }} <code>{{ forge.webhook_secret }}</code>{{ crate::t(", which never comes through your browser. A webhook already pointing at this server is updated instead of doubled.") }}</p>
   <form method="post" action="/admin/repos/{{ repo.id.0 }}/connection/webhooks" class="inline" aria-labelledby="make-heading">
     {% include "form_guard.html" %}
-    <label>Where
+    <label>{{ crate::t("Where") }}
       <select name="place" required>
-        <option value="repo">the repo itself</option>
-        <option value="fork">the fork, {{ fork }}</option>
+        <option value="repo">{{ crate::t("the repo itself") }}</option>
+        <option value="fork">{{ crate::t("the fork,") }} {{ fork }}</option>
       </select>
     </label>
-    <label>Token, used once
+    <label>{{ crate::t("Token, used once") }}
       <input type="password" name="token" required autocomplete="new-password" spellcheck="false" data-1p-ignore data-lpignore="true">
     </label>
-    <button type="submit">Make the webhook</button>
+    <button type="submit">{{ crate::t("Make the webhook") }}</button>
   </form>
   {% else %}
-  <p class="note">Make them by hand on the forge, or let an admin make them from here with a token given once: set <code>[web] make_webhooks = true</code> in the server's configuration.</p>
+  <p class="note">{{ crate::t("Make them by hand on the forge, or let an admin make them from here with a token given once: set") }} <code>[web] make_webhooks = true</code> {{ crate::t("in the server's configuration.") }}</p>
   {% endif %}
 </section>
 
 <section aria-labelledby="secrets-heading" class="band">
-  <h2 id="secrets-heading">Secrets</h2>
-  <p class="note">Whether the secret store has each one; their values are never shown.</p>
+  <h2 id="secrets-heading">{{ crate::t("Secrets") }}</h2>
+  <p class="note">{{ crate::t("Whether the secret store has each one; their values are never shown.") }}</p>
   <div class="scroll">
   <table>
-    <thead><tr><th scope="col">Name</th><th scope="col">For</th><th scope="col">In the store</th></tr></thead>
+    <thead><tr><th scope="col">{{ crate::t("Name") }}</th><th scope="col">{{ crate::t("For") }}</th><th scope="col">{{ crate::t("In the store") }}</th></tr></thead>
     <tbody>
     {% for s in secrets %}
-      <tr><td><code>{{ s.name }}</code></td><td>{{ s.purpose }}</td><td>{% if s.set %}<span class="check pass">set</span>{% else %}<span class="check fail">missing</span>{% endif %}</td></tr>
+      <tr><td><code>{{ s.name }}</code></td><td>{{ s.purpose }}</td><td>{% if s.set %}<span class="check pass">{{ crate::t("set") }}</span>{% else %}<span class="check fail">{{ crate::t("missing") }}</span>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -64,11 +64,11 @@
 </section>
 
 <section aria-labelledby="check-heading" class="band">
-  <h2 id="check-heading">Check against {{ forge.name }}</h2>
-  <p class="note">Asks the forge's API, from the server, what each token may do and what the repo is called now.</p>
+  <h2 id="check-heading">{{ crate::t("Check against") }} {{ forge.name }}</h2>
+  <p class="note">{{ crate::t("Asks the forge's API, from the server, what each token may do and what the repo is called now.") }}</p>
   <form method="post" action="/admin/repos/{{ repo.id.0 }}/connection" class="inline">
     {% include "form_guard.html" %}
-    <button type="submit">Check now</button>
+    <button type="submit">{{ crate::t("Check now") }}</button>
   </form>
   {% if let Some(rows) = checks %}
   <ul class="checks" role="status">
@@ -80,10 +80,10 @@
 </section>
 
 <section aria-labelledby="recent-heading" class="band">
-  <h2 id="recent-heading">Last webhooks</h2>
+  <h2 id="recent-heading">{{ crate::t("Last webhooks") }}</h2>
   {% include "webhook_table.html" %}
   {% for b in bad_signatures %}
-  <p class="notice bad">{{ b.count }} {{ b.source }} webhook(s) with a bad signature in the last {{ bad_hours }} hours, the last at {{ b.last }} UTC. They name no repo; if they are yours, the webhook's secret is not the value of <code>{{ forge.webhook_secret }}</code>.</p>
+  <p class="notice bad">{{ b.count }} {{ b.source }} {{ crate::t("webhook(s) with a bad signature in the last") }} {{ bad_hours }} {{ crate::t("hours, the last at") }} {{ b.last }} {{ crate::t("UTC. They name no repo; if they are yours, the webhook's secret is not the value of") }} <code>{{ forge.webhook_secret }}</code>.</p>
   {% endfor %}
 </section>
 {% endblock %}

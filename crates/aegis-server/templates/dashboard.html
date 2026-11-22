@@ -3,45 +3,45 @@
 {% block title %}KPIs{% endblock %}
 {% block content %}
 <section class="hero" aria-labelledby="kpi-heading">
-  <p class="eyebrow">Ledger · all completed runs</p>
-  <h1 id="kpi-heading">Accepted PRs <strong class="{{ total.accept_class }}">{{ total.accept }}</strong></h1>
+  <p class="eyebrow">{{ crate::t("Ledger · all completed runs") }}</p>
+  <h1 id="kpi-heading">{{ crate::t("Accepted PRs") }} <strong class="{{ total.accept_class }}">{{ total.accept }}</strong></h1>
   <dl class="figures">
-    <div><dt>Cost / issue</dt><dd class="{{ total.cost_class }}">{{ total.cost }}</dd><dd class="threshold">target ≤ $4</dd></div>
-    <div><dt>Review time / PR</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">≤ 15 min</dd></div>
-    <div><dt>Cache read</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
-    <div><dt>Escalated to Expert</dt><dd>{{ total.expert }}</dd><dd class="threshold">tracked</dd></div>
-    <div><dt>Stopped without PR</dt><dd>{{ total.stopped }}</dd><dd class="threshold">investigate &gt; 30%</dd></div>
-    <div><dt>Diagnosed, no PR</dt><dd>{{ total.diagnosed }}</dd><dd class="threshold">triage lane</dd></div>
-    <div><dt>Held: no verifiable sources</dt><dd>{{ total.held_for_sources }}</dd><dd class="threshold">tracked</dd></div>
-    <div><dt>Awaiting review</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">PRs without review</dd></div>
+    <div><dt>{{ crate::t("Cost / issue") }}</dt><dd class="{{ total.cost_class }}">{{ total.cost }}</dd><dd class="threshold">{{ crate::t("target ≤ $4") }}</dd></div>
+    <div><dt>{{ crate::t("Review time / PR") }}</dt><dd class="{{ total.review_class }}">{{ total.review }}</dd><dd class="threshold">{{ crate::t("≤ 15 min") }}</dd></div>
+    <div><dt>{{ crate::t("Cache read") }}</dt><dd class="{{ total.cache_class }}">{{ total.cache }}</dd><dd class="threshold">≥ 70%</dd></div>
+    <div><dt>{{ crate::t("Escalated to Expert") }}</dt><dd>{{ total.expert }}</dd><dd class="threshold">{{ crate::t("tracked") }}</dd></div>
+    <div><dt>{{ crate::t("Stopped without PR") }}</dt><dd>{{ total.stopped }}</dd><dd class="threshold">{{ crate::t("investigate > 30%") }}</dd></div>
+    <div><dt>{{ crate::t("Diagnosed, no PR") }}</dt><dd>{{ total.diagnosed }}</dd><dd class="threshold">{{ crate::t("triage lane") }}</dd></div>
+    <div><dt>{{ crate::t("Held: no verifiable sources") }}</dt><dd>{{ total.held_for_sources }}</dd><dd class="threshold">{{ crate::t("tracked") }}</dd></div>
+    <div><dt>{{ crate::t("Awaiting review") }}</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">{{ crate::t("PRs without review") }}</dd></div>
   </dl>
-  <p class="note">Same formulas as <code>aegis-local report</code> (ADR 0005): acceptance target ≥ 40% overall, ≥ 35% per language. Hidden test results are not shown here.</p>
+  <p class="note">{{ crate::t("Same formulas as") }} <code>aegis-local report</code> {{ crate::t("(ADR 0005): acceptance target ≥ 40% overall, ≥ 35% per language. Hidden test results are not shown here.") }}</p>
 </section>
 
 <section aria-labelledby="budget-heading" class="band">
-  <h2 id="budget-heading">Monthly budget</h2>
+  <h2 id="budget-heading">{{ crate::t("Monthly budget") }}</h2>
   <div class="scroll">
   <table class="budget">
     <thead>
       <tr>
-        <th scope="col">Repo</th>
-        <th scope="col" class="num">Spent</th>
-        <th scope="col" class="num">Cap</th>
-        <th scope="col" class="num">Remaining</th>
-        <th scope="col">Usage</th>
-        <th scope="col">Status</th>
+        <th scope="col">{{ crate::t("Repo") }}</th>
+        <th scope="col" class="num">{{ crate::t("Spent") }}</th>
+        <th scope="col" class="num">{{ crate::t("Cap") }}</th>
+        <th scope="col" class="num">{{ crate::t("Remaining") }}</th>
+        <th scope="col">{{ crate::t("Usage") }}</th>
+        <th scope="col">{{ crate::t("Status") }}</th>
       </tr>
     </thead>
     <tbody>
     {% for b in budgets %}
       <tr>
-        <th scope="row">{{ b.label }}{% if b.editable %} <a class="change" href="/repos/{{ b.id }}/budget">Change<span class="visually-hidden"> the cap of {{ b.label }}</span></a>{% endif %}</th>
+        <th scope="row">{{ b.label }}{% if b.editable %} <a class="change" href="/repos/{{ b.id }}/budget">{{ crate::t("Change") }}<span class="visually-hidden"> {{ crate::t("the cap of") }} {{ b.label }}</span></a>{% endif %}</th>
         <td class="num">{{ b.spent }}</td>
         <td class="num">{{ b.cap }}</td>
         <td class="num">{{ b.left }}</td>
         <td>
           {%- if b.capped %}
-          <svg class="spend" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ b.used }} of cap">
+          <svg class="spend" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ b.used }} {{ crate::t("of cap") }}">
             <rect class="track" x="0" y="0" width="100" height="10"></rect>
             <rect class="bar {{ b.class }}" x="0" y="0" width="{{ b.bar }}" height="10"></rect>
             <line class="threshold" x1="{{ warn_at }}" x2="{{ warn_at }}" y1="0" y2="10"></line>
@@ -51,17 +51,17 @@
         <td class="{{ b.class }}">{{ b.state }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="empty">No repos yet.</td></tr>
+      <tr><td colspan="6" class="empty">{{ crate::t("No repos yet.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
-  <p class="note">Month tracked in {{ time_zone }} timezone. Warning threshold at {{ warn_at }}% of cap; below {{ reserve }} (reserve per issue), repo accepts no new jobs; queued jobs wait for next month or until cap is raised.</p>
+  <p class="note">{{ crate::t("Month tracked in") }} {{ time_zone }} {{ crate::t("timezone. Warning threshold at") }} {{ warn_at }}{{ crate::t("% of cap; below") }} {{ reserve }} {{ crate::t("(reserve per issue), repo accepts no new jobs; queued jobs wait for next month or until cap is raised.") }}</p>
 </section>
 
 <section aria-labelledby="lang-heading" class="band">
   <div class="band-head">
-    <h2 id="lang-heading">By language</h2>
+    <h2 id="lang-heading">{{ crate::t("By language") }}</h2>
     {% call m::bars(languages, language_min, "Acceptance rate by language, target 35%") %}{% endcall %}
   </div>
   {% call m::kpi_table("Language", languages) %}{% endcall %}
@@ -69,43 +69,43 @@
 
 {% if tenants.len() > 1 %}
 <section aria-labelledby="tenant-heading" class="band">
-  <h2 id="tenant-heading">By tenant</h2>
+  <h2 id="tenant-heading">{{ crate::t("By tenant") }}</h2>
   {% call m::kpi_table("Tenant", tenants) %}{% endcall %}
 </section>
 {% endif %}
 
 <section aria-labelledby="repo-heading" class="band">
-  <h2 id="repo-heading">By repo</h2>
+  <h2 id="repo-heading">{{ crate::t("By repo") }}</h2>
   {% call m::kpi_table("Repo", repos) %}{% endcall %}
 </section>
 
 <section aria-labelledby="source-heading" class="band">
-  <h2 id="source-heading">By ticket source</h2>
+  <h2 id="source-heading">{{ crate::t("By ticket source") }}</h2>
   {% call m::kpi_table("Source", ticket_sources) %}{% endcall %}
 </section>
 {% if !ticket_languages.is_empty() %}
 
 <section aria-labelledby="ticket-lang-heading" class="band">
-  <h2 id="ticket-lang-heading">By ticket language</h2>
+  <h2 id="ticket-lang-heading">{{ crate::t("By ticket language") }}</h2>
   {% call m::kpi_table("Ticket language", ticket_languages) %}{% endcall %}
 </section>
 {% endif %}
 {% if !bias_alerts.is_empty() %}
 
 <section aria-labelledby="bias-heading" class="band">
-  <h2 id="bias-heading">Bias investigation flags (#511)</h2>
+  <h2 id="bias-heading">{{ crate::t("Bias investigation flags (#511)") }}</h2>
   <div class="scroll">
   <table class="kpi">
     <thead>
       <tr>
-        <th scope="col">Dimension</th>
-        <th scope="col">Group</th>
-        <th scope="col" class="num">Runs</th>
-        <th scope="col" class="num">Accepted</th>
-        <th scope="col" class="num">Stopped</th>
-        <th scope="col" class="num">Mean cost</th>
-        <th scope="col" class="num">Triage miss</th>
-        <th scope="col">Flags</th>
+        <th scope="col">{{ crate::t("Dimension") }}</th>
+        <th scope="col">{{ crate::t("Group") }}</th>
+        <th scope="col" class="num">{{ crate::t("Runs") }}</th>
+        <th scope="col" class="num">{{ crate::t("Accepted") }}</th>
+        <th scope="col" class="num">{{ crate::t("Stopped") }}</th>
+        <th scope="col" class="num">{{ crate::t("Mean cost") }}</th>
+        <th scope="col" class="num">{{ crate::t("Triage miss") }}</th>
+        <th scope="col">{{ crate::t("Flags") }}</th>
       </tr>
     </thead>
     <tbody>
@@ -124,13 +124,13 @@
     </tbody>
   </table>
   </div>
-  <p class="note">Flags appear once a slice reaches 5 finished attempts (ADR 0016).</p>
+  <p class="note">{{ crate::t("Flags appear once a slice reaches 5 finished attempts (ADR 0016).") }}</p>
 </section>
 {% endif %}
 
 <section aria-labelledby="week-heading" class="band">
   <div class="band-head">
-    <h2 id="week-heading">By job creation week</h2>
+    <h2 id="week-heading">{{ crate::t("By job creation week") }}</h2>
     {% call m::bars(weeks, total_min, "Acceptance rate by week, target 40%") %}{% endcall %}
   </div>
   {% call m::kpi_table("Week", weeks) %}{% endcall %}
@@ -138,17 +138,17 @@
 {% if let Some(triage) = triage %}
 
 <section aria-labelledby="triage-heading" class="band">
-  <h2 id="triage-heading">Triage, recorded only</h2>
+  <h2 id="triage-heading">{{ crate::t("Triage, recorded only") }}</h2>
   <div class="scroll">
   <table class="triage">
     <thead>
       <tr>
-        <th scope="col">Light read the ticket as</th>
-        <th scope="col" class="num">Jobs</th>
+        <th scope="col">{{ crate::t("Light read the ticket as") }}</th>
+        <th scope="col" class="num">{{ crate::t("Jobs") }}</th>
         <th scope="col" class="num">PRs</th>
-        <th scope="col" class="num">Accepted</th>
-        <th scope="col" class="num">Rejected</th>
-        <th scope="col" class="num">No PR</th>
+        <th scope="col" class="num">{{ crate::t("Accepted") }}</th>
+        <th scope="col" class="num">{{ crate::t("Rejected") }}</th>
+        <th scope="col" class="num">{{ crate::t("No PR") }}</th>
       </tr>
     </thead>
     <tbody>
@@ -165,7 +165,7 @@
     </tbody>
   </table>
   </div>
-  <p class="note">Every job works on the code whatever Light read (#497). A ticket read as other than <code>code_bug</code> whose PR was accepted is one a diagnostic lane would have missed (ADR 0012). Jobs show no triage of their own, so reviews are not swayed by it.</p>
+  <p class="note">{{ crate::t("Every job works on the code whatever Light read (#497). A ticket read as other than") }} <code>code_bug</code> {{ crate::t("whose PR was accepted is one a diagnostic lane would have missed (ADR 0012). Jobs show no triage of their own, so reviews are not swayed by it.") }}</p>
 </section>
 {% endif %}
 {% endblock %}
