@@ -90,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             usd: 0.0,
         },
         input_flags: vec![],
+        locale: aegis_pr::Locale::Vi,
     });
     let pr = github
         .open_pull_request(

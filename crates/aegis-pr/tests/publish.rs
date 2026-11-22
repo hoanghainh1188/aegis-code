@@ -216,6 +216,7 @@ fn the_body_follows_the_template_and_model_text_is_inert() {
             usd: 0.4321,
         },
         input_flags: vec![],
+        locale: aegis_pr::Locale::Vi,
     });
     assert_eq!(
         body,

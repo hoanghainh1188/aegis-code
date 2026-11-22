@@ -13,7 +13,7 @@
 use std::fmt::Write as _;
 
 use aegis_aci::redact;
-use aegis_pr::{GitHub, NoteAt, PullState, REPLY_MARKER, ReviewNote, inert};
+use aegis_pr::{GitHub, Locale, NoteAt, PullState, REPLY_MARKER, ReviewNote, inert};
 
 use crate::answer::{FinalAnswer, ReviewReply};
 use crate::untrusted::defang;
@@ -185,21 +185,20 @@ impl ReviewRound {
 
     /// The reply posted on the PR once the round's commit is pushed: what
     /// was done about each note, every model text made inert.
-    pub(crate) fn reply(&self, commit: &str, answer: &FinalAnswer) -> String {
+    pub(crate) fn reply(&self, commit: &str, answer: &FinalAnswer, locale: Locale) -> String {
+        let t = locale.strings();
         let short: String = commit.chars().take(12).collect();
-        let mut text = format!(
-            "{REPLY_MARKER}\n**aegis-code** pushed `{short}` for the review; the checks passed.\n"
-        );
+        let mut text = format!("{REPLY_MARKER}\n{}\n", (t.pushed)(&short));
         for (n, note) in self.notes.iter().enumerate() {
             let n = u32::try_from(n + 1).unwrap_or(u32::MAX);
             let about = match &note.at {
                 NoteAt::Line {
                     path,
                     line: Some(line),
-                } => format!("{} line {line}", inert(path)),
+                } => format!("{} {} {line}", inert(path), t.line),
                 NoteAt::Line { path, line: None } => inert(path),
-                NoteAt::Review { .. } => "review".into(),
-                NoteAt::Conversation => "comment".into(),
+                NoteAt::Review { .. } => t.review.into(),
+                NoteAt::Conversation => t.comment.into(),
             };
             let reply = answer.review_replies.iter().find(|r| r.note == n);
             let line = match reply {
@@ -211,17 +210,18 @@ impl ReviewRound {
                     inert(reply)
                 ),
                 Some(ReviewReply { reply, .. }) => format!(
-                    "- ⏸️ {n}. {about} ({}): not done: {}",
+                    "- ⏸️ {n}. {about} ({}): {}: {}",
                     inert(&note.author),
+                    t.not_done,
                     inert(reply)
                 ),
-                None => format!("- {n}. {about} ({}): no answer", inert(&note.author)),
+                None => format!("- {n}. {about} ({}): {}", inert(&note.author), t.no_answer),
             };
             text.push_str(&line);
             text.push('\n');
         }
         if !answer.changes.is_empty() {
-            text.push_str("\nChanges:\n");
+            let _ = writeln!(text, "\n{}", t.changes);
             for c in &answer.changes {
                 let _ = writeln!(text, "- {}: {}", inert(&c.location), inert(&c.note));
             }
@@ -306,7 +306,14 @@ mod tests {
                                  {"note":2,"done":false,"reply":"@everyone the name is the convention"}]}"#,
         )
         .unwrap();
-        let reply = round().reply("0123456789abcdef", &answer);
+        for locale in Locale::ALL {
+            let t = locale.strings();
+            let reply = round().reply("0123456789abcdef", &answer, locale);
+            assert!(reply.contains(&(t.pushed)("0123456789ab")), "{reply}");
+            assert!(reply.contains(t.changes), "{reply}");
+            assert!(!reply.contains(" @everyone"), "{locale}: {reply}");
+        }
+        let reply = round().reply("0123456789abcdef", &answer, Locale::En);
         assert!(reply.starts_with(REPLY_MARKER), "{reply}");
         assert!(reply.contains("pushed `0123456789ab`"), "{reply}");
         assert!(

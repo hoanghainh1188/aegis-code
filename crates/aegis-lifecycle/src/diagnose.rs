@@ -220,7 +220,8 @@ fn check(repo: &Path, base: &str, ticket: &str, raw: RawReport) -> Checked {
 }
 
 /// The report as posted: every model text inert, one item per line.
-fn render(triage: &Triage, checked: &Checked) -> String {
+fn render(triage: &Triage, checked: &Checked, locale: aegis_pr::Locale) -> String {
+    let t = locale.strings();
     let inert = |t: &str| aegis_pr::inert(t);
     let sources = |k: &Kept| {
         k.sources
@@ -229,25 +230,21 @@ fn render(triage: &Triage, checked: &Checked) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let mut out = format!(
-        "**Diagnosis**: {} (confidence {:.2}). Read-only: nothing was changed.\n",
-        triage.category.as_str(),
-        triage.confidence
-    );
+    let mut out = (t.diagnosis)(triage.category.as_str(), triage.confidence) + "\n";
     if !checked.findings.is_empty() {
-        out.push_str("\nFindings, each with the sources it was checked against:\n");
+        out.push_str(&format!("\n{}\n", t.findings));
         for f in &checked.findings {
             out.push_str(&format!("- {} ({})\n", inert(&f.text), sources(f)));
         }
     }
     if !checked.steps.is_empty() {
-        out.push_str("\nSuggested steps for an operator (not applied):\n");
+        out.push_str(&format!("\n{}\n", t.steps));
         for (i, s) in checked.steps.iter().enumerate() {
             out.push_str(&format!("{}. {} ({})\n", i + 1, inert(&s.text), sources(s)));
         }
     }
     if !checked.questions.is_empty() {
-        out.push_str("\nQuestions for the reporter:\n");
+        out.push_str(&format!("\n{}\n", t.questions));
         for q in &checked.questions {
             out.push_str(&format!("- {}\n", inert(q)));
         }
@@ -346,7 +343,7 @@ fn context(repo: &Path, base: &str, ticket: &str) -> (Vec<(String, String)>, usi
     (shown, hidden)
 }
 
-fn prompt(issue: &IssueInput, files: &[(String, String)]) -> String {
+fn prompt(issue: &IssueInput, files: &[(String, String)], locale: aegis_pr::Locale) -> String {
     let ticket: String = issue
         .body
         .lines()
@@ -374,6 +371,7 @@ fn prompt(issue: &IssueInput, files: &[(String, String)]) -> String {
              ticket or the files.\n",
         );
     }
+    text.push_str(&crate::language::directive(locale));
     text
 }
 
@@ -400,7 +398,7 @@ where
         &platform.provider,
         light,
         DIAGNOSE_SYSTEM,
-        prompt(issue, &files),
+        prompt(issue, &files, cfg.repo.locale),
         MAX_REPORT_TOKENS,
     )
     .await;
@@ -432,7 +430,7 @@ where
             ),
         ));
     }
-    let report = redact(&render(triage, &checked));
+    let report = redact(&render(triage, &checked, cfg.repo.locale));
     ledger
         .secrets_blocked("diagnosis", count(report.count()))
         .await?;
@@ -538,7 +536,26 @@ mod tests {
         .unwrap();
         let checked = check(Path::new("/nonexistent"), "HEAD", ticket, raw);
         assert_eq!((checked.kept(), checked.dropped), (2, 2));
-        let text = render(&triage(TriageCategory::OpsOrConfig, 0.9), &checked);
+        for locale in aegis_pr::Locale::ALL {
+            let t = locale.strings();
+            let text = render(&triage(TriageCategory::OpsOrConfig, 0.9), &checked, locale);
+            assert!(
+                text.starts_with(&(t.diagnosis)("ops_or_config", 0.9)),
+                "{text}"
+            );
+            for heading in [t.findings, t.steps, t.questions] {
+                assert!(text.contains(heading), "{locale}: {text}");
+            }
+            assert!(
+                text.contains("- The limit is hit @\u{200b}admin (`ticket:1`)"),
+                "{text}"
+            );
+        }
+        let text = render(
+            &triage(TriageCategory::OpsOrConfig, 0.9),
+            &checked,
+            aegis_pr::Locale::En,
+        );
         assert!(
             text.starts_with("**Diagnosis**: ops_or_config (confidence 0.90)"),
             "{text}"

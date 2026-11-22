@@ -1667,9 +1667,17 @@ async fn an_answer_without_sources_is_asked_again_and_the_pr_lists_them() {
         .unwrap();
     let body = pr["body"].as_str().unwrap();
     assert!(
-        body.contains("Nguồn đã kiểm:\n- `src/lib.rs:24` — \"self.items.len() >= MAX_ITEMS\""),
+        body.contains("Checked sources:\n- `src/lib.rs:24` — \"self.items.len() >= MAX_ITEMS\""),
         "{body}"
     );
+    // No `[repo] locale`: English, for the platform and for the model (#588).
+    assert!(body.contains("## Root cause\n"), "{body}");
+    let told = p.provider.requests.lock().unwrap().iter().any(|r| {
+        serde_json::to_string(&r.messages[0])
+            .unwrap()
+            .contains("in English. Keep code")
+    });
+    assert!(told, "the first message names the language");
 }
 
 /// #508: a source that is not in the repository, every time, stops the job

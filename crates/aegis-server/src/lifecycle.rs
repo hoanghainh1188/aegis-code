@@ -449,6 +449,7 @@ impl LifecycleRunner {
         });
         let _tag = self.ledger.tag(job.ledger_key.clone(), claim.run.id);
         let fork = platform.config.repo.fork.clone();
+        let locale = platform.config.repo.locale;
         let token = platform.github.clone();
         type Run = std::pin::Pin<
             Box<dyn Future<Output = Result<aegis_lifecycle::IssueReport, LifecycleError>> + Send>,
@@ -475,9 +476,8 @@ impl LifecycleRunner {
             // The round pushed nothing: the reviewers are told why on the PR.
             let reason = report.reason.as_deref().unwrap_or("it stopped");
             let text = format!(
-                "{REPLY_MARKER}\n**aegis-code** pushed nothing for this review: {}.\n\n\
-                 <sub>aegis-code job {}</sub>",
-                aegis_pr::inert(reason),
+                "{REPLY_MARKER}\n{}\n\n<sub>aegis-code job {}</sub>",
+                (locale.strings().pushed_nothing)(&aegis_pr::inert(reason)),
                 job.id.0
             );
             match aegis_lifecycle::fork_forge_of(&fork, &token) {
