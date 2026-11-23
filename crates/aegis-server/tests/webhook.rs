@@ -1194,6 +1194,115 @@ async fn a_fix_comment_on_the_agents_azure_pr_queues_a_round_for_writers() {
     db.drop().await;
 }
 
+/// #641: a project whose name holds a space is `%20` in its URLs, itself
+/// in the round's ref and in the writer group its author is looked up in.
+#[tokio::test]
+async fn a_fix_comment_in_a_project_with_a_space_queues_its_round() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone();
+    let clone = "https://dev.azure.com/acme/My%20Project/_git/cart";
+    repo(&store, "cart", clone).await;
+    let writer = "6f5e1b2a-0c3d-4e5f-8a9b-0c1d2e3f4a5b";
+    let azure = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(wiremock::matchers::query_param("identityIds", writer))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "value": [{ "id": writer, "memberOf": ["T;S-contrib"] }]
+        })))
+        .mount(&azure)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(wiremock::matchers::query_param(
+            "filterValue",
+            "[My Project]\\Contributors",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "value": [{ "descriptor": "T;S-contrib" }]
+        })))
+        .expect(1)
+        .mount(&azure)
+        .await;
+    let secrets = Secrets::fixed([
+        (AZURE_DEVOPS_SECRET_ENV, SECRET),
+        (AZURE_DEVOPS_COMMENT_TOKEN_ENV, "az-comment"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            azure_devops_notifier: Some(AzureDevOpsNotifier::new(
+                &format!("{}/acme", azure.uri()),
+                secrets.clone(),
+            )),
+            secrets,
+            ..config()
+        },
+    );
+    let row = store.repo_by_slug("cart").await.unwrap().unwrap();
+    store
+        .create_job(&aegis_store::NewJob {
+            repo_id: row.id,
+            issue_ref: "My Project/cart#9".into(),
+            ledger_key: aegis_ledger::IssueId::parse("cart-9-1".to_owned()).unwrap(),
+            source: JobSource::Cli,
+            priority: None,
+            sla_deadline: None,
+        })
+        .await
+        .unwrap();
+    let claim = store
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let opened = aegis_store::AttemptEnd::Done {
+        outcome: Outcome::PrOpened,
+        reason: None,
+        pr_url: Some(format!("{clone}/pullrequest/12")),
+        patch: None,
+        diagnosis: None,
+    };
+    let root = store
+        .finish_attempt(&claim.run, "w", &opened)
+        .await
+        .unwrap();
+    let comment = |project: &str| {
+        json!({
+            "id": format!("d-{project}"),
+            "eventType": "ms.vss-code.git-pullrequest-comment-event",
+            "resource": {
+                "comment": { "content": "/aegis fix", "commentType": "text", "author": { "id": writer } },
+                "pullRequest": {
+                    "pullRequestId": 12, "status": "active",
+                    "sourceRefName": "refs/heads/agent/cart-9-1",
+                    "targetRefName": "refs/heads/main",
+                    "repository": {
+                        "name": "cart", "project": { "name": project },
+                        "remoteUrl": "https://acme@dev.azure.com/acme/My%20Project/_git/cart"
+                    }
+                }
+            }
+        })
+    };
+    let by_header = [("x-aegis-webhook-secret", SECRET)];
+    // A name with `..` is still refused.
+    let (status, body) = send(&app, "/azure-devops", &by_header, &comment("My..Project")).await;
+    assert_ne!(status, StatusCode::ACCEPTED, "{body}");
+    let (status, body) = send(&app, "/azure-devops", &by_header, &comment("My Project")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let round = store
+        .job(aegis_store::JobId(body["data"]["job_id"].as_i64().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (round.source, round.review_of, round.issue_ref.as_str()),
+        (JobSource::Review, Some(root.id), "My Project/cart#12")
+    );
+    db.drop().await;
+}
+
 /// #331: what became of each delivery is recorded for its repo's
 /// connection page, the ignored ones and GitHub's `ping` too; a delivery
 /// with a bad signature names no repo and is only counted.

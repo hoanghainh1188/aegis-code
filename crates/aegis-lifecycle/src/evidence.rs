@@ -199,7 +199,14 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
         s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "-._/".contains(c))
     };
-    if !plain(&cited.path) || !plain(&fork.path()) {
+    // Azure DevOps names may hold spaces, written `%20` (#641).
+    let names_ok = match fork.platform {
+        ForkPlatform::AzureDevOps => {
+            aegis_pr::azure_name(&fork.owner) && aegis_pr::azure_name(&fork.name)
+        }
+        _ => plain(&fork.path()),
+    };
+    if !plain(&cited.path) || !names_ok {
         return None;
     }
     let root = web_root(fork)?;
@@ -224,7 +231,9 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
         });
         return Some(format!(
             "{root}/{}/_git/{}?path=/{}&version=GC{commit}{lines}",
-            fork.owner, fork.name, cited.path
+            aegis_pr::azure_segment(&fork.owner),
+            aegis_pr::azure_segment(&fork.name),
+            cited.path
         ));
     }
     let blob = match fork.platform {
@@ -310,6 +319,22 @@ mod tests {
                  &line=4&lineEnd=7&lineStartColumn=1&lineEndColumn=1"
             )
         );
+        let spaced = ForkConfig {
+            owner: "My Shop".into(),
+            ..az.clone()
+        };
+        assert_eq!(
+            line_url(&spaced, "abc123", "a.py:4").as_deref(),
+            Some(
+                "https://dev.azure.com/acme/My%20Shop/_git/cart?path=/a.py&version=GCabc123\
+                 &line=4&lineEnd=5&lineStartColumn=1&lineEndColumn=1"
+            )
+        );
+        let slashed = ForkConfig {
+            owner: "My/Shop".into(),
+            ..az.clone()
+        };
+        assert_eq!(line_url(&slashed, "abc123", "a.py:4"), None);
         let bb = fork(ForkPlatform::Bitbucket, aegis_pr::BITBUCKET_API);
         assert_eq!(
             line_url(&bb, "abc123", "a.py:4-6").as_deref(),

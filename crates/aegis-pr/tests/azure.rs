@@ -280,3 +280,55 @@ async fn a_service_principal_gets_a_token_for_azure_devops() {
         "{err}"
     );
 }
+
+/// #641: a project with a space is written `%20` in URLs and by its own
+/// name in the group a writer is looked up in.
+#[tokio::test]
+async fn a_project_with_a_space_opens_its_pr_and_checks_its_writers_by_name() {
+    let server = MockServer::start().await;
+    let repo = "/acme/My%20Shop/_apis/git/repositories/the%20cart";
+    Mock::given(method("POST"))
+        .and(path(format!("{repo}/pullrequests")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "pullRequestId": 12 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(query_param("identityIds", WRITER))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1, "value": [{ "id": WRITER, "memberOf": ["Microsoft.TeamFoundation.Identity;S-1-9-contrib"] }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(query_param("filterValue", "[My Shop]\\Contributors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "value": [{ "descriptor": "Microsoft.TeamFoundation.Identity;S-1-9-contrib" }]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let az = AzureDevOps::new(
+        &format!("{}/acme", server.uri()),
+        "My Shop",
+        "the cart",
+        "pat",
+    )
+    .unwrap();
+    let head = AgentBranch::for_issue("7").unwrap();
+    let url = Forge::AzureDevOps(az.clone())
+        .open_request(&head, "main", "Fix the cart", "body", false)
+        .await
+        .unwrap();
+    assert_eq!(
+        url,
+        format!(
+            "{}/acme/My%20Shop/_git/the%20cart/pullrequest/12",
+            server.uri()
+        )
+    );
+    assert!(az.can_write(WRITER).await.unwrap());
+}

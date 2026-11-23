@@ -880,7 +880,14 @@ pub fn azure_devops(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
         return Err(ignored("a pull request from another repository"));
     }
     let repo = &pull.repository;
-    let path = checked_path(&format!("{}/{}", repo.project.name, repo.name), 2)?.to_owned();
+    // Names may hold spaces; the ref keeps them as Azure shows them (#641).
+    if !aegis_pr::azure_name(&repo.project.name) || !aegis_pr::azure_name(&repo.name) {
+        return Err(Skip::Malformed(format!(
+            "`{}/{}` is not a project and repository name",
+            repo.project.name, repo.name
+        )));
+    }
+    let path = format!("{}/{}", repo.project.name, repo.name);
     let issue_ref = checked_ref(format!("{path}#{}", pull.pull_request_id))?;
     let repo_url = without_user(&repo.remote_url);
     let pr_url = format!("{repo_url}/pullrequest/{}", pull.pull_request_id);
@@ -944,6 +951,28 @@ mod tests {
         })
         .to_string()
         .into_bytes()
+    }
+
+    #[test]
+    fn an_azure_project_with_a_space_keeps_its_name_in_the_ref() {
+        let event = |project: &str| {
+            let mut pull = az_pull("completed", "agent/cart-1");
+            pull["repository"]["project"]["name"] = json!(project);
+            pull["repository"]["remoteUrl"] =
+                json!("https://dev.azure.com/acme/My%20Shop/_git/cart");
+            json!({ "eventType": AZURE_UPDATED, "resource": pull }).to_string()
+        };
+        let merged = azure_devops(AZURE_UPDATED, event("My Shop").as_bytes()).unwrap();
+        assert_eq!(merged.issue_ref, "My Shop/cart#12");
+        for bad in ["My/Shop", "My..Shop", "My\nShop", " Shop"] {
+            assert!(
+                matches!(
+                    azure_devops(AZURE_UPDATED, event(bad).as_bytes()),
+                    Err(Skip::Malformed(_))
+                ),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]
