@@ -132,7 +132,7 @@ text_enum! {
 
 text_enum! {
     /// Who sent a webhook delivery, or which tracker a polled ticket is
-    /// from (#26, #453), or Bitbucket Cloud (#634).
+    /// from (#26, #453), or Bitbucket Cloud (#634) or Data Center (#635).
     WebhookSource {
         Github = "github",
         Gitlab = "gitlab",
@@ -141,6 +141,7 @@ text_enum! {
         Jsm = "jsm",
         Servicenow = "servicenow",
         Bitbucket = "bitbucket",
+        BitbucketDc = "bitbucket-dc",
     }
 }
 

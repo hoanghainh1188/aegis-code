@@ -15,6 +15,7 @@ mod access;
 mod actions;
 mod app;
 mod bitbucket;
+mod bitbucket_dc;
 mod body;
 mod branch;
 mod commit_message;
@@ -36,6 +37,7 @@ pub use access::RepoAccess;
 pub use actions::{FailedJob, FailedRun};
 pub use app::{AppKey, Gate, GitHubApp, TokenSource, TokenUse};
 pub use bitbucket::{BITBUCKET_API, Bitbucket, BitbucketPermission, BitbucketPull};
+pub use bitbucket_dc::{BitbucketDataCenter, DataCenterPull};
 pub use body::{
     AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, Evidence, InputFlagNote,
     PrContent, gate_line, inert, render,
@@ -46,7 +48,8 @@ pub use coverage::{cobertura_lines, cobertura_percent, lcov_lines, lcov_percent}
 pub use error::PrError;
 pub use forge::Forge;
 pub use git::{
-    BITBUCKET_USER, GITHUB_USER, GITLAB_USER, Identity, Remote, token_env, token_env_as,
+    BEARER_USER, BITBUCKET_USER, GITHUB_USER, GITLAB_USER, Identity, Remote, token_env,
+    token_env_as,
 };
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};

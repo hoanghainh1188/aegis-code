@@ -15,7 +15,7 @@ reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-time = { workspace = true, features = ["parsing", "serde"] }
+time = { workspace = true, features = ["formatting", "parsing", "serde"] }
 
 [dev-dependencies]
 time = { workspace = true, features = ["formatting", "macros"] }

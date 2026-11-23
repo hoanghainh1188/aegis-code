@@ -8,7 +8,9 @@ use aegis_ledger::Outcome;
 use std::sync::Arc;
 
 use aegis_lifecycle::PLATFORM_ERROR;
-use aegis_pr::{Bitbucket, GitHub, GitLab, Locale, TokenSource, TokenUse, inert};
+use aegis_pr::{
+    Bitbucket, BitbucketDataCenter, GitHub, GitLab, Locale, TokenSource, TokenUse, inert,
+};
 use aegis_secrets::Secrets;
 use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store, TenantId};
 
@@ -38,6 +40,14 @@ pub const BITBUCKET_API_ENV: &str = "AEGIS_BITBUCKET_API";
 /// read who may write to them (repository admin scope) and comment on
 /// their pull requests.
 pub const BITBUCKET_COMMENT_TOKEN_ENV: &str = "AEGIS_BITBUCKET_COMMENT_TOKEN";
+
+/// The Bitbucket Data Center API root (`https://<host>/rest/api/1.0`,
+/// #635); no Data Center webhook queues a round while it is unset.
+pub const BITBUCKET_DC_API_ENV: &str = "AEGIS_BITBUCKET_DC_API";
+/// The secret: an HTTP access token of the instance that may read who may
+/// write to the registered repositories and comment on their pull
+/// requests.
+pub const BITBUCKET_DC_COMMENT_TOKEN_ENV: &str = "AEGIS_BITBUCKET_DC_COMMENT_TOKEN";
 
 pub(crate) const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 pub(crate) const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
@@ -386,6 +396,62 @@ impl BitbucketNotifier {
         };
         let posted = match Bitbucket::new(&self.api, workspace, repo, token.expose()) {
             Ok(bitbucket) => bitbucket.comment_on_pull_request(id, text).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = posted {
+            tracing::warn!(error = %e, "commenting on the pull request");
+        }
+    }
+}
+
+/// Asks Bitbucket Data Center who may write to a repository and comments
+/// on its pull requests (#635), with [`BITBUCKET_DC_COMMENT_TOKEN_ENV`].
+#[derive(Debug, Clone)]
+pub struct BitbucketDataCenterNotifier {
+    api: String,
+    secrets: Secrets,
+}
+
+impl BitbucketDataCenterNotifier {
+    pub fn new(api: &str, secrets: Secrets) -> Self {
+        Self {
+            api: api.to_owned(),
+            secrets,
+        }
+    }
+
+    /// The API root from [`BITBUCKET_DC_API_ENV`]; none while it is unset.
+    pub fn from_env(secrets: Secrets) -> Option<Self> {
+        let api = std::env::var(BITBUCKET_DC_API_ENV).ok()?;
+        (!api.is_empty()).then(|| Self::new(&api, secrets))
+    }
+
+    fn client(&self, project: &str, repo: &str) -> Result<BitbucketDataCenter, String> {
+        let token = self
+            .secrets
+            .get(BITBUCKET_DC_COMMENT_TOKEN_ENV)
+            .ok_or_else(|| format!("no secret {BITBUCKET_DC_COMMENT_TOKEN_ENV}"))?;
+        BitbucketDataCenter::new(&self.api, project, repo, token.expose())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Whether the person `slug` may write to `project/repo`; `Err` when
+    /// there is no token or Bitbucket fails.
+    pub async fn can_write(&self, project: &str, repo: &str, slug: &str) -> Result<bool, String> {
+        self.client(project, repo)?
+            .can_write(slug)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Posts `text` on PR `id` of `project/repo`, if the store has the
+    /// token; failures are logged.
+    pub async fn comment_on_pull_request(&self, project: &str, repo: &str, id: u64, text: &str) {
+        let posted = match self.client(project, repo) {
+            Ok(dc) => dc
+                .comment_on_pull_request(id, text)
+                .await
+                .map_err(|e| e.to_string()),
             Err(e) => Err(e),
         };
         if let Err(e) = posted {

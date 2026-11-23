@@ -257,6 +257,8 @@ fn agent_pull(pull: &GithubPull) -> Result<(), Skip> {
 pub fn repo_url(source: WebhookSource, body: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     let pointer = match source {
+        // Its payloads name a repository by key and slug only.
+        WebhookSource::BitbucketDc => return None,
         WebhookSource::Gitlab => "/project/web_url",
         WebhookSource::Bitbucket => "/repository/links/html/href",
         WebhookSource::Github
@@ -664,10 +666,237 @@ pub fn bitbucket(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct DcProject {
+    key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DcRepo {
+    slug: String,
+    project: DcProject,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DcRef {
+    display_id: String,
+    repository: DcRepo,
+}
+
+#[derive(Debug, Deserialize)]
+struct DcSelf {
+    href: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DcLinks {
+    #[serde(rename = "self", default)]
+    own: Vec<DcSelf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DcPull {
+    id: u64,
+    state: String,
+    from_ref: DcRef,
+    to_ref: DcRef,
+    links: DcLinks,
+}
+
+#[derive(Debug, Deserialize)]
+struct DcActor {
+    #[serde(default)]
+    slug: String,
+    #[serde(rename = "type", default)]
+    kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DcComment {
+    #[serde(default)]
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DcPullEvent {
+    actor: DcActor,
+    pull_request: DcPull,
+    #[serde(default)]
+    comment: Option<DcComment>,
+}
+
+/// A delivery of Bitbucket Data Center event `event` (`X-Event-Key`,
+/// #635): `/aegis fix` in a comment on the agent's open PR, or a reviewer
+/// marking it "needs work", by a person, asks for a review round; the
+/// agent's PR merged is recorded (#456). The sender is their user slug,
+/// whose right to write is checked before a job is made.
+pub fn bitbucket_dc(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
+    let round = match event {
+        "pr:comment:added" | "pr:reviewer:needs_work" => true,
+        "pr:merged" => false,
+        other => return Err(ignored(format!("event `{other}`"))),
+    };
+    let e: DcPullEvent = parse(body)?;
+    if event == "pr:comment:added"
+        && !asks_for_fix(e.comment.as_ref().map_or("", |c| c.text.as_str()))
+    {
+        return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
+    }
+    let pull = e.pull_request;
+    if !pull.from_ref.display_id.starts_with("agent/") {
+        return Err(ignored("not a pull request of the agent"));
+    }
+    let (from, to) = (&pull.from_ref.repository, &pull.to_ref.repository);
+    if !(from.slug.eq_ignore_ascii_case(&to.slug)
+        && from.project.key.eq_ignore_ascii_case(&to.project.key))
+    {
+        return Err(ignored("a pull request from another repository"));
+    }
+    let path = checked_path(&format!("{}/{}", to.project.key, to.slug), 2)?.to_owned();
+    let issue_ref = checked_ref(format!("{path}#{}", pull.id))?;
+    let pr_url = pull
+        .links
+        .own
+        .into_iter()
+        .next()
+        .map(|l| l.href)
+        .filter(|u| u.len() <= MAX_ISSUE_REF_LEN)
+        .ok_or_else(|| Skip::Malformed("a pull request without its link".into()))?;
+    let repo_url = pr_url
+        .rsplit_once("/pull-requests/")
+        .map_or_else(|| pr_url.clone(), |(repo, _)| repo.to_owned());
+    let kind = if round {
+        if pull.state != "OPEN" {
+            return Err(ignored("the pull request is not open"));
+        }
+        if e.actor.kind != "NORMAL" || e.actor.slug.is_empty() {
+            return Err(ignored("not sent by a person"));
+        }
+        Kind::ReviewRound {
+            pr_url,
+            sender: e.actor.slug,
+        }
+    } else {
+        Kind::PrMerged { pr_url }
+    };
+    Ok(Wanted {
+        issue_ref,
+        repo_url,
+        kind,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn dc_event(comment: Option<&str>, state: &str, branch: &str, actor: &str) -> Vec<u8> {
+        let repo = json!({ "slug": "cart", "project": { "key": "PAY" } });
+        json!({
+            "eventKey": "pr:comment:added",
+            "actor": { "slug": "lan", "type": actor },
+            "pullRequest": {
+                "id": 12, "state": state,
+                "fromRef": { "displayId": branch, "repository": repo },
+                "toRef": { "displayId": "main", "repository": repo },
+                "links": { "self": [{ "href": "https://git.acme.example/projects/PAY/repos/cart/pull-requests/12" }] }
+            },
+            "comment": comment.map(|text| json!({ "text": text })),
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn a_fix_comment_on_an_agent_pr_on_data_center_asks_for_a_round() {
+        let wanted = bitbucket_dc(
+            "pr:comment:added",
+            &dc_event(
+                Some("Please:\n/aegis fix"),
+                "OPEN",
+                "agent/cart-1",
+                "NORMAL",
+            ),
+        )
+        .unwrap();
+        assert_eq!(wanted.issue_ref, "PAY/cart#12");
+        assert_eq!(
+            wanted.repo_url,
+            "https://git.acme.example/projects/PAY/repos/cart"
+        );
+        assert_eq!(
+            wanted.kind,
+            Kind::ReviewRound {
+                pr_url: "https://git.acme.example/projects/PAY/repos/cart/pull-requests/12".into(),
+                sender: "lan".into()
+            }
+        );
+        let needs_work = bitbucket_dc(
+            "pr:reviewer:needs_work",
+            &dc_event(None, "OPEN", "agent/cart-1", "NORMAL"),
+        )
+        .unwrap();
+        assert!(matches!(needs_work.kind, Kind::ReviewRound { .. }));
+        let merged = bitbucket_dc(
+            "pr:merged",
+            &dc_event(None, "MERGED", "agent/cart-1", "NORMAL"),
+        )
+        .unwrap();
+        assert!(matches!(merged.kind, Kind::PrMerged { .. }));
+        for (event, comment, state, branch, actor) in [
+            (
+                "pr:comment:added",
+                Some("looks fine"),
+                "OPEN",
+                "agent/cart-1",
+                "NORMAL",
+            ),
+            (
+                "pr:comment:added",
+                Some("/aegis fix"),
+                "DECLINED",
+                "agent/cart-1",
+                "NORMAL",
+            ),
+            (
+                "pr:comment:added",
+                Some("/aegis fix"),
+                "OPEN",
+                "feature/x",
+                "NORMAL",
+            ),
+            (
+                "pr:comment:added",
+                Some("/aegis fix"),
+                "OPEN",
+                "agent/cart-1",
+                "SERVICE",
+            ),
+            (
+                "pr:reviewer:approved",
+                None,
+                "OPEN",
+                "agent/cart-1",
+                "NORMAL",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    bitbucket_dc(event, &dc_event(comment, state, branch, actor)),
+                    Err(Skip::Ignored(_))
+                ),
+                "{event} {comment:?} {state} {branch} {actor}"
+            );
+        }
+        assert!(matches!(
+            bitbucket_dc("pr:merged", b"{}"),
+            Err(Skip::Malformed(_))
+        ));
+    }
 
     fn bitbucket_event(comment: Option<&str>, state: &str, branch: &str, actor: &str) -> Vec<u8> {
         json!({
