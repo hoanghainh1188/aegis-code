@@ -343,6 +343,58 @@ mod tests {
     }
 
     #[test]
+    fn a_go_and_typescript_monorepo_picks_each_file_s_profile_and_image() {
+        // #598: `[[repo.dirs]]` makes a polyglot monorepo; a file goes by
+        // the deepest directory that holds it, the rest by the root.
+        let mut cfg = monorepo(true);
+        cfg.repo.language = aegis_lang::Language::Go;
+        cfg.repo.dirs = vec![toml::from_str("path = \"web\"\nlanguage = \"typescript\"").unwrap()];
+        let profiles = cfg.repo.profiles(&Profiles::builtin().unwrap()).unwrap();
+        let image = |file: &str| {
+            let part = profiles.part_of(file);
+            let sandbox = sandbox(&cfg, part).unwrap().unwrap();
+            (part.dir.clone(), part.profile.language(), sandbox.image)
+        };
+        let go = (
+            "".to_owned(),
+            aegis_lang::Language::Go,
+            "aegis-sandbox-go".to_owned(),
+        );
+        let ts = (
+            "web".to_owned(),
+            aegis_lang::Language::TypeScript,
+            "aegis-sandbox-node".to_owned(),
+        );
+        assert_eq!(image("cart.go"), go);
+        assert_eq!(image("internal/pay/pay.go"), go);
+        assert_eq!(image("web/src/cart.ts"), ts);
+        assert_eq!(image("web/test/cart.test.ts"), ts);
+        // Not under `web/`: the root's.
+        assert_eq!(image("webhooks/hook.go"), go);
+        // Each part's lockfile is checked by its own profile.
+        let lockfiles: Vec<(String, Vec<String>)> = profiles
+            .parts()
+            .iter()
+            .map(|p| {
+                (
+                    p.dir.clone(),
+                    p.profile.profile.dependencies.lockfiles.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(lockfiles[0].0, "");
+        assert!(
+            lockfiles[0].1.contains(&"go.sum".to_owned()),
+            "{lockfiles:?}"
+        );
+        assert_eq!(lockfiles[1].0, "web");
+        assert!(
+            lockfiles[1].1.contains(&"package-lock.json".to_owned()),
+            "{lockfiles:?}"
+        );
+    }
+
+    #[test]
     fn codebase_memory_runs_in_the_index_directory_not_in_the_job_s_tree() {
         // #203: the daemon keeps its first server's directory, and a job's
         // tree is removed at the end of the job.
