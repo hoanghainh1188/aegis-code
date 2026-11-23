@@ -73,6 +73,26 @@ impl ReviewRound {
         })
     }
 
+    /// PR `id` of the Bitbucket Cloud fork `workspace/repo`, which must be
+    /// open and from an `agent/*` branch of the repository, and its notes
+    /// (#634).
+    pub async fn from_bitbucket(
+        api: &str,
+        workspace: &str,
+        repo: &str,
+        id: u64,
+        token: &str,
+    ) -> Result<Self, LifecycleError> {
+        let bitbucket = aegis_pr::Bitbucket::new(api, workspace, repo, token)?;
+        let pull = bitbucket.agent_pull(id).await?;
+        let notes = bitbucket.review_notes(id).await?;
+        Ok(Self {
+            pull,
+            notes,
+            local_base: None,
+        })
+    }
+
     /// A local round (#439) of the PR `agent/<id>` whose head is commit
     /// `head` on `base`, both in the platform's clone.
     pub fn local(id: &str, head: &str, base: &str, notes: Vec<ReviewNote>) -> Self {

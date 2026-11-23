@@ -28,4 +28,8 @@ pub enum PrError {
     /// `status` 0: the request did not get an answer.
     #[error("GitLab API {status}: {message}")]
     GitLab { status: u16, message: String },
+
+    /// `status` 0: the request did not get an answer (#634).
+    #[error("Bitbucket API {status}: {message}")]
+    Bitbucket { status: u16, message: String },
 }

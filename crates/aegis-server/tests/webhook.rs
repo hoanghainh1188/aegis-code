@@ -9,8 +9,9 @@ use aegis_ledger::Outcome;
 use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::webhook::{
-    COMMENT_TOKEN_ENV, DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV,
-    GITLAB_TOKEN_ENV, GitHubNotifier, GitLabNotifier, WebhookConfig, router,
+    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_SECRET_ENV, BitbucketNotifier, COMMENT_TOKEN_ENV,
+    DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
+    GitHubNotifier, GitLabNotifier, WebhookConfig, router,
 };
 use aegis_server::worker::{WorkerConfig, run_worker_notifying};
 use aegis_store::testing::test_db;
@@ -38,6 +39,7 @@ fn config() -> WebhookConfig {
         per_minute: 600,
         notifier: None,
         gitlab_notifier: None,
+        bitbucket_notifier: None,
         max_body_bytes: DEFAULT_MAX_BODY_BYTES,
         modes: None,
         app: None,
@@ -107,6 +109,16 @@ async fn gitlab(app: &Router, event: &str, delivery: &str, body: &Value) -> (Sta
         ("x-gitlab-token", TOKEN),
     ];
     send(app, "/gitlab", &headers, body).await
+}
+
+async fn bitbucket(app: &Router, event: &str, delivery: &str, body: &Value) -> (StatusCode, Value) {
+    let signature = sign(body.to_string().as_bytes());
+    let headers = [
+        ("x-event-key", event),
+        ("x-request-uuid", delivery),
+        ("x-hub-signature", signature.as_str()),
+    ];
+    send(app, "/bitbucket", &headers, body).await
 }
 
 fn labeled(full_name: &str, number: u64, label: &str) -> Value {
@@ -781,6 +793,122 @@ async fn a_fix_note_on_the_agents_gitlab_mr_queues_a_round_for_developers() {
     assert_eq!(
         (round.source, round.review_of, round.issue_ref.as_str()),
         (JobSource::Review, Some(root.id), "acme/app!4")
+    );
+    db.drop().await;
+}
+
+/// #634: `/aegis fix` on the agent's Bitbucket Cloud PR by someone who may
+/// write to the repo queues a review round; a reader's queues none, and a
+/// delivery not signed with the secret is refused.
+#[tokio::test]
+async fn a_fix_comment_on_the_agents_bitbucket_pr_queues_a_round_for_writers() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone();
+    repo(&store, "app", "https://bitbucket.org/acme/app").await;
+    let bitbucket_api = MockServer::start().await;
+    for (user, permission) in [("%7Bw%7D", "write"), ("%7Br%7D", "read")] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/2.0/repositories/acme/app/permissions-config/users/{user}"
+            )))
+            .and(header("authorization", "Bearer bb-comment"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "permission": permission })),
+            )
+            .mount(&bitbucket_api)
+            .await;
+    }
+    let secrets = Secrets::fixed([
+        (BITBUCKET_SECRET_ENV, SECRET),
+        (BITBUCKET_COMMENT_TOKEN_ENV, "bb-comment"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            bitbucket_notifier: Some(BitbucketNotifier::new(
+                &format!("{}/2.0", bitbucket_api.uri()),
+                secrets.clone(),
+            )),
+            secrets,
+            ..config()
+        },
+    );
+    let pr = "https://bitbucket.org/acme/app/pull-requests/7";
+    let row = store.repo_by_slug("app").await.unwrap().unwrap();
+    store
+        .create_job(&aegis_store::NewJob {
+            repo_id: row.id,
+            issue_ref: "acme/app#9".into(),
+            ledger_key: aegis_ledger::IssueId::parse("app-9-1".to_owned()).unwrap(),
+            source: JobSource::Cli,
+            priority: None,
+            sla_deadline: None,
+        })
+        .await
+        .unwrap();
+    let claim = store
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let opened = aegis_store::AttemptEnd::Done {
+        outcome: Outcome::PrOpened,
+        reason: None,
+        pr_url: Some(pr.into()),
+        patch: None,
+        diagnosis: None,
+    };
+    let root = store
+        .finish_attempt(&claim.run, "w", &opened)
+        .await
+        .unwrap();
+    let comment = |user: &str| {
+        json!({
+            "actor": { "uuid": user, "type": "user" },
+            "pullrequest": {
+                "id": 7, "state": "OPEN",
+                "source": { "branch": { "name": "agent/app-9-1" } },
+                "links": { "html": { "href": pr } }
+            },
+            "repository": {
+                "full_name": "acme/app",
+                "links": { "html": { "href": "https://bitbucket.org/acme/app" } }
+            },
+            "comment": { "content": { "raw": "/aegis fix" } }
+        })
+    };
+    let forged = [
+        ("x-event-key", "pullrequest:comment_created"),
+        ("x-request-uuid", "b0"),
+        ("x-hub-signature", "sha256=00"),
+    ];
+    let (status, _) = send(&app, "/bitbucket", &forged, &comment("{w}")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) =
+        bitbucket(&app, "pullrequest:comment_created", "b1", &comment("{r}")).await;
+    assert_eq!(
+        (status, &body["data"]["status"]),
+        (StatusCode::OK, &json!("ignored")),
+        "{body}"
+    );
+    let (status, body) =
+        bitbucket(&app, "pullrequest:comment_created", "b2", &comment("{w}")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let round = store
+        .job(aegis_store::JobId(body["data"]["job_id"].as_i64().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (round.source, round.review_of, round.issue_ref.as_str()),
+        (JobSource::Review, Some(root.id), "acme/app#7")
+    );
+    let (status, body) =
+        bitbucket(&app, "pullrequest:comment_created", "b2", &comment("{w}")).await;
+    assert_eq!(
+        (status, &body["data"]["status"]),
+        (StatusCode::OK, &json!("duplicate")),
+        "{body}"
     );
     db.drop().await;
 }

@@ -258,7 +258,12 @@ pub fn repo_url(source: WebhookSource, body: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     let pointer = match source {
         WebhookSource::Gitlab => "/project/web_url",
-        _ => "/repository/html_url",
+        WebhookSource::Bitbucket => "/repository/links/html/href",
+        WebhookSource::Github
+        | WebhookSource::Jira
+        | WebhookSource::Backlog
+        | WebhookSource::Jsm
+        | WebhookSource::Servicenow => "/repository/html_url",
     };
     let url = value.pointer(pointer)?.as_str()?;
     (url.len() <= MAX_ISSUE_REF_LEN).then(|| url.to_owned())
@@ -550,10 +555,226 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct BitbucketHref {
+    href: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketLinks {
+    html: BitbucketHref,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketBranch {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketEnd {
+    branch: BitbucketBranch,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketPull {
+    id: u64,
+    state: String,
+    source: BitbucketEnd,
+    links: BitbucketLinks,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketRepo {
+    full_name: String,
+    links: BitbucketLinks,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketActor {
+    #[serde(default)]
+    uuid: String,
+    #[serde(rename = "type", default)]
+    kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketContent {
+    #[serde(default)]
+    raw: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitbucketComment {
+    content: BitbucketContent,
+}
+
+/// A pull request event of Bitbucket Cloud: who, which PR, which
+/// repository, and the comment when there is one.
+#[derive(Debug, Deserialize)]
+struct BitbucketPullEvent {
+    actor: BitbucketActor,
+    pullrequest: BitbucketPull,
+    repository: BitbucketRepo,
+    #[serde(default)]
+    comment: Option<BitbucketComment>,
+}
+
+/// A delivery of Bitbucket Cloud event `event` (`X-Event-Key`, #634):
+/// `/aegis fix` in a comment on the agent's open PR, or changes requested
+/// on it, by a person, asks for a review round; the agent's PR merged is
+/// recorded (#456). The sender is their `{uuid}`, whose right to write is
+/// checked before a job is made.
+pub fn bitbucket(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
+    let round = match event {
+        "pullrequest:comment_created" => true,
+        "pullrequest:changes_request_created" => true,
+        "pullrequest:fulfilled" => false,
+        other => return Err(ignored(format!("event `{other}`"))),
+    };
+    let e: BitbucketPullEvent = parse(body)?;
+    if event == "pullrequest:comment_created"
+        && !asks_for_fix(e.comment.as_ref().map_or("", |c| c.content.raw.as_str()))
+    {
+        return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
+    }
+    if !e.pullrequest.source.branch.name.starts_with("agent/") {
+        return Err(ignored("not a pull request of the agent"));
+    }
+    let path = checked_path(&e.repository.full_name, 2)?;
+    let issue_ref = checked_ref(format!("{path}#{}", e.pullrequest.id))?;
+    let pr_url = e.pullrequest.links.html.href;
+    let kind = if round {
+        if e.pullrequest.state != "OPEN" {
+            return Err(ignored("the pull request is not open"));
+        }
+        if e.actor.kind != "user" || e.actor.uuid.is_empty() {
+            return Err(ignored("not sent by a person"));
+        }
+        Kind::ReviewRound {
+            pr_url,
+            sender: e.actor.uuid,
+        }
+    } else {
+        Kind::PrMerged { pr_url }
+    };
+    Ok(Wanted {
+        issue_ref,
+        repo_url: e.repository.links.html.href,
+        kind,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn bitbucket_event(comment: Option<&str>, state: &str, branch: &str, actor: &str) -> Vec<u8> {
+        json!({
+            "actor": { "uuid": "{42}", "type": actor },
+            "pullrequest": {
+                "id": 7, "state": state,
+                "source": { "branch": { "name": branch } },
+                "links": { "html": { "href": "https://bitbucket.org/acme/app/pull-requests/7" } }
+            },
+            "repository": {
+                "full_name": "acme/app",
+                "links": { "html": { "href": "https://bitbucket.org/acme/app" } }
+            },
+            "comment": comment.map(|raw| json!({ "content": { "raw": raw } })),
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn a_fix_comment_on_an_agent_pr_on_bitbucket_asks_for_a_round() {
+        let wanted = bitbucket(
+            "pullrequest:comment_created",
+            &bitbucket_event(Some("Please:\n/aegis fix"), "OPEN", "agent/app-1", "user"),
+        )
+        .unwrap();
+        assert_eq!(wanted.issue_ref, "acme/app#7");
+        assert_eq!(wanted.repo_url, "https://bitbucket.org/acme/app");
+        assert_eq!(
+            wanted.kind,
+            Kind::ReviewRound {
+                pr_url: "https://bitbucket.org/acme/app/pull-requests/7".into(),
+                sender: "{42}".into()
+            }
+        );
+        let changes = bitbucket(
+            "pullrequest:changes_request_created",
+            &bitbucket_event(None, "OPEN", "agent/app-1", "user"),
+        )
+        .unwrap();
+        assert!(matches!(changes.kind, Kind::ReviewRound { .. }));
+        for (event, comment, state, branch, actor) in [
+            (
+                "pullrequest:comment_created",
+                Some("looks fine"),
+                "OPEN",
+                "agent/app-1",
+                "user",
+            ),
+            (
+                "pullrequest:comment_created",
+                Some("/aegis fix"),
+                "MERGED",
+                "agent/app-1",
+                "user",
+            ),
+            (
+                "pullrequest:comment_created",
+                Some("/aegis fix"),
+                "OPEN",
+                "feature/x",
+                "user",
+            ),
+            (
+                "pullrequest:comment_created",
+                Some("/aegis fix"),
+                "OPEN",
+                "agent/app-1",
+                "app_user",
+            ),
+            ("pullrequest:approved", None, "OPEN", "agent/app-1", "user"),
+        ] {
+            assert!(
+                matches!(
+                    bitbucket(event, &bitbucket_event(comment, state, branch, actor)),
+                    Err(Skip::Ignored(_))
+                ),
+                "{event} {comment:?} {state} {branch} {actor}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_merged_agent_pr_on_bitbucket_is_recorded() {
+        let wanted = bitbucket(
+            "pullrequest:fulfilled",
+            &bitbucket_event(None, "MERGED", "agent/app-1", "user"),
+        )
+        .unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::PrMerged {
+                pr_url: "https://bitbucket.org/acme/app/pull-requests/7".into()
+            }
+        );
+        assert!(matches!(
+            bitbucket(
+                "pullrequest:fulfilled",
+                &bitbucket_event(None, "MERGED", "main", "user")
+            ),
+            Err(Skip::Ignored(_))
+        ));
+        assert!(matches!(
+            bitbucket("pullrequest:comment_created", b"{}"),
+            Err(Skip::Malformed(_))
+        ));
+    }
 
     fn pull(state: &str, head: &str) -> serde_json::Value {
         json!({ "number": 100, "html_url": "https://github.com/bot/demo/pull/100",

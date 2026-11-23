@@ -17,7 +17,9 @@ pub const DEFAULT_MAX_REVIEW_ROUNDS: u32 = 3;
 
 /// `https://github.com/<owner>/<name>/pull/<n>` → `<owner>/<name>#<n>`,
 /// `https://<gitlab>/<group/sub/project>/-/merge_requests/<n>` →
-/// `<group/sub/project>!<n>` (#254): the PR or MR as an issue ref, so it
+/// `<group/sub/project>!<n>` (#254), and Bitbucket Cloud's
+/// `https://bitbucket.org/<workspace>/<repo>/pull-requests/<n>` →
+/// `<workspace>/<repo>#<n>` (#634): the PR or MR as an issue ref, so it
 /// has one live round at a time.
 pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
     let plain = |s: &str| {
@@ -39,7 +41,7 @@ pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
         return ok.then(|| format!("{project}!{iid}"));
     }
     let parts: Vec<&str> = pr_url.trim_end_matches('/').rsplitn(4, '/').collect();
-    let [number, "pull", name, rest] = parts.as_slice() else {
+    let [number, "pull" | "pull-requests", name, rest] = parts.as_slice() else {
         return None;
     };
     let owner = rest.rsplit('/').next()?;
@@ -236,6 +238,11 @@ mod tests {
                 "https://gitlab.com/acme/platform/app/-/merge_requests/4",
                 Some("acme/platform/app!4"),
             ),
+            (
+                "https://bitbucket.org/acme/app/pull-requests/7",
+                Some("acme/app#7"),
+            ),
+            ("https://bitbucket.org/acme/app/pull-requests/x", None),
             ("https://gitlab.com/app/-/merge_requests/4", None),
             ("https://gitlab.com/acme/app/-/merge_requests/x", None),
             ("https://github.com/acme/typst/issues/12", None),

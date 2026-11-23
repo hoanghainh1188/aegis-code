@@ -534,7 +534,7 @@ impl LifecycleRunner {
             JobSource::Github | JobSource::Cli | JobSource::Gitlab | JobSource::Ci
         ) {
             return Err(Attempt::Rejected(format!(
-                "review rounds are for GitHub and GitLab jobs; job {} is a `{}` job",
+                "review rounds are for GitHub, GitLab and CLI jobs; job {} is a `{}` job",
                 root.id.0,
                 root.source.as_str()
             )));
@@ -572,6 +572,17 @@ impl LifecycleRunner {
                 }
                 ReviewRound::from_gitlab(&fork.api, project, iid, token).await
             }
+            // `workspace/repo#id` (#634).
+            ForkPlatform::Bitbucket => {
+                let (workspace, repo, id) =
+                    parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+                if !(workspace.eq_ignore_ascii_case(&fork.owner)
+                    && repo.eq_ignore_ascii_case(&fork.name))
+                {
+                    return Err(not_the_forks());
+                }
+                ReviewRound::from_bitbucket(&fork.api, &fork.owner, &fork.name, id, token).await
+            }
         };
         let round = read.map_err(|e| match e {
             // Closed, merged, not the agent's: no attempt changes it.
@@ -581,6 +592,10 @@ impl LifecycleRunner {
                     ref message,
                 }
                 | aegis_pr::PrError::GitLab {
+                    status: 0,
+                    ref message,
+                }
+                | aegis_pr::PrError::Bitbucket {
                     status: 0,
                     ref message,
                 },
@@ -721,6 +736,7 @@ fn git_user(fork: &aegis_lifecycle::ForkConfig) -> &'static str {
     match fork.platform {
         ForkPlatform::GitHub => aegis_pr::GITHUB_USER,
         ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
+        ForkPlatform::Bitbucket => aegis_pr::BITBUCKET_USER,
     }
 }
 

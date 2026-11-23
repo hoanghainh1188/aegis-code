@@ -8,7 +8,7 @@ use aegis_ledger::Outcome;
 use std::sync::Arc;
 
 use aegis_lifecycle::PLATFORM_ERROR;
-use aegis_pr::{GitHub, GitLab, Locale, TokenSource, TokenUse, inert};
+use aegis_pr::{Bitbucket, GitHub, GitLab, Locale, TokenSource, TokenUse, inert};
 use aegis_secrets::Secrets;
 use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store, TenantId};
 
@@ -30,6 +30,14 @@ pub const GITLAB_API_ENV: &str = "AEGIS_GITLAB_API";
 /// The secret: a token that may comment on the issues of the registered
 /// GitLab projects; no comments while the store has none.
 pub const GITLAB_COMMENT_TOKEN_ENV: &str = "AEGIS_GITLAB_COMMENT_TOKEN";
+
+/// The Bitbucket Cloud API root, [`aegis_pr::BITBUCKET_API`] when unset
+/// (#634).
+pub const BITBUCKET_API_ENV: &str = "AEGIS_BITBUCKET_API";
+/// The secret: a token of the registered Bitbucket repositories that may
+/// read who may write to them (repository admin scope) and comment on
+/// their pull requests.
+pub const BITBUCKET_COMMENT_TOKEN_ENV: &str = "AEGIS_BITBUCKET_COMMENT_TOKEN";
 
 pub(crate) const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 pub(crate) const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
@@ -323,6 +331,65 @@ impl JobNotifier for GitLabNotifier {
         match posted {
             Ok(()) => tracing::info!(job = job.id.0, "commented on the issue"),
             Err(e) => tracing::warn!(job = job.id.0, error = %e, "commenting on the issue"),
+        }
+    }
+}
+
+/// Asks Bitbucket Cloud who may write to a repository and comments on its
+/// pull requests (#634), with [`BITBUCKET_COMMENT_TOKEN_ENV`]. Bitbucket
+/// issues make no jobs, so no job's end is told there.
+#[derive(Debug, Clone)]
+pub struct BitbucketNotifier {
+    api: String,
+    secrets: Secrets,
+}
+
+impl BitbucketNotifier {
+    pub fn new(api: &str, secrets: Secrets) -> Self {
+        Self {
+            api: api.to_owned(),
+            secrets,
+        }
+    }
+
+    /// The API root from [`BITBUCKET_API_ENV`]; the token is read from
+    /// `secrets` when it is needed.
+    pub fn from_env(secrets: Secrets) -> Self {
+        let api =
+            std::env::var(BITBUCKET_API_ENV).unwrap_or_else(|_| aegis_pr::BITBUCKET_API.into());
+        Self::new(&api, secrets)
+    }
+
+    /// Whether the person `uuid` may write to `workspace/repo`; `Err` when
+    /// there is no token or Bitbucket fails.
+    pub async fn can_write(&self, workspace: &str, repo: &str, uuid: &str) -> Result<bool, String> {
+        let token = self
+            .secrets
+            .get(BITBUCKET_COMMENT_TOKEN_ENV)
+            .ok_or_else(|| {
+                format!("no secret {BITBUCKET_COMMENT_TOKEN_ENV} to check the sender's rights")
+            })?;
+        let bitbucket = Bitbucket::new(&self.api, workspace, repo, token.expose())
+            .map_err(|e| e.to_string())?;
+        let level = bitbucket
+            .permission(uuid)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(level >= aegis_pr::BitbucketPermission::Write)
+    }
+
+    /// Posts `text` on PR `id` of `workspace/repo`, if the store has the
+    /// token; failures are logged.
+    pub async fn comment_on_pull_request(&self, workspace: &str, repo: &str, id: u64, text: &str) {
+        let Some(token) = self.secrets.get(BITBUCKET_COMMENT_TOKEN_ENV) else {
+            return;
+        };
+        let posted = match Bitbucket::new(&self.api, workspace, repo, token.expose()) {
+            Ok(bitbucket) => bitbucket.comment_on_pull_request(id, text).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = posted {
+            tracing::warn!(error = %e, "commenting on the pull request");
         }
     }
 }

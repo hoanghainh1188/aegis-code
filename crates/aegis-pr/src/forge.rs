@@ -1,12 +1,14 @@
 //! Where the agent's change goes: a pull request on GitHub or a merge
-//! request on GitLab (#252), from a branch of the same repository.
+//! request on GitLab (#252) or a pull request on Bitbucket Cloud (#634),
+//! from a branch of the same repository.
 
-use crate::{AgentBranch, GitHub, GitLab, PrError, Remote};
+use crate::{AgentBranch, Bitbucket, GitHub, GitLab, PrError, Remote};
 
 #[derive(Debug, Clone)]
 pub enum Forge {
     GitHub(GitHub),
     GitLab(GitLab),
+    Bitbucket(Bitbucket),
 }
 
 impl Forge {
@@ -15,6 +17,7 @@ impl Forge {
         match self {
             Self::GitHub(github) => github.remote(),
             Self::GitLab(gitlab) => gitlab.remote(),
+            Self::Bitbucket(bitbucket) => bitbucket.remote(),
         }
     }
 
@@ -24,6 +27,7 @@ impl Forge {
         match self {
             Self::GitHub(github) => github.remote_now().await,
             Self::GitLab(gitlab) => gitlab.remote(),
+            Self::Bitbucket(bitbucket) => bitbucket.remote(),
         }
     }
 
@@ -32,6 +36,7 @@ impl Forge {
         match self {
             Self::GitHub(github) => github.comment_on_issue(number, body).await.map(drop),
             Self::GitLab(gitlab) => gitlab.comment_on_merge_request(number, body).await,
+            Self::Bitbucket(bitbucket) => bitbucket.comment_on_pull_request(number, body).await,
         }
     }
 
@@ -53,6 +58,10 @@ impl Forge {
                 .open_merge_request(head, base, title, body, draft)
                 .await
                 .map(|mr| mr.web_url),
+            Self::Bitbucket(bitbucket) => bitbucket
+                .open_pull_request(head, base, title, body, draft)
+                .await
+                .map(|pr| pr.url),
         }
     }
 }

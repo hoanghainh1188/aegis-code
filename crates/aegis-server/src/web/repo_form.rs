@@ -199,6 +199,7 @@ impl RepoForm {
             fork_platform: match fork.platform {
                 aegis_lifecycle::ForkPlatform::GitHub => "github".into(),
                 aegis_lifecycle::ForkPlatform::GitLab => "gitlab".into(),
+                aegis_lifecycle::ForkPlatform::Bitbucket => "bitbucket".into(),
             },
             fork_owner: fork.owner.clone(),
             fork_name: fork.name.clone(),

@@ -373,11 +373,14 @@ pub enum ForkPlatform {
     #[default]
     GitHub,
     GitLab,
+    /// Bitbucket Cloud (#634).
+    Bitbucket,
 }
 
-/// The fork the agent pushes to and opens PRs in: a GitHub repository, or
-/// a GitLab project (`owner` is then its namespace, subgroups included,
-/// and `api` the instance's API root).
+/// The fork the agent pushes to and opens PRs in: a GitHub repository, a
+/// GitLab project (`owner` is then its namespace, subgroups included, and
+/// `api` the instance's API root), or a Bitbucket Cloud repository
+/// (`owner` is its workspace, `api` [`aegis_pr::BITBUCKET_API`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForkConfig {
@@ -627,6 +630,12 @@ impl RunConfig {
                     .into(),
             ));
         }
+        if fork.platform == ForkPlatform::Bitbucket && fork.api == default_api() {
+            return Err(LifecycleError::Config(format!(
+                "repo.fork.api: a Bitbucket fork needs Bitbucket's API root (`{}`)",
+                aegis_pr::BITBUCKET_API
+            )));
+        }
         self.repo
             .audit_policy()
             .check_ids()
@@ -833,6 +842,27 @@ test_env = { DATABASE_URL = "postgres://postgres:test@postgres:5432/postgres" }
             RunConfig::from_toml(POC).unwrap().repo.fork.platform,
             ForkPlatform::GitHub
         );
+    }
+
+    #[test]
+    fn a_bitbucket_fork_names_bitbuckets_api_root() {
+        let bitbucket = |api: &str| {
+            RunConfig::from_toml(&POC.replacen(
+                "[repo.fork]",
+                &format!("[repo.fork]\nplatform = \"bitbucket\"{api}"),
+                1,
+            ))
+        };
+        let err = bitbucket("").unwrap_err().to_string();
+        assert!(err.contains("a Bitbucket fork needs"), "{err}");
+        let cfg = bitbucket("\napi = \"https://api.bitbucket.org/2.0\"").unwrap();
+        assert_eq!(cfg.repo.fork.platform, ForkPlatform::Bitbucket);
+        let forge = crate::publish::fork_forge_of(
+            &cfg.repo.fork,
+            &aegis_pr::TokenSource::Static("t".into()),
+        )
+        .unwrap();
+        assert!(matches!(forge, aegis_pr::Forge::Bitbucket(_)));
     }
 
     #[test]

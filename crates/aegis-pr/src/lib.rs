@@ -14,6 +14,7 @@
 mod access;
 mod actions;
 mod app;
+mod bitbucket;
 mod body;
 mod branch;
 mod commit_message;
@@ -34,6 +35,7 @@ use aegis_gate::GateReport;
 pub use access::RepoAccess;
 pub use actions::{FailedJob, FailedRun};
 pub use app::{AppKey, Gate, GitHubApp, TokenSource, TokenUse};
+pub use bitbucket::{BITBUCKET_API, Bitbucket, BitbucketPermission, BitbucketPull};
 pub use body::{
     AllowedReferenceChange, AllowedTestChange, ChangeNote, Cost, Evidence, InputFlagNote,
     PrContent, gate_line, inert, render,
@@ -43,7 +45,9 @@ pub use commit_message::{CommitInput, CommitMessage, checked, write_commit_messa
 pub use coverage::{cobertura_lines, cobertura_percent, lcov_lines, lcov_percent};
 pub use error::PrError;
 pub use forge::Forge;
-pub use git::{GITHUB_USER, GITLAB_USER, Identity, Remote, token_env, token_env_as};
+pub use git::{
+    BITBUCKET_USER, GITHUB_USER, GITLAB_USER, Identity, Remote, token_env, token_env_as,
+};
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};
 pub use hooks::HookDone;

@@ -13,7 +13,7 @@ use crate::{GitHub, GitLab, PrError};
 pub const REPLY_MARKER: &str = "<!-- aegis-code review reply -->";
 
 /// Notes read from a PR, at most; the oldest are dropped first.
-const MAX_NOTES: usize = 100;
+pub(crate) const MAX_NOTES: usize = 100;
 
 /// An open PR of the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
