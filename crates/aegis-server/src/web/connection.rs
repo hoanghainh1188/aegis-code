@@ -9,7 +9,7 @@
 //! browser.
 
 use aegis_lifecycle::ForkPlatform;
-use aegis_pr::{GitHub, GitLab, HookDone, PrError, RepoAccess};
+use aegis_pr::{Bitbucket, GitHub, GitLab, HookDone, PrError, RepoAccess};
 use aegis_store::{BadSignatures, Repo, Store};
 use askama::Template;
 use axum::extract::rejection::ExtensionRejection;
@@ -27,8 +27,8 @@ use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::{Access, Auth};
 use crate::repo_cli::RepoFile;
 use crate::webhook::{
-    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
-    owner_and_name, project_path,
+    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_SECRET_ENV, COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV,
+    GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV, owner_and_name, project_path,
 };
 
 /// The webhooks shown on the page.
@@ -38,7 +38,7 @@ const BAD_SIGNATURE_HOURS: i32 = 24;
 
 /// What a repo's forge is, and what it needs there.
 struct Forge {
-    /// `github` or `gitlab`, as in the webhook's path.
+    /// `github`, `gitlab` or `bitbucket`, as in the webhook's path.
     name: &'static str,
     webhook_secret: &'static str,
     comment_token: &'static str,
@@ -83,10 +83,32 @@ const GITLAB: Forge = Forge {
     hook_right: "the Maintainer role on the project and the api scope",
 };
 
+/// Bitbucket Cloud (#634): review rounds only, on the fork; its issues
+/// and pipelines make no jobs. Its webhooks are made by hand.
+const BITBUCKET: Forge = Forge {
+    name: "bitbucket",
+    webhook_secret: BITBUCKET_SECRET_ENV,
+    comment_token: BITBUCKET_COMMENT_TOKEN_ENV,
+    repo_events: &[],
+    fork_events: &[
+        "Pull request: Comment created",
+        "Pull request: Changes request created",
+        "Pull request: Merged",
+    ],
+    repo_hook_events: &[],
+    fork_hook_events: &[
+        "pullrequest:comment_created",
+        "pullrequest:changes_request_created",
+        "pullrequest:fulfilled",
+    ],
+    hook_right: "the admin role on the repository",
+};
+
 fn forge_of(platform: ForkPlatform) -> &'static Forge {
     match platform {
         ForkPlatform::GitHub => &GITHUB,
         ForkPlatform::GitLab => &GITLAB,
+        ForkPlatform::Bitbucket => &BITBUCKET,
     }
 }
 
@@ -370,6 +392,11 @@ pub async fn make_webhooks(
     let api = match fork.platform {
         ForkPlatform::GitHub => admin.github_api.clone(),
         ForkPlatform::GitLab => admin.gitlab_api.clone(),
+        ForkPlatform::Bitbucket => {
+            return Err(bad(
+                "Bitbucket webhooks are made by hand, in the repository's settings",
+            ));
+        }
     };
     let (path, events) = match form.place.as_str() {
         "repo" => {
@@ -417,6 +444,11 @@ pub async fn make_webhooks(
             Ok(gl) => gl.ensure_hook(&url, &secret, events).await,
             Err(e) => Err(e),
         },
+        ForkPlatform::Bitbucket => {
+            return Err(bad(
+                "Bitbucket webhooks are made by hand, in the repository's settings",
+            ));
+        }
     };
     let (hook, created) = match done {
         Ok(HookDone::Created(hook)) => (hook, true),
@@ -439,7 +471,9 @@ pub async fn make_webhooks(
 /// token nor the secret appears.
 fn hook_refusal(e: &PrError, forge: &Forge, path: &str, token: &str, secret: &str) -> String {
     let status = match e {
-        PrError::GitHub { status, .. } | PrError::GitLab { status, .. } => *status,
+        PrError::GitHub { status, .. }
+        | PrError::GitLab { status, .. }
+        | PrError::Bitbucket { status, .. } => *status,
         _ => 0,
     };
     let said = match status {
@@ -459,9 +493,9 @@ fn hook_refusal(e: &PrError, forge: &Forge, path: &str, token: &str, secret: &st
 /// What a forge's refusal means, said plainly; `secret` never appears.
 fn refusal(e: &PrError, what: &str, secret: &str) -> String {
     let (status, message) = match e {
-        PrError::GitHub { status, message } | PrError::GitLab { status, message } => {
-            (*status, message.as_str())
-        }
+        PrError::GitHub { status, message }
+        | PrError::GitLab { status, message }
+        | PrError::Bitbucket { status, message } => (*status, message.as_str()),
         _ => (0, ""),
     };
     let said = match status {
@@ -490,6 +524,10 @@ async fn access(
             GitHub::new(api, owner, name, token)?.access().await
         }
         ForkPlatform::GitLab => GitLab::new(api, path, token)?.access().await,
+        ForkPlatform::Bitbucket => {
+            let (workspace, name) = path.split_once('/').unwrap_or((path, ""));
+            Bitbucket::new(api, workspace, name, token)?.access().await
+        }
     }
 }
 
@@ -498,6 +536,7 @@ fn upstream_path(platform: ForkPlatform, url: &str) -> Option<String> {
     match platform {
         ForkPlatform::GitHub => owner_and_name(url).map(|(o, n)| format!("{o}/{n}")),
         ForkPlatform::GitLab => project_path(url).map(str::to_owned),
+        ForkPlatform::Bitbucket => owner_and_name(url).map(|(o, n)| format!("{o}/{n}")),
     }
 }
 
@@ -586,6 +625,7 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
     let api = match fork.platform {
         ForkPlatform::GitHub => admin.github_api.as_str(),
         ForkPlatform::GitLab => admin.gitlab_api.as_str(),
+        ForkPlatform::Bitbucket => admin.bitbucket_api.as_str(),
     };
     let Some(path) = upstream_path(fork.platform, &repo.url) else {
         rows.push(skip(COMMENT, "the repo's URL names no repository"));
@@ -613,7 +653,9 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
             rows.push(fail(URL, why));
         }
         Ok(a) => {
-            rows.push(if !a.issues_enabled {
+            // Bitbucket's token comments on PRs, never on issues (#634).
+            let issues = a.issues_enabled || fork.platform == ForkPlatform::Bitbucket;
+            rows.push(if !issues {
                 fail(COMMENT, format!("`{}` has its issues turned off", a.path))
             } else if !a.comment {
                 fail(

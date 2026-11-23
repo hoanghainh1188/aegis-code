@@ -104,6 +104,24 @@ impl Remote {
         })
     }
 
+    /// `https://<host>/<workspace>/<repo>.git` on Bitbucket Cloud (#634),
+    /// pushed with `token`.
+    pub fn bitbucket(
+        host: &str,
+        workspace: &str,
+        repo: &str,
+        token: &str,
+    ) -> Result<Self, PrError> {
+        if !plain_host(host) || !plain_name(workspace) || !plain_name(repo) {
+            return Err(PrError::InvalidRemote(format!("{host}/{workspace}/{repo}")));
+        }
+        Ok(Self {
+            url: format!("https://{host}/{workspace}/{repo}.git"),
+            token: Some(token.to_owned()),
+            user: BITBUCKET_USER,
+        })
+    }
+
     /// A bare repo on this machine; no token is sent.
     pub fn local(path: &Path) -> Result<Self, PrError> {
         let path = path
@@ -139,8 +157,12 @@ pub const GITHUB_USER: &str = "x-access-token";
 /// The user GitLab takes with a personal, project or group access token
 /// over HTTPS (#252).
 pub const GITLAB_USER: &str = "oauth2";
+/// The user Bitbucket Cloud takes with a repository, project or workspace
+/// access token over HTTPS (#634).
+pub const BITBUCKET_USER: &str = "x-token-auth";
 
-/// [`token_env`] for `user`: [`GITHUB_USER`] or [`GITLAB_USER`].
+/// [`token_env`] for `user`: [`GITHUB_USER`], [`GITLAB_USER`] or
+/// [`BITBUCKET_USER`].
 pub fn token_env_as(user: &str, token: &str) -> [(&'static str, String); 5] {
     let basic = base64(format!("{user}:{token}").as_bytes());
     [

@@ -7,8 +7,8 @@ use aegis_gate::GateReport;
 use aegis_lang::{CoverageFormat, RepoProfiles};
 use aegis_ledger::{InputFlag, IssueLedger, LedgerStore, Tier};
 use aegis_pr::{
-    CommitInput, Cost, Forge, GitHub, GitLab, Identity, InputFlagNote, PrContent, Remote,
-    TokenSource, abandon, cobertura_lines, cobertura_percent, lcov_lines, lcov_percent,
+    Bitbucket, CommitInput, Cost, Forge, GitHub, GitLab, Identity, InputFlagNote, PrContent,
+    Remote, TokenSource, abandon, cobertura_lines, cobertura_percent, lcov_lines, lcov_percent,
     push_eval_base, push_gated, push_gated_onto, render, write_commit_message,
 };
 use aegis_provider::ModelProvider;
@@ -208,9 +208,9 @@ where
     }
 }
 
-/// The fork's forge: a GitHub repository or a GitLab project (#252),
-/// reached with tokens from `source`: a GitLab project only with a fixed
-/// token, a GitHub repo with either.
+/// The fork's forge: a GitHub repository, a GitLab project (#252) or a
+/// Bitbucket Cloud repository (#634), reached with tokens from `source`:
+/// a GitHub repo with either, the others only with a fixed token.
 pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, LifecycleError> {
     Ok(match (fork.platform, source) {
         (ForkPlatform::GitHub, _) => Forge::GitHub(GitHub::with_source(
@@ -222,9 +222,12 @@ pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, L
         (ForkPlatform::GitLab, TokenSource::Static(token)) => {
             Forge::GitLab(GitLab::new(&fork.api, &fork.path(), token)?)
         }
-        (ForkPlatform::GitLab, TokenSource::App { .. }) => {
+        (ForkPlatform::Bitbucket, TokenSource::Static(token)) => {
+            Forge::Bitbucket(Bitbucket::new(&fork.api, &fork.owner, &fork.name, token)?)
+        }
+        (ForkPlatform::GitLab | ForkPlatform::Bitbucket, TokenSource::App { .. }) => {
             return Err(LifecycleError::Config(
-                "the GitHub App does not reach a GitLab project".into(),
+                "the GitHub App reaches GitHub repos only".into(),
             ));
         }
     })

@@ -15,8 +15,14 @@
 //!   and `Note Hook` with a line `/aegis fix` on the agent's MR (#254), from
 //!   a Developer or above of the repo's project (asked of GitLab with
 //!   `AEGIS_GITLAB_COMMENT_TOKEN`).
+//! - `POST /webhooks/bitbucket` (#634): `X-Hub-Signature` with the secret
+//!   `AEGIS_BITBUCKET_WEBHOOK_SECRET` (HMAC-SHA256, as GitHub's); events
+//!   `pullrequest:comment_created` (a line `/aegis fix`) and
+//!   `pullrequest:changes_request_created` on the agent's PR, from people
+//!   who can write to the repo (asked of Bitbucket with
+//!   `AEGIS_BITBUCKET_COMMENT_TOKEN`), and `pullrequest:fulfilled`.
 //!
-//! Both from the server's secret store (#30), as they are at the time of
+//! All from the server's secret store (#30), as they are at the time of
 //! the delivery: a rotated secret is used once read, and a delivery that
 //! does not verify makes the store read it again (at most every 30 s). An
 //! endpoint whose secret is not in the store answers 404. The label is
@@ -61,14 +67,15 @@ use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
 pub use notify::{
-    COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
-    GitLabNotifier, comment_with, on_app_path, plain_comment_with, plain_status_comment,
-    status_comment,
+    BITBUCKET_API_ENV, BITBUCKET_COMMENT_TOKEN_ENV, BitbucketNotifier, COMMENT_TOKEN_ENV,
+    GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier, GitLabNotifier,
+    comment_with, on_app_path, plain_comment_with, plain_status_comment, status_comment,
 };
 pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
 pub const GITLAB_TOKEN_ENV: &str = "AEGIS_GITLAB_WEBHOOK_TOKEN";
+pub const BITBUCKET_SECRET_ENV: &str = "AEGIS_BITBUCKET_WEBHOOK_SECRET";
 pub const LABEL_ENV: &str = "AEGIS_WEBHOOK_LABEL";
 pub const MAX_BODY_ENV: &str = "AEGIS_WEBHOOK_MAX_BODY_BYTES";
 /// GitHub sends up to 25 MB, but an issue body is at most 65,536
@@ -92,6 +99,8 @@ pub struct WebhookConfig {
     pub notifier: Option<GitHubNotifier>,
     /// …on GitLab (#168).
     pub gitlab_notifier: Option<GitLabNotifier>,
+    /// …and asks Bitbucket Cloud who may ask for a review round (#634).
+    pub bitbucket_notifier: Option<BitbucketNotifier>,
     /// The largest body read from a delivery; beyond, 413.
     pub max_body_bytes: usize,
     /// The modes' configurations, for the Light model that extracts a
@@ -138,6 +147,7 @@ impl WebhookConfig {
         Self {
             notifier: Some(GitHubNotifier::from_env(secrets.clone())),
             gitlab_notifier: Some(GitLabNotifier::from_env(secrets.clone())),
+            bitbucket_notifier: Some(BitbucketNotifier::from_env(secrets.clone())),
             secrets,
             label: std::env::var(LABEL_ENV)
                 .ok()
@@ -222,9 +232,9 @@ struct Hooks {
     locales: crate::locale::Locales,
 }
 
-/// The endpoints, under `/github` and `/gitlab`; nested at `/webhooks` by
-/// [`crate::api::router`], whose timeout they keep. The body limit is
-/// theirs, [`WebhookConfig::max_body_bytes`].
+/// The endpoints, under `/github`, `/gitlab` and `/bitbucket`; nested at
+/// `/webhooks` by [`crate::api::router`], whose timeout they keep. The
+/// body limit is theirs, [`WebhookConfig::max_body_bytes`].
 pub fn router(store: Store, config: WebhookConfig) -> Router {
     let limit = Arc::new(RateLimit::new(config.burst, config.per_minute));
     // Comments in each repo's language (#589), the server's default from
@@ -250,6 +260,7 @@ pub fn router(store: Store, config: WebhookConfig) -> Router {
     Router::new()
         .route("/github", post(github))
         .route("/gitlab", post(gitlab))
+        .route("/bitbucket", post(bitbucket))
         .with_state(Hooks {
             store,
             config: Arc::new(config),
@@ -475,6 +486,43 @@ async fn gitlab(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> R
     let handled = deliver(&hooks, WebhookSource::Gitlab, None, id, event, wanted).await;
     handled
         .log(&hooks, WebhookSource::Gitlab, id, event, &body)
+        .await
+}
+
+async fn bitbucket(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> Response {
+    let body = match read(&hooks, &headers, body, "x-request-uuid").await {
+        Ok(body) => body,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let signature = header(&headers, "x-hub-signature");
+    let admitted = admit(
+        &hooks,
+        WebhookSource::Bitbucket,
+        &[(BITBUCKET_SECRET_ENV, ())],
+        |s| verify::github(s.expose().as_bytes(), &body, signature),
+        &headers,
+        "x-request-uuid",
+        "x-event-key",
+    )
+    .await;
+    let (id, event, ()) = match admitted {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let handled = if event == "diagnostics:ping" {
+        // Sent by Bitbucket's "Test connection": the way is open.
+        Handled::new(
+            answer(StatusCode::OK, json!({ "status": "pong" })),
+            WebhookOutcome::Ping,
+            None,
+            None,
+        )
+    } else {
+        let wanted = events::bitbucket(event, &body);
+        deliver(&hooks, WebhookSource::Bitbucket, None, id, event, wanted).await
+    };
+    handled
+        .log(&hooks, WebhookSource::Bitbucket, id, event, &body)
         .await
 }
 
@@ -742,6 +790,10 @@ async fn deliver(
         (Kind::Issue { .. }, WebhookSource::Backlog) => JobSource::Backlog,
         (Kind::Issue { .. }, WebhookSource::Jsm) => JobSource::Jsm,
         (Kind::Issue { .. }, WebhookSource::Servicenow) => JobSource::Servicenow,
+        // Bitbucket deliveries ask for review rounds only (#634).
+        (Kind::Issue { .. }, WebhookSource::Bitbucket) => {
+            return ignored_in(delivery, "Bitbucket issues make no jobs", Some(repo.id));
+        }
         (Kind::ReviewRound { .. } | Kind::PrMerged { .. }, _) => unreachable!("handled above"),
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
@@ -1011,7 +1063,20 @@ async fn review_round(
             };
             notifier.can_develop(project, user_id).await
         }
-        _ => {
+        WebhookSource::Bitbucket => {
+            let Some(notifier) = hooks.config.bitbucket_notifier.as_ref() else {
+                return ignored(delivery, "no Bitbucket client to check the sender's rights");
+            };
+            let Some((workspace, name)) = owner_and_name(&repo.url) else {
+                return ignored(delivery, "the repository's URL names no workspace and name");
+            };
+            notifier.can_write(workspace, name, sender).await
+        }
+        WebhookSource::Github
+        | WebhookSource::Jira
+        | WebhookSource::Backlog
+        | WebhookSource::Jsm
+        | WebhookSource::Servicenow => {
             let Some(notifier) = hooks.config.notifier.as_ref() else {
                 return ignored(delivery, "no GitHub client to check the sender's rights");
             };
@@ -1051,14 +1116,31 @@ async fn review_round(
             aegis_pr::REPLY_MARKER,
             (locale.strings().review_refused)(&aegis_pr::inert(&why))
         );
-        // `group/project!iid` on GitLab, `owner/repo#n` on GitHub.
-        match (source, issue_ref.rsplit_once('!')) {
-            (WebhookSource::Gitlab, Some((project, iid))) => {
-                if let (Some(n), Ok(iid)) = (&hooks.config.gitlab_notifier, iid.parse()) {
+        // `group/project!iid` on GitLab, `owner/repo#n` on GitHub and
+        // `workspace/repo#n` on Bitbucket.
+        match source {
+            WebhookSource::Gitlab => {
+                if let (Some(n), Some((project, Ok(iid)))) = (
+                    &hooks.config.gitlab_notifier,
+                    issue_ref.rsplit_once('!').map(|(p, i)| (p, i.parse())),
+                ) {
                     n.comment_on_merge_request(project, iid, &text).await;
                 }
             }
-            _ => {
+            WebhookSource::Bitbucket => {
+                if let (Some(n), Ok((workspace, name, id))) = (
+                    &hooks.config.bitbucket_notifier,
+                    crate::lifecycle::parse_issue_ref(issue_ref),
+                ) {
+                    n.comment_on_pull_request(&workspace, &name, id, &text)
+                        .await;
+                }
+            }
+            WebhookSource::Github
+            | WebhookSource::Jira
+            | WebhookSource::Backlog
+            | WebhookSource::Jsm
+            | WebhookSource::Servicenow => {
                 if let (Some(n), Ok((owner, name, number))) = (
                     &hooks.config.notifier,
                     crate::lifecycle::parse_issue_ref(issue_ref),

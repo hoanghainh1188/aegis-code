@@ -371,6 +371,7 @@ async fn a_webhook_job_refused_for_the_budget_is_told_on_the_issue() {
             Secrets::fixed([(COMMENT_TOKEN_ENV, "comment-token")]),
         )),
         gitlab_notifier: None,
+        bitbucket_notifier: None,
     };
     let app = router(s.clone(), config);
     let body = json!({

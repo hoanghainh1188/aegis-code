@@ -24,7 +24,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Role;
 use crate::config::GithubAppSection;
-use crate::webhook::{GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV};
+use crate::webhook::{
+    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_SECRET_ENV, GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV,
+};
 
 pub const DATABASE_URL: &str = "AEGIS_DATABASE_URL";
 pub const JAPAN_REGION: &str = "ap-northeast-1";
@@ -126,7 +128,8 @@ pub fn section(section: Option<&SecretsSection>) -> Result<&SecretsSection, Stri
 
 /// What the process cannot start without, read now: the database URL;
 /// with the API, also the webhook secrets, which may be absent (their
-/// endpoints stay closed): the repo webhooks', GitLab's and, with
+/// endpoints stay closed): the repo webhooks', GitLab's, Bitbucket's
+/// with the token that checks its senders (#634) and, with
 /// `[github_app]`, the app's (#554). The webhooks only check a secret the
 /// store has read. A mode's API key is checked by
 /// [`crate::lifecycle::LifecycleRunner::new`].
@@ -141,10 +144,13 @@ pub async fn load_at_start(
         .map_err(|e| e.to_string())?;
     if role.serves_api() {
         let app_secret = app.map(|a| a.webhook_secret_env.as_str());
-        for name in [GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV]
-            .into_iter()
-            .chain(app_secret)
-        {
+        let webhooks = [
+            GITHUB_SECRET_ENV,
+            GITLAB_TOKEN_ENV,
+            BITBUCKET_SECRET_ENV,
+            BITBUCKET_COMMENT_TOKEN_ENV,
+        ];
+        for name in webhooks.into_iter().chain(app_secret) {
             secrets.load(name).await.map_err(|e| e.to_string())?;
         }
     }

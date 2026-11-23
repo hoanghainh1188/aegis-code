@@ -170,13 +170,16 @@ pub fn check_sources(tree: &Path, base: &str, answer: &FinalAnswer) -> SourceChe
 
 /// The forge's web root from its API root: `https://api.github.com` is
 /// `https://github.com`; GitHub Enterprise drops `/api/v3`, GitLab
-/// `/api/v4`. `None` for anything else.
+/// `/api/v4`; Bitbucket Cloud's is `https://bitbucket.org`. `None` for
+/// anything else.
 fn web_root(fork: &ForkConfig) -> Option<String> {
     let api = fork.api.trim_end_matches('/');
     let root = match fork.platform {
         ForkPlatform::GitHub if api == "https://api.github.com" => "https://github.com",
         ForkPlatform::GitHub => api.strip_suffix("/api/v3")?,
         ForkPlatform::GitLab => api.strip_suffix("/api/v4")?,
+        ForkPlatform::Bitbucket if api == aegis_pr::BITBUCKET_API => "https://bitbucket.org",
+        ForkPlatform::Bitbucket => return None,
     };
     root.starts_with("https://").then(|| root.to_owned())
 }
@@ -200,9 +203,12 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
     let blob = match fork.platform {
         ForkPlatform::GitHub => "blob",
         ForkPlatform::GitLab => "-/blob",
+        ForkPlatform::Bitbucket => "src",
     };
     let anchor = match (fork.platform, cited.lines) {
         (_, None) => String::new(),
+        (ForkPlatform::Bitbucket, Some((a, b))) if a == b => format!("#lines-{a}"),
+        (ForkPlatform::Bitbucket, Some((a, b))) => format!("#lines-{a}:{b}"),
         (_, Some((a, b))) if a == b => format!("#L{a}"),
         (ForkPlatform::GitHub, Some((a, b))) => format!("#L{a}-L{b}"),
         (ForkPlatform::GitLab, Some((a, b))) => format!("#L{a}-{b}"),
@@ -245,6 +251,15 @@ mod tests {
         assert_eq!(
             line_url(&gl, "abc123", "a.py:4-6").as_deref(),
             Some("https://gitlab.com/aegis-bot/cart/-/blob/abc123/a.py#L4-6")
+        );
+        let bb = fork(ForkPlatform::Bitbucket, aegis_pr::BITBUCKET_API);
+        assert_eq!(
+            line_url(&bb, "abc123", "a.py:4-6").as_deref(),
+            Some("https://bitbucket.org/aegis-bot/cart/src/abc123/a.py#lines-4:6")
+        );
+        assert_eq!(
+            line_url(&bb, "abc123", "a.py:4").as_deref(),
+            Some("https://bitbucket.org/aegis-bot/cart/src/abc123/a.py#lines-4")
         );
         assert_eq!(line_url(&gh, "abc123", "dir with space/a.py:1"), None);
         assert_eq!(line_url(&gh, "not-a-sha", "a.py:1"), None);
