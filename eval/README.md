@@ -59,6 +59,14 @@ After Step 7 verification, **20 issues** were incorporated:
 
 Total benchmark comprises **52 issues**: 18 typst, 14 scrapy, 5 zod, 5 gin, 5 gson, 5 C#.
 
+### Kotlin (#626)
+
+Same criteria, Kotlin source (`.kt`) and `*Spec.kt` / `*Test.kt` tests; patches touching `build-logic/`, `buildSrc/` or Gradle settings are skipped. Bases before detekt's commit bb8697af9c need a JDK 17 toolchain in `build-logic` and were dropped (the sandbox image ships JDK 21).
+
+- **Kotlin** (`detekt/detekt`): detekt-7333, detekt-7420, detekt-8545, detekt-9721, detekt-9780
+
+Run with `config/detekt.toml`; benchmark total: **57 issues**.
+
 ### Execution via Platform Harness (#259)
 
 Each target repository maintains an isolated configuration mirroring `config/poc.toml`:
@@ -104,7 +112,7 @@ This rule replaces neither option considered for later runs: a reviewer blind to
 | Field | Definition |
 | --- | --- |
 | `id` | `<repo>-<issue-number>`, also used as identifier in ledger and git branch `agent/<id>` |
-| `language` | Language profile (`rust`, `python`, `typescript`, `go`, `java`, `csharp`) for per-ecosystem KPI tracking |
+| `language` | Language profile (`rust`, `python`, `typescript`, `go`, `java`, `csharp`, `kotlin`) for per-ecosystem KPI tracking |
 | `repo`, `issue`, `url`, `title`, `closed_at`, `labels` | Upstream issue metadata |
 | `base_commit` | First parent of the merge commit: repository state immediately preceding the fix |
 | `fix_commit`, `fix_pr` | Human reference patch commit and PR identifier |
@@ -122,6 +130,7 @@ Hidden test commands:
 - Zod (TypeScript): `vitest run <files>...`
 - Gin (Go): `go test -v -run "^(Test1|Test2)$" ./...`
 - Gson (Java): `mvn test -Dtest=TestClass1,TestClass2 -pl <module>`
+- detekt (Kotlin): `gradle --continue :<project>:test --tests <package>.<Class> ...` (hidden test ids are `:<project>:<package>.<Class>`)
 - Polly, NSubstitute, StackExchange.Redis (C#): `dotnet test [--project] <project> --filter "FullyQualifiedName~Ns.Class.|..."`
 
 ---

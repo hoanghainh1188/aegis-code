@@ -10,6 +10,7 @@ candidate, for a person to pick from.
 """
 
 import json
+import re
 import subprocess
 import sys
 
@@ -46,6 +47,8 @@ BLOCKED = (
     "go.mod", "go.sum", "go.work",
     # Java
     "pom.xml", ".mvn/", "mvnw", "gradlew", "build.gradle",
+    # Kotlin / Gradle: settings, version catalog, wrapper, convention plugins
+    "settings.gradle", "gradle.properties", "gradle/", "buildSrc/", "build-logic/",
     # C# / .NET
     ".csproj", ".fsproj", ".vbproj", ".sln", ".slnx", "packages.lock.json",
     "Directory.Build.props", "Directory.Build.targets", "nuget.config", "global.json",
@@ -79,6 +82,13 @@ def is_test(path, language):
             name.endswith(("Test.java", "Tests.java", "TestCase.java"))
             or path.startswith("src/test/") or "/src/test/" in path
         )
+    if language == "kotlin":
+        # Gradle source sets: `src/test`, and `src/<target>Test` in
+        # multiplatform projects (jvmTest, commonTest).
+        return (
+            name.endswith(("Test.kt", "Tests.kt", "Spec.kt"))
+            or re.search(r"(^|/)src/\w*[tT]est/", path) is not None
+        )
     if language == "csharp":
         return (
             name_lower.endswith(("test.cs", "tests.cs"))
@@ -104,6 +114,8 @@ def is_source(path, language):
         return path.endswith(".go")
     if language == "java":
         return path.endswith(".java")
+    if language == "kotlin":
+        return path.endswith(".kt")
     if language == "csharp":
         return path.endswith(".cs")
     if language == "rust":

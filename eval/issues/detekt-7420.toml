@@ -1,0 +1,22 @@
+# CanBeNonNullable false positive
+id = "detekt-7420"
+language = "kotlin"
+repo = "detekt/detekt"
+issue = 7420
+url = "https://github.com/detekt/detekt/issues/7420"
+title = "CanBeNonNullable false positive"
+closed_at = "2026-10-17T19:41:37Z"
+labels = ["rules", "false-positive", "never gets stale"]
+base_commit = "a3d42d98709577c5c72341099dd167dc3bedb960"
+fix_commit = "dd8ea15f4cc6f43609bce7ab82f84d1ed1f5c395"
+fix_pr = 9796
+source_files = ["detekt-rules-style/src/main/kotlin/dev/detekt/rules/style/CanBeNonNullable.kt"]
+test_files = ["detekt-rules-style/src/test/kotlin/dev/detekt/rules/style/CanBeNonNullableSpec.kt"]
+hidden_tests = [":detekt-rules-style:dev.detekt.rules.style.CanBeNonNullableSpec"]
+body = "## Expected Behavior\r\nThe `Locale` in this code shouldn't be flagged as `CanBeNonNullable`:\r\n\r\n```kotlin\r\nprivate fun setMessageTimestamp(\r\n    messageType: MessageType,\r\n    message: Message,\r\n    locale: Locale?,\r\n  ) {\r\n    if(messageType == MessageType.ChecklistItem) {\r\n      messageTimestamp?.text = \"Marked completed\"\r\n    }\r\n    else {\r\n      val zonedDateTime = message.sentAt\r\n      if(zonedDateTime != null && locale != null) {\r\n        val dateFormatter = DataFormatter.instance.dateTimeFormatter(locale)\r\n        val localDateTime = ZonedDateTime.ofInstant(zonedDateTime.toInstant(), ZoneId.systemDefault())\r\n        messageTimestamp?.text = localDateTime.format(dateFormatter)\r\n      }\r\n    }\r\n  }\r\n```\r\n\r\n## Observed Behavior\r\nIt is flagged\r\n\r\n## Your Environment\r\n* Version of detekt used: 1.23.6\r\n"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-11-23"
+seconds = 44

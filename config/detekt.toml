@@ -1,0 +1,108 @@
+# Kotlin eval set (#626): detekt, same models and budget as poc.toml (ADR 0005).
+
+[provider]
+kind = "claude_api"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Model per tier (design §5.1). Read by aegis-router.
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+# Lifecycle of one issue (#16). Paths are relative to where `aegis` runs.
+[run]
+state_dir = ".workspace/state"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+# Gate steps in docker/<profile> images, --network none (#5); dependencies
+# come from the fetch step behind the egress proxy (#66).
+sandbox = true
+
+[budget]
+max_cost_usd = 4.0
+
+# Codebase-Memory (design §3.2, #185), as in poc.toml.
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+# The repo: a clone of the fork, each job gets a worktree.
+[repo]
+path = ".workspace/repos/detekt"
+language = "kotlin"
+base = "main"
+key = "detekt"
+# Hidden tests of eval runs: eval/issues lists detekt's as
+# `:<project>:<package>.<Class>` (scripts/eval/build.py). Gradle's `--tests`
+# applies to the test task before it, and a test task whose filter matches
+# nothing fails, so each class runs in its own project's test task.
+hidden_test = ["sh", "-c", """args=
+for t in "$@"; do args="$args ${t%:*}:test --tests ${t##*:}"; done
+exec gradle --offline --no-configuration-cache -q --continue --max-workers=2 $args""", "sh", "{tests}"]
+conventions = """
+- Each rule set is its own Gradle project (`detekt-rules-style`,
+  `detekt-rules-complexity`, …): a rule in
+  `<project>/src/main/kotlin/dev/detekt/rules/<set>/<Rule>.kt` has its tests
+  in `<project>/src/test/kotlin/dev/detekt/rules/<set>/<Rule>Spec.kt`.
+- Test classes end in `Spec` and use JUnit 5 with AssertJ
+  (`dev.detekt.test.assertj`).
+- Give a reproduction test as `<package>.<Class>` or
+  `<package>.<Class>.<method>`: the gate runs it with `--tests` in every
+  project.
+"""
+
+[repo.overrides]
+# Detekt resolves Kotlin analysis-api artifacts from JetBrains' redirector
+# (settings.gradle.kts), and the Develocity plugin is on the Plugin Portal.
+# services.gradle.org redirects the wrapper's Gradle 9 download to GitHub's
+# release assets (#648).
+fetch_hosts = [
+    "github.com",
+    "release-assets.githubusercontent.com",
+    "redirector.kotlinlang.org",
+    # Where the redirector's intellij-dependencies artifacts are served from.
+    "db2uklzeiyqq6.cloudfront.net",
+    # The included detekt-gradle-plugin build: Android Gradle Plugin API and
+    # Gradle's public API artifacts.
+    "dl.google.com",
+    "repo.gradle.org",
+    "packages.jetbrains.team",
+    "cache-redirector.jetbrains.com",
+    "maven.pkg.jetbrains.space",
+]
+
+# The profile's repro_test runs `test --tests {test}` in every project, and
+# each of detekt's 31 projects without that class fails the build with "No
+# tests found for given includes". Here a test task whose filter matches
+# nothing passes instead. A wrong id then passes with the patch too, and is
+# refused on the base, not by the #235 check.
+# Two workers for every step that builds all projects: with the profile's default, the full suite (32 projects,
+# each test JVM embedding the Kotlin compiler) killed the Gradle daemon in a
+# Docker VM of 8 GB; with two it passes offline in about 5 minutes.
+[repo.overrides.gate]
+lint = ["gradle", "--offline", "--no-configuration-cache", "-q", "--max-workers=2", "testClasses"]
+test = ["gradle", "--offline", "--no-configuration-cache", "-q", "--continue", "--max-workers=2", "test"]
+test_output = "gradle"
+# Off: detekt's merged JaCoCo report (`:code-coverage-report`) depends on its
+# included `detekt-gradle-plugin` build, whose dependencies the profile's
+# fetch does not resolve, and the profile's root-project report does not
+# exist here.
+coverage = false
+repro_test = ["sh", "-c", """printf '%s\\n' 'allprojects { tasks.withType(Test).configureEach { filter.failOnNoMatchingTests = false } }' > /tmp/aegis-repro.gradle
+exec gradle --offline --no-configuration-cache -q --max-workers=2 -I /tmp/aegis-repro.gradle test --tests "$1"""", "sh", "{test}"]
+
+[repo.fork]
+owner = "hoanghainh1188"
+name = "detekt"
+token_env = "GITHUB_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"
