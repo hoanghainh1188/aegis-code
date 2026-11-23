@@ -9,7 +9,7 @@
 //! browser.
 
 use aegis_lifecycle::ForkPlatform;
-use aegis_pr::{Bitbucket, GitHub, GitLab, HookDone, PrError, RepoAccess};
+use aegis_pr::{Bitbucket, BitbucketDataCenter, GitHub, GitLab, HookDone, PrError, RepoAccess};
 use aegis_store::{BadSignatures, Repo, Store};
 use askama::Template;
 use axum::extract::rejection::ExtensionRejection;
@@ -27,8 +27,9 @@ use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::{Access, Auth};
 use crate::repo_cli::RepoFile;
 use crate::webhook::{
-    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_SECRET_ENV, COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV,
-    GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV, owner_and_name, project_path,
+    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_COMMENT_TOKEN_ENV, BITBUCKET_DC_SECRET_ENV,
+    BITBUCKET_SECRET_ENV, COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV,
+    GITLAB_TOKEN_ENV, owner_and_name, project_path,
 };
 
 /// The webhooks shown on the page.
@@ -104,11 +105,29 @@ const BITBUCKET: Forge = Forge {
     hook_right: "the admin role on the repository",
 };
 
+/// Bitbucket Data Center (#635): as Bitbucket Cloud, under its own
+/// endpoint and secrets.
+const BITBUCKET_DC: Forge = Forge {
+    name: "bitbucket-dc",
+    webhook_secret: BITBUCKET_DC_SECRET_ENV,
+    comment_token: BITBUCKET_DC_COMMENT_TOKEN_ENV,
+    repo_events: &[],
+    fork_events: &[
+        "Pull request: Comment added",
+        "Pull request: Reviewer needs work",
+        "Pull request: Merged",
+    ],
+    repo_hook_events: &[],
+    fork_hook_events: &["pr:comment:added", "pr:reviewer:needs_work", "pr:merged"],
+    hook_right: "the admin permission on the repository",
+};
+
 fn forge_of(platform: ForkPlatform) -> &'static Forge {
     match platform {
         ForkPlatform::GitHub => &GITHUB,
         ForkPlatform::GitLab => &GITLAB,
         ForkPlatform::Bitbucket => &BITBUCKET,
+        ForkPlatform::BitbucketDataCenter => &BITBUCKET_DC,
     }
 }
 
@@ -392,7 +411,7 @@ pub async fn make_webhooks(
     let api = match fork.platform {
         ForkPlatform::GitHub => admin.github_api.clone(),
         ForkPlatform::GitLab => admin.gitlab_api.clone(),
-        ForkPlatform::Bitbucket => {
+        ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter => {
             return Err(bad(
                 "Bitbucket webhooks are made by hand, in the repository's settings",
             ));
@@ -444,7 +463,7 @@ pub async fn make_webhooks(
             Ok(gl) => gl.ensure_hook(&url, &secret, events).await,
             Err(e) => Err(e),
         },
-        ForkPlatform::Bitbucket => {
+        ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter => {
             return Err(bad(
                 "Bitbucket webhooks are made by hand, in the repository's settings",
             ));
@@ -528,6 +547,12 @@ async fn access(
             let (workspace, name) = path.split_once('/').unwrap_or((path, ""));
             Bitbucket::new(api, workspace, name, token)?.access().await
         }
+        ForkPlatform::BitbucketDataCenter => {
+            let (project, name) = path.split_once('/').unwrap_or((path, ""));
+            BitbucketDataCenter::new(api, project, name, token)?
+                .access()
+                .await
+        }
     }
 }
 
@@ -537,6 +562,10 @@ fn upstream_path(platform: ForkPlatform, url: &str) -> Option<String> {
         ForkPlatform::GitHub => owner_and_name(url).map(|(o, n)| format!("{o}/{n}")),
         ForkPlatform::GitLab => project_path(url).map(str::to_owned),
         ForkPlatform::Bitbucket => owner_and_name(url).map(|(o, n)| format!("{o}/{n}")),
+        // `https://<host>/scm/<key>/<slug>.git`.
+        ForkPlatform::BitbucketDataCenter => {
+            owner_and_name(url).map(|(key, slug)| format!("{}/{slug}", key.to_ascii_uppercase()))
+        }
     }
 }
 
@@ -626,7 +655,19 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
         ForkPlatform::GitHub => admin.github_api.as_str(),
         ForkPlatform::GitLab => admin.gitlab_api.as_str(),
         ForkPlatform::Bitbucket => admin.bitbucket_api.as_str(),
+        ForkPlatform::BitbucketDataCenter => admin.bitbucket_dc_api.as_str(),
     };
+    if api.is_empty() {
+        rows.push(skip(
+            COMMENT,
+            format!(
+                "set `{}` to ask the forge",
+                crate::webhook::BITBUCKET_DC_API_ENV
+            ),
+        ));
+        rows.push(skip(URL, "the instance's API root is not set"));
+        return rows;
+    }
     let Some(path) = upstream_path(fork.platform, &repo.url) else {
         rows.push(skip(COMMENT, "the repo's URL names no repository"));
         rows.push(fail(
@@ -654,7 +695,11 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
         }
         Ok(a) => {
             // Bitbucket's token comments on PRs, never on issues (#634).
-            let issues = a.issues_enabled || fork.platform == ForkPlatform::Bitbucket;
+            let issues = a.issues_enabled
+                || matches!(
+                    fork.platform,
+                    ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter
+                );
             rows.push(if !issues {
                 fail(COMMENT, format!("`{}` has its issues turned off", a.path))
             } else if !a.comment {

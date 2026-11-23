@@ -572,6 +572,24 @@ impl LifecycleRunner {
                 }
                 ReviewRound::from_gitlab(&fork.api, project, iid, token).await
             }
+            // `KEY/slug#id` (#635).
+            ForkPlatform::BitbucketDataCenter => {
+                let (project, repo, id) =
+                    parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+                if !(project.eq_ignore_ascii_case(&fork.owner)
+                    && repo.eq_ignore_ascii_case(&fork.name))
+                {
+                    return Err(not_the_forks());
+                }
+                ReviewRound::from_bitbucket_data_center(
+                    &fork.api,
+                    &fork.owner,
+                    &fork.name,
+                    id,
+                    token,
+                )
+                .await
+            }
             // `workspace/repo#id` (#634).
             ForkPlatform::Bitbucket => {
                 let (workspace, repo, id) =
@@ -737,6 +755,7 @@ fn git_user(fork: &aegis_lifecycle::ForkConfig) -> &'static str {
         ForkPlatform::GitHub => aegis_pr::GITHUB_USER,
         ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
         ForkPlatform::Bitbucket => aegis_pr::BITBUCKET_USER,
+        ForkPlatform::BitbucketDataCenter => aegis_pr::BEARER_USER,
     }
 }
 

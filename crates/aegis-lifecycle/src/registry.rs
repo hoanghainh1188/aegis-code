@@ -820,6 +820,7 @@ fn auth(platform: crate::ForkPlatform, token: Option<&str>) -> Option<(&'static 
         crate::ForkPlatform::GitHub => aegis_pr::GITHUB_USER,
         crate::ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
         crate::ForkPlatform::Bitbucket => aegis_pr::BITBUCKET_USER,
+        crate::ForkPlatform::BitbucketDataCenter => aegis_pr::BEARER_USER,
     };
     token.map(|t| (user, t))
 }

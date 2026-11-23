@@ -122,6 +122,34 @@ impl Remote {
         })
     }
 
+    /// `<root>/scm/<project>/<repo>.git` on Bitbucket Data Center (#635),
+    /// `root` its web root (`https://<host>[/<context>]`), pushed with
+    /// `token` as a bearer token.
+    pub fn bitbucket_data_center(
+        root: &str,
+        project: &str,
+        repo: &str,
+        token: &str,
+    ) -> Result<Self, PrError> {
+        let refused = || PrError::InvalidRemote(format!("{root}/scm/{project}/{repo}"));
+        let rest = root.strip_prefix("https://").ok_or_else(refused)?;
+        let mut parts = rest.split('/');
+        let host = parts.next().unwrap_or_default();
+        let context: Vec<&str> = parts.collect();
+        if !plain_host(host)
+            || !context.iter().all(|p| plain_name(p))
+            || !plain_name(project)
+            || !plain_name(repo)
+        {
+            return Err(refused());
+        }
+        Ok(Self {
+            url: format!("{root}/scm/{project}/{repo}.git"),
+            token: Some(token.to_owned()),
+            user: BEARER_USER,
+        })
+    }
+
     /// A bare repo on this machine; no token is sent.
     pub fn local(path: &Path) -> Result<Self, PrError> {
         let path = path
@@ -161,17 +189,24 @@ pub const GITLAB_USER: &str = "oauth2";
 /// access token over HTTPS (#634).
 pub const BITBUCKET_USER: &str = "x-token-auth";
 
+/// Not a user: Bitbucket Data Center takes an HTTP access token as a
+/// bearer token, from git too (#635). No user name can be it.
+pub const BEARER_USER: &str = "<bearer>";
+
 /// [`token_env`] for `user`: [`GITHUB_USER`], [`GITLAB_USER`] or
-/// [`BITBUCKET_USER`].
+/// [`BITBUCKET_USER`], sent with the token as Basic auth; for
+/// [`BEARER_USER`], the token alone as a bearer token.
 pub fn token_env_as(user: &str, token: &str) -> [(&'static str, String); 5] {
-    let basic = base64(format!("{user}:{token}").as_bytes());
+    let header = if user == BEARER_USER {
+        format!("Authorization: Bearer {token}")
+    } else {
+        let basic = base64(format!("{user}:{token}").as_bytes());
+        format!("Authorization: Basic {basic}")
+    };
     [
         ("GIT_CONFIG_COUNT", "2".into()),
         ("GIT_CONFIG_KEY_0", "http.extraHeader".into()),
-        (
-            "GIT_CONFIG_VALUE_0",
-            format!("Authorization: Basic {basic}"),
-        ),
+        ("GIT_CONFIG_VALUE_0", header),
         ("GIT_CONFIG_KEY_1", "credential.helper".into()),
         ("GIT_CONFIG_VALUE_1", String::new()),
     ]
@@ -423,6 +458,30 @@ mod tests {
                 .unwrap()
                 .credentials(),
             Some(("x-access-token", "t"))
+        );
+    }
+
+    #[test]
+    fn a_data_center_remote_is_under_scm_and_sends_a_bearer_token() {
+        for root in ["https://git.acme.example", "https://acme.example/bitbucket"] {
+            let r = Remote::bitbucket_data_center(root, "PAY", "cart", "t").unwrap();
+            assert_eq!(r.url(), format!("{root}/scm/PAY/cart.git"));
+            assert_eq!(r.credentials(), Some((BEARER_USER, "t")));
+        }
+        for (root, project) in [
+            ("http://git.acme.example", "PAY"),
+            ("https://git.acme.example/../x", "PAY"),
+            ("https://git.acme.example", "~me"),
+            ("https://evil.com/a b", "PAY"),
+        ] {
+            assert!(
+                Remote::bitbucket_data_center(root, project, "cart", "t").is_err(),
+                "{root} {project}"
+            );
+        }
+        assert_eq!(
+            token_env_as(BEARER_USER, "t")[2].1,
+            "Authorization: Bearer t"
         );
     }
 

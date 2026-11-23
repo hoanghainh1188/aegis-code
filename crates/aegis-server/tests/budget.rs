@@ -372,6 +372,7 @@ async fn a_webhook_job_refused_for_the_budget_is_told_on_the_issue() {
         )),
         gitlab_notifier: None,
         bitbucket_notifier: None,
+        bitbucket_dc_notifier: None,
     };
     let app = router(s.clone(), config);
     let body = json!({

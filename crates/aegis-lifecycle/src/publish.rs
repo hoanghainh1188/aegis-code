@@ -209,7 +209,8 @@ where
 }
 
 /// The fork's forge: a GitHub repository, a GitLab project (#252) or a
-/// Bitbucket Cloud repository (#634), reached with tokens from `source`:
+/// Bitbucket Cloud (#634) or Data Center (#635) repository, reached with
+/// tokens from `source`:
 /// a GitHub repo with either, the others only with a fixed token.
 pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, LifecycleError> {
     Ok(match (fork.platform, source) {
@@ -225,7 +226,18 @@ pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, L
         (ForkPlatform::Bitbucket, TokenSource::Static(token)) => {
             Forge::Bitbucket(Bitbucket::new(&fork.api, &fork.owner, &fork.name, token)?)
         }
-        (ForkPlatform::GitLab | ForkPlatform::Bitbucket, TokenSource::App { .. }) => {
+        (ForkPlatform::BitbucketDataCenter, TokenSource::Static(token)) => {
+            Forge::BitbucketDataCenter(aegis_pr::BitbucketDataCenter::new(
+                &fork.api,
+                &fork.owner,
+                &fork.name,
+                token,
+            )?)
+        }
+        (
+            ForkPlatform::GitLab | ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter,
+            TokenSource::App { .. },
+        ) => {
             return Err(LifecycleError::Config(
                 "the GitHub App reaches GitHub repos only".into(),
             ));

@@ -21,6 +21,12 @@
 //!   `pullrequest:changes_request_created` on the agent's PR, from people
 //!   who can write to the repo (asked of Bitbucket with
 //!   `AEGIS_BITBUCKET_COMMENT_TOKEN`), and `pullrequest:fulfilled`.
+//! - `POST /webhooks/bitbucket-dc` (#635): Bitbucket Data Center's,
+//!   `X-Hub-Signature` with `AEGIS_BITBUCKET_DC_WEBHOOK_SECRET`; events
+//!   `pr:comment:added` (a line `/aegis fix`) and `pr:reviewer:needs_work`
+//!   on the agent's PR, from people who can write to the repo (asked of
+//!   `AEGIS_BITBUCKET_DC_API` with `AEGIS_BITBUCKET_DC_COMMENT_TOKEN`), and
+//!   `pr:merged`.
 //!
 //! All from the server's secret store (#30), as they are at the time of
 //! the delivery: a rotated secret is used once read, and a delivery that
@@ -67,15 +73,18 @@ use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
 pub use notify::{
-    BITBUCKET_API_ENV, BITBUCKET_COMMENT_TOKEN_ENV, BitbucketNotifier, COMMENT_TOKEN_ENV,
-    GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier, GitLabNotifier,
-    comment_with, on_app_path, plain_comment_with, plain_status_comment, status_comment,
+    BITBUCKET_API_ENV, BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_API_ENV,
+    BITBUCKET_DC_COMMENT_TOKEN_ENV, BitbucketDataCenterNotifier, BitbucketNotifier,
+    COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
+    GitLabNotifier, comment_with, on_app_path, plain_comment_with, plain_status_comment,
+    status_comment,
 };
 pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 
 pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
 pub const GITLAB_TOKEN_ENV: &str = "AEGIS_GITLAB_WEBHOOK_TOKEN";
 pub const BITBUCKET_SECRET_ENV: &str = "AEGIS_BITBUCKET_WEBHOOK_SECRET";
+pub const BITBUCKET_DC_SECRET_ENV: &str = "AEGIS_BITBUCKET_DC_WEBHOOK_SECRET";
 pub const LABEL_ENV: &str = "AEGIS_WEBHOOK_LABEL";
 pub const MAX_BODY_ENV: &str = "AEGIS_WEBHOOK_MAX_BODY_BYTES";
 /// GitHub sends up to 25 MB, but an issue body is at most 65,536
@@ -101,6 +110,8 @@ pub struct WebhookConfig {
     pub gitlab_notifier: Option<GitLabNotifier>,
     /// …and asks Bitbucket Cloud who may ask for a review round (#634).
     pub bitbucket_notifier: Option<BitbucketNotifier>,
+    /// …and Bitbucket Data Center (#635).
+    pub bitbucket_dc_notifier: Option<BitbucketDataCenterNotifier>,
     /// The largest body read from a delivery; beyond, 413.
     pub max_body_bytes: usize,
     /// The modes' configurations, for the Light model that extracts a
@@ -148,6 +159,7 @@ impl WebhookConfig {
             notifier: Some(GitHubNotifier::from_env(secrets.clone())),
             gitlab_notifier: Some(GitLabNotifier::from_env(secrets.clone())),
             bitbucket_notifier: Some(BitbucketNotifier::from_env(secrets.clone())),
+            bitbucket_dc_notifier: BitbucketDataCenterNotifier::from_env(secrets.clone()),
             secrets,
             label: std::env::var(LABEL_ENV)
                 .ok()
@@ -232,7 +244,8 @@ struct Hooks {
     locales: crate::locale::Locales,
 }
 
-/// The endpoints, under `/github`, `/gitlab` and `/bitbucket`; nested at
+/// The endpoints, under `/github`, `/gitlab`, `/bitbucket` and
+/// `/bitbucket-dc`; nested at
 /// `/webhooks` by [`crate::api::router`], whose timeout they keep. The
 /// body limit is theirs, [`WebhookConfig::max_body_bytes`].
 pub fn router(store: Store, config: WebhookConfig) -> Router {
@@ -261,6 +274,7 @@ pub fn router(store: Store, config: WebhookConfig) -> Router {
         .route("/github", post(github))
         .route("/gitlab", post(gitlab))
         .route("/bitbucket", post(bitbucket))
+        .route("/bitbucket-dc", post(bitbucket_dc))
         .with_state(Hooks {
             store,
             config: Arc::new(config),
@@ -523,6 +537,43 @@ async fn bitbucket(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -
     };
     handled
         .log(&hooks, WebhookSource::Bitbucket, id, event, &body)
+        .await
+}
+
+async fn bitbucket_dc(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> Response {
+    let body = match read(&hooks, &headers, body, "x-request-id").await {
+        Ok(body) => body,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let signature = header(&headers, "x-hub-signature");
+    let admitted = admit(
+        &hooks,
+        WebhookSource::BitbucketDc,
+        &[(BITBUCKET_DC_SECRET_ENV, ())],
+        |s| verify::github(s.expose().as_bytes(), &body, signature),
+        &headers,
+        "x-request-id",
+        "x-event-key",
+    )
+    .await;
+    let (id, event, ()) = match admitted {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let handled = if event == "diagnostics:ping" {
+        // Sent by the webhook's "Test connection": the way is open.
+        Handled::new(
+            answer(StatusCode::OK, json!({ "status": "pong" })),
+            WebhookOutcome::Ping,
+            None,
+            None,
+        )
+    } else {
+        let wanted = events::bitbucket_dc(event, &body);
+        deliver(&hooks, WebhookSource::BitbucketDc, None, id, event, wanted).await
+    };
+    handled
+        .log(&hooks, WebhookSource::BitbucketDc, id, event, &body)
         .await
 }
 
@@ -791,7 +842,7 @@ async fn deliver(
         (Kind::Issue { .. }, WebhookSource::Jsm) => JobSource::Jsm,
         (Kind::Issue { .. }, WebhookSource::Servicenow) => JobSource::Servicenow,
         // Bitbucket deliveries ask for review rounds only (#634).
-        (Kind::Issue { .. }, WebhookSource::Bitbucket) => {
+        (Kind::Issue { .. }, WebhookSource::Bitbucket | WebhookSource::BitbucketDc) => {
             return ignored_in(delivery, "Bitbucket issues make no jobs", Some(repo.id));
         }
         (Kind::ReviewRound { .. } | Kind::PrMerged { .. }, _) => unreachable!("handled above"),
@@ -1072,6 +1123,19 @@ async fn review_round(
             };
             notifier.can_write(workspace, name, sender).await
         }
+        WebhookSource::BitbucketDc => {
+            let Some(notifier) = hooks.config.bitbucket_dc_notifier.as_ref() else {
+                return ignored(
+                    delivery,
+                    "no Bitbucket Data Center client to check the sender's rights",
+                );
+            };
+            // `https://<host>/scm/<key>/<slug>.git`.
+            let Some((project, name)) = owner_and_name(&repo.url) else {
+                return ignored(delivery, "the repository's URL names no project and slug");
+            };
+            notifier.can_write(project, name, sender).await
+        }
         WebhookSource::Github
         | WebhookSource::Jira
         | WebhookSource::Backlog
@@ -1117,7 +1181,7 @@ async fn review_round(
             (locale.strings().review_refused)(&aegis_pr::inert(&why))
         );
         // `group/project!iid` on GitLab, `owner/repo#n` on GitHub and
-        // `workspace/repo#n` on Bitbucket.
+        // `workspace/repo#n` on Bitbucket, `KEY/slug#n` on its Data Center.
         match source {
             WebhookSource::Gitlab => {
                 if let (Some(n), Some((project, Ok(iid)))) = (
@@ -1125,6 +1189,14 @@ async fn review_round(
                     issue_ref.rsplit_once('!').map(|(p, i)| (p, i.parse())),
                 ) {
                     n.comment_on_merge_request(project, iid, &text).await;
+                }
+            }
+            WebhookSource::BitbucketDc => {
+                if let (Some(n), Ok((project, name, id))) = (
+                    &hooks.config.bitbucket_dc_notifier,
+                    crate::lifecycle::parse_issue_ref(issue_ref),
+                ) {
+                    n.comment_on_pull_request(&project, &name, id, &text).await;
                 }
             }
             WebhookSource::Bitbucket => {

@@ -170,8 +170,8 @@ pub fn check_sources(tree: &Path, base: &str, answer: &FinalAnswer) -> SourceChe
 
 /// The forge's web root from its API root: `https://api.github.com` is
 /// `https://github.com`; GitHub Enterprise drops `/api/v3`, GitLab
-/// `/api/v4`; Bitbucket Cloud's is `https://bitbucket.org`. `None` for
-/// anything else.
+/// `/api/v4`, Bitbucket Data Center `/rest/api/1.0`; Bitbucket Cloud's is
+/// `https://bitbucket.org`. `None` for anything else.
 fn web_root(fork: &ForkConfig) -> Option<String> {
     let api = fork.api.trim_end_matches('/');
     let root = match fork.platform {
@@ -180,6 +180,7 @@ fn web_root(fork: &ForkConfig) -> Option<String> {
         ForkPlatform::GitLab => api.strip_suffix("/api/v4")?,
         ForkPlatform::Bitbucket if api == aegis_pr::BITBUCKET_API => "https://bitbucket.org",
         ForkPlatform::Bitbucket => return None,
+        ForkPlatform::BitbucketDataCenter => api.strip_suffix("/rest/api/1.0")?,
     };
     root.starts_with("https://").then(|| root.to_owned())
 }
@@ -200,10 +201,23 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
         return None;
     }
     let root = web_root(fork)?;
+    if fork.platform == ForkPlatform::BitbucketDataCenter {
+        let anchor = match cited.lines {
+            None => String::new(),
+            Some((a, b)) if a == b => format!("#{a}"),
+            Some((a, b)) => format!("#{a}-{b}"),
+        };
+        return Some(format!(
+            "{root}/projects/{}/repos/{}/browse/{}?at={commit}{anchor}",
+            fork.owner, fork.name, cited.path
+        ));
+    }
     let blob = match fork.platform {
         ForkPlatform::GitHub => "blob",
         ForkPlatform::GitLab => "-/blob",
         ForkPlatform::Bitbucket => "src",
+        // Linked above: its page names the commit in the query.
+        ForkPlatform::BitbucketDataCenter => "browse",
     };
     let anchor = match (fork.platform, cited.lines) {
         (_, None) => String::new(),
@@ -211,7 +225,9 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
         (ForkPlatform::Bitbucket, Some((a, b))) => format!("#lines-{a}:{b}"),
         (_, Some((a, b))) if a == b => format!("#L{a}"),
         (ForkPlatform::GitHub, Some((a, b))) => format!("#L{a}-L{b}"),
-        (ForkPlatform::GitLab, Some((a, b))) => format!("#L{a}-{b}"),
+        (ForkPlatform::GitLab | ForkPlatform::BitbucketDataCenter, Some((a, b))) => {
+            format!("#L{a}-{b}")
+        }
     };
     Some(format!(
         "{root}/{}/{blob}/{commit}/{}{anchor}",
@@ -251,6 +267,20 @@ mod tests {
         assert_eq!(
             line_url(&gl, "abc123", "a.py:4-6").as_deref(),
             Some("https://gitlab.com/aegis-bot/cart/-/blob/abc123/a.py#L4-6")
+        );
+        let dc = fork(
+            ForkPlatform::BitbucketDataCenter,
+            "https://git.acme.example/rest/api/1.0",
+        );
+        assert_eq!(
+            line_url(&dc, "abc123", "a.py:4-6").as_deref(),
+            Some(
+                "https://git.acme.example/projects/aegis-bot/repos/cart/browse/a.py?at=abc123#4-6"
+            )
+        );
+        assert_eq!(
+            line_url(&dc, "abc123", "a.py:4").as_deref(),
+            Some("https://git.acme.example/projects/aegis-bot/repos/cart/browse/a.py?at=abc123#4")
         );
         let bb = fork(ForkPlatform::Bitbucket, aegis_pr::BITBUCKET_API);
         assert_eq!(

@@ -375,12 +375,17 @@ pub enum ForkPlatform {
     GitLab,
     /// Bitbucket Cloud (#634).
     Bitbucket,
+    /// Bitbucket Data Center or Server, self-hosted (#635).
+    #[serde(rename = "bitbucket-dc")]
+    BitbucketDataCenter,
 }
 
 /// The fork the agent pushes to and opens PRs in: a GitHub repository, a
 /// GitLab project (`owner` is then its namespace, subgroups included, and
 /// `api` the instance's API root), or a Bitbucket Cloud repository
-/// (`owner` is its workspace, `api` [`aegis_pr::BITBUCKET_API`]).
+/// (`owner` is its workspace, `api` [`aegis_pr::BITBUCKET_API`]), or a
+/// Bitbucket Data Center repository (`owner` is its project key, `name`
+/// its slug, `api` the instance's `…/rest/api/1.0`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForkConfig {
@@ -636,6 +641,15 @@ impl RunConfig {
                 aegis_pr::BITBUCKET_API
             )));
         }
+        if fork.platform == ForkPlatform::BitbucketDataCenter
+            && !fork.api.trim_end_matches('/').ends_with("/rest/api/1.0")
+        {
+            return Err(LifecycleError::Config(
+                "repo.fork.api: a Bitbucket Data Center fork needs its instance's API root \
+                 (`https://<host>/rest/api/1.0`)"
+                    .into(),
+            ));
+        }
         self.repo
             .audit_policy()
             .check_ids()
@@ -863,6 +877,27 @@ test_env = { DATABASE_URL = "postgres://postgres:test@postgres:5432/postgres" }
         )
         .unwrap();
         assert!(matches!(forge, aegis_pr::Forge::Bitbucket(_)));
+    }
+
+    #[test]
+    fn a_data_center_fork_names_its_instances_api_root() {
+        let dc = |api: &str| {
+            RunConfig::from_toml(&POC.replacen(
+                "[repo.fork]",
+                &format!("[repo.fork]\nplatform = \"bitbucket-dc\"{api}"),
+                1,
+            ))
+        };
+        let err = dc("").unwrap_err().to_string();
+        assert!(err.contains("a Bitbucket Data Center fork needs"), "{err}");
+        let cfg = dc("\napi = \"https://git.acme.example/rest/api/1.0\"").unwrap();
+        assert_eq!(cfg.repo.fork.platform, ForkPlatform::BitbucketDataCenter);
+        let forge = crate::publish::fork_forge_of(
+            &cfg.repo.fork,
+            &aegis_pr::TokenSource::Static("t".into()),
+        )
+        .unwrap();
+        assert!(matches!(forge, aegis_pr::Forge::BitbucketDataCenter(_)));
     }
 
     #[test]

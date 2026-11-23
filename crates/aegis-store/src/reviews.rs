@@ -19,8 +19,10 @@ pub const DEFAULT_MAX_REVIEW_ROUNDS: u32 = 3;
 /// `https://<gitlab>/<group/sub/project>/-/merge_requests/<n>` →
 /// `<group/sub/project>!<n>` (#254), and Bitbucket Cloud's
 /// `https://bitbucket.org/<workspace>/<repo>/pull-requests/<n>` →
-/// `<workspace>/<repo>#<n>` (#634): the PR or MR as an issue ref, so it
-/// has one live round at a time.
+/// `<workspace>/<repo>#<n>` (#634), and Bitbucket Data Center's
+/// `https://<host>/projects/<KEY>/repos/<slug>/pull-requests/<n>` →
+/// `<KEY>/<slug>#<n>` (#635): the PR or MR as an issue ref, so it has one
+/// live round at a time.
 pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
     let plain = |s: &str| {
         !s.is_empty()
@@ -40,7 +42,14 @@ pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
         let ok = (2..=21).contains(&parts.len()) && parts.iter().all(|p| plain(p));
         return ok.then(|| format!("{project}!{iid}"));
     }
-    let parts: Vec<&str> = pr_url.trim_end_matches('/').rsplitn(4, '/').collect();
+    let trimmed = pr_url.trim_end_matches('/');
+    let trimmed = trimmed.strip_suffix("/overview").unwrap_or(trimmed);
+    let tail: Vec<&str> = trimmed.rsplitn(7, '/').collect();
+    if let [number, "pull-requests", slug, "repos", key, "projects", _] = tail.as_slice() {
+        let number: u64 = number.parse().ok()?;
+        return (plain(key) && plain(slug)).then(|| format!("{key}/{slug}#{number}"));
+    }
+    let parts: Vec<&str> = trimmed.rsplitn(4, '/').collect();
     let [number, "pull" | "pull-requests", name, rest] = parts.as_slice() else {
         return None;
     };
@@ -243,6 +252,18 @@ mod tests {
                 Some("acme/app#7"),
             ),
             ("https://bitbucket.org/acme/app/pull-requests/x", None),
+            (
+                "https://git.acme.example/projects/PAY/repos/cart/pull-requests/12",
+                Some("PAY/cart#12"),
+            ),
+            (
+                "https://acme.example/bitbucket/projects/PAY/repos/cart/pull-requests/12/overview",
+                Some("PAY/cart#12"),
+            ),
+            (
+                "https://git.acme.example/projects/~me/repos/cart/pull-requests/12",
+                None,
+            ),
             ("https://gitlab.com/app/-/merge_requests/4", None),
             ("https://gitlab.com/acme/app/-/merge_requests/x", None),
             ("https://github.com/acme/typst/issues/12", None),
