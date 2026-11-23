@@ -32,6 +32,7 @@ CLONES = {
 TYPST_HEADER = re.compile(r"^\+--- ([A-Za-z0-9_-]+)")
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
 GO_FUNC = re.compile(r"^func\s+(?:\([^)]*\)\s+)?([A-Za-z_]\w*)\s*[\[(]")
+KT_PACKAGE = re.compile(r"^\s*package\s+([\w.]+)", re.MULTILINE)
 CS_NAMESPACE = re.compile(r"^\s*namespace\s+([\w.]+)", re.MULTILINE)
 
 
@@ -92,6 +93,8 @@ def hidden_tests(item, clone, base):
         return names if names else item["test_files"]
     if lang in ("typescript", "javascript"):
         return item["test_files"]
+    if lang == "kotlin":
+        return kotlin_tests(item, clone)
     if lang == "csharp":
         return csharp_tests(item, clone)
     return item["test_files"]
@@ -124,6 +127,30 @@ def go_tests(item, clone, base):
                 names.append(enclosing[-1])
     if not names:
         sys.exit(f"{item['repo']}#{item['issue']}: the fix changes no Go Test function")
+    return names
+
+
+def kotlin_tests(item, clone):
+    """`:<project>:<package>.<Class>` of each test file, one class per file
+    named like it. Gradle's `--tests` applies to the test task before it, and
+    a test task whose filter matches nothing fails the build, so each class
+    carries the project that holds it (`detekt-rules-style/src/test/...` is
+    `:detekt-rules-style`)."""
+    names = []
+    for path in item["test_files"]:
+        if not path.endswith(".kt"):
+            continue
+        source = git(clone, "show", f"{item['fix_commit']}:{path}")
+        stem = path.rsplit("/", 1)[-1][:-3]
+        if not re.search(rf"\bclass\s+{re.escape(stem)}\b", source):
+            sys.exit(f"{item['repo']}#{item['issue']}: no class {stem} in {path}")
+        package = KT_PACKAGE.search(source)
+        project = ":" + path.split("/src/", 1)[0].replace("/", ":") if "/src/" in path else ""
+        name = f"{project}:{package.group(1) + '.' if package else ''}{stem}"
+        if name not in names:
+            names.append(name)
+    if not names:
+        sys.exit(f"{item['repo']}#{item['issue']}: the fix changes no Kotlin test class")
     return names
 
 

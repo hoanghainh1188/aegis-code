@@ -40,6 +40,8 @@ RAN = {
     "go": re.compile(r"^--- (PASS|FAIL): ", re.MULTILINE),
     "csharp": re.compile(r"\b[Tt]otal(?: tests)?:\s*[1-9]"),
     "java": re.compile(r"Tests run: [1-9]"),
+    # Printed by gradle_tests() below for each test that ran.
+    "kotlin": re.compile(r"^aegis-verify RAN ", re.MULTILINE),
 }
 
 
@@ -93,6 +95,9 @@ def command(item, tree):
         modules = sorted({f.split("/src/test/")[0] for f in item["test_files"] if "/src/test/" in f})
         return ["mvn", "-B", "test", f"-Dtest={test_arg}", "-Dsurefire.failIfNoSpecifiedTests=false",
                 *(["-pl", ",".join(modules)] if modules else [])], env
+    if lang == "kotlin":
+        return ["./gradlew", "--no-configuration-cache", "--no-build-cache", "--continue",
+                "-I", str(GRADLE_INIT), *gradle_tests(item["hidden_tests"])], {**os.environ}
     if lang == "csharp":
         # English output, for RAN.
         env = {**os.environ, "DOTNET_CLI_UI_LANGUAGE": "en"}
@@ -110,6 +115,40 @@ def command(item, tree):
         return ["dotnet", "test", *dotnet_target(item, tree), "--filter", filter_expr, *props,
                 *(["--framework", framework] if framework else [])], env
     raise ValueError(f"unknown language: {lang}")
+
+
+GRADLE_INIT = WORK / "verify.init.gradle"
+GRADLE_INIT_TEXT = """import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestListener
+import org.gradle.api.tasks.testing.TestResult
+
+// A listener, not `afterTest { }`: repos that fail on deprecations (detekt)
+// refuse the closure.
+class AegisVerifyRan implements TestListener {
+    void beforeSuite(TestDescriptor suite) {}
+    void afterSuite(TestDescriptor suite, TestResult result) {}
+    void beforeTest(TestDescriptor test) {}
+    void afterTest(TestDescriptor test, TestResult result) {
+        println "aegis-verify RAN ${test.className}#${test.name} ${result.resultType}"
+    }
+}
+
+allprojects {
+    tasks.withType(Test).configureEach { addTestListener(new AegisVerifyRan()) }
+}
+"""
+
+
+def gradle_tests(hidden):
+    """`:<project>:test --tests <class>` per hidden test, as build.py names
+    them (`:<project>:<package>.<Class>`)."""
+    GRADLE_INIT.parent.mkdir(parents=True, exist_ok=True)
+    GRADLE_INIT.write_text(GRADLE_INIT_TEXT)
+    args = []
+    for name in hidden:
+        project, cls = name.rsplit(":", 1)
+        args += [f"{project}:test", "--tests", cls]
+    return args
 
 
 def dotnet_target(item, tree):

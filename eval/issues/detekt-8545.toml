@@ -1,0 +1,22 @@
+# `CouldBeSequence` false negative when adding operations after `toList()`
+id = "detekt-8545"
+language = "kotlin"
+repo = "detekt/detekt"
+issue = 8545
+url = "https://github.com/detekt/detekt/issues/8545"
+title = "`CouldBeSequence` false negative when adding operations after `toList()`"
+closed_at = "2026-11-07T18:57:53Z"
+labels = ["rules", "false-negative", "never gets stale"]
+base_commit = "ae9990b4b887ddd00f6b98fda4fa42eda700182e"
+fix_commit = "ca1d64eb4b9cb957938f69174aa570b04f9df419"
+fix_pr = 9870
+source_files = ["detekt-rules-standard-library/src/main/kotlin/dev/detekt/rules/standardlibrary/CouldBeSequence.kt"]
+test_files = ["detekt-rules-standard-library/src/test/kotlin/dev/detekt/rules/standardlibrary/CouldBeSequenceSpec.kt"]
+hidden_tests = [":detekt-rules-standard-library:dev.detekt.rules.standardlibrary.CouldBeSequenceSpec"]
+body = "## Expected Behavior\n```kotlin\n            val bar = listOf<String?>(\"bar\")\n                .asSequence()\n                .filterIsInstance<String>()\n                .filterNot { true }\n                .filterNotNull()\n                .take(1)\n                .drop(1)\n                .takeWhile { true }\n                .toList()\n                .takeLast(2)\n                .mapNotNull { it }\n```\n\nShould throw an issue because there is not a good reason to don't move the `toList()` at the end of the chain.\n\n## Observed Behavior\nThis snipped doesn't throw any issue\n\n## Context\nFor more context you can read https://github.com/detekt/detekt/pull/8200#discussion_r2301622748\n\n## Your Environment\n* Version of detekt used: main"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-11-23"
+seconds = 91

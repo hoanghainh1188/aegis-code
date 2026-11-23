@@ -1,0 +1,22 @@
+# False positive MissingUseCall on separated usage.
+id = "detekt-9721"
+language = "kotlin"
+repo = "detekt/detekt"
+issue = 9721
+url = "https://github.com/detekt/detekt/issues/9721"
+title = "False positive MissingUseCall on separated usage."
+closed_at = "2026-10-17T19:37:24Z"
+labels = ["bug", "help wanted"]
+base_commit = "652504049495fe4d35fa3ea62f7b49e2e439a2c2"
+fix_commit = "a3d42d98709577c5c72341099dd167dc3bedb960"
+fix_pr = 9773
+source_files = ["detekt-rules-standard-library/src/main/kotlin/dev/detekt/rules/standardlibrary/MissingUseCall.kt"]
+test_files = ["detekt-rules-standard-library/src/test/kotlin/dev/detekt/rules/standardlibrary/MissingUseCallSpec.kt"]
+hidden_tests = [":detekt-rules-standard-library:dev.detekt.rules.standardlibrary.MissingUseCallSpec"]
+body = "## Steps to Reproduce\n\n```java\npackage org.eclipse.jgit.api;\npublic class Git implements AutoCloseable {}\n```\n```kotlin\ninline fun git(repoDir: File, block: Git.() -> Unit) {\n\tval repo = createGitRepository(repoDir)\n\trepo.use(block)\n}\nfun createGitRepository(repoDir: File): Git = TODO()\n```\n\n## Expected Behavior\nNo finding, `.use` is called.\n\n## Observed Behavior\n\n```\ncreateGitRepository doesn't call `use` to access the `Closeable` [MissingUseCall]\n``` \n\n## Context\n\nThe sole purpose of the `git` function is to do `.use` correctly and hidden away.\n\n`createGitRepository(repoDir).use(block)` resolves the issue, but it hides the variable from being able to be used in debugger for example.\n\n## Your Environment\n<!-- Include as many relevant details about the environment you experienced the bug in -->\n* Version of detekt used: 2.0.0-alpha.6\n* Version of Gradle used (if applicable): N/A\n* Gradle scan link (add `--scan` option when running the gradle task): N/A\n* Operating System and version: N/A\n* Link to your project (if it's a public repository): https://github.com/TWiStErRob/net.twisterrob.gradle/blob/1e8a35e204d86791e3b9dd6c2e4776f34b4eaa34/plugin/versioning/src/testFixtures/kotlin/net/twisterrob/gradle/vcs/git/GitHelpers.kt#L13-L16\n"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-11-23"
+seconds = 36

@@ -1,0 +1,22 @@
+# `RedundantVisibilityModifier` false negative on constructor visibility
+id = "detekt-9780"
+language = "kotlin"
+repo = "detekt/detekt"
+issue = 9780
+url = "https://github.com/detekt/detekt/issues/9780"
+title = "`RedundantVisibilityModifier` false negative on constructor visibility"
+closed_at = "2026-10-16T12:16:06Z"
+labels = ["bug", "help wanted"]
+base_commit = "8c6369716a23880df464969741127acb0c9bf690"
+fix_commit = "7f20a78d2dc0bf172f250b24c18b7a4287daea3b"
+fix_pr = 9789
+source_files = ["detekt-psi-utils/src/main/kotlin/dev/detekt/psi/internal/FullQualifiedNameGuesser.kt", "detekt-rules-style/src/main/kotlin/dev/detekt/rules/style/RedundantVisibilityModifier.kt"]
+test_files = ["detekt-rules-style/src/test/kotlin/dev/detekt/rules/style/RedundantVisibilityModifierSpec.kt"]
+hidden_tests = [":detekt-rules-style:dev.detekt.rules.style.RedundantVisibilityModifierSpec"]
+body = "## Expected Behavior\nSomething like this:\n\n```kotlin\ninternal class AuthenticationSingleSignOnManagerImpl internal constructor(/*...*/)\n```\n\nShould be marked by `RedundantVisibilityModifier` `internal constructor` -> `constructor`.\n\nThe constructor is also unnecessary once you remove the visibility in this sample but we shouldn't care about that here, other rules take care of that.\n\n## Observed Behavior\nNo issue raised on that code\n\n## Your Environment\n* Version of detekt used: 2.0.0-alpha6"
+
+[verified]
+base = "fail"
+fix = "pass"
+on = "2026-11-23"
+seconds = 22
