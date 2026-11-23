@@ -214,10 +214,13 @@ async fn platform(config_path: &Path, open_prs: bool) -> Result<Run, String> {
     finish_platform(config, provider, store, github_token)
 }
 
-/// Empty when the run opens no PR: nothing then talks to the fork.
-fn fork_token(config: &RunConfig) -> Result<String, String> {
+/// Where the fork's tokens come from: `token_env`'s token, or for a
+/// service principal (`repo.fork.entra`, #643) its client secret's tokens,
+/// issued again before each expires. Empty when the run opens no PR:
+/// nothing then talks to the fork.
+fn fork_token(config: &RunConfig) -> Result<aegis_pr::TokenSource, String> {
     if !config.run.open_prs {
-        return Ok(String::new());
+        return Ok(aegis_pr::TokenSource::Static(String::new()));
     }
     if config.repo.app.is_some() {
         return Err(
@@ -225,15 +228,17 @@ fn fork_token(config: &RunConfig) -> Result<String, String> {
                 .into(),
         );
     }
-    if config.repo.fork.entra.is_some() {
-        return Err(
-            "repo.fork.entra: a service principal's token is issued on the server; the CLI \
-             needs a personal access token in repo.fork.token_env"
-                .into(),
-        );
-    }
     let token_env = &config.repo.fork.token_env;
-    std::env::var(token_env).map_err(|_| format!("set {token_env} to a token for the fork"))
+    let what = if config.repo.fork.entra.is_some() {
+        "the service principal's client secret"
+    } else {
+        "a token for the fork"
+    };
+    let secret = std::env::var(token_env).map_err(|_| format!("set {token_env} to {what}"))?;
+    Ok(aegis_lifecycle::fork_token_source(
+        &config.repo.fork,
+        &secret,
+    ))
 }
 
 /// The dry run's platform: the replay provider, its own ledger, and no
@@ -253,7 +258,7 @@ fn finish_platform<P, S>(
     config: RunConfig,
     provider: P,
     store: S,
-    github_token: String,
+    github_token: aegis_pr::TokenSource,
 ) -> Result<Platform<P, S>, String> {
     // Before the first issue, so a missing ACI writes nothing to the ledger.
     config.check_aci_bin().map_err(|e| e.to_string())?;
@@ -272,7 +277,7 @@ fn finish_platform<P, S>(
         provider,
         prices,
         profiles: Profiles::builtin().map_err(|e| e.to_string())?,
-        github: aegis_pr::TokenSource::Static(github_token),
+        github: github_token,
     })
 }
 
@@ -285,7 +290,7 @@ async fn fetch(run: &Run, issue_ref: &str) -> Result<IssueInput, String> {
         number,
         match &run.github {
             aegis_pr::TokenSource::Static(token) => Some(token.as_str()),
-            aegis_pr::TokenSource::App { .. } => None,
+            aegis_pr::TokenSource::App { .. } | aegis_pr::TokenSource::Entra(_) => None,
         },
     )
     .await
@@ -744,7 +749,7 @@ mod tests {
             config.clone(),
             ReplayProvider::default(),
             store,
-            String::new(),
+            aegis_pr::TokenSource::Static(String::new()),
         )
         .err()
         .unwrap();
@@ -756,6 +761,49 @@ mod tests {
         // Any file will do: the check only looks for it.
         config.run.aci_bin = Some(std::env::current_exe().unwrap());
         assert!(config.check_aci_bin().is_ok());
+    }
+
+    /// #643: `aegis run` takes a service principal's client secret and
+    /// sends its tokens, as the server does.
+    #[tokio::test]
+    async fn a_run_on_an_azure_fork_takes_a_service_principal() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/oauth2/v2.0/token"))
+            .and(body_string_contains("client_secret=s3cret"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "token_type": "Bearer", "expires_in": 3599, "access_token": "eyJh.eyJ1.c2ln"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let poc = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/poc.toml");
+        let mut config = RunConfig::load(&poc).unwrap();
+        config.run.open_prs = true;
+        let fork = &mut config.repo.fork;
+        fork.platform = aegis_lifecycle::ForkPlatform::AzureDevOps;
+        fork.api = "https://dev.azure.com/acme".into();
+        fork.owner = "Shop".into();
+        fork.name = "cart".into();
+        fork.token_env = format!("AEGIS_TEST_ENTRA_SECRET_{}", std::process::id());
+        fork.entra = Some(aegis_lifecycle::EntraConfig {
+            tenant: "contoso".into(),
+            client_id: "app-1".into(),
+            authority: server.uri(),
+        });
+        let err = fork_token(&config).unwrap_err();
+        assert!(err.contains("client secret"), "{err}");
+        // SAFETY: the variable is this test's own, named by its process.
+        unsafe { std::env::set_var(&config.repo.fork.token_env, "s3cret") };
+        let source = fork_token(&config).unwrap();
+        assert!(matches!(source, aegis_pr::TokenSource::Entra(_)));
+        let forge = aegis_lifecycle::fork_forge_of(&config.repo.fork, &source).unwrap();
+        let remote = forge.remote_now().await.unwrap();
+        assert_eq!(remote.credentials().unwrap().1, "eyJh.eyJ1.c2ln");
+        assert_eq!(source.token().await.unwrap(), "eyJh.eyJ1.c2ln");
+        unsafe { std::env::remove_var(&config.repo.fork.token_env) };
     }
 
     #[test]

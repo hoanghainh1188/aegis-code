@@ -376,10 +376,12 @@ async fn read<T: serde::de::DeserializeOwned>(
 }
 
 /// Where a client's token comes from (ADR 0017 §3): the token path's fixed
-/// token, or the app asked at each use.
+/// token, the app asked at each use, or an Azure DevOps service principal
+/// whose token is issued again before it expires (#643).
 #[derive(Clone)]
 pub enum TokenSource {
     Static(String),
+    Entra(Arc<crate::EntraToken>),
     App {
         app: Arc<GitHubApp>,
         owner: String,
@@ -395,6 +397,7 @@ impl fmt::Debug for TokenSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Static(_) => f.write_str("Static(…)"),
+            Self::Entra(entra) => write!(f, "{entra:?}"),
             Self::App {
                 owner, repo, use_, ..
             } => write!(f, "App({owner}/{repo}, {use_:?})"),
@@ -407,6 +410,7 @@ impl TokenSource {
     pub async fn token(&self) -> Result<String, PrError> {
         match self {
             Self::Static(token) => Ok(token.clone()),
+            Self::Entra(entra) => entra.token().await,
             Self::App {
                 app,
                 owner,
@@ -422,6 +426,7 @@ impl TokenSource {
     pub fn for_use(&self, use_: TokenUse) -> Self {
         match self {
             Self::Static(t) => Self::Static(t.clone()),
+            Self::Entra(entra) => Self::Entra(Arc::clone(entra)),
             Self::App {
                 app,
                 owner,

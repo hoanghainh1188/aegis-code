@@ -7,7 +7,9 @@
 //! fork's `owner` is its project and `name` its repository. A personal
 //! access token is sent as Basic auth, a Microsoft Entra access token
 //! (from a service principal, [`entra_token`]) as a bearer token, to git
-//! too ([`crate::AZURE_DEVOPS_USER`]).
+//! too ([`crate::AZURE_DEVOPS_USER`]). A service principal's token lives
+//! about an hour: [`EntraToken`] keeps it and issues a new one before it
+//! expires, asked at each call and each push (#643).
 //!
 //! Only comments of people who may write to the repository are read
 //! (design §7): those whose effective permissions on it allow
@@ -20,14 +22,15 @@
 //! ([`azure_name`], [`azure_segment`], [`azure_unescaped`]).
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::fmt;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::github::{checked_api, plain_name};
 use crate::review::{MAX_NOTES, NoteAt, PullState, REPLY_MARKER, ReviewNote};
-use crate::{AgentBranch, PrError, Remote, RepoAccess, is_entra_token};
+use crate::{AgentBranch, PrError, Remote, RepoAccess, TokenSource, is_entra_token};
 
 /// A request to Azure DevOps still running after this long fails.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -50,6 +53,10 @@ const GENERIC_CONTRIBUTE: u32 = 4;
 /// Where a tenant's tokens are issued.
 pub const ENTRA_AUTHORITY: &str = "https://login.microsoftonline.com";
 
+/// A service principal's token is issued again when it has less than this
+/// left: a push or a call never starts with a token about to expire.
+pub const ENTRA_REFRESH_MARGIN: Duration = Duration::from_secs(5 * 60);
+
 /// Azure DevOps' application ID, the resource its tokens are for.
 const AZURE_DEVOPS_RESOURCE: &str = "499b84ac-1321-427f-aa17-267ca6975798";
 
@@ -60,7 +67,7 @@ pub struct AzureDevOps {
     collection: String,
     project: String,
     repo: String,
-    token: String,
+    token: TokenSource,
 }
 
 /// A pull request opened by the agent.
@@ -217,6 +224,27 @@ impl AzureDevOps {
     /// `collection` is the organization or collection URL; `project/repo`
     /// the repository the agent works on.
     pub fn new(collection: &str, project: &str, repo: &str, token: &str) -> Result<Self, PrError> {
+        Self::with_source(
+            collection,
+            project,
+            repo,
+            TokenSource::Static(token.to_owned()),
+        )
+    }
+
+    /// The same, with its token from `source`: a fixed token, or a
+    /// service principal's ([`TokenSource::Entra`]); never a GitHub App's.
+    pub fn with_source(
+        collection: &str,
+        project: &str,
+        repo: &str,
+        source: TokenSource,
+    ) -> Result<Self, PrError> {
+        if matches!(source, TokenSource::App { .. }) {
+            return Err(PrError::App(
+                "the GitHub App reaches GitHub repos only".into(),
+            ));
+        }
         if !azure_name(project) || !azure_name(repo) {
             return Err(PrError::AzureDevOps {
                 status: 0,
@@ -239,14 +267,29 @@ impl AzureDevOps {
             collection,
             project: project.to_owned(),
             repo: repo.to_owned(),
-            token: token.to_owned(),
+            token: source,
         })
     }
 
     /// Where the agent's branch is pushed:
-    /// `<collection>/<project>/_git/<repo>`, same token.
+    /// `<collection>/<project>/_git/<repo>`, same token. Only for a fixed
+    /// token: a service principal's expires, so [`AzureDevOps::remote_now`]
+    /// asks for one right before the push.
     pub fn remote(&self) -> Result<Remote, PrError> {
-        Remote::azure_devops(&self.collection, &self.project, &self.repo, &self.token)
+        match &self.token {
+            TokenSource::Static(token) => {
+                Remote::azure_devops(&self.collection, &self.project, &self.repo, token)
+            }
+            TokenSource::App { .. } | TokenSource::Entra(_) => Err(PrError::App(
+                "a service principal's token is asked for at each push: use `remote_now`".into(),
+            )),
+        }
+    }
+
+    /// The same remote with a token asked for now: what a push uses.
+    pub async fn remote_now(&self) -> Result<Remote, PrError> {
+        let token = self.token.token().await?;
+        Remote::azure_devops(&self.collection, &self.project, &self.repo, &token)
     }
 
     /// The web page of PR `id`.
@@ -544,10 +587,11 @@ impl AzureDevOps {
             .client
             .request(method, url)
             .header("Accept", "application/json");
-        let mut request = if is_entra_token(&self.token) {
-            request.bearer_auth(&self.token)
+        let token = self.token.token().await?;
+        let mut request = if is_entra_token(&token) {
+            request.bearer_auth(&token)
         } else {
-            request.basic_auth("aegis", Some(&self.token))
+            request.basic_auth("aegis", Some(&token))
         };
         if let Some(body) = body {
             request = request.json(body);
@@ -574,9 +618,81 @@ pub async fn entra_token(
     client_id: &str,
     secret: &str,
 ) -> Result<String, PrError> {
+    Ok(issue_entra(authority, tenant, client_id, secret).await?.0)
+}
+
+/// A service principal's token, issued when first asked and again once it
+/// is within [`ENTRA_REFRESH_MARGIN`] of expiring (#643): what a job
+/// longer than the token's hour, and the webhook's notifier, ask.
+pub struct EntraToken {
+    authority: String,
+    tenant: String,
+    client_id: String,
+    secret: String,
+    issued: std::sync::Mutex<Option<(String, Instant)>>,
+}
+
+impl fmt::Debug for EntraToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "EntraToken({}/{})", self.tenant, self.client_id)
+    }
+}
+
+impl EntraToken {
+    pub fn new(authority: &str, tenant: &str, client_id: &str, secret: &str) -> Self {
+        Self {
+            authority: authority.to_owned(),
+            tenant: tenant.to_owned(),
+            client_id: client_id.to_owned(),
+            secret: secret.to_owned(),
+            issued: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The token to send now: the one held while it has more than
+    /// [`ENTRA_REFRESH_MARGIN`] left, a new one otherwise.
+    /// Two callers that find it expiring together may both get a new
+    /// one: both are good.
+    pub async fn token(&self) -> Result<String, PrError> {
+        if let Some((token, expires)) = self.held()
+            && Instant::now() + ENTRA_REFRESH_MARGIN < expires
+        {
+            return Ok(token);
+        }
+        let (token, lifetime) =
+            issue_entra(&self.authority, &self.tenant, &self.client_id, &self.secret).await?;
+        *self
+            .issued
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((token.clone(), Instant::now() + lifetime));
+        Ok(token)
+    }
+
+    fn held(&self) -> Option<(String, Instant)> {
+        self.issued
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// A new token and how long it lives (`expires_in`; an hour when Entra
+/// does not say).
+async fn issue_entra(
+    authority: &str,
+    tenant: &str,
+    client_id: &str,
+    secret: &str,
+) -> Result<(String, Duration), PrError> {
     #[derive(Deserialize)]
     struct Issued {
         access_token: String,
+        #[serde(default = "an_hour")]
+        expires_in: u64,
+    }
+    fn an_hour() -> u64 {
+        3600
     }
     #[derive(Deserialize)]
     struct Refused {
@@ -620,7 +736,7 @@ pub async fn entra_token(
         return Err(PrError::AzureDevOps { status, message });
     }
     let issued: Issued = parsed(status, &text)?;
-    Ok(issued.access_token)
+    Ok((issued.access_token, Duration::from_secs(issued.expires_in)))
 }
 
 /// Whether `name` is an Azure DevOps project or repository name aegis

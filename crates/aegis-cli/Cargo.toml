@@ -27,3 +27,5 @@ bedrock = ["aegis-provider/bedrock"]
 
 [dev-dependencies]
 aegis-store = { path = "../aegis-store", features = ["testing"] }
+serde_json.workspace = true
+wiremock.workspace = true

@@ -118,6 +118,11 @@ impl GitHub {
         repo: &str,
         source: TokenSource,
     ) -> Result<Self, PrError> {
+        if matches!(source, TokenSource::Entra(_)) {
+            return Err(PrError::App(
+                "a service principal reaches Azure DevOps repos only".into(),
+            ));
+        }
         if let TokenSource::App {
             owner: o, repo: r, ..
         } = &source
@@ -173,7 +178,7 @@ impl GitHub {
     pub fn remote(&self) -> Result<Remote, PrError> {
         match &self.token {
             TokenSource::Static(token) => self.remote_with(token),
-            TokenSource::App { .. } => Err(PrError::App(
+            TokenSource::App { .. } | TokenSource::Entra(_) => Err(PrError::App(
                 "an app token is asked for at each push: use `remote_now`".into(),
             )),
         }

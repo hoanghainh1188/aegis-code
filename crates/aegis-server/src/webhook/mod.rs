@@ -81,11 +81,13 @@ use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
 pub use notify::{
-    AZURE_DEVOPS_COMMENT_TOKEN_ENV, AZURE_DEVOPS_URL_ENV, AzureDevOpsNotifier, BITBUCKET_API_ENV,
-    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_API_ENV, BITBUCKET_DC_COMMENT_TOKEN_ENV,
-    BitbucketDataCenterNotifier, BitbucketNotifier, COMMENT_TOKEN_ENV, GITHUB_API_ENV,
-    GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier, GitLabNotifier, comment_with,
-    on_app_path, plain_comment_with, plain_status_comment, status_comment,
+    AZURE_DEVOPS_AUTHORITY_ENV, AZURE_DEVOPS_CLIENT_ID_ENV, AZURE_DEVOPS_COMMENT_TOKEN_ENV,
+    AZURE_DEVOPS_TENANT_ENV, AZURE_DEVOPS_URL_ENV, AzureDevOpsNotifier, AzureServicePrincipal,
+    BITBUCKET_API_ENV, BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_API_ENV,
+    BITBUCKET_DC_COMMENT_TOKEN_ENV, BitbucketDataCenterNotifier, BitbucketNotifier,
+    COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
+    GitLabNotifier, comment_with, on_app_path, plain_comment_with, plain_status_comment,
+    status_comment,
 };
 pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 

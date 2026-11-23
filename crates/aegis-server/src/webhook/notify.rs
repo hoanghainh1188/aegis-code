@@ -56,8 +56,18 @@ pub const BITBUCKET_DC_COMMENT_TOKEN_ENV: &str = "AEGIS_BITBUCKET_DC_COMMENT_TOK
 pub const AZURE_DEVOPS_URL_ENV: &str = "AEGIS_AZURE_DEVOPS_URL";
 /// The secret: a personal access token of the organization that may read
 /// its identities and comment on the registered repositories' pull
-/// requests.
+/// requests; with [`AZURE_DEVOPS_TENANT_ENV`] and
+/// [`AZURE_DEVOPS_CLIENT_ID_ENV`], the client secret of a Microsoft Entra
+/// service principal that may (#643).
 pub const AZURE_DEVOPS_COMMENT_TOKEN_ENV: &str = "AEGIS_AZURE_DEVOPS_COMMENT_TOKEN";
+/// The service principal's tenant (ID or domain), with
+/// [`AZURE_DEVOPS_CLIENT_ID_ENV`] (#643).
+pub const AZURE_DEVOPS_TENANT_ENV: &str = "AEGIS_AZURE_DEVOPS_TENANT";
+/// The service principal's application (client) ID (#643).
+pub const AZURE_DEVOPS_CLIENT_ID_ENV: &str = "AEGIS_AZURE_DEVOPS_CLIENT_ID";
+/// Where the service principal's tokens are issued;
+/// [`aegis_pr::ENTRA_AUTHORITY`] when unset (#643).
+pub const AZURE_DEVOPS_AUTHORITY_ENV: &str = "AEGIS_AZURE_DEVOPS_AUTHORITY";
 
 pub(crate) const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 pub(crate) const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
@@ -470,12 +480,60 @@ impl BitbucketDataCenterNotifier {
     }
 }
 
+/// A Microsoft Entra service principal the Azure DevOps notifier is
+/// (#643): [`AZURE_DEVOPS_COMMENT_TOKEN_ENV`] is then its client secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AzureServicePrincipal {
+    pub tenant: String,
+    pub client_id: String,
+    pub authority: String,
+}
+
+impl AzureServicePrincipal {
+    /// From [`AZURE_DEVOPS_TENANT_ENV`] and [`AZURE_DEVOPS_CLIENT_ID_ENV`],
+    /// both set; none while either is unset or empty.
+    pub fn from_env() -> Option<Self> {
+        let var = |name| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+        Some(Self {
+            tenant: var(AZURE_DEVOPS_TENANT_ENV)?,
+            client_id: var(AZURE_DEVOPS_CLIENT_ID_ENV)?,
+            authority: var(AZURE_DEVOPS_AUTHORITY_ENV)
+                .unwrap_or_else(|| aegis_pr::ENTRA_AUTHORITY.to_owned()),
+        })
+    }
+
+    /// An access token for its client secret `secret`, issued now.
+    pub async fn token(&self, secret: &str) -> Result<String, String> {
+        aegis_pr::entra_token(&self.authority, &self.tenant, &self.client_id, secret)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// The service principal's tokens, kept for the secret they were issued
+/// for: a new secret in the store gets new tokens.
+#[derive(Clone, Default)]
+struct HeldTokens(Arc<std::sync::Mutex<Option<ForSecret>>>);
+
+/// The secret and the tokens issued for it.
+type ForSecret = (String, Arc<aegis_pr::EntraToken>);
+
+impl std::fmt::Debug for HeldTokens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HeldTokens(…)")
+    }
+}
+
 /// Asks Azure DevOps who may write to a repository and comments on its
-/// pull requests (#636), with [`AZURE_DEVOPS_COMMENT_TOKEN_ENV`].
+/// pull requests (#636), with [`AZURE_DEVOPS_COMMENT_TOKEN_ENV`]: a
+/// personal access token, or a service principal's client secret whose
+/// tokens are kept and issued again before they expire (#643).
 #[derive(Debug, Clone)]
 pub struct AzureDevOpsNotifier {
     collection: String,
     secrets: Secrets,
+    principal: Option<AzureServicePrincipal>,
+    held: HeldTokens,
 }
 
 impl AzureDevOpsNotifier {
@@ -483,14 +541,31 @@ impl AzureDevOpsNotifier {
         Self {
             collection: collection.trim_end_matches('/').to_owned(),
             secrets,
+            principal: None,
+            held: HeldTokens::default(),
+        }
+    }
+
+    /// The same, as the service principal `principal` (#643).
+    pub fn with_principal(self, principal: AzureServicePrincipal) -> Self {
+        Self {
+            principal: Some(principal),
+            ..self
         }
     }
 
     /// The organization from [`AZURE_DEVOPS_URL_ENV`]; none while it is
-    /// unset.
+    /// unset. A service principal when [`AzureServicePrincipal::from_env`]
+    /// finds one.
     pub fn from_env(secrets: Secrets) -> Option<Self> {
         let url = std::env::var(AZURE_DEVOPS_URL_ENV).ok()?;
-        (!url.is_empty()).then(|| Self::new(&url, secrets))
+        (!url.is_empty()).then(|| {
+            let notifier = Self::new(&url, secrets);
+            match AzureServicePrincipal::from_env() {
+                Some(principal) => notifier.with_principal(principal),
+                None => notifier,
+            }
+        })
     }
 
     /// The organization or collection URL.
@@ -499,11 +574,37 @@ impl AzureDevOpsNotifier {
     }
 
     fn client(&self, project: &str, repo: &str) -> Result<AzureDevOps, String> {
-        let token = self
+        let secret = self
             .secrets
             .get(AZURE_DEVOPS_COMMENT_TOKEN_ENV)
             .ok_or_else(|| format!("no secret {AZURE_DEVOPS_COMMENT_TOKEN_ENV}"))?;
-        AzureDevOps::new(&self.collection, project, repo, token.expose()).map_err(|e| e.to_string())
+        let source = match &self.principal {
+            None => TokenSource::Static(secret.expose().to_owned()),
+            Some(principal) => TokenSource::Entra(self.tokens(principal, secret.expose())),
+        };
+        AzureDevOps::with_source(&self.collection, project, repo, source).map_err(|e| e.to_string())
+    }
+
+    /// The tokens held for `secret`, or new ones when it changed.
+    fn tokens(&self, principal: &AzureServicePrincipal, secret: &str) -> Arc<aegis_pr::EntraToken> {
+        let mut held = self
+            .held
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((for_secret, tokens)) = held.as_ref()
+            && for_secret == secret
+        {
+            return Arc::clone(tokens);
+        }
+        let tokens = Arc::new(aegis_pr::EntraToken::new(
+            &principal.authority,
+            &principal.tenant,
+            &principal.client_id,
+            secret,
+        ));
+        *held = Some((secret.to_owned(), Arc::clone(&tokens)));
+        tokens
     }
 
     /// Whether the identity `id` may write to `project/repo`; `Err` when
