@@ -15,6 +15,22 @@ use crate::{Actor, Job, JobId, JobSource, JobStatus, Store, StoreError};
 /// Rounds a PR gets when the server sets no other number.
 pub const DEFAULT_MAX_REVIEW_ROUNDS: u32 = 3;
 
+/// An Azure DevOps project or repository name of a URL path segment,
+/// `%20` read as a space: letters, digits, `-_.` and spaces inside, never
+/// `..` (the same names as `aegis_pr::azure_name`).
+fn azure_unescaped(segment: &str) -> Option<String> {
+    let name = segment.replace("%20", " ");
+    let ok = !name.is_empty()
+        && name.len() <= 128
+        && name.trim() == name
+        && !name.contains("..")
+        && name != "."
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_. ".contains(c));
+    ok.then_some(name)
+}
+
 /// `https://github.com/<owner>/<name>/pull/<n>` → `<owner>/<name>#<n>`,
 /// `https://<gitlab>/<group/sub/project>/-/merge_requests/<n>` →
 /// `<group/sub/project>!<n>` (#254), and Bitbucket Cloud's
@@ -23,7 +39,7 @@ pub const DEFAULT_MAX_REVIEW_ROUNDS: u32 = 3;
 /// `https://<host>/projects/<KEY>/repos/<slug>/pull-requests/<n>` →
 /// `<KEY>/<slug>#<n>` (#635), and Azure DevOps'
 /// `https://<org or collection>/<project>/_git/<repo>/pullrequest/<n>` →
-/// `<project>/<repo>#<n>` (#636): the PR or MR as an issue ref, so it has
+/// `<project>/<repo>#<n>` (#636; `%20` read as a space, #641): the PR or MR as an issue ref, so it has
 /// one live round at a time.
 pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
     let plain = |s: &str| {
@@ -51,9 +67,12 @@ pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
         let number: u64 = number.parse().ok()?;
         return (plain(key) && plain(slug)).then(|| format!("{key}/{slug}#{number}"));
     }
+    // Azure DevOps names may hold spaces, `%20` in the URL and themselves
+    // in the ref: `My Project/cart#12` (#641).
     if let [number, "pullrequest", repo, "_git", project, ..] = tail.as_slice() {
         let number: u64 = number.parse().ok()?;
-        return (plain(project) && plain(repo)).then(|| format!("{project}/{repo}#{number}"));
+        let (project, repo) = (azure_unescaped(project)?, azure_unescaped(repo)?);
+        return Some(format!("{project}/{repo}#{number}"));
     }
     let parts: Vec<&str> = trimmed.rsplitn(4, '/').collect();
     let [number, "pull" | "pull-requests", name, rest] = parts.as_slice() else {
@@ -275,7 +294,19 @@ mod tests {
                 Some("Shop/cart#12"),
             ),
             (
-                "https://dev.azure.com/acme/My%20Shop/_git/cart/pullrequest/12",
+                "https://dev.azure.com/acme/My%20Shop/_git/the%20cart/pullrequest/12",
+                Some("My Shop/the cart#12"),
+            ),
+            (
+                "https://dev.azure.com/acme/My%2FShop/_git/cart/pullrequest/12",
+                None,
+            ),
+            (
+                "https://dev.azure.com/acme/a..b/_git/cart/pullrequest/12",
+                None,
+            ),
+            (
+                "https://dev.azure.com/acme/%20Shop/_git/cart/pullrequest/12",
                 None,
             ),
             ("https://gitlab.com/app/-/merge_requests/4", None),

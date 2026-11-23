@@ -167,13 +167,17 @@ impl Remote {
         let context: Vec<&str> = parts.collect();
         if !plain_host(host)
             || !context.iter().all(|p| plain_name(p))
-            || !plain_name(project)
-            || !plain_name(repo)
+            || !crate::azure_name(project)
+            || !crate::azure_name(repo)
         {
             return Err(refused());
         }
         Ok(Self {
-            url: format!("{collection}/{project}/_git/{repo}"),
+            url: format!(
+                "{collection}/{}/_git/{}",
+                crate::azure_segment(project),
+                crate::azure_segment(repo)
+            ),
             token: Some(token.to_owned()),
             user: AZURE_DEVOPS_USER,
         })
@@ -548,11 +552,14 @@ mod tests {
             let r = Remote::azure_devops(root, "Shop", "cart", "t").unwrap();
             assert_eq!(r.url(), format!("{root}/Shop/_git/cart"));
             assert_eq!(r.credentials(), Some((AZURE_DEVOPS_USER, "t")));
+            let spaced = Remote::azure_devops(root, "My Shop", "cart", "t").unwrap();
+            assert_eq!(spaced.url(), format!("{root}/My%20Shop/_git/cart"));
         }
         for (root, project) in [
             ("http://dev.azure.com/acme", "Shop"),
             ("https://dev.azure.com/../x", "Shop"),
-            ("https://dev.azure.com/acme", "My Shop"),
+            ("https://dev.azure.com/acme", "My/Shop"),
+            ("https://dev.azure.com/acme", "My..Shop"),
         ] {
             assert!(
                 Remote::azure_devops(root, project, "cart", "t").is_err(),

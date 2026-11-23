@@ -37,7 +37,10 @@ use aegis_gate::GateReport;
 pub use access::RepoAccess;
 pub use actions::{FailedJob, FailedRun};
 pub use app::{AppKey, Gate, GitHubApp, TokenSource, TokenUse};
-pub use azure::{AzureDevOps, AzurePull, ENTRA_AUTHORITY, WRITER_GROUPS, entra_token};
+pub use azure::{
+    AzureDevOps, AzurePull, ENTRA_AUTHORITY, WRITER_GROUPS, azure_name, azure_segment,
+    azure_unescaped, entra_token,
+};
 pub use bitbucket::{BITBUCKET_API, Bitbucket, BitbucketPermission, BitbucketPull};
 pub use bitbucket_dc::{BitbucketDataCenter, DataCenterPull};
 pub use body::{

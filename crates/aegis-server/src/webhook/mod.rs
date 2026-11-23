@@ -1078,12 +1078,16 @@ pub(crate) fn project_path(url: &str) -> Option<&str> {
 /// `owner/name` of a repo URL (`https://github.com/owner/name`, with or
 /// without `.git`).
 /// The project and repository of an Azure Repos URL,
-/// `…/<project>/_git/<repo>` (#636).
-pub(crate) fn azure_project_and_repo(url: &str) -> Option<(&str, &str)> {
+/// `…/<project>/_git/<repo>` (#636), by their names: `%20` read as a
+/// space (#641).
+pub(crate) fn azure_project_and_repo(url: &str) -> Option<(String, String)> {
     let path = url.trim_end_matches('/');
     let (front, repo) = path.rsplit_once("/_git/")?;
     let (_, project) = front.rsplit_once('/')?;
-    (!project.is_empty() && !repo.is_empty() && !repo.contains('/')).then_some((project, repo))
+    Some((
+        aegis_pr::azure_unescaped(project)?,
+        aegis_pr::azure_unescaped(repo)?,
+    ))
 }
 
 pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
@@ -1254,7 +1258,7 @@ async fn review_round(
                     "the repository's URL names no project and repository",
                 );
             };
-            notifier.can_write(project, name, sender).await
+            notifier.can_write(&project, &name, sender).await
         }
         WebhookSource::Github
         | WebhookSource::Jira
@@ -1408,6 +1412,26 @@ async fn review_round(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn azure_urls_name_their_project_and_repo_by_name() {
+        assert_eq!(
+            azure_project_and_repo("https://dev.azure.com/acme/My%20Shop/_git/the%20cart"),
+            Some(("My Shop".into(), "the cart".into()))
+        );
+        assert_eq!(
+            azure_project_and_repo("https://dev.azure.com/acme/Shop/_git/cart/"),
+            Some(("Shop".into(), "cart".into()))
+        );
+        for bad in [
+            "https://dev.azure.com/acme/My%2FShop/_git/cart",
+            "https://dev.azure.com/acme/Shop/_git/a/b",
+            "https://dev.azure.com/acme/../_git/cart",
+            "https://github.com/acme/cart",
+        ] {
+            assert_eq!(azure_project_and_repo(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn a_gitlab_repo_url_gives_its_project_path() {

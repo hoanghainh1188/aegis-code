@@ -12,6 +12,10 @@
 //! Only comments of people who may write to the repository are read
 //! (design §7): members, groups included, of the project's
 //! [`WRITER_GROUPS`].
+//!
+//! Project and repository names may hold spaces (`My Project`, #641):
+//! they are kept as Azure shows them and written `%20` in URLs only
+//! ([`azure_name`], [`azure_segment`], [`azure_unescaped`]).
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -172,7 +176,7 @@ impl AzureDevOps {
     /// `collection` is the organization or collection URL; `project/repo`
     /// the repository the agent works on.
     pub fn new(collection: &str, project: &str, repo: &str, token: &str) -> Result<Self, PrError> {
-        if !plain_name(project) || !plain_name(repo) {
+        if !azure_name(project) || !azure_name(repo) {
             return Err(PrError::AzureDevOps {
                 status: 0,
                 message: format!("`{project}/{repo}` is not a project and repository name"),
@@ -208,7 +212,9 @@ impl AzureDevOps {
     pub fn pull_url(&self, id: u64) -> String {
         format!(
             "{}/{}/_git/{}/pullrequest/{id}",
-            self.collection, self.project, self.repo
+            self.collection,
+            azure_segment(&self.project),
+            azure_segment(&self.repo)
         )
     }
 
@@ -418,7 +424,9 @@ impl AzureDevOps {
     fn repo_url(&self) -> String {
         format!(
             "{}/{}/_apis/git/repositories/{}",
-            self.collection, self.project, self.repo
+            self.collection,
+            azure_segment(&self.project),
+            azure_segment(&self.repo)
         )
     }
 
@@ -526,6 +534,32 @@ pub async fn entra_token(
     Ok(issued.access_token)
 }
 
+/// Whether `name` is an Azure DevOps project or repository name aegis
+/// takes: letters, digits, `-`, `_`, `.` and spaces inside (#641); never
+/// `/`, `..`, `%` or a control character, nor a leading or trailing space.
+pub fn azure_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name.trim() == name
+        && !name.contains("..")
+        && name != "."
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_. ".contains(c))
+}
+
+/// An [`azure_name`] as a URL path segment: its spaces as `%20`.
+pub fn azure_segment(name: &str) -> String {
+    name.replace(' ', "%20")
+}
+
+/// The name a URL path segment holds, `%20` read as a space: `None` when
+/// it is not an [`azure_name`] (another escape, `/`, …).
+pub fn azure_unescaped(segment: &str) -> Option<String> {
+    let name = segment.replace("%20", " ");
+    azure_name(&name).then_some(name)
+}
+
 fn unreached(e: &reqwest::Error) -> PrError {
     PrError::AzureDevOps {
         status: 0,
@@ -621,7 +655,47 @@ mod tests {
             assert_eq!(az.remote().unwrap().url(), url, "{collection}");
         }
         assert!(AzureDevOps::new("https://dev.azure.com/acme/_apis", "Shop", "cart", "t").is_err());
-        assert!(AzureDevOps::new("https://dev.azure.com/acme", "My Shop", "cart", "t").is_err());
+        let spaced =
+            AzureDevOps::new("https://dev.azure.com/acme", "My Shop", "the cart", "t").unwrap();
+        assert_eq!(
+            spaced.remote().unwrap().url(),
+            "https://dev.azure.com/acme/My%20Shop/_git/the%20cart"
+        );
+        assert_eq!(
+            spaced.pull_url(12),
+            "https://dev.azure.com/acme/My%20Shop/_git/the%20cart/pullrequest/12"
+        );
+        for bad in [
+            "a/b",
+            "..",
+            "a..b",
+            " Shop",
+            "Shop ",
+            "Sh\top",
+            "Sh\u{7}op",
+            "My%20Shop",
+            "",
+        ] {
+            assert!(
+                AzureDevOps::new("https://dev.azure.com/acme", bad, "cart", "t").is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn names_with_spaces_are_escaped_in_urls_only() {
+        assert!(azure_name("My Project"));
+        assert!(azure_name("cart.v2"));
+        assert_eq!(azure_segment("My Project"), "My%20Project");
+        assert_eq!(
+            azure_unescaped("My%20Project").as_deref(),
+            Some("My Project")
+        );
+        assert_eq!(azure_unescaped("Shop").as_deref(), Some("Shop"));
+        for bad in ["My%2FProject", "a%2e%2e", "%20Shop", "a/b", "..", ""] {
+            assert_eq!(azure_unescaped(bad), None, "{bad}");
+        }
     }
 
     #[test]
