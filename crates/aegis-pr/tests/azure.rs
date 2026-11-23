@@ -332,3 +332,126 @@ async fn a_project_with_a_space_opens_its_pr_and_checks_its_writers_by_name() {
     );
     assert!(az.can_write(WRITER).await.unwrap());
 }
+
+const PROJECT_ID: &str = "aaaaaaaa-1111-2222-3333-444444444444";
+const REPO_ID: &str = "bbbbbbbb-1111-2222-3333-444444444444";
+const NAMESPACE: &str = "/acme/_apis/accesscontrollists/2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87";
+
+/// A person `id` named by `descriptor`, in the project's Contributors
+/// when `contributor`, and the repository with its IDs.
+async fn person(server: &MockServer, id: &str, descriptor: &str, contributor: bool) {
+    let groups = if contributor {
+        json!(["Microsoft.TeamFoundation.Identity;S-1-9-contrib"])
+    } else {
+        json!([])
+    };
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(query_param("identityIds", id))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "value": [{ "id": id, "descriptor": descriptor, "memberOf": groups }]
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(REPO))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": REPO_ID, "name": "cart",
+            "project": { "id": PROJECT_ID, "name": "Shop" },
+        })))
+        .mount(server)
+        .await;
+}
+
+/// The repository's ACL for `descriptor`, with its effective bits.
+async fn acl(server: &MockServer, descriptor: &str, allow: u32, deny: u32) {
+    let token = format!("repoV2/{PROJECT_ID}/{REPO_ID}");
+    Mock::given(method("GET"))
+        .and(path(NAMESPACE))
+        .and(query_param("token", token.as_str()))
+        .and(query_param("descriptors", descriptor))
+        .and(query_param("includeExtendedInfo", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "value": [{
+                "inheritPermissions": true,
+                "token": token,
+                "acesDictionary": { descriptor: {
+                    "descriptor": descriptor, "allow": 0, "deny": 0,
+                    "extendedInfo": { "effectiveAllow": allow, "effectiveDeny": deny }
+                } },
+                "includeExtendedInfo": true
+            }]
+        })))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+/// The project's groups, asked `times` times.
+async fn groups(server: &MockServer, times: impl Into<wiremock::Times>) {
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(query_param("searchFilter", "General"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "value": [{ "descriptor": "Microsoft.TeamFoundation.Identity;S-1-9-contrib" }]
+        })))
+        .expect(times)
+        .mount(server)
+        .await;
+}
+
+const WHO: &str = "Microsoft.IdentityModel.Claims.ClaimsIdentity;acme\\rev@acme.example";
+
+/// #642: a contributor whose groups allow `GenericContribute` (read,
+/// contribute, …: 2 | 4 | 16) writes; the groups are not asked.
+#[tokio::test]
+async fn a_contributor_allowed_through_a_group_writes() {
+    let server = MockServer::start().await;
+    person(&server, WRITER, WHO, true).await;
+    acl(&server, WHO, 2 | 4 | 16, 0).await;
+    groups(&server, 0).await;
+    assert!(azure(&server, "pat").can_write(WRITER).await.unwrap());
+}
+
+/// A Contributor denied `GenericContribute` on this repository does not
+/// write, though the group would say so.
+#[tokio::test]
+async fn a_contributor_denied_on_the_repository_does_not_write() {
+    let server = MockServer::start().await;
+    person(&server, WRITER, WHO, true).await;
+    acl(&server, WHO, 2 | 16, 4).await;
+    groups(&server, 0).await;
+    assert!(!azure(&server, "pat").can_write(WRITER).await.unwrap());
+}
+
+/// Someone in no writer group but allowed on the repository itself
+/// writes.
+#[tokio::test]
+async fn someone_allowed_on_the_repository_itself_writes() {
+    let server = MockServer::start().await;
+    person(&server, READER, WHO, false).await;
+    acl(&server, WHO, 2 | 4, 0).await;
+    groups(&server, 0).await;
+    assert!(azure(&server, "pat").can_write(READER).await.unwrap());
+}
+
+/// When the token may not read the repository's security, the groups
+/// decide, as before.
+#[tokio::test]
+async fn the_groups_decide_when_the_acl_cannot_be_read() {
+    let server = MockServer::start().await;
+    person(&server, WRITER, WHO, true).await;
+    Mock::given(method("GET"))
+        .and(path(NAMESPACE))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "message": "TF400813: not authorized"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    groups(&server, 1..).await;
+    assert!(azure(&server, "pat").can_write(WRITER).await.unwrap());
+}

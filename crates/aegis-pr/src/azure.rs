@@ -10,7 +10,9 @@
 //! too ([`crate::AZURE_DEVOPS_USER`]).
 //!
 //! Only comments of people who may write to the repository are read
-//! (design §7): members, groups included, of the project's
+//! (design §7): those whose effective permissions on it allow
+//! `GenericContribute` (#642), read from its access control list; when
+//! Azure does not answer that, members, groups included, of the project's
 //! [`WRITER_GROUPS`].
 //!
 //! Project and repository names may hold spaces (`My Project`, #641):
@@ -35,8 +37,15 @@ const API_VERSION: &str = "api-version=7.1";
 /// Azure DevOps takes a PR description up to this many characters.
 const MAX_DESCRIPTION: usize = 4000;
 
-/// The project groups whose members may write to its repositories.
+/// The project groups whose members may write to its repositories, asked
+/// when a repository's access control list cannot be read.
 pub const WRITER_GROUPS: [&str; 2] = ["Contributors", "Project Administrators"];
+
+/// The Git Repositories security namespace.
+const GIT_NAMESPACE: &str = "2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87";
+
+/// Its `GenericContribute` bit: pushing to a repository.
+const GENERIC_CONTRIBUTE: u32 = 4;
 
 /// Where a tenant's tokens are issued.
 pub const ENTRA_AUTHORITY: &str = "https://login.microsoftonline.com";
@@ -64,6 +73,8 @@ pub struct AzurePull {
 #[derive(Debug, Deserialize)]
 struct Project {
     name: String,
+    #[serde(default)]
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,9 +167,39 @@ struct Identity {
     member_of: Vec<serde_json::Value>,
 }
 
+/// An access control list, its entries by identity descriptor.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Acl {
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    aces_dictionary: BTreeMap<String, Ace>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Ace {
+    #[serde(default)]
+    extended_info: Option<AceExtended>,
+}
+
+/// An identity's permissions on a token, its groups' and the inherited
+/// ones included.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AceExtended {
+    #[serde(default)]
+    effective_allow: u32,
+    #[serde(default)]
+    effective_deny: u32,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Repository {
+    #[serde(default)]
+    id: String,
     name: String,
     project: Project,
     #[serde(default)]
@@ -306,8 +347,12 @@ impl AzureDevOps {
     }
 
     /// Whether the identity `id` (a GUID, as comments and service hooks
-    /// name their authors) may write to this repository: a member, groups
-    /// included, of one of the project's [`WRITER_GROUPS`].
+    /// name their authors) may write to this repository: its effective
+    /// permissions there allow `GenericContribute` and do not deny it,
+    /// however they come (a group, the repository, the project, #642).
+    /// When Azure does not give them (the token may not read the
+    /// repository's security, an older server), a member, groups included,
+    /// of one of the project's [`WRITER_GROUPS`].
     pub async fn can_write(&self, id: &str) -> Result<bool, PrError> {
         if !is_guid(id) {
             return Ok(false);
@@ -321,6 +366,9 @@ impl AzureDevOps {
         let Some(person) = found.value.into_iter().next() else {
             return Ok(false);
         };
+        if let Some(writes) = self.effective_write(&person).await {
+            return Ok(writes);
+        }
         let member_of: Vec<String> = person.member_of.iter().filter_map(descriptor).collect();
         for group in WRITER_GROUPS {
             let url = reqwest::Url::parse_with_params(
@@ -347,6 +395,47 @@ impl AzureDevOps {
             }
         }
         Ok(false)
+    }
+
+    /// Whether `person`'s effective permissions on this repository allow
+    /// `GenericContribute`: `None` when Azure does not say (an error, no
+    /// descriptor, no extended entry), for the groups to be asked instead.
+    async fn effective_write(&self, person: &Identity) -> Option<bool> {
+        let who = descriptor(&person.descriptor)?;
+        let repo: Repository = self.call(reqwest::Method::GET, "", None).await.ok()?;
+        let project = repo.project.id;
+        if !is_guid(&project) || !is_guid(&repo.id) {
+            return None;
+        }
+        let token = format!("repoV2/{project}/{}", repo.id);
+        let url = reqwest::Url::parse_with_params(
+            &format!(
+                "{}/_apis/accesscontrollists/{GIT_NAMESPACE}",
+                self.collection
+            ),
+            &[
+                ("token", token.as_str()),
+                ("descriptors", who.as_str()),
+                ("includeExtendedInfo", "true"),
+                ("api-version", "7.1"),
+            ],
+        )
+        .ok()?;
+        let (status, text) = self
+            .send(reqwest::Method::GET, url.as_str(), None)
+            .await
+            .ok()?;
+        let acls: List<Acl> = parsed(status, &text).ok()?;
+        acls.value
+            .iter()
+            .filter(|acl| acl.token.eq_ignore_ascii_case(&token))
+            .flat_map(|acl| &acl.aces_dictionary)
+            .find(|(key, _)| key.eq_ignore_ascii_case(&who))
+            .and_then(|(_, ace)| ace.extended_info.as_ref())
+            .map(|e| {
+                e.effective_allow & GENERIC_CONTRIBUTE != 0
+                    && e.effective_deny & GENERIC_CONTRIBUTE == 0
+            })
     }
 
     /// The comments in PR `id`'s active threads, oldest first, of people
