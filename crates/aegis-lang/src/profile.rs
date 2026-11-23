@@ -1410,6 +1410,17 @@ mod tests {
         }
     }
 
+    /// Gradle's and Kotlin's per-build state, in every included build too:
+    /// files under `build-logic/.gradle` match the protected
+    /// `**/build-logic/**` and would read as hidden build input (#649).
+    #[test]
+    fn kotlin_caches_the_gradle_and_kotlin_state_of_each_build() {
+        let kt = builtin().get(Language::Kotlin).unwrap().clone();
+        for dir in ["build", ".gradle", ".kotlin"] {
+            assert!(kt.sandbox.cache_dirs.iter().any(|d| d == dir), "{dir}");
+        }
+    }
+
     #[test]
     fn csharp_skips_its_coverage_under_the_testing_platform() {
         let root = std::env::temp_dir().join(format!("aegis_test_mtp_{}", std::process::id()));

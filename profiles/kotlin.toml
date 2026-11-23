@@ -106,7 +106,11 @@ on_change = ["*.versions.toml", "gradle.properties", "gradle.lockfile"]
 
 [sandbox]
 image = "aegis-sandbox-kotlin"
-cache_dirs = ["build", "/home/aegis/.gradle/caches", "/home/aegis/.gradle/wrapper"]
+# `.gradle` và `.kotlin`: Gradle và Kotlin ghi vào mỗi build, kể cả
+# included build như `build-logic/`. Không có ở đây thì gate liệt kê từng
+# file trong đó, và file dưới `build-logic/` khớp mẫu `protected`, nên mọi
+# bản vá bị coi là giấu build input (#649, như #290 của C#).
+cache_dirs = ["build", ".gradle", ".kotlin", "/home/aegis/.gradle/caches", "/home/aegis/.gradle/wrapper"]
 # Ngoài các thư mục trên, image chỉ đọc (#320); Gradle và language server ghi vào HOME.
 writable = ["/home/aegis"]
 
