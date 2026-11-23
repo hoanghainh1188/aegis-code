@@ -52,7 +52,7 @@ pub use memory::{
     ExtractedMemory, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
     fallback_extract_from_merged_pr, format_for_bp3,
 };
-pub use publish::{fork_forge_of, fork_token};
+pub use publish::{fork_forge_of, fork_token, fork_token_source};
 pub use registry::{
     IssueTrustConfig, IssueTrustPolicy, ModeConfig, Modes, PatchScopeConfig, RepoRun, RepoSettings,
     RepoSpec, check_tenant_secrets, tenant_state_dir,

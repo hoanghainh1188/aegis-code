@@ -2,8 +2,11 @@
 //! PR, commenting on it, what a review round reads of it, and a service
 //! principal's token.
 
-use aegis_pr::{AgentBranch, AzureDevOps, Forge, NoteAt, PrError, entra_token};
+use aegis_pr::{
+    AgentBranch, AzureDevOps, EntraToken, Forge, NoteAt, PrError, TokenSource, entra_token,
+};
 use serde_json::json;
+use std::sync::Arc;
 use wiremock::matchers::{
     body_partial_json, body_string_contains, header, method, path, query_param,
 };
@@ -454,4 +457,95 @@ async fn the_groups_decide_when_the_acl_cannot_be_read() {
         .await;
     groups(&server, 1..).await;
     assert!(azure(&server, "pat").can_write(WRITER).await.unwrap());
+}
+
+/// The authority gives tokens `first` then `second`, each living
+/// `lifetime` seconds.
+async fn authority(server: &MockServer, lifetime: u64, first: &str, second: &str) {
+    Mock::given(method("POST"))
+        .and(path("/contoso/oauth2/v2.0/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "token_type": "Bearer", "expires_in": lifetime, "access_token": first
+        })))
+        .up_to_n_times(1)
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/contoso/oauth2/v2.0/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "token_type": "Bearer", "expires_in": lifetime, "access_token": second
+        })))
+        .mount(server)
+        .await;
+}
+
+fn principal(server: &MockServer) -> Arc<EntraToken> {
+    Arc::new(EntraToken::new(&server.uri(), "contoso", "app-1", "s"))
+}
+
+/// #643: a service principal's token is kept while it has time left.
+#[tokio::test]
+async fn a_service_principal_token_is_kept_while_it_lives() {
+    let server = MockServer::start().await;
+    authority(&server, 3599, "eyJh.eyJ1.b25l", "eyJh.eyJ2.dHdv").await;
+    let tokens = principal(&server);
+    assert_eq!(tokens.token().await.unwrap(), "eyJh.eyJ1.b25l");
+    assert_eq!(tokens.token().await.unwrap(), "eyJh.eyJ1.b25l");
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// A token about to expire (less than the margin left) is issued again
+/// before a call or a push: a job longer than the token's hour goes on.
+#[tokio::test]
+async fn an_expiring_token_is_issued_again_before_a_call_and_a_push() {
+    let server = MockServer::start().await;
+    // Sixty seconds: inside the five minutes' margin, so stale at once.
+    authority(&server, 60, "eyJh.eyJ1.b25l", "eyJh.eyJ2.dHdv").await;
+    for token in ["eyJh.eyJ1.b25l", "eyJh.eyJ2.dHdv"] {
+        Mock::given(method("POST"))
+            .and(path(format!("{REPO}/pullRequests/12/threads")))
+            .and(header("authorization", format!("Bearer {token}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 1 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let tokens = principal(&server);
+    let az = AzureDevOps::with_source(
+        &format!("{}/acme", server.uri()),
+        "Shop",
+        "cart",
+        TokenSource::Entra(Arc::clone(&tokens)),
+    )
+    .unwrap();
+    az.comment_on_pull_request(12, "first").await.unwrap();
+    az.comment_on_pull_request(12, "second").await.unwrap();
+    // The push asks too, right before it: a third token.
+    let push = AzureDevOps::with_source(
+        "https://dev.azure.com/acme",
+        "Shop",
+        "cart",
+        TokenSource::Entra(tokens),
+    )
+    .unwrap();
+    let remote = Forge::AzureDevOps(push.clone()).remote_now().await.unwrap();
+    assert_eq!(remote.credentials().unwrap().1, "eyJh.eyJ2.dHdv");
+    let issued = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().ends_with("/token"))
+        .count();
+    assert_eq!(issued, 3);
+    // A fixed remote cannot be had from an expiring token.
+    assert!(matches!(push.remote(), Err(PrError::App(_))));
+}
+
+/// A service principal reaches Azure DevOps only.
+#[tokio::test]
+async fn a_service_principal_is_not_a_github_token() {
+    let server = MockServer::start().await;
+    let source = TokenSource::Entra(principal(&server));
+    assert!(aegis_pr::GitHub::with_source("https://api.github.com", "o", "r", source).is_err());
 }

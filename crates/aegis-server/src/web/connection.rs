@@ -733,6 +733,21 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
         ));
         return rows;
     };
+    // A service principal's client secret is exchanged for a token (#643).
+    let t = match crate::webhook::AzureServicePrincipal::from_env()
+        .filter(|_| fork.platform == ForkPlatform::AzureDevOps)
+    {
+        None => t,
+        Some(principal) => match principal.token(&t).await {
+            Ok(token) => token,
+            Err(e) => {
+                let why = format!("no token for the service principal: {e}").replace(&t, "***");
+                rows.push(fail(COMMENT, why.clone()));
+                rows.push(fail(URL, why));
+                return rows;
+            }
+        },
+    };
     match access(fork.platform, api, &path, &t).await {
         Err(e) => {
             let why = refusal(&e, &format!("`{path}`"), &t);

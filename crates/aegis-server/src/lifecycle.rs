@@ -235,11 +235,15 @@ impl LifecycleRunner {
             }
             let name = &config.repo.fork.token_env;
             let token = self.secret(slug, "the fork's token", name).await?;
-            // A service principal's secret becomes a token now (#636).
-            let token = aegis_lifecycle::fork_token(&config.repo.fork, token.expose())
+            // A service principal's secret gives tokens, issued again
+            // before each expires (#636, #643); the first one now, so a
+            // wrong secret stops the job before it starts.
+            let source = aegis_lifecycle::fork_token_source(&config.repo.fork, token.expose());
+            source
+                .token()
                 .await
                 .map_err(|e| Attempt::Infra(format!("repo `{slug}`: the fork's token: {e}")))?;
-            return Ok(TokenSource::Static(token));
+            return Ok(source);
         };
         let handle = self.github_app.as_ref().ok_or_else(|| {
             Attempt::Rejected(format!(
@@ -354,7 +358,9 @@ impl LifecycleRunner {
         // The main branch as it is now, not as the clone last saw it; a
         // worker on a new machine makes the clone (#234).
         let read_token = match &github {
-            TokenSource::App { .. } => Some(use_token(&github, TokenUse::Read).await?),
+            TokenSource::App { .. } | TokenSource::Entra(_) => {
+                Some(use_token(&github, TokenUse::Read).await?)
+            }
             TokenSource::Static(t) if !t.is_empty() => Some(t.clone()),
             TokenSource::Static(_) => match self
                 .secrets
@@ -517,7 +523,9 @@ impl LifecycleRunner {
 async fn use_token(source: &TokenSource, use_: TokenUse) -> Result<String, Attempt> {
     source.for_use(use_).token().await.map_err(|e| match &e {
         PrError::Http(_) => Attempt::Infra(e.to_string()),
-        PrError::GitHub { status, .. } if *status == 0 || *status == 429 || *status >= 500 => {
+        PrError::GitHub { status, .. } | PrError::AzureDevOps { status, .. }
+            if *status == 0 || *status == 429 || *status >= 500 =>
+        {
             Attempt::Infra(e.to_string())
         }
         _ => Attempt::Rejected(e.to_string()),

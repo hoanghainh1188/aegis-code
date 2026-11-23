@@ -29,14 +29,15 @@ impl Forge {
     }
 
     /// Where the agent's branch is pushed, with a token asked for now
-    /// (ADR 0017): what a push on the app path needs.
+    /// (ADR 0017): what a push on the app path, or with a service
+    /// principal's token (#643), needs.
     pub async fn remote_now(&self) -> Result<Remote, PrError> {
         match self {
             Self::GitHub(github) => github.remote_now().await,
             Self::GitLab(gitlab) => gitlab.remote(),
             Self::Bitbucket(bitbucket) => bitbucket.remote(),
             Self::BitbucketDataCenter(dc) => dc.remote(),
-            Self::AzureDevOps(az) => az.remote(),
+            Self::AzureDevOps(az) => az.remote_now().await,
         }
     }
 

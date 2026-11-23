@@ -30,8 +30,10 @@ dependencies = [
  "aegis-pr",
  "aegis-provider",
  "aegis-store",
+ "serde_json",
  "tokio",
  "tokio-util",
+ "wiremock",
 ]
 
 [[package]]

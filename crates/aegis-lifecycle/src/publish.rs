@@ -208,7 +208,23 @@ where
     }
 }
 
-/// The token a job sends to the fork from `secret`, the value of its
+/// Where a job's tokens for the fork come from, `secret` being the value
+/// of its `token_env`: the secret itself, or for a service principal
+/// ([`crate::EntraConfig`], #636) its access tokens, issued again before
+/// each one expires (#643).
+pub fn fork_token_source(fork: &ForkConfig, secret: &str) -> TokenSource {
+    match &fork.entra {
+        None => TokenSource::Static(secret.to_owned()),
+        Some(entra) => TokenSource::Entra(std::sync::Arc::new(aegis_pr::EntraToken::new(
+            &entra.authority,
+            &entra.tenant,
+            &entra.client_id,
+            secret,
+        ))),
+    }
+}
+
+/// The token a job sends to the fork now from `secret`, the value of its
 /// `token_env`: the secret itself, or for a service principal
 /// ([`crate::EntraConfig`], #636) an access token issued for it now.
 pub async fn fork_token(fork: &ForkConfig, secret: &str) -> Result<String, LifecycleError> {
@@ -226,8 +242,9 @@ pub async fn fork_token(fork: &ForkConfig, secret: &str) -> Result<String, Lifec
 /// The fork's forge: a GitHub repository, a GitLab project (#252) or a
 /// Bitbucket Cloud (#634) or Data Center (#635) or Azure Repos (#636)
 /// repository, reached with
-/// tokens from `source`:
-/// a GitHub repo with either, the others only with a fixed token.
+/// tokens from `source`: a GitHub repo with a fixed token or the app, an
+/// Azure Repos one with a fixed token or a service principal's (#643),
+/// the others only with a fixed token.
 pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, LifecycleError> {
     Ok(match (fork.platform, source) {
         (ForkPlatform::GitHub, _) => Forge::GitHub(GitHub::with_source(
@@ -250,18 +267,26 @@ pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, L
                 token,
             )?)
         }
-        (ForkPlatform::AzureDevOps, TokenSource::Static(token)) => Forge::AzureDevOps(
-            aegis_pr::AzureDevOps::new(&fork.api, &fork.owner, &fork.name, token)?,
-        ),
-        (
-            ForkPlatform::GitLab
-            | ForkPlatform::Bitbucket
-            | ForkPlatform::BitbucketDataCenter
-            | ForkPlatform::AzureDevOps,
-            TokenSource::App { .. },
-        ) => {
+        (ForkPlatform::AzureDevOps, TokenSource::Static(_) | TokenSource::Entra(_)) => {
+            Forge::AzureDevOps(aegis_pr::AzureDevOps::with_source(
+                &fork.api,
+                &fork.owner,
+                &fork.name,
+                source.clone(),
+            )?)
+        }
+        (ForkPlatform::AzureDevOps, TokenSource::App { .. }) => {
             return Err(LifecycleError::Config(
                 "the GitHub App reaches GitHub repos only".into(),
+            ));
+        }
+        (
+            ForkPlatform::GitLab | ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter,
+            TokenSource::App { .. } | TokenSource::Entra(_),
+        ) => {
+            return Err(LifecycleError::Config(
+                "the GitHub App reaches GitHub repos only, a service principal Azure DevOps ones"
+                    .into(),
             ));
         }
     })
