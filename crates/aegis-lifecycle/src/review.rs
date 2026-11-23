@@ -113,6 +113,26 @@ impl ReviewRound {
         })
     }
 
+    /// PR `id` of the Azure DevOps fork `project/repo` of `collection`,
+    /// which must be active and from an `agent/*` branch of the
+    /// repository, and its notes (#636).
+    pub async fn from_azure_devops(
+        collection: &str,
+        project: &str,
+        repo: &str,
+        id: u64,
+        token: &str,
+    ) -> Result<Self, LifecycleError> {
+        let azure = aegis_pr::AzureDevOps::new(collection, project, repo, token)?;
+        let pull = azure.agent_pull(id).await?;
+        let notes = azure.review_notes(id).await?;
+        Ok(Self {
+            pull,
+            notes,
+            local_base: None,
+        })
+    }
+
     /// A local round (#439) of the PR `agent/<id>` whose head is commit
     /// `head` on `base`, both in the platform's clone.
     pub fn local(id: &str, head: &str, base: &str, notes: Vec<ReviewNote>) -> Self {

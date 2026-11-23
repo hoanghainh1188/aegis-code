@@ -21,8 +21,10 @@ pub const DEFAULT_MAX_REVIEW_ROUNDS: u32 = 3;
 /// `https://bitbucket.org/<workspace>/<repo>/pull-requests/<n>` →
 /// `<workspace>/<repo>#<n>` (#634), and Bitbucket Data Center's
 /// `https://<host>/projects/<KEY>/repos/<slug>/pull-requests/<n>` →
-/// `<KEY>/<slug>#<n>` (#635): the PR or MR as an issue ref, so it has one
-/// live round at a time.
+/// `<KEY>/<slug>#<n>` (#635), and Azure DevOps'
+/// `https://<org or collection>/<project>/_git/<repo>/pullrequest/<n>` →
+/// `<project>/<repo>#<n>` (#636): the PR or MR as an issue ref, so it has
+/// one live round at a time.
 pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
     let plain = |s: &str| {
         !s.is_empty()
@@ -48,6 +50,10 @@ pub fn pr_issue_ref(pr_url: &str) -> Option<String> {
     if let [number, "pull-requests", slug, "repos", key, "projects", _] = tail.as_slice() {
         let number: u64 = number.parse().ok()?;
         return (plain(key) && plain(slug)).then(|| format!("{key}/{slug}#{number}"));
+    }
+    if let [number, "pullrequest", repo, "_git", project, ..] = tail.as_slice() {
+        let number: u64 = number.parse().ok()?;
+        return (plain(project) && plain(repo)).then(|| format!("{project}/{repo}#{number}"));
     }
     let parts: Vec<&str> = trimmed.rsplitn(4, '/').collect();
     let [number, "pull" | "pull-requests", name, rest] = parts.as_slice() else {
@@ -262,6 +268,14 @@ mod tests {
             ),
             (
                 "https://git.acme.example/projects/~me/repos/cart/pull-requests/12",
+                None,
+            ),
+            (
+                "https://dev.azure.com/acme/Shop/_git/cart/pullrequest/12",
+                Some("Shop/cart#12"),
+            ),
+            (
+                "https://dev.azure.com/acme/My%20Shop/_git/cart/pullrequest/12",
                 None,
             ),
             ("https://gitlab.com/app/-/merge_requests/4", None),

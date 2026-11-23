@@ -982,6 +982,7 @@ mod tests {
                 api: "https://api.github.com".into(),
                 token_env: "GITHUB_TOKEN".into(),
                 push_to_local: None,
+                entra: None,
             },
         };
 

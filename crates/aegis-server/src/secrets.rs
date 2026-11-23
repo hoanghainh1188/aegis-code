@@ -25,8 +25,9 @@ use tokio_util::sync::CancellationToken;
 use crate::Role;
 use crate::config::GithubAppSection;
 use crate::webhook::{
-    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_COMMENT_TOKEN_ENV, BITBUCKET_DC_SECRET_ENV,
-    BITBUCKET_SECRET_ENV, GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV,
+    AZURE_DEVOPS_COMMENT_TOKEN_ENV, AZURE_DEVOPS_SECRET_ENV, BITBUCKET_COMMENT_TOKEN_ENV,
+    BITBUCKET_DC_COMMENT_TOKEN_ENV, BITBUCKET_DC_SECRET_ENV, BITBUCKET_SECRET_ENV,
+    GITHUB_SECRET_ENV, GITLAB_TOKEN_ENV,
 };
 
 pub const DATABASE_URL: &str = "AEGIS_DATABASE_URL";
@@ -131,7 +132,7 @@ pub fn section(section: Option<&SecretsSection>) -> Result<&SecretsSection, Stri
 /// with the API, also the webhook secrets, which may be absent (their
 /// endpoints stay closed): the repo webhooks', GitLab's, Bitbucket's
 /// and its Data Center's with the tokens that check their senders (#634,
-/// #635) and, with `[github_app]`, the app's (#554). The webhooks only check a secret the
+/// #635), Azure DevOps' (#636) and, with `[github_app]`, the app's (#554). The webhooks only check a secret the
 /// store has read. A mode's API key is checked by
 /// [`crate::lifecycle::LifecycleRunner::new`].
 pub async fn load_at_start(
@@ -152,6 +153,8 @@ pub async fn load_at_start(
             BITBUCKET_COMMENT_TOKEN_ENV,
             BITBUCKET_DC_SECRET_ENV,
             BITBUCKET_DC_COMMENT_TOKEN_ENV,
+            AZURE_DEVOPS_SECRET_ENV,
+            AZURE_DEVOPS_COMMENT_TOKEN_ENV,
         ];
         for name in webhooks.into_iter().chain(app_secret) {
             secrets.load(name).await.map_err(|e| e.to_string())?;

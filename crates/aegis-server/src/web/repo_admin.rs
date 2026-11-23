@@ -41,6 +41,9 @@ pub struct RepoAdmin {
     /// `AEGIS_BITBUCKET_DC_API`; empty when the instance has no Bitbucket
     /// Data Center (#635).
     pub(super) bitbucket_dc_api: String,
+    /// `AEGIS_AZURE_DEVOPS_URL`; empty when the instance has no Azure
+    /// DevOps organization (#636).
+    pub(super) azure_devops_url: String,
     /// When each mode's provider was last checked (#367), to check at
     /// most once a minute: each check costs a little.
     /// When each mode was last checked, by [`aegis_store::ModeName::key`].
@@ -69,6 +72,7 @@ impl RepoAdmin {
             ),
             bitbucket_api: api(crate::webhook::BITBUCKET_API_ENV, aegis_pr::BITBUCKET_API),
             bitbucket_dc_api: api(crate::webhook::BITBUCKET_DC_API_ENV, ""),
+            azure_devops_url: api(crate::webhook::AZURE_DEVOPS_URL_ENV, ""),
             ai_checks: Arc::default(),
             make_webhooks: false,
             github_app: None,
@@ -121,7 +125,13 @@ impl RepoAdmin {
 pub type RepoAdminExt = Extension<Option<RepoAdmin>>;
 
 const MODES: [&str; 2] = ["poc", "customer-jp"];
-const PLATFORMS: [&str; 4] = ["github", "gitlab", "bitbucket", "bitbucket-dc"];
+const PLATFORMS: [&str; 5] = [
+    "github",
+    "gitlab",
+    "bitbucket",
+    "bitbucket-dc",
+    "azure-devops",
+];
 
 pub(super) fn editing(admin: Option<RepoAdmin>) -> Result<RepoAdmin, WebError> {
     admin.ok_or_else(|| {
@@ -144,7 +154,7 @@ struct FormPage<'a> {
     error: Option<&'a str>,
     languages: Vec<&'static str>,
     modes: [&'static str; 2],
-    platforms: [&'static str; 4],
+    platforms: [&'static str; 5],
     connections: [&'static str; 2],
     /// Repos the GitHub App is installed on and no repo is registered
     /// for, as clone URLs with the same URL encoded for a query (ADR 0017

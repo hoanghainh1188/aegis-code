@@ -40,8 +40,8 @@ mod untrusted;
 pub use answer::{FinalAnswer, ReviewReply, Status, SuspiciousInput, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
-    AppConnection, BudgetSection, DirConfig, ExtraServer, ForkConfig, ForkPlatform, IdentityConfig,
-    LedgerBackend, RepoConfig, RunConfig, RunSection, SonarConfig, upstream_of,
+    AppConnection, BudgetSection, DirConfig, EntraConfig, ExtraServer, ForkConfig, ForkPlatform,
+    IdentityConfig, LedgerBackend, RepoConfig, RunConfig, RunSection, SonarConfig, upstream_of,
 };
 pub use cve::CveTarget;
 pub use diagnose::TriageLane;
@@ -52,7 +52,7 @@ pub use memory::{
     ExtractedMemory, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
     fallback_extract_from_merged_pr, format_for_bp3,
 };
-pub use publish::fork_forge_of;
+pub use publish::{fork_forge_of, fork_token};
 pub use registry::{
     IssueTrustConfig, IssueTrustPolicy, ModeConfig, Modes, PatchScopeConfig, RepoRun, RepoSettings,
     RepoSpec, check_tenant_secrets, tenant_state_dir,

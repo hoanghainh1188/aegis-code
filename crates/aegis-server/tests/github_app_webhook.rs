@@ -60,6 +60,7 @@ fn config(api: &str) -> WebhookConfig {
         gitlab_notifier: None,
         bitbucket_notifier: None,
         bitbucket_dc_notifier: None,
+        azure_devops_notifier: None,
         label: "aegis".into(),
         burst: 100,
         per_minute: 600,

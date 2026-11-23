@@ -27,6 +27,14 @@
 //!   on the agent's PR, from people who can write to the repo (asked of
 //!   `AEGIS_BITBUCKET_DC_API` with `AEGIS_BITBUCKET_DC_COMMENT_TOKEN`), and
 //!   `pr:merged`.
+//! - `POST /webhooks/azure-devops` (#636): an Azure DevOps service hook's,
+//!   with `AEGIS_AZURE_DEVOPS_WEBHOOK_SECRET` as the Basic auth password
+//!   or in `X-Aegis-Webhook-Secret` (service hooks sign nothing); the
+//!   delivery's `id` and `eventType` are in its body. Events
+//!   `ms.vss-code.git-pullrequest-comment-event` (a line `/aegis fix`) on
+//!   the agent's PR, from people who can write to the repo (asked of
+//!   `AEGIS_AZURE_DEVOPS_URL` with `AEGIS_AZURE_DEVOPS_COMMENT_TOKEN`), and
+//!   `git.pullrequest.updated` to completed.
 //!
 //! All from the server's secret store (#30), as they are at the time of
 //! the delivery: a rotated secret is used once read, and a delivery that
@@ -73,11 +81,11 @@ use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
 pub use notify::{
-    BITBUCKET_API_ENV, BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_API_ENV,
-    BITBUCKET_DC_COMMENT_TOKEN_ENV, BitbucketDataCenterNotifier, BitbucketNotifier,
-    COMMENT_TOKEN_ENV, GITHUB_API_ENV, GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier,
-    GitLabNotifier, comment_with, on_app_path, plain_comment_with, plain_status_comment,
-    status_comment,
+    AZURE_DEVOPS_COMMENT_TOKEN_ENV, AZURE_DEVOPS_URL_ENV, AzureDevOpsNotifier, BITBUCKET_API_ENV,
+    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_API_ENV, BITBUCKET_DC_COMMENT_TOKEN_ENV,
+    BitbucketDataCenterNotifier, BitbucketNotifier, COMMENT_TOKEN_ENV, GITHUB_API_ENV,
+    GITLAB_API_ENV, GITLAB_COMMENT_TOKEN_ENV, GitHubNotifier, GitLabNotifier, comment_with,
+    on_app_path, plain_comment_with, plain_status_comment, status_comment,
 };
 pub(crate) use notify::{DEFAULT_GITHUB_API, DEFAULT_GITLAB_API, pr_url};
 
@@ -85,6 +93,7 @@ pub const GITHUB_SECRET_ENV: &str = "AEGIS_GITHUB_WEBHOOK_SECRET";
 pub const GITLAB_TOKEN_ENV: &str = "AEGIS_GITLAB_WEBHOOK_TOKEN";
 pub const BITBUCKET_SECRET_ENV: &str = "AEGIS_BITBUCKET_WEBHOOK_SECRET";
 pub const BITBUCKET_DC_SECRET_ENV: &str = "AEGIS_BITBUCKET_DC_WEBHOOK_SECRET";
+pub const AZURE_DEVOPS_SECRET_ENV: &str = "AEGIS_AZURE_DEVOPS_WEBHOOK_SECRET";
 pub const LABEL_ENV: &str = "AEGIS_WEBHOOK_LABEL";
 pub const MAX_BODY_ENV: &str = "AEGIS_WEBHOOK_MAX_BODY_BYTES";
 /// GitHub sends up to 25 MB, but an issue body is at most 65,536
@@ -112,6 +121,8 @@ pub struct WebhookConfig {
     pub bitbucket_notifier: Option<BitbucketNotifier>,
     /// …and Bitbucket Data Center (#635).
     pub bitbucket_dc_notifier: Option<BitbucketDataCenterNotifier>,
+    /// …and Azure DevOps (#636).
+    pub azure_devops_notifier: Option<AzureDevOpsNotifier>,
     /// The largest body read from a delivery; beyond, 413.
     pub max_body_bytes: usize,
     /// The modes' configurations, for the Light model that extracts a
@@ -160,6 +171,7 @@ impl WebhookConfig {
             gitlab_notifier: Some(GitLabNotifier::from_env(secrets.clone())),
             bitbucket_notifier: Some(BitbucketNotifier::from_env(secrets.clone())),
             bitbucket_dc_notifier: BitbucketDataCenterNotifier::from_env(secrets.clone()),
+            azure_devops_notifier: AzureDevOpsNotifier::from_env(secrets.clone()),
             secrets,
             label: std::env::var(LABEL_ENV)
                 .ok()
@@ -244,8 +256,8 @@ struct Hooks {
     locales: crate::locale::Locales,
 }
 
-/// The endpoints, under `/github`, `/gitlab`, `/bitbucket` and
-/// `/bitbucket-dc`; nested at
+/// The endpoints, under `/github`, `/gitlab`, `/bitbucket`,
+/// `/bitbucket-dc` and `/azure-devops`; nested at
 /// `/webhooks` by [`crate::api::router`], whose timeout they keep. The
 /// body limit is theirs, [`WebhookConfig::max_body_bytes`].
 pub fn router(store: Store, config: WebhookConfig) -> Router {
@@ -275,6 +287,7 @@ pub fn router(store: Store, config: WebhookConfig) -> Router {
         .route("/gitlab", post(gitlab))
         .route("/bitbucket", post(bitbucket))
         .route("/bitbucket-dc", post(bitbucket_dc))
+        .route("/azure-devops", post(azure_devops))
         .with_state(Hooks {
             store,
             config: Arc::new(config),
@@ -338,6 +351,26 @@ async fn admit<'a, T: Copy>(
     id_header: &str,
     event_header: &str,
 ) -> Result<(&'a str, &'a str, T), Refusal> {
+    let tag = verify_delivery(hooks, source, secrets_named, verified).await?;
+    match (header(headers, id_header), header(headers, event_header)) {
+        (Some(id), Some(event)) => Ok((id, event, tag)),
+        _ => Err(refuse(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            format!("{id_header} and {event_header} are required"),
+        )),
+    }
+}
+
+/// [`admit`]'s checks of who sent a delivery: the tag of the one secret
+/// it verifies with. Azure DevOps names a delivery and its event in the
+/// body (#636), read once this passes.
+async fn verify_delivery<T: Copy>(
+    hooks: &Hooks,
+    source: WebhookSource,
+    secrets_named: &[(&str, T)],
+    verified: impl Fn(&Secret) -> bool,
+) -> Result<T, Refusal> {
     let secrets = &hooks.config.secrets;
     let present: Vec<(&str, T, Secret)> = secrets_named
         .iter()
@@ -403,14 +436,7 @@ async fn admit<'a, T: Copy>(
             ));
         }
     };
-    match (header(headers, id_header), header(headers, event_header)) {
-        (Some(id), Some(event)) => Ok((id, event, tag)),
-        _ => Err(refuse(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            format!("{id_header} and {event_header} are required"),
-        )),
-    }
+    Ok(tag)
 }
 
 /// The whole body, up to the limit, so that the signature is checked on
@@ -574,6 +600,67 @@ async fn bitbucket_dc(State(hooks): State<Hooks>, headers: HeaderMap, body: Body
     };
     handled
         .log(&hooks, WebhookSource::BitbucketDc, id, event, &body)
+        .await
+}
+
+/// The custom header an Azure DevOps service hook may send the secret in,
+/// instead of Basic auth (#636).
+pub const AZURE_DEVOPS_SECRET_HEADER: &str = "x-aegis-webhook-secret";
+
+async fn azure_devops(State(hooks): State<Hooks>, headers: HeaderMap, body: Body) -> Response {
+    let body = match read(&hooks, &headers, body, "x-vss-activityid").await {
+        Ok(body) => body,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let authorization = header(&headers, "authorization");
+    let custom = header(&headers, AZURE_DEVOPS_SECRET_HEADER);
+    let verified = verify_delivery(
+        &hooks,
+        WebhookSource::AzureDevops,
+        &[(AZURE_DEVOPS_SECRET_ENV, ())],
+        |s| verify::azure_devops(s.expose().as_bytes(), authorization, custom),
+    )
+    .await;
+    if let Err(refusal) = verified {
+        return refusal.into_response();
+    }
+    // A service hook names its delivery and event in the body.
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Named {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        event_type: String,
+    }
+    let named: Named = serde_json::from_slice(&body).unwrap_or(Named {
+        id: String::new(),
+        event_type: String::new(),
+    });
+    let fits = |s: &str| !s.is_empty() && s.len() <= MAX_HEADER_LEN;
+    if !(fits(&named.id) && fits(&named.event_type)) {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "the body's id and eventType are required",
+        )
+        .into_response();
+    }
+    let (id, event) = (named.id.as_str(), named.event_type.as_str());
+    let handled = if event == "service.hook.test" {
+        // Sent by the subscription's "Test": the way is open.
+        Handled::new(
+            answer(StatusCode::OK, json!({ "status": "pong" })),
+            WebhookOutcome::Ping,
+            None,
+            None,
+        )
+    } else {
+        let wanted = events::azure_devops(event, &body);
+        deliver(&hooks, WebhookSource::AzureDevops, None, id, event, wanted).await
+    };
+    handled
+        .log(&hooks, WebhookSource::AzureDevops, id, event, &body)
         .await
 }
 
@@ -845,6 +932,14 @@ async fn deliver(
         (Kind::Issue { .. }, WebhookSource::Bitbucket | WebhookSource::BitbucketDc) => {
             return ignored_in(delivery, "Bitbucket issues make no jobs", Some(repo.id));
         }
+        // Service hooks ask for review rounds only (#636).
+        (Kind::Issue { .. }, WebhookSource::AzureDevops) => {
+            return ignored_in(
+                delivery,
+                "Azure DevOps work items make no jobs",
+                Some(repo.id),
+            );
+        }
         (Kind::ReviewRound { .. } | Kind::PrMerged { .. }, _) => unreachable!("handled above"),
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
@@ -982,6 +1077,15 @@ pub(crate) fn project_path(url: &str) -> Option<&str> {
 
 /// `owner/name` of a repo URL (`https://github.com/owner/name`, with or
 /// without `.git`).
+/// The project and repository of an Azure Repos URL,
+/// `…/<project>/_git/<repo>` (#636).
+pub(crate) fn azure_project_and_repo(url: &str) -> Option<(&str, &str)> {
+    let path = url.trim_end_matches('/');
+    let (front, repo) = path.rsplit_once("/_git/")?;
+    let (_, project) = front.rsplit_once('/')?;
+    (!project.is_empty() && !repo.is_empty() && !repo.contains('/')).then_some((project, repo))
+}
+
 pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
     let path = url.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
@@ -1136,6 +1240,22 @@ async fn review_round(
             };
             notifier.can_write(project, name, sender).await
         }
+        WebhookSource::AzureDevops => {
+            let Some(notifier) = hooks.config.azure_devops_notifier.as_ref() else {
+                return ignored(
+                    delivery,
+                    "no Azure DevOps client to check the sender's rights",
+                );
+            };
+            // `https://dev.azure.com/<org>/<project>/_git/<repo>`.
+            let Some((project, name)) = azure_project_and_repo(&repo.url) else {
+                return ignored(
+                    delivery,
+                    "the repository's URL names no project and repository",
+                );
+            };
+            notifier.can_write(project, name, sender).await
+        }
         WebhookSource::Github
         | WebhookSource::Jira
         | WebhookSource::Backlog
@@ -1181,7 +1301,8 @@ async fn review_round(
             (locale.strings().review_refused)(&aegis_pr::inert(&why))
         );
         // `group/project!iid` on GitLab, `owner/repo#n` on GitHub and
-        // `workspace/repo#n` on Bitbucket, `KEY/slug#n` on its Data Center.
+        // `workspace/repo#n` on Bitbucket, `KEY/slug#n` on its Data Center,
+        // `project/repo#n` on Azure DevOps.
         match source {
             WebhookSource::Gitlab => {
                 if let (Some(n), Some((project, Ok(iid)))) = (
@@ -1189,6 +1310,14 @@ async fn review_round(
                     issue_ref.rsplit_once('!').map(|(p, i)| (p, i.parse())),
                 ) {
                     n.comment_on_merge_request(project, iid, &text).await;
+                }
+            }
+            WebhookSource::AzureDevops => {
+                if let (Some(n), Ok((project, name, id))) = (
+                    &hooks.config.azure_devops_notifier,
+                    crate::lifecycle::parse_issue_ref(issue_ref),
+                ) {
+                    n.comment_on_pull_request(&project, &name, id, &text).await;
                 }
             }
             WebhookSource::BitbucketDc => {

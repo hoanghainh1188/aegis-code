@@ -32,6 +32,26 @@ pub fn gitlab(token: &[u8], header: Option<&str>) -> bool {
     given.as_slice().ct_eq(expected.as_slice()).into()
 }
 
+/// An Azure DevOps service hook (#636) signs nothing: it sends the
+/// secret as its Basic auth password (`authorization`, any user name) or
+/// in a header of the subscription's (`custom`). Both are checked, so the
+/// time taken does not say which was sent.
+pub fn azure_devops(secret: &[u8], authorization: Option<&str>, custom: Option<&str>) -> bool {
+    use base64::Engine;
+    let password = authorization
+        .and_then(|a| a.strip_prefix("Basic "))
+        .and_then(|b| {
+            base64::engine::general_purpose::STANDARD
+                .decode(b.trim())
+                .ok()
+        })
+        .and_then(|d| String::from_utf8(d).ok())
+        .and_then(|d| d.split_once(':').map(|(_, p)| p.to_owned()));
+    let basic = gitlab(secret, password.as_deref());
+    let header = gitlab(secret, custom);
+    basic | header
+}
+
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return None;
@@ -69,6 +89,26 @@ mod tests {
         ));
         assert!(!github(SECRET, BODY, Some("sha256=zz")));
         assert!(!github(SECRET, BODY, None));
+    }
+
+    #[test]
+    fn azure_secrets_come_as_a_basic_password_or_a_header() {
+        // `aegis:s3cret`.
+        assert!(azure_devops(
+            b"s3cret",
+            Some("Basic YWVnaXM6czNjcmV0"),
+            None
+        ));
+        assert!(azure_devops(b"s3cret", None, Some("s3cret")));
+        // `aegis:other`.
+        assert!(!azure_devops(
+            b"s3cret",
+            Some("Basic YWVnaXM6b3RoZXI="),
+            None
+        ));
+        assert!(!azure_devops(b"s3cret", Some("Bearer s3cret"), None));
+        assert!(!azure_devops(b"s3cret", Some("Basic !!"), Some("no")));
+        assert!(!azure_devops(b"s3cret", None, None));
     }
 
     #[test]

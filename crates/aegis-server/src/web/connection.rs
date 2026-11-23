@@ -9,7 +9,9 @@
 //! browser.
 
 use aegis_lifecycle::ForkPlatform;
-use aegis_pr::{Bitbucket, BitbucketDataCenter, GitHub, GitLab, HookDone, PrError, RepoAccess};
+use aegis_pr::{
+    AzureDevOps, Bitbucket, BitbucketDataCenter, GitHub, GitLab, HookDone, PrError, RepoAccess,
+};
 use aegis_store::{BadSignatures, Repo, Store};
 use askama::Template;
 use axum::extract::rejection::ExtensionRejection;
@@ -27,9 +29,10 @@ use super::{Me, Nonce, WebError, WebResult, render};
 use crate::auth::{Access, Auth};
 use crate::repo_cli::RepoFile;
 use crate::webhook::{
-    BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_COMMENT_TOKEN_ENV, BITBUCKET_DC_SECRET_ENV,
-    BITBUCKET_SECRET_ENV, COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV,
-    GITLAB_TOKEN_ENV, owner_and_name, project_path,
+    AZURE_DEVOPS_COMMENT_TOKEN_ENV, AZURE_DEVOPS_SECRET_ENV, BITBUCKET_COMMENT_TOKEN_ENV,
+    BITBUCKET_DC_COMMENT_TOKEN_ENV, BITBUCKET_DC_SECRET_ENV, BITBUCKET_SECRET_ENV,
+    COMMENT_TOKEN_ENV, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
+    azure_project_and_repo, owner_and_name, project_path,
 };
 
 /// The webhooks shown on the page.
@@ -122,12 +125,29 @@ const BITBUCKET_DC: Forge = Forge {
     hook_right: "the admin permission on the repository",
 };
 
+/// Azure DevOps (#636): review rounds only, on the fork, from a service
+/// hook made by hand in the project's settings.
+const AZURE_DEVOPS: Forge = Forge {
+    name: "azure-devops",
+    webhook_secret: AZURE_DEVOPS_SECRET_ENV,
+    comment_token: AZURE_DEVOPS_COMMENT_TOKEN_ENV,
+    repo_events: &[],
+    fork_events: &["Pull request commented on", "Pull request updated"],
+    repo_hook_events: &[],
+    fork_hook_events: &[
+        "ms.vss-code.git-pullrequest-comment-event",
+        "git.pullrequest.updated",
+    ],
+    hook_right: "the Edit subscriptions permission on the project",
+};
+
 fn forge_of(platform: ForkPlatform) -> &'static Forge {
     match platform {
         ForkPlatform::GitHub => &GITHUB,
         ForkPlatform::GitLab => &GITLAB,
         ForkPlatform::Bitbucket => &BITBUCKET,
         ForkPlatform::BitbucketDataCenter => &BITBUCKET_DC,
+        ForkPlatform::AzureDevOps => &AZURE_DEVOPS,
     }
 }
 
@@ -416,6 +436,11 @@ pub async fn make_webhooks(
                 "Bitbucket webhooks are made by hand, in the repository's settings",
             ));
         }
+        ForkPlatform::AzureDevOps => {
+            return Err(bad(
+                "Azure DevOps service hooks are made by hand, in the project's settings",
+            ));
+        }
     };
     let (path, events) = match form.place.as_str() {
         "repo" => {
@@ -468,6 +493,11 @@ pub async fn make_webhooks(
                 "Bitbucket webhooks are made by hand, in the repository's settings",
             ));
         }
+        ForkPlatform::AzureDevOps => {
+            return Err(bad(
+                "Azure DevOps service hooks are made by hand, in the project's settings",
+            ));
+        }
     };
     let (hook, created) = match done {
         Ok(HookDone::Created(hook)) => (hook, true),
@@ -492,7 +522,8 @@ fn hook_refusal(e: &PrError, forge: &Forge, path: &str, token: &str, secret: &st
     let status = match e {
         PrError::GitHub { status, .. }
         | PrError::GitLab { status, .. }
-        | PrError::Bitbucket { status, .. } => *status,
+        | PrError::Bitbucket { status, .. }
+        | PrError::AzureDevOps { status, .. } => *status,
         _ => 0,
     };
     let said = match status {
@@ -514,7 +545,8 @@ fn refusal(e: &PrError, what: &str, secret: &str) -> String {
     let (status, message) = match e {
         PrError::GitHub { status, message }
         | PrError::GitLab { status, message }
-        | PrError::Bitbucket { status, message } => (*status, message.as_str()),
+        | PrError::Bitbucket { status, message }
+        | PrError::AzureDevOps { status, message } => (*status, message.as_str()),
         _ => (0, ""),
     };
     let said = match status {
@@ -553,6 +585,10 @@ async fn access(
                 .access()
                 .await
         }
+        ForkPlatform::AzureDevOps => {
+            let (project, name) = path.split_once('/').unwrap_or((path, ""));
+            AzureDevOps::new(api, project, name, token)?.access().await
+        }
     }
 }
 
@@ -565,6 +601,10 @@ fn upstream_path(platform: ForkPlatform, url: &str) -> Option<String> {
         // `https://<host>/scm/<key>/<slug>.git`.
         ForkPlatform::BitbucketDataCenter => {
             owner_and_name(url).map(|(key, slug)| format!("{}/{slug}", key.to_ascii_uppercase()))
+        }
+        // `https://dev.azure.com/<org>/<project>/_git/<repo>`.
+        ForkPlatform::AzureDevOps => {
+            azure_project_and_repo(url).map(|(project, repo)| format!("{project}/{repo}"))
         }
     }
 }
@@ -620,7 +660,13 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
             FORK,
             format!("the secret store has no `{}`", fork.token_env),
         )),
-        Some(t) => match access(fork.platform, &fork.api, &fork.path(), &t).await {
+        // A service principal's secret is exchanged for a token (#636).
+        Some(secret) => match aegis_lifecycle::fork_token(fork, &secret).await {
+        Err(e) => rows.push(fail(
+            FORK,
+            format!("no token for the fork's service principal: {e}").replace(&secret, "***"),
+        )),
+        Ok(t) => match access(fork.platform, &fork.api, &fork.path(), &t).await {
             Err(e) => rows.push(fail(
                 FORK,
                 refusal(&e, &format!("the fork `{}`", fork.path()), &t),
@@ -647,6 +693,7 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
                 format!("may push `agent/*` branches to `{}`", a.path),
             )),
         },
+        },
     }
     }
     const COMMENT: &str = "Comment token";
@@ -656,15 +703,14 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
         ForkPlatform::GitLab => admin.gitlab_api.as_str(),
         ForkPlatform::Bitbucket => admin.bitbucket_api.as_str(),
         ForkPlatform::BitbucketDataCenter => admin.bitbucket_dc_api.as_str(),
+        ForkPlatform::AzureDevOps => admin.azure_devops_url.as_str(),
     };
     if api.is_empty() {
-        rows.push(skip(
-            COMMENT,
-            format!(
-                "set `{}` to ask the forge",
-                crate::webhook::BITBUCKET_DC_API_ENV
-            ),
-        ));
+        let env = match fork.platform {
+            ForkPlatform::AzureDevOps => crate::webhook::AZURE_DEVOPS_URL_ENV,
+            _ => crate::webhook::BITBUCKET_DC_API_ENV,
+        };
+        rows.push(skip(COMMENT, format!("set `{env}` to ask the forge")));
         rows.push(skip(URL, "the instance's API root is not set"));
         return rows;
     }
@@ -698,7 +744,9 @@ pub(super) async fn run_checks(store: &Store, admin: &RepoAdmin, repo: &Repo) ->
             let issues = a.issues_enabled
                 || matches!(
                     fork.platform,
-                    ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter
+                    ForkPlatform::Bitbucket
+                        | ForkPlatform::BitbucketDataCenter
+                        | ForkPlatform::AzureDevOps
                 );
             rows.push(if !issues {
                 fail(COMMENT, format!("`{}` has its issues turned off", a.path))

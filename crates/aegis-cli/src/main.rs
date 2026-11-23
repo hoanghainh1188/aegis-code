@@ -225,6 +225,13 @@ fn fork_token(config: &RunConfig) -> Result<String, String> {
                 .into(),
         );
     }
+    if config.repo.fork.entra.is_some() {
+        return Err(
+            "repo.fork.entra: a service principal's token is issued on the server; the CLI \
+             needs a personal access token in repo.fork.token_env"
+                .into(),
+        );
+    }
     let token_env = &config.repo.fork.token_env;
     std::env::var(token_env).map_err(|_| format!("set {token_env} to a token for the fork"))
 }

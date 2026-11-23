@@ -253,6 +253,7 @@ impl RepoSettings {
                     api: app.api.clone().unwrap_or_else(crate::config::default_api),
                     token_env: String::new(),
                     push_to_local: None,
+                    entra: None,
                 };
                 Ok((fork, Some(app.clone())))
             }
@@ -821,6 +822,7 @@ fn auth(platform: crate::ForkPlatform, token: Option<&str>) -> Option<(&'static 
         crate::ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
         crate::ForkPlatform::Bitbucket => aegis_pr::BITBUCKET_USER,
         crate::ForkPlatform::BitbucketDataCenter => aegis_pr::BEARER_USER,
+        crate::ForkPlatform::AzureDevOps => aegis_pr::AZURE_DEVOPS_USER,
     };
     token.map(|t| (user, t))
 }
