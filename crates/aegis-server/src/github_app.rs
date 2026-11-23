@@ -166,11 +166,18 @@ pub async fn read_token(
     tenant: TenantId,
 ) -> Result<Option<String>, String> {
     if let Some(fork) = &settings.fork {
-        return Ok(secrets
+        let Some(secret) = secrets
             .get_or_load(&fork.token_env)
             .await
             .map_err(|e| e.to_string())?
-            .map(|t| t.expose().to_owned()));
+        else {
+            return Ok(None);
+        };
+        // A service principal's secret is exchanged for a token (#636).
+        return aegis_lifecycle::fork_token(fork, secret.expose())
+            .await
+            .map(Some)
+            .map_err(|e| e.to_string());
     }
     let app = app.ok_or("`app` needs the instance's GitHub App, `[github_app]` in server.toml")?;
     let (owner, name) = aegis_lifecycle::upstream_of(url)

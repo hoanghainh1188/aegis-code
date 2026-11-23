@@ -171,7 +171,8 @@ pub fn check_sources(tree: &Path, base: &str, answer: &FinalAnswer) -> SourceChe
 /// The forge's web root from its API root: `https://api.github.com` is
 /// `https://github.com`; GitHub Enterprise drops `/api/v3`, GitLab
 /// `/api/v4`, Bitbucket Data Center `/rest/api/1.0`; Bitbucket Cloud's is
-/// `https://bitbucket.org`. `None` for anything else.
+/// `https://bitbucket.org`; Azure DevOps' API root is its web root.
+/// `None` for anything else.
 fn web_root(fork: &ForkConfig) -> Option<String> {
     let api = fork.api.trim_end_matches('/');
     let root = match fork.platform {
@@ -181,6 +182,7 @@ fn web_root(fork: &ForkConfig) -> Option<String> {
         ForkPlatform::Bitbucket if api == aegis_pr::BITBUCKET_API => "https://bitbucket.org",
         ForkPlatform::Bitbucket => return None,
         ForkPlatform::BitbucketDataCenter => api.strip_suffix("/rest/api/1.0")?,
+        ForkPlatform::AzureDevOps => api,
     };
     root.starts_with("https://").then(|| root.to_owned())
 }
@@ -212,12 +214,26 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
             fork.owner, fork.name, cited.path
         ));
     }
+    if fork.platform == ForkPlatform::AzureDevOps {
+        // Lines are a selection, up to the start of the line after.
+        let lines = cited.lines.map_or_else(String::new, |(a, b)| {
+            format!(
+                "&line={a}&lineEnd={}&lineStartColumn=1&lineEndColumn=1",
+                b + 1
+            )
+        });
+        return Some(format!(
+            "{root}/{}/_git/{}?path=/{}&version=GC{commit}{lines}",
+            fork.owner, fork.name, cited.path
+        ));
+    }
     let blob = match fork.platform {
         ForkPlatform::GitHub => "blob",
         ForkPlatform::GitLab => "-/blob",
         ForkPlatform::Bitbucket => "src",
         // Linked above: its page names the commit in the query.
         ForkPlatform::BitbucketDataCenter => "browse",
+        ForkPlatform::AzureDevOps => "_git",
     };
     let anchor = match (fork.platform, cited.lines) {
         (_, None) => String::new(),
@@ -225,7 +241,10 @@ pub fn line_url(fork: &ForkConfig, commit: &str, location: &str) -> Option<Strin
         (ForkPlatform::Bitbucket, Some((a, b))) => format!("#lines-{a}:{b}"),
         (_, Some((a, b))) if a == b => format!("#L{a}"),
         (ForkPlatform::GitHub, Some((a, b))) => format!("#L{a}-L{b}"),
-        (ForkPlatform::GitLab | ForkPlatform::BitbucketDataCenter, Some((a, b))) => {
+        (
+            ForkPlatform::GitLab | ForkPlatform::BitbucketDataCenter | ForkPlatform::AzureDevOps,
+            Some((a, b)),
+        ) => {
             format!("#L{a}-{b}")
         }
     };
@@ -248,6 +267,7 @@ mod tests {
             api: api.into(),
             token_env: "T".into(),
             push_to_local: None,
+            entra: None,
         }
     }
 
@@ -281,6 +301,14 @@ mod tests {
         assert_eq!(
             line_url(&dc, "abc123", "a.py:4").as_deref(),
             Some("https://git.acme.example/projects/aegis-bot/repos/cart/browse/a.py?at=abc123#4")
+        );
+        let az = fork(ForkPlatform::AzureDevOps, "https://dev.azure.com/acme");
+        assert_eq!(
+            line_url(&az, "abc123", "a.py:4-6").as_deref(),
+            Some(
+                "https://dev.azure.com/acme/aegis-bot/_git/cart?path=/a.py&version=GCabc123\
+                 &line=4&lineEnd=7&lineStartColumn=1&lineEndColumn=1"
+            )
         );
         let bb = fork(ForkPlatform::Bitbucket, aegis_pr::BITBUCKET_API);
         assert_eq!(

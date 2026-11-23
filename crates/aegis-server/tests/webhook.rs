@@ -9,6 +9,7 @@ use aegis_ledger::Outcome;
 use aegis_secrets::{MemorySource, Secrets};
 use aegis_server::runner::{Attempt, JobRunner};
 use aegis_server::webhook::{
+    AZURE_DEVOPS_COMMENT_TOKEN_ENV, AZURE_DEVOPS_SECRET_ENV, AzureDevOpsNotifier,
     BITBUCKET_COMMENT_TOKEN_ENV, BITBUCKET_DC_COMMENT_TOKEN_ENV, BITBUCKET_DC_SECRET_ENV,
     BITBUCKET_SECRET_ENV, BitbucketDataCenterNotifier, BitbucketNotifier, COMMENT_TOKEN_ENV,
     DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GITLAB_COMMENT_TOKEN_ENV, GITLAB_TOKEN_ENV,
@@ -42,6 +43,7 @@ fn config() -> WebhookConfig {
         gitlab_notifier: None,
         bitbucket_notifier: None,
         bitbucket_dc_notifier: None,
+        azure_devops_notifier: None,
         max_body_bytes: DEFAULT_MAX_BODY_BYTES,
         modes: None,
         app: None,
@@ -1041,6 +1043,153 @@ async fn a_fix_comment_on_the_agents_data_center_pr_queues_a_round_for_writers()
     assert_eq!(
         (round.source, round.review_of, round.issue_ref.as_str()),
         (JobSource::Review, Some(root.id), "PAY/cart#12")
+    );
+    db.drop().await;
+}
+
+/// #636: an Azure DevOps service hook signs nothing; its secret comes as
+/// the Basic auth password or in a header, and the comment's author must
+/// be in a writer group of the project.
+#[tokio::test]
+async fn a_fix_comment_on_the_agents_azure_pr_queues_a_round_for_writers() {
+    let Some(db) = test_db().await else { return };
+    let store = db.store.clone();
+    repo(&store, "cart", "https://dev.azure.com/acme/Shop/_git/cart").await;
+    let writer = "6f5e1b2a-0c3d-4e5f-8a9b-0c1d2e3f4a5b";
+    let reader = "11111111-2222-3333-4444-555555555555";
+    let azure = MockServer::start().await;
+    for (id, groups) in [
+        (writer, json!(["T;S-contrib"])),
+        (reader, json!(["T;S-readers"])),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/acme/_apis/identities"))
+            .and(wiremock::matchers::query_param("identityIds", id))
+            // `aegis:az-comment`.
+            .and(header("authorization", "Basic YWVnaXM6YXotY29tbWVudA=="))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": [{ "id": id, "memberOf": groups }]
+            })))
+            .mount(&azure)
+            .await;
+    }
+    for (group, sid) in [
+        ("Contributors", "S-contrib"),
+        ("Project Administrators", "S-admins"),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/acme/_apis/identities"))
+            .and(wiremock::matchers::query_param(
+                "filterValue",
+                format!("[Shop]\\{group}").as_str(),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": [{ "descriptor": format!("T;{sid}") }]
+            })))
+            .mount(&azure)
+            .await;
+    }
+    let secrets = Secrets::fixed([
+        (AZURE_DEVOPS_SECRET_ENV, SECRET),
+        (AZURE_DEVOPS_COMMENT_TOKEN_ENV, "az-comment"),
+    ]);
+    let app = router(
+        store.clone(),
+        WebhookConfig {
+            azure_devops_notifier: Some(AzureDevOpsNotifier::new(
+                &format!("{}/acme", azure.uri()),
+                secrets.clone(),
+            )),
+            secrets,
+            ..config()
+        },
+    );
+    let pr = "https://dev.azure.com/acme/Shop/_git/cart/pullrequest/12";
+    let row = store.repo_by_slug("cart").await.unwrap().unwrap();
+    store
+        .create_job(&aegis_store::NewJob {
+            repo_id: row.id,
+            issue_ref: "Shop/cart#9".into(),
+            ledger_key: aegis_ledger::IssueId::parse("cart-9-1".to_owned()).unwrap(),
+            source: JobSource::Cli,
+            priority: None,
+            sla_deadline: None,
+        })
+        .await
+        .unwrap();
+    let claim = store
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let opened = aegis_store::AttemptEnd::Done {
+        outcome: Outcome::PrOpened,
+        reason: None,
+        pr_url: Some(pr.into()),
+        patch: None,
+        diagnosis: None,
+    };
+    let root = store
+        .finish_attempt(&claim.run, "w", &opened)
+        .await
+        .unwrap();
+    let comment = |id: &str, author: &str| {
+        json!({
+            "id": id,
+            "eventType": "ms.vss-code.git-pullrequest-comment-event",
+            "resource": {
+                "comment": { "content": "/aegis fix", "commentType": "text", "author": { "id": author } },
+                "pullRequest": {
+                    "pullRequestId": 12, "status": "active",
+                    "sourceRefName": "refs/heads/agent/cart-9-1",
+                    "targetRefName": "refs/heads/main",
+                    "repository": {
+                        "name": "cart", "project": { "name": "Shop" },
+                        "remoteUrl": "https://acme@dev.azure.com/acme/Shop/_git/cart"
+                    }
+                }
+            }
+        })
+    };
+    // `aegis:wrong`, then no secret at all.
+    let forged = [("authorization", "Basic YWVnaXM6d3Jvbmc=")];
+    let (status, _) = send(&app, "/azure-devops", &forged, &comment("d0", writer)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = send(&app, "/azure-devops", &[], &comment("d0", writer)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let basic = format!(
+        "Basic {}",
+        base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            format!("hook:{SECRET}")
+        )
+    );
+    let by_basic = [("authorization", basic.as_str())];
+    let (status, body) = send(
+        &app,
+        "/azure-devops",
+        &by_basic,
+        &json!({ "eventType": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = send(&app, "/azure-devops", &by_basic, &comment("d1", reader)).await;
+    assert_eq!(
+        (status, &body["data"]["status"]),
+        (StatusCode::OK, &json!("ignored")),
+        "{body}"
+    );
+    let by_header = [("x-aegis-webhook-secret", SECRET)];
+    let (status, body) = send(&app, "/azure-devops", &by_header, &comment("d2", writer)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let round = store
+        .job(aegis_store::JobId(body["data"]["job_id"].as_i64().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (round.source, round.review_of, round.issue_ref.as_str()),
+        (JobSource::Review, Some(root.id), "Shop/cart#12")
     );
     db.drop().await;
 }

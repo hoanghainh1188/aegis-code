@@ -32,4 +32,6 @@ pub enum PrError {
     /// `status` 0: the request did not get an answer (#634).
     #[error("Bitbucket API {status}: {message}")]
     Bitbucket { status: u16, message: String },
+    #[error("Azure DevOps API {status}: {message}")]
+    AzureDevOps { status: u16, message: String },
 }

@@ -150,6 +150,35 @@ impl Remote {
         })
     }
 
+    /// `<collection>/<project>/_git/<repo>` on Azure DevOps (#636),
+    /// `collection` the organization or collection URL
+    /// (`https://dev.azure.com/<org>`, `https://<host>/tfs/<collection>`),
+    /// pushed with `token` (see [`AZURE_DEVOPS_USER`]).
+    pub fn azure_devops(
+        collection: &str,
+        project: &str,
+        repo: &str,
+        token: &str,
+    ) -> Result<Self, PrError> {
+        let refused = || PrError::InvalidRemote(format!("{collection}/{project}/_git/{repo}"));
+        let rest = collection.strip_prefix("https://").ok_or_else(refused)?;
+        let mut parts = rest.split('/');
+        let host = parts.next().unwrap_or_default();
+        let context: Vec<&str> = parts.collect();
+        if !plain_host(host)
+            || !context.iter().all(|p| plain_name(p))
+            || !plain_name(project)
+            || !plain_name(repo)
+        {
+            return Err(refused());
+        }
+        Ok(Self {
+            url: format!("{collection}/{project}/_git/{repo}"),
+            token: Some(token.to_owned()),
+            user: AZURE_DEVOPS_USER,
+        })
+    }
+
     /// A bare repo on this machine; no token is sent.
     pub fn local(path: &Path) -> Result<Self, PrError> {
         let path = path
@@ -193,15 +222,40 @@ pub const BITBUCKET_USER: &str = "x-token-auth";
 /// bearer token, from git too (#635). No user name can be it.
 pub const BEARER_USER: &str = "<bearer>";
 
+/// Not a user: Azure DevOps (#636) takes a personal access token as Basic
+/// auth and a Microsoft Entra access token (a JWT) as a bearer token;
+/// which one a token is decides how it is sent ([`is_entra_token`]).
+pub const AZURE_DEVOPS_USER: &str = "<azure-devops>";
+
+/// Whether `token` is a Microsoft Entra access token: a JWT, three
+/// base64url parts. A personal access token has no dot.
+pub fn is_entra_token(token: &str) -> bool {
+    let parts: Vec<&str> = token.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c))
+        })
+}
+
 /// [`token_env`] for `user`: [`GITHUB_USER`], [`GITLAB_USER`] or
 /// [`BITBUCKET_USER`], sent with the token as Basic auth; for
-/// [`BEARER_USER`], the token alone as a bearer token.
+/// [`BEARER_USER`], the token alone as a bearer token; for
+/// [`AZURE_DEVOPS_USER`], either, by the token.
 pub fn token_env_as(user: &str, token: &str) -> [(&'static str, String); 5] {
-    let header = if user == BEARER_USER {
-        format!("Authorization: Bearer {token}")
-    } else {
-        let basic = base64(format!("{user}:{token}").as_bytes());
-        format!("Authorization: Basic {basic}")
+    let header = match user {
+        BEARER_USER => format!("Authorization: Bearer {token}"),
+        AZURE_DEVOPS_USER if is_entra_token(token) => format!("Authorization: Bearer {token}"),
+        // Azure DevOps takes any user name with a personal access token.
+        AZURE_DEVOPS_USER => format!(
+            "Authorization: Basic {}",
+            base64(format!("aegis:{token}").as_bytes())
+        ),
+        _ => format!(
+            "Authorization: Basic {}",
+            base64(format!("{user}:{token}").as_bytes())
+        ),
     };
     [
         ("GIT_CONFIG_COUNT", "2".into()),
@@ -483,6 +537,38 @@ mod tests {
             token_env_as(BEARER_USER, "t")[2].1,
             "Authorization: Bearer t"
         );
+    }
+
+    #[test]
+    fn an_azure_remote_sends_a_pat_as_basic_and_an_entra_token_as_bearer() {
+        for root in [
+            "https://dev.azure.com/acme",
+            "https://tfs.acme.example/tfs/Main",
+        ] {
+            let r = Remote::azure_devops(root, "Shop", "cart", "t").unwrap();
+            assert_eq!(r.url(), format!("{root}/Shop/_git/cart"));
+            assert_eq!(r.credentials(), Some((AZURE_DEVOPS_USER, "t")));
+        }
+        for (root, project) in [
+            ("http://dev.azure.com/acme", "Shop"),
+            ("https://dev.azure.com/../x", "Shop"),
+            ("https://dev.azure.com/acme", "My Shop"),
+        ] {
+            assert!(
+                Remote::azure_devops(root, project, "cart", "t").is_err(),
+                "{root} {project}"
+            );
+        }
+        assert_eq!(
+            token_env_as(AZURE_DEVOPS_USER, "pat")[2].1,
+            format!("Authorization: Basic {}", base64(b"aegis:pat"))
+        );
+        assert_eq!(
+            token_env_as(AZURE_DEVOPS_USER, "eyJh.eyJz.c2ln")[2].1,
+            "Authorization: Bearer eyJh.eyJz.c2ln"
+        );
+        assert!(!is_entra_token("a.b"));
+        assert!(!is_entra_token("a..b"));
     }
 
     #[test]

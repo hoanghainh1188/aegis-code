@@ -1,8 +1,11 @@
 //! Where the agent's change goes: a pull request on GitHub or a merge
 //! request on GitLab (#252) or a pull request on Bitbucket Cloud (#634)
-//! or Data Center (#635), from a branch of the same repository.
+//! or Data Center (#635) or Azure DevOps (#636), from a branch of the
+//! same repository.
 
-use crate::{AgentBranch, Bitbucket, BitbucketDataCenter, GitHub, GitLab, PrError, Remote};
+use crate::{
+    AgentBranch, AzureDevOps, Bitbucket, BitbucketDataCenter, GitHub, GitLab, PrError, Remote,
+};
 
 #[derive(Debug, Clone)]
 pub enum Forge {
@@ -10,6 +13,7 @@ pub enum Forge {
     GitLab(GitLab),
     Bitbucket(Bitbucket),
     BitbucketDataCenter(BitbucketDataCenter),
+    AzureDevOps(AzureDevOps),
 }
 
 impl Forge {
@@ -20,6 +24,7 @@ impl Forge {
             Self::GitLab(gitlab) => gitlab.remote(),
             Self::Bitbucket(bitbucket) => bitbucket.remote(),
             Self::BitbucketDataCenter(dc) => dc.remote(),
+            Self::AzureDevOps(az) => az.remote(),
         }
     }
 
@@ -31,6 +36,7 @@ impl Forge {
             Self::GitLab(gitlab) => gitlab.remote(),
             Self::Bitbucket(bitbucket) => bitbucket.remote(),
             Self::BitbucketDataCenter(dc) => dc.remote(),
+            Self::AzureDevOps(az) => az.remote(),
         }
     }
 
@@ -41,6 +47,7 @@ impl Forge {
             Self::GitLab(gitlab) => gitlab.comment_on_merge_request(number, body).await,
             Self::Bitbucket(bitbucket) => bitbucket.comment_on_pull_request(number, body).await,
             Self::BitbucketDataCenter(dc) => dc.comment_on_pull_request(number, body).await,
+            Self::AzureDevOps(az) => az.comment_on_pull_request(number, body).await,
         }
     }
 
@@ -67,6 +74,10 @@ impl Forge {
                 .await
                 .map(|pr| pr.url),
             Self::BitbucketDataCenter(dc) => dc
+                .open_pull_request(head, base, title, body, draft)
+                .await
+                .map(|pr| pr.url),
+            Self::AzureDevOps(az) => az
                 .open_pull_request(head, base, title, body, draft)
                 .await
                 .map(|pr| pr.url),

@@ -235,7 +235,11 @@ impl LifecycleRunner {
             }
             let name = &config.repo.fork.token_env;
             let token = self.secret(slug, "the fork's token", name).await?;
-            return Ok(TokenSource::Static(token.expose().to_owned()));
+            // A service principal's secret becomes a token now (#636).
+            let token = aegis_lifecycle::fork_token(&config.repo.fork, token.expose())
+                .await
+                .map_err(|e| Attempt::Infra(format!("repo `{slug}`: the fork's token: {e}")))?;
+            return Ok(TokenSource::Static(token));
         };
         let handle = self.github_app.as_ref().ok_or_else(|| {
             Attempt::Rejected(format!(
@@ -352,12 +356,19 @@ impl LifecycleRunner {
         let read_token = match &github {
             TokenSource::App { .. } => Some(use_token(&github, TokenUse::Read).await?),
             TokenSource::Static(t) if !t.is_empty() => Some(t.clone()),
-            TokenSource::Static(_) => self
+            TokenSource::Static(_) => match self
                 .secrets
                 .get_or_load(&config.repo.fork.token_env)
                 .await
                 .map_err(|e| Attempt::Infra(e.to_string()))?
-                .map(|t| t.expose().to_owned()),
+            {
+                Some(secret) => Some(
+                    aegis_lifecycle::fork_token(&config.repo.fork, secret.expose())
+                        .await
+                        .map_err(|e| Attempt::Infra(e.to_string()))?,
+                ),
+                None => None,
+            },
         };
         aegis_lifecycle::clone::prepare_async(
             &config.repo.path,
@@ -572,6 +583,17 @@ impl LifecycleRunner {
                 }
                 ReviewRound::from_gitlab(&fork.api, project, iid, token).await
             }
+            // `project/repo#id` (#636).
+            ForkPlatform::AzureDevOps => {
+                let (project, repo, id) =
+                    parse_issue_ref(&job.issue_ref).map_err(Attempt::Rejected)?;
+                if !(project.eq_ignore_ascii_case(&fork.owner)
+                    && repo.eq_ignore_ascii_case(&fork.name))
+                {
+                    return Err(not_the_forks());
+                }
+                ReviewRound::from_azure_devops(&fork.api, &fork.owner, &fork.name, id, token).await
+            }
             // `KEY/slug#id` (#635).
             ForkPlatform::BitbucketDataCenter => {
                 let (project, repo, id) =
@@ -614,6 +636,10 @@ impl LifecycleRunner {
                     ref message,
                 }
                 | aegis_pr::PrError::Bitbucket {
+                    status: 0,
+                    ref message,
+                }
+                | aegis_pr::PrError::AzureDevOps {
                     status: 0,
                     ref message,
                 },
@@ -756,6 +782,7 @@ fn git_user(fork: &aegis_lifecycle::ForkConfig) -> &'static str {
         ForkPlatform::GitLab => aegis_pr::GITLAB_USER,
         ForkPlatform::Bitbucket => aegis_pr::BITBUCKET_USER,
         ForkPlatform::BitbucketDataCenter => aegis_pr::BEARER_USER,
+        ForkPlatform::AzureDevOps => aegis_pr::AZURE_DEVOPS_USER,
     }
 }
 

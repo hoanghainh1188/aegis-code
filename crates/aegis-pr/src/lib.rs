@@ -14,6 +14,7 @@
 mod access;
 mod actions;
 mod app;
+mod azure;
 mod bitbucket;
 mod bitbucket_dc;
 mod body;
@@ -36,6 +37,7 @@ use aegis_gate::GateReport;
 pub use access::RepoAccess;
 pub use actions::{FailedJob, FailedRun};
 pub use app::{AppKey, Gate, GitHubApp, TokenSource, TokenUse};
+pub use azure::{AzureDevOps, AzurePull, ENTRA_AUTHORITY, WRITER_GROUPS, entra_token};
 pub use bitbucket::{BITBUCKET_API, Bitbucket, BitbucketPermission, BitbucketPull};
 pub use bitbucket_dc::{BitbucketDataCenter, DataCenterPull};
 pub use body::{
@@ -48,8 +50,8 @@ pub use coverage::{cobertura_lines, cobertura_percent, lcov_lines, lcov_percent}
 pub use error::PrError;
 pub use forge::Forge;
 pub use git::{
-    BEARER_USER, BITBUCKET_USER, GITHUB_USER, GITLAB_USER, Identity, Remote, token_env,
-    token_env_as,
+    AZURE_DEVOPS_USER, BEARER_USER, BITBUCKET_USER, GITHUB_USER, GITLAB_USER, Identity, Remote,
+    is_entra_token, token_env, token_env_as,
 };
 pub use github::{GitHub, IssueComment, PullRequest};
 pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};

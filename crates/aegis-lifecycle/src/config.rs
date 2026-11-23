@@ -378,6 +378,9 @@ pub enum ForkPlatform {
     /// Bitbucket Data Center or Server, self-hosted (#635).
     #[serde(rename = "bitbucket-dc")]
     BitbucketDataCenter,
+    /// Azure DevOps Services or Server (Azure Repos, #636).
+    #[serde(rename = "azure-devops")]
+    AzureDevOps,
 }
 
 /// The fork the agent pushes to and opens PRs in: a GitHub repository, a
@@ -385,7 +388,9 @@ pub enum ForkPlatform {
 /// `api` the instance's API root), or a Bitbucket Cloud repository
 /// (`owner` is its workspace, `api` [`aegis_pr::BITBUCKET_API`]), or a
 /// Bitbucket Data Center repository (`owner` is its project key, `name`
-/// its slug, `api` the instance's `…/rest/api/1.0`).
+/// its slug, `api` the instance's `…/rest/api/1.0`), or an Azure Repos
+/// repository (`owner` is its project, `api` the organization or
+/// collection URL, `https://dev.azure.com/<org>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForkConfig {
@@ -399,6 +404,28 @@ pub struct ForkConfig {
     /// Push to this local bare repo instead of the fork (tests, dry runs).
     #[serde(default)]
     pub push_to_local: Option<PathBuf>,
+    /// An Azure DevOps fork reached as a Microsoft Entra service principal
+    /// (#636): `token_env` then names its client secret, exchanged for an
+    /// access token when a job starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entra: Option<EntraConfig>,
+}
+
+/// A Microsoft Entra service principal (#636).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntraConfig {
+    /// The tenant's ID or domain.
+    pub tenant: String,
+    /// The application (client) ID.
+    pub client_id: String,
+    /// Where tokens are issued; [`aegis_pr::ENTRA_AUTHORITY`] by default.
+    #[serde(default = "default_authority")]
+    pub authority: String,
+}
+
+fn default_authority() -> String {
+    aegis_pr::ENTRA_AUTHORITY.into()
 }
 
 fn is_github(platform: &ForkPlatform) -> bool {
@@ -650,6 +677,20 @@ impl RunConfig {
                     .into(),
             ));
         }
+        if fork.platform == ForkPlatform::AzureDevOps
+            && (fork.api == default_api() || fork.api.contains("/_apis"))
+        {
+            return Err(LifecycleError::Config(
+                "repo.fork.api: an Azure DevOps fork needs its organization or collection URL \
+                 (`https://dev.azure.com/<org>`)"
+                    .into(),
+            ));
+        }
+        if fork.entra.is_some() && fork.platform != ForkPlatform::AzureDevOps {
+            return Err(LifecycleError::Config(
+                "repo.fork.entra: a service principal reaches Azure DevOps forks only".into(),
+            ));
+        }
         self.repo
             .audit_policy()
             .check_ids()
@@ -877,6 +918,41 @@ test_env = { DATABASE_URL = "postgres://postgres:test@postgres:5432/postgres" }
         )
         .unwrap();
         assert!(matches!(forge, aegis_pr::Forge::Bitbucket(_)));
+    }
+
+    #[test]
+    fn an_azure_fork_names_its_organization_and_may_be_a_service_principal() {
+        let azure = |extra: &str| {
+            RunConfig::from_toml(&POC.replacen(
+                "[repo.fork]",
+                &format!("[repo.fork]\nplatform = \"azure-devops\"{extra}"),
+                1,
+            ))
+        };
+        let err = azure("").unwrap_err().to_string();
+        assert!(err.contains("an Azure DevOps fork needs"), "{err}");
+        let cfg = azure(
+            "\napi = \"https://dev.azure.com/acme\"\n\
+             entra = { tenant = \"contoso.onmicrosoft.com\", client_id = \"app-1\" }",
+        )
+        .unwrap();
+        assert_eq!(cfg.repo.fork.platform, ForkPlatform::AzureDevOps);
+        let entra = cfg.repo.fork.entra.as_ref().unwrap();
+        assert_eq!(entra.authority, aegis_pr::ENTRA_AUTHORITY);
+        let forge = crate::publish::fork_forge_of(
+            &cfg.repo.fork,
+            &aegis_pr::TokenSource::Static("t".into()),
+        )
+        .unwrap();
+        assert!(matches!(forge, aegis_pr::Forge::AzureDevOps(_)));
+        let err = RunConfig::from_toml(&POC.replacen(
+            "[repo.fork]",
+            "[repo.fork]\nentra = { tenant = \"t\", client_id = \"c\" }",
+            1,
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("Azure DevOps forks only"), "{err}");
     }
 
     #[test]

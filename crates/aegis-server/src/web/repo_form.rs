@@ -201,6 +201,7 @@ impl RepoForm {
                 aegis_lifecycle::ForkPlatform::GitLab => "gitlab".into(),
                 aegis_lifecycle::ForkPlatform::Bitbucket => "bitbucket".into(),
                 aegis_lifecycle::ForkPlatform::BitbucketDataCenter => "bitbucket-dc".into(),
+                aegis_lifecycle::ForkPlatform::AzureDevOps => "azure-devops".into(),
             },
             fork_owner: fork.owner.clone(),
             fork_name: fork.name.clone(),

@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use aegis_lifecycle::PLATFORM_ERROR;
 use aegis_pr::{
-    Bitbucket, BitbucketDataCenter, GitHub, GitLab, Locale, TokenSource, TokenUse, inert,
+    AzureDevOps, Bitbucket, BitbucketDataCenter, GitHub, GitLab, Locale, TokenSource, TokenUse,
+    inert,
 };
 use aegis_secrets::Secrets;
 use aegis_store::{BUDGET_SPENT, Job, JobSource, JobStatus, Store, TenantId};
@@ -48,6 +49,15 @@ pub const BITBUCKET_DC_API_ENV: &str = "AEGIS_BITBUCKET_DC_API";
 /// write to the registered repositories and comment on their pull
 /// requests.
 pub const BITBUCKET_DC_COMMENT_TOKEN_ENV: &str = "AEGIS_BITBUCKET_DC_COMMENT_TOKEN";
+
+/// The Azure DevOps organization or collection URL
+/// (`https://dev.azure.com/<org>`, #636); no Azure DevOps service hook
+/// queues a round while it is unset.
+pub const AZURE_DEVOPS_URL_ENV: &str = "AEGIS_AZURE_DEVOPS_URL";
+/// The secret: a personal access token of the organization that may read
+/// its identities and comment on the registered repositories' pull
+/// requests.
+pub const AZURE_DEVOPS_COMMENT_TOKEN_ENV: &str = "AEGIS_AZURE_DEVOPS_COMMENT_TOKEN";
 
 pub(crate) const DEFAULT_GITHUB_API: &str = "https://api.github.com";
 pub(crate) const DEFAULT_GITLAB_API: &str = "https://gitlab.com/api/v4";
@@ -449,6 +459,67 @@ impl BitbucketDataCenterNotifier {
     pub async fn comment_on_pull_request(&self, project: &str, repo: &str, id: u64, text: &str) {
         let posted = match self.client(project, repo) {
             Ok(dc) => dc
+                .comment_on_pull_request(id, text)
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = posted {
+            tracing::warn!(error = %e, "commenting on the pull request");
+        }
+    }
+}
+
+/// Asks Azure DevOps who may write to a repository and comments on its
+/// pull requests (#636), with [`AZURE_DEVOPS_COMMENT_TOKEN_ENV`].
+#[derive(Debug, Clone)]
+pub struct AzureDevOpsNotifier {
+    collection: String,
+    secrets: Secrets,
+}
+
+impl AzureDevOpsNotifier {
+    pub fn new(collection: &str, secrets: Secrets) -> Self {
+        Self {
+            collection: collection.trim_end_matches('/').to_owned(),
+            secrets,
+        }
+    }
+
+    /// The organization from [`AZURE_DEVOPS_URL_ENV`]; none while it is
+    /// unset.
+    pub fn from_env(secrets: Secrets) -> Option<Self> {
+        let url = std::env::var(AZURE_DEVOPS_URL_ENV).ok()?;
+        (!url.is_empty()).then(|| Self::new(&url, secrets))
+    }
+
+    /// The organization or collection URL.
+    pub fn collection(&self) -> &str {
+        &self.collection
+    }
+
+    fn client(&self, project: &str, repo: &str) -> Result<AzureDevOps, String> {
+        let token = self
+            .secrets
+            .get(AZURE_DEVOPS_COMMENT_TOKEN_ENV)
+            .ok_or_else(|| format!("no secret {AZURE_DEVOPS_COMMENT_TOKEN_ENV}"))?;
+        AzureDevOps::new(&self.collection, project, repo, token.expose()).map_err(|e| e.to_string())
+    }
+
+    /// Whether the identity `id` may write to `project/repo`; `Err` when
+    /// there is no token or Azure DevOps fails.
+    pub async fn can_write(&self, project: &str, repo: &str, id: &str) -> Result<bool, String> {
+        self.client(project, repo)?
+            .can_write(id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Posts `text` on PR `id` of `project/repo`, if the store has the
+    /// token; failures are logged.
+    pub async fn comment_on_pull_request(&self, project: &str, repo: &str, id: u64, text: &str) {
+        let posted = match self.client(project, repo) {
+            Ok(azure) => azure
                 .comment_on_pull_request(id, text)
                 .await
                 .map_err(|e| e.to_string()),

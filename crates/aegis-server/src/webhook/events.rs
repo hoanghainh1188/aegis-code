@@ -259,6 +259,16 @@ pub fn repo_url(source: WebhookSource, body: &[u8]) -> Option<String> {
     let pointer = match source {
         // Its payloads name a repository by key and slug only.
         WebhookSource::BitbucketDc => return None,
+        WebhookSource::AzureDevops => {
+            let url = [
+                "/resource/pullRequest/repository/remoteUrl",
+                "/resource/repository/remoteUrl",
+            ]
+            .iter()
+            .find_map(|p| value.pointer(p)?.as_str())?;
+            let url = without_user(url);
+            return (url.len() <= MAX_ISSUE_REF_LEN).then_some(url);
+        }
         WebhookSource::Gitlab => "/project/web_url",
         WebhookSource::Bitbucket => "/repository/links/html/href",
         WebhookSource::Github
@@ -789,10 +799,209 @@ pub fn bitbucket_dc(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct AzProject {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AzRepo {
+    name: String,
+    project: AzProject,
+    remote_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AzPull {
+    pull_request_id: u64,
+    status: String,
+    source_ref_name: String,
+    repository: AzRepo,
+    #[serde(default)]
+    fork_source: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AzAuthor {
+    #[serde(default)]
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AzComment {
+    #[serde(default)]
+    content: String,
+    author: AzAuthor,
+    #[serde(default)]
+    comment_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AzCommented {
+    comment: AzComment,
+    pull_request: AzPull,
+}
+
+#[derive(Debug, Deserialize)]
+struct AzEvent<T> {
+    resource: T,
+}
+
+/// The service hook event of an Azure DevOps delivery (#636).
+pub const AZURE_COMMENTED: &str = "ms.vss-code.git-pullrequest-comment-event";
+pub const AZURE_UPDATED: &str = "git.pullrequest.updated";
+
+/// A delivery of Azure DevOps service hook event `event` (its body's
+/// `eventType`, #636): `/aegis fix` in a comment on the agent's active PR
+/// asks for a review round; the agent's PR completed is recorded as
+/// merged (#456). The sender is the comment author's identity ID, whose
+/// right to write is checked before a job is made.
+pub fn azure_devops(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
+    let (pull, sender) = match event {
+        AZURE_COMMENTED => {
+            let e: AzEvent<AzCommented> = parse(body)?;
+            let comment = e.resource.comment;
+            if comment.comment_type != "text" || !asks_for_fix(&comment.content) {
+                return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
+            }
+            (e.resource.pull_request, Some(comment.author.id))
+        }
+        AZURE_UPDATED => (parse::<AzEvent<AzPull>>(body)?.resource, None),
+        other => return Err(ignored(format!("event `{other}`"))),
+    };
+    if !pull.source_ref_name.starts_with("refs/heads/agent/") {
+        return Err(ignored("not a pull request of the agent"));
+    }
+    if pull.fork_source.is_some() {
+        return Err(ignored("a pull request from another repository"));
+    }
+    let repo = &pull.repository;
+    let path = checked_path(&format!("{}/{}", repo.project.name, repo.name), 2)?.to_owned();
+    let issue_ref = checked_ref(format!("{path}#{}", pull.pull_request_id))?;
+    let repo_url = without_user(&repo.remote_url);
+    let pr_url = format!("{repo_url}/pullrequest/{}", pull.pull_request_id);
+    if !repo_url.starts_with("https://") || pr_url.len() > MAX_ISSUE_REF_LEN {
+        return Err(Skip::Malformed("a repository without its URL".into()));
+    }
+    let kind = match sender {
+        Some(sender) => {
+            if pull.status != "active" {
+                return Err(ignored("the pull request is not active"));
+            }
+            if sender.is_empty() {
+                return Err(ignored("not sent by a person"));
+            }
+            Kind::ReviewRound { pr_url, sender }
+        }
+        None if pull.status == "completed" => Kind::PrMerged { pr_url },
+        None => return Err(ignored("the pull request is not completed")),
+    };
+    Ok(Wanted {
+        issue_ref,
+        repo_url,
+        kind,
+    })
+}
+
+/// A clone URL without the user name Azure DevOps puts in it.
+fn without_user(url: &str) -> String {
+    match url.strip_prefix("https://").and_then(|r| r.split_once('@')) {
+        Some((user, rest)) if !user.contains('/') => format!("https://{rest}"),
+        _ => url.to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const AZ_WRITER: &str = "6f5e1b2a-0c3d-4e5f-8a9b-0c1d2e3f4a5b";
+
+    fn az_pull(status: &str, branch: &str) -> serde_json::Value {
+        json!({
+            "pullRequestId": 12, "status": status,
+            "sourceRefName": format!("refs/heads/{branch}"),
+            "targetRefName": "refs/heads/main",
+            "repository": {
+                "name": "cart", "project": { "name": "Shop" },
+                "remoteUrl": "https://acme@dev.azure.com/acme/Shop/_git/cart"
+            }
+        })
+    }
+
+    fn az_comment(text: &str, kind: &str, status: &str, branch: &str) -> Vec<u8> {
+        json!({
+            "id": "d1", "eventType": AZURE_COMMENTED,
+            "resource": {
+                "comment": { "content": text, "commentType": kind, "author": { "id": AZ_WRITER } },
+                "pullRequest": az_pull(status, branch),
+            }
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn a_fix_comment_on_an_agent_pr_on_azure_asks_for_a_round() {
+        let wanted = azure_devops(
+            AZURE_COMMENTED,
+            &az_comment("Please:\n/aegis fix", "text", "active", "agent/cart-1"),
+        )
+        .unwrap();
+        assert_eq!(wanted.issue_ref, "Shop/cart#12");
+        assert_eq!(wanted.repo_url, "https://dev.azure.com/acme/Shop/_git/cart");
+        assert_eq!(
+            wanted.kind,
+            Kind::ReviewRound {
+                pr_url: "https://dev.azure.com/acme/Shop/_git/cart/pullrequest/12".into(),
+                sender: AZ_WRITER.into()
+            }
+        );
+        let completed =
+            json!({ "eventType": AZURE_UPDATED, "resource": az_pull("completed", "agent/cart-1") });
+        let merged = azure_devops(AZURE_UPDATED, completed.to_string().as_bytes()).unwrap();
+        assert!(matches!(merged.kind, Kind::PrMerged { .. }));
+        for (text, kind, status, branch) in [
+            ("looks fine", "text", "active", "agent/cart-1"),
+            ("/aegis fix", "system", "active", "agent/cart-1"),
+            ("/aegis fix", "text", "abandoned", "agent/cart-1"),
+            ("/aegis fix", "text", "active", "feature/x"),
+        ] {
+            assert!(
+                matches!(
+                    azure_devops(AZURE_COMMENTED, &az_comment(text, kind, status, branch)),
+                    Err(Skip::Ignored(_))
+                ),
+                "{text} {kind} {status} {branch}"
+            );
+        }
+        let active = json!({ "resource": az_pull("active", "agent/cart-1") });
+        assert!(matches!(
+            azure_devops(AZURE_UPDATED, active.to_string().as_bytes()),
+            Err(Skip::Ignored(_))
+        ));
+        assert!(matches!(
+            azure_devops("git.push", b"{}"),
+            Err(Skip::Ignored(_))
+        ));
+        assert!(matches!(
+            azure_devops(AZURE_COMMENTED, b"{}"),
+            Err(Skip::Malformed(_))
+        ));
+        assert_eq!(
+            repo_url(
+                WebhookSource::AzureDevops,
+                &az_comment("x", "text", "active", "agent/1")
+            )
+            .as_deref(),
+            Some("https://dev.azure.com/acme/Shop/_git/cart")
+        );
+    }
 
     fn dc_event(comment: Option<&str>, state: &str, branch: &str, actor: &str) -> Vec<u8> {
         let repo = json!({ "slug": "cart", "project": { "key": "PAY" } });

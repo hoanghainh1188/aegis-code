@@ -208,8 +208,24 @@ where
     }
 }
 
+/// The token a job sends to the fork from `secret`, the value of its
+/// `token_env`: the secret itself, or for a service principal
+/// ([`crate::EntraConfig`], #636) an access token issued for it now.
+pub async fn fork_token(fork: &ForkConfig, secret: &str) -> Result<String, LifecycleError> {
+    match &fork.entra {
+        None => Ok(secret.to_owned()),
+        Some(entra) => {
+            Ok(
+                aegis_pr::entra_token(&entra.authority, &entra.tenant, &entra.client_id, secret)
+                    .await?,
+            )
+        }
+    }
+}
+
 /// The fork's forge: a GitHub repository, a GitLab project (#252) or a
-/// Bitbucket Cloud (#634) or Data Center (#635) repository, reached with
+/// Bitbucket Cloud (#634) or Data Center (#635) or Azure Repos (#636)
+/// repository, reached with
 /// tokens from `source`:
 /// a GitHub repo with either, the others only with a fixed token.
 pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, LifecycleError> {
@@ -234,8 +250,14 @@ pub fn fork_forge_of(fork: &ForkConfig, source: &TokenSource) -> Result<Forge, L
                 token,
             )?)
         }
+        (ForkPlatform::AzureDevOps, TokenSource::Static(token)) => Forge::AzureDevOps(
+            aegis_pr::AzureDevOps::new(&fork.api, &fork.owner, &fork.name, token)?,
+        ),
         (
-            ForkPlatform::GitLab | ForkPlatform::Bitbucket | ForkPlatform::BitbucketDataCenter,
+            ForkPlatform::GitLab
+            | ForkPlatform::Bitbucket
+            | ForkPlatform::BitbucketDataCenter
+            | ForkPlatform::AzureDevOps,
             TokenSource::App { .. },
         ) => {
             return Err(LifecycleError::Config(
