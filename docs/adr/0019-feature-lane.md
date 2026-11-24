@@ -39,12 +39,19 @@ Introduce a **Spec-Driven Hierarchical Feature Lane** that handles both small fe
   - Recommended delivery mode (`FeatureDeliveryMode`)
 - The RFC is sanitized (`redact` + `inert`), posted to the source issue/dashboard, and the job pauses in `Outcome::AwaitingApproval`.
 - Only a write-authorized human commenting `/aegis approve [mode=integration_pr|stacked_prs]` unblocks and enqueues the DAG sub-jobs.
+- A write-authorized human may also request design changes via `/aegis revise <feedback>`, resuming the Architect Phase (from its checkpoint, up to a configured revision cap) to publish an updated RFC and DAG before returning to `Outcome::AwaitingApproval`.
 
 ### 4. Dual Delivery Modes (`FeatureDeliveryMode`, #678)
 Rather than forcing one PR strategy for all feature sizes, the platform supports configurable delivery at the repo or approval level:
 - **`integration_pr`:** Sub-jobs that pass the gate are sequentially merged into an integration branch (`feature/<epic-id>`) with an integration gate after each merge (reusing the pattern in `aegis-sonar-batch/src/integrate.rs`). Once the DAG completes, Aegis opens **one final PR** into `main`. Best for cohesive small/medium features (2–3 sub-jobs).
 - **`stacked_prs`:** Each sub-job opens an independent small PR targeting its prerequisite branch (or `feature/<epic-id>`), enabling incremental human review. Best for large, cross-module epics.
 - **`auto` (default):** Selects `integration_pr` for small DAGs (e.g., `<= 3` sub-jobs) and recommends `stacked_prs` for larger DAGs; reviewers can override on `/aegis approve`.
+
+### 5. Feature Feedback Loops (Design, Code Review & Architectural Learning)
+The Feature Lane closes three distinct feedback loops:
+1. **Design Feedback Loop (`/aegis revise`):** Iterates on the RFC and DAG at `Outcome::AwaitingApproval` before any code is written, eliminating wasted implementation turns.
+2. **Code Review Loop (Review Rounds):** Supports standard Aegis review rounds (*Request changes* / `/aegis fix`, no force-push) on each individual sub-PR (`stacked_prs`, rebasing downstream sub-jobs if needed) or on the `feature/<epic-id>` branch (`integration_pr`).
+3. **Architectural Learning Loop (`repo_memories`):** When a Feature Epic is merged, Aegis extracts not only `MergedPr` and `ReviewLesson` entries, but also architectural invariants and human design corrections from the approved/revised RFC into `BusinessRule` memories (and `RejectedPattern` on rejected sub-PRs, #657). Subsequent Architect and bug-fix sessions recall these rules into `BP3`.
 
 ## Security & Operational Invariants
 
