@@ -67,6 +67,17 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 
 2. **Configure `server.toml`** for what step 1 did not set: `public_url` and `[auth.oidc]` as in the [install guide, B4](../install-on-premise.md#b4-servertoml). `[modes]` names the configuration of each mode, by any name a repo's mode may have (`poc`, `customer-jp`, `customer-eu`…). For a local model (Ollama / vLLM), create `./modes/local.toml` from [config/local.toml](../../config/local.toml) and set `poc = "/etc/aegis/modes/local.toml"`. To keep a mode's code in one place, add a `[residency]` section to its file: `allowed_model_prefixes = ["eu."]` (every tier's model must start with one of them) or `local_only = true` (a `local` provider only). The server refuses to start if a mode breaks its own `[residency]`, and checks it again before each request.
 
+   **Self-Hosted Presets (#599):** Four ready-to-use mode presets ship in [`deploy/presets/`](../../deploy/presets/README.md) (validated in CI against `[residency]` and pricing):
+
+   | Preset | Models & Embedding | Code & Memory Stay In | Secret |
+   | --- | --- | --- | --- |
+   | `aws-japan-bedrock` | Bedrock `jp.` profiles, Titan v2 | `ap-northeast-1` (customer-jp guard) | none (IAM role) |
+   | `gcp-vertex-tokyo` | Claude on Vertex AI, `text-multilingual-embedding-002` | `asia-northeast1` | `VERTEX_ACCESS_TOKEN` |
+   | `azure-openai-enterprise` | Azure OpenAI deployments (with custom pricing file) | Japan East | `AZURE_OPENAI_API_KEY` |
+   | `onprem-airgap-ollama` | Ollama (`qwen2.5-coder`, `nomic-embed-text`) | deployment's network (`local_only`) | none |
+
+   To use a preset with `deploy/compose`: copy its `mode.toml` into `deploy/compose/modes/`, reference it under `[modes]` in `server.toml` (name `aws-japan-bedrock` as `customer-jp`), place its secret (if any) in `./secrets/`, edit your project/URL/deployment values, and set `AEGIS_POSTGRES_IMAGE=pgvector/pgvector:pg17` if using semantic recall. See [`deploy/presets/README.md`](../../deploy/presets/README.md) for full details.
+
 3. **Populate Secrets** that step 1 did not write: one file each in `./secrets/`, readable only by its owner and owned by uid `10001:10001`, as in the [install guide, B5](../install-on-premise.md#b5-secrets). They are `ANTHROPIC_API_KEY` (not needed with a local model), `AEGIS_OIDC_CLIENT_SECRET`, and on the token path `AEGIS_GITHUB_COMMENT_TOKEN` and each repo's fork token. The GitHub App's two secrets come from `sudo ./github-app.sh` ([install guide, B10](../install-on-premise.md#b10-the-github-app-instead-of-a-bot-and-tokens)); `install.sh` stops asking for the comment token once `server.toml` has `[github_app]`. Rotation: [Secret Rotation](README.md#3-secret-rotation); the app's key: a new one generated in the app's settings, written over `secrets/AEGIS_GITHUB_APP_PRIVATE_KEY`, read within 5 minutes without a restart, then the old one deleted on GitHub.
 
 4. **Deploy Application Version:**
@@ -203,7 +214,12 @@ A repo whose tests connect to PostgreSQL, Redis or MySQL declares them as sideca
 
 ### Registering
 
-From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` registers a GitHub repo (#476):
+**From the Web Dashboard (#599):** An admin can register and verify a repository without SSH, `check-repo`, or `add-repo.sh` via **Admin → Repos → Add**:
+1. The repo is registered and paused with the reason *"Added from the pages: waiting for its pre-flight check"*.
+2. After the background clone finishes, the server runs the pre-flight check automatically (same items as `aegis-local check-repo`: *Repository Path*, *Git Repository*, *Base Revision*, *Working Tree*, *Lockfile*, *Language Profiles* / *Profile Resolution*, *Docker Daemon*, *Sandbox Image*, *Fetch Hosts*, and *Baseline Gate*, plus *Network & DB Isolation* and *Execution Duration*). At most **2** pre-flight checks run concurrently; click **Run the pre-flight check** to re-run after fixing an issue.
+3. When the check ends as `passed` or `warned`, click **Turn the repo on** to activate the repository.
+
+**From the CLI (`add-repo.sh` and `aegis-server repo add`):** Both CLI paths remain supported. From `deploy/compose/`, with the server healthy, `sudo ./add-repo.sh` registers a GitHub repo (#476):
 - it asks for the upstream URL, slug, default branch, language, mode, the fork, and the fork's token (read without echo);
 - it asks for the maintainers' and reviewers' emails, and the monthly budget;
 - it writes the token and the repo file, runs `repo add` and `grant`, and prints the webhook settings with the link to the repo's budget page.
