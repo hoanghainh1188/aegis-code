@@ -1,0 +1,59 @@
+# Preset aws-japan-bedrock (#599): customer code processed in Japan only.
+# Bedrock in ap-northeast-1 with `jp.` inference profiles for every tier
+# (design §1, §7), Titan Text Embeddings v2 in the same region for the
+# memory's semantic recall (#655). The server's IAM role needs
+# `bedrock:InvokeModel` on these models in ap-northeast-1; no secret.
+#
+# Name it `customer-jp` in server.toml's [modes]: the guard of design §7
+# then applies whatever the file says, and a wrong line stops the start.
+
+[provider]
+kind = "bedrock"
+region = "ap-northeast-1"
+require_jp_profile = true
+
+[residency]
+allowed_model_prefixes = ["jp."]
+
+# Core uses Opus with low effort: Sonnet 5.5 has no `jp.` profile on
+# Bedrock yet (#19). Switch once it has.
+[models.light]
+id = "jp.anthropic.claude-haiku-5-5"
+
+[models.core]
+id = "jp.anthropic.claude-opus-5-5"
+effort = "low"
+
+[models.expert]
+id = "jp.anthropic.claude-opus-5-5"
+effort = "high"
+
+[run]
+state_dir = ".workspace/state-jp"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+sandbox = true
+ledger = "postgres"
+
+[budget]
+max_cost_usd = 4.0
+
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+# Semantic recall needs PostgreSQL with pgvector (AEGIS_POSTGRES_IMAGE in
+# deploy/compose); without it, recall stays lexical. Titan v2 takes 256,
+# 512 or 1024 dimensions.
+[memory.embedding]
+model = "amazon.titan-embed-text-v2:0"
+dimensions = 1024
+[memory.embedding.provider]
+kind = "bedrock"
+region = "ap-northeast-1"
+require_jp_profile = false
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

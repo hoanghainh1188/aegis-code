@@ -1,0 +1,25 @@
+# Prices of the deployments of azure-openai-enterprise/mode.toml, $ per
+# million tokens, from your Azure contract (#599). The numbers below are
+# placeholders: replace them before the first job, or the ledger's costs
+# and the budgets that read them are wrong.
+
+regional_surcharge = 0.0
+
+[cache_write_multiplier]
+5m = 1.0
+1h = 1.0
+
+[models.aegis-light]
+input = 0.25
+output = 2.0
+cache_read_multiplier = 0.1
+
+[models.aegis-core]
+input = 1.25
+output = 10.0
+cache_read_multiplier = 0.1
+
+[models.aegis-expert]
+input = 1.25
+output = 10.0
+cache_read_multiplier = 0.1

@@ -42,6 +42,11 @@
   {{ clone|safe }}
 </section>
 
+<section aria-labelledby="preflight-heading" class="band">
+  <h2 id="preflight-heading">{{ crate::t("Pre-flight check") }}</h2>
+  {{ preflight|safe }}
+</section>
+
 <section aria-labelledby="webhooks-heading" class="band">
   <h2 id="webhooks-heading">{{ crate::t("Recent webhooks") }}</h2>
   <p class="note">{{ crate::t("What became of the forge's last") }} {{ webhooks.len() }} {{ crate::t("deliveries for this repo, kept 30 days: the job each made or found, or why it made none. Deliveries with a bad signature name no repo; see the") }} <a href="/admin/repos/{{ repo.id.0 }}/connection">{{ crate::t("connection page") }}</a>.</p>

@@ -1,0 +1,36 @@
+{#- The pre-flight check part of a repo's page (#599); asks for itself again while the check runs. -#}
+<div id="preflight"{% if let Some(c) = check %}{% if c.live %} hx-get="/admin/repos/{{ repo_id }}/preflight" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}{% endif %} aria-live="polite">
+{% if let Some(c) = check %}
+  <p class="clone-state {{ c.state }}"><strong>{{ crate::t("Pre-flight check") }} {{ crate::t(c.state) }}</strong>
+    <span class="note">{{ crate::t("by") }} {{ c.started_by }}, {{ crate::t("since") }} {{ c.started_at }} UTC{% if let Some(f) = c.finished_at %}{{ crate::t(", done") }} {{ f }} UTC{% endif %}</span></p>
+  {% if c.items.is_empty() %}
+  <p class="note">{{ crate::t("Waiting for the first result: a check waits for a free slot, then runs the repo's gate on its base.") }}</p>
+  {% else %}
+  <table class="checks">
+    <thead><tr><th scope="col">{{ crate::t("Result") }}</th><th scope="col">{{ crate::t("Check") }}</th><th scope="col">{{ crate::t("Detail") }}</th></tr></thead>
+    <tbody>
+    {% for i in c.items %}
+      <tr><td><span class="check {{ i.status }}">{{ crate::t(i.status) }}</span>{% if i.is_blocking && i.status == "fail" %} <strong>{{ crate::t("blocking") }}</strong>{% endif %}</td>
+        <td>{{ i.category }} · {{ i.name }}</td><td>{{ i.detail }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% else %}
+  <p class="note">{{ crate::t("No pre-flight check yet. It checks the repo's profile, clone, lockfiles, sandbox image and fetch hosts, then runs its gate on the base, as") }} <code>aegis-local check-repo</code> {{ crate::t("does.") }}</p>
+{% endif %}
+{% if can_run %}
+  {% if !running %}
+  <form method="post" action="/admin/repos/{{ repo_id }}/preflight" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit"{% if can_activate %} class="ghost"{% endif %}>{{ crate::t("Run the pre-flight check") }}</button>
+  </form>
+  {% endif %}
+{% endif %}
+{% if can_activate %}
+  <form method="post" action="/admin/repos/{{ repo_id }}/activate" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">{{ crate::t("Turn the repo on") }}</button>
+  </form>
+{% endif %}
+</div>

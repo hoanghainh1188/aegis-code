@@ -133,6 +133,25 @@ async fn only_an_admin_sees_admin_pages() {
     let grant = format!("/admin/repos/{}/roles", a.0);
     let sent = post(&app, &maint, &grant, "who=x%40x.test&role=viewer").await;
     assert_eq!(sent.status, StatusCode::NOT_FOUND);
+    // Nor the pre-flight check's part, its start or turning the repo on
+    // (#599).
+    assert_eq!(
+        get(&app, &maint, &format!("/admin/repos/{}/preflight", a.0))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    for action in ["preflight", "activate"] {
+        let uri = format!("/admin/repos/{}/{action}", a.0);
+        assert_eq!(
+            post(&app, &maint, &uri, "").await.status,
+            StatusCode::NOT_FOUND
+        );
+    }
+    assert!(
+        s.repo_preflight(a).await.unwrap().is_none(),
+        "nothing started"
+    );
 
     // The admin's list holds every repo, with its settings.
     let list = get(&app, &admin, "/admin/repos").await;
@@ -334,6 +353,19 @@ async fn clone_ended(s: &Store, repo: RepoId) -> RepoClone {
     panic!("the clone of repo {} did not end", repo.0);
 }
 
+/// `repo`'s pre-flight check, once it has ended (#599).
+async fn preflight_ended(s: &Store, repo: RepoId) -> aegis_store::RepoPreflight {
+    for _ in 0..600 {
+        if let Some(check) = s.repo_preflight(repo).await.unwrap()
+            && check.state != aegis_store::PreflightState::Running
+        {
+            return check;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the pre-flight check of repo {} did not end", repo.0);
+}
+
 /// The repo `/admin/repos/<id>?done=…` names.
 fn repo_in(location: &str) -> RepoId {
     let id = location
@@ -404,16 +436,54 @@ async fn an_admin_adds_a_repo_follows_its_clone_and_changes_it() {
     assert_eq!(sent.status, StatusCode::SEE_OTHER, "{}", sent.body);
     assert!(sent.location.ends_with("?done=added"), "{}", sent.location);
     let id = repo_in(&sent.location);
+    let actions: Vec<String> = s
+        .audit_log(None, Page::first(10))
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .filter(|e| e.repo_id == Some(id) && e.actor.name == "admin@x.test")
+        .map(|e| e.action)
+        .collect();
+    assert!(actions.contains(&"repo.register".to_owned()), "{actions:?}");
+    // #599: it takes no job until its pre-flight check passes.
+    let paused = s.repo_pause(id).await.unwrap().expect("paused");
     assert_eq!(
-        last_audit(s).await,
-        (
-            ActorKind::User,
-            "admin@x.test".into(),
-            "repo.register".into(),
-            Some(id.0)
-        )
+        paused.reason.as_deref(),
+        Some("Added from the pages: waiting for its pre-flight check")
     );
     assert_eq!(clone_ended(s, id).await.state, CloneState::Done);
+    let check = preflight_ended(s, id).await;
+    assert!(!check.items.is_empty(), "{check:?}");
+    let shown = get(&app, &admin, &format!("/admin/repos/{}", id.0)).await;
+    assert!(shown.body.contains("id=\"preflight\""), "{}", shown.body);
+    if !check.state.ready() {
+        let refused = post(&app, &admin, &format!("/admin/repos/{}/activate", id.0), "").await;
+        assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.body);
+        assert!(s.repo_pause(id).await.unwrap().is_some());
+    }
+    // Once a check passes, the page offers to turn it on, and it does.
+    assert!(
+        s.start_preflight_by(id, &aegis_store::Actor::cli())
+            .await
+            .unwrap()
+    );
+    s.finish_preflight(id, aegis_store::PreflightState::Passed)
+        .await
+        .unwrap();
+    let shown = get(&app, &admin, &format!("/admin/repos/{}/preflight", id.0)).await;
+    assert!(
+        shown
+            .body
+            .contains(&format!("action=\"/admin/repos/{}/activate\"", id.0)),
+        "{}",
+        shown.body
+    );
+    let on = post(&app, &admin, &format!("/admin/repos/{}/activate", id.0), "").await;
+    assert_eq!(on.status, StatusCode::SEE_OTHER, "{}", on.body);
+    assert!(on.location.ends_with("?done=activated"), "{}", on.location);
+    assert!(s.repo_pause(id).await.unwrap().is_none());
+    assert_eq!(last_audit(s).await.2, "repo.resume");
     assert!(tmp.0.join("state/repos/demo").exists());
     let shown = get(&app, &admin, &format!("/admin/repos/{}", id.0)).await;
     assert!(shown.body.contains("Clone ready"), "{}", shown.body);

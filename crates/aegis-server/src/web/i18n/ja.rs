@@ -4,6 +4,25 @@
 
 pub(super) fn get(en: &str) -> Option<&'static str> {
     Some(match en {
+        "Pre-flight check" => "事前チェック",
+        "Check" => "チェック",
+        "Result" => "結果",
+        "No pre-flight check yet. It checks the repo's profile, clone, lockfiles, sandbox image and fetch hosts, then runs its gate on the base, as" => {
+            "まだ事前チェックはありません。リポジトリのプロファイル、クローン、ロックファイル、サンドボックスイメージ、取得先ホストを確認し、ベース上でゲートを実行します。これは"
+        }
+        "does." => "と同じです。",
+        "Run the pre-flight check" => "事前チェックを実行",
+        "Turn the repo on" => "リポジトリを有効にする",
+        "Waiting for the first result: a check waits for a free slot, then runs the repo's gate on its base." => {
+            "最初の結果を待っています。チェックは空きを待ってから、ベース上でリポジトリのゲートを実行します。"
+        }
+        "blocking" => "ブロック",
+        "warn" => "警告",
+        "skip" => "スキップ",
+        "running" => "実行中",
+        "passed" => "合格",
+        "warned" => "警告あり",
+        "failed" => "失敗",
         "the merge request" => "merge request",
         "the pull request" => "pull request",
         "Internal server error" => "サーバー内部エラーが発生しました",

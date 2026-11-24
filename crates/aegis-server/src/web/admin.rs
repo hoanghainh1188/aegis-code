@@ -127,6 +127,8 @@ struct RepoPage<'a> {
     settings: String,
     /// The clone part, rendered: it also answers alone while polled.
     clone: String,
+    /// The pre-flight check part (#599), rendered the same way.
+    preflight: String,
     can_edit: bool,
     /// What became of its recent webhooks (#373).
     webhooks: Vec<WebhookRow>,
@@ -173,10 +175,19 @@ pub async fn repo(
     let notice = match q.done.as_str() {
         "granted" => Some("Role given; it applies from their next request."),
         "revoked" => Some("Role taken away; it applies from their next request."),
-        "added" => Some("Repo added; its clone is being made below."),
+        "added" if admin.is_none() => Some("Repo added; its clone is being made below."),
         "updated" => Some("Repo changed; its clone is being fetched below."),
         "paused" => Some("Repo paused: its queued jobs wait until it is resumed."),
         "resumed" => Some("Repo resumed: its queued jobs run again."),
+        "added" if admin.is_some() => Some(
+            "Repo added, paused: its clone is being made, then its pre-flight check runs; \
+             turn it on below once the check passes.",
+        ),
+        "preflight" => Some("Pre-flight check started; its results come in below."),
+        "preflight-running" => {
+            Some("A pre-flight check is running already; its results are below.")
+        }
+        "activated" => Some("Repo turned on: it takes jobs from now on."),
         _ => None,
     };
     let settings = settings_of(&repo);
@@ -185,6 +196,13 @@ pub async fn repo(
         .render()
         .map_err(|e| {
             tracing::error!(error = %e, "web: clone part");
+            WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        })?;
+    let preflight = super::preflight::part_of(&store, &me, repo.id, admin.is_some())
+        .await?
+        .render()
+        .map_err(|e| {
+            tracing::error!(error = %e, "web: pre-flight part");
             WebError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         })?;
     render(&RepoPage {
@@ -196,6 +214,7 @@ pub async fn repo(
         notice,
         settings,
         clone,
+        preflight,
         can_edit: admin.is_some() && access.is_admin(),
         webhooks: webhooks::rows(&store, repo_id, SHOWN_WEBHOOKS).await?,
         pause: store.repo_pause(repo_id).await?.map(PauseView::from),

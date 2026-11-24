@@ -23,6 +23,7 @@ mod memory;
 mod page;
 mod pause;
 mod polls;
+mod preflights;
 mod queue;
 mod repos;
 mod reviews;
@@ -62,6 +63,9 @@ pub use memory::{
 };
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};
+pub use preflights::{
+    MAX_PREFLIGHT_ITEMS, PREFLIGHT_STALE_AFTER, PreflightItem, PreflightState, RepoPreflight,
+};
 pub use queue::{AttemptEnd, Claim, Lease, MAX_DIAGNOSIS_CHARS, MAX_PATCH_BYTES, Patch};
 pub use reviews::{DEFAULT_MAX_REVIEW_ROUNDS, pr_issue_ref};
 pub use sonar::MAX_BATCH_WARNINGS;
