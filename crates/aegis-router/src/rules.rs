@@ -156,7 +156,56 @@ pub struct Router {
     retest_reminded: bool,
 }
 
+/// A router's counters, without its rules (they come from the run's
+/// configuration): what a checkpoint keeps (#662).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RouterState {
+    pub tier: Tier,
+    pub edit_rejections: u32,
+    pub repro_failures: u32,
+    pub expert_failures: u32,
+    pub attempt_failed: bool,
+    pub patched: bool,
+    pub last_test: Option<u32>,
+    pub reminders: u32,
+    pub retests: u32,
+    pub retest_reminded: bool,
+}
+
 impl Router {
+    /// Its counters, for a checkpoint.
+    pub fn state(&self) -> RouterState {
+        RouterState {
+            tier: self.tier,
+            edit_rejections: self.edit_rejections,
+            repro_failures: self.repro_failures,
+            expert_failures: self.expert_failures,
+            attempt_failed: self.attempt_failed,
+            patched: self.patched,
+            last_test: self.last_test,
+            reminders: self.reminders,
+            retests: self.retests,
+            retest_reminded: self.retest_reminded,
+        }
+    }
+
+    /// A router with `rules` where `state` left one.
+    pub fn resumed(rules: EscalationRules, state: RouterState) -> Self {
+        Self {
+            rules,
+            tier: state.tier,
+            edit_rejections: state.edit_rejections,
+            repro_failures: state.repro_failures,
+            expert_failures: state.expert_failures,
+            attempt_failed: state.attempt_failed,
+            patched: state.patched,
+            last_test: state.last_test,
+            reminders: state.reminders,
+            retests: state.retests,
+            retest_reminded: state.retest_reminded,
+        }
+    }
+
     pub fn new(rules: EscalationRules) -> Self {
         Self {
             rules,
@@ -367,6 +416,22 @@ impl Default for Router {
 
 #[cfg(test)]
 mod tests {
+
+    /// #662: a router resumed from its counters decides as it would have.
+    #[test]
+    fn a_router_resumed_from_its_state_goes_on_alike() {
+        let rules = EscalationRules::default();
+        let (router, _) = Router::new(rules).observe(Signal::EditRejected);
+        let (router, _) = router.observe(Signal::TestRun { calls: 4 });
+        let json = serde_json::to_string(&router.state()).unwrap();
+        let resumed = Router::resumed(rules, serde_json::from_str(&json).unwrap());
+        assert_eq!(resumed, router);
+        assert_eq!(
+            resumed.observe(Signal::EditRejected),
+            router.observe(Signal::EditRejected)
+        );
+    }
+
     use super::*;
 
     /// Feeds signals in order and returns the final state and the decisions.

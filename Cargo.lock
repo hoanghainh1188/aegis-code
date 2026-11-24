@@ -153,6 +153,7 @@ version = "0.19.0"
 dependencies = [
  "aegis-provider",
  "rmcp",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",

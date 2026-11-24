@@ -39,6 +39,9 @@ struct Scripted {
     core: Mutex<VecDeque<Vec<ContentBlock>>>,
     expert: Mutex<VecDeque<Vec<ContentBlock>>>,
     requests: Mutex<Vec<Request>>,
+    /// Core's call past its script waits forever, as a call in flight
+    /// when a worker dies (#662), instead of failing the test.
+    hang_when_done: std::sync::atomic::AtomicBool,
 }
 
 impl Scripted {
@@ -47,6 +50,7 @@ impl Scripted {
             core: Mutex::new(core.into()),
             expert: Mutex::new(expert.into()),
             requests: Mutex::new(vec![]),
+            hang_when_done: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -109,12 +113,20 @@ impl ModelProvider for Scripted {
                 )]
             }
             "light" => vec![ContentBlock::text("fix: refuse a fourth item in the cart")],
-            "core" => self
-                .core
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("core script exhausted"),
+            "core" => {
+                let next = self.core.lock().unwrap().pop_front();
+                match next {
+                    Some(next) => next,
+                    None if self
+                        .hang_when_done
+                        .load(std::sync::atomic::Ordering::SeqCst) =>
+                    {
+                        std::future::pending::<()>().await;
+                        unreachable!()
+                    }
+                    None => panic!("core script exhausted"),
+                }
+            }
             "expert" => self
                 .expert
                 .lock()
@@ -2358,4 +2370,156 @@ async fn a_repo_on_the_app_path_and_one_on_the_token_path_open_their_prs_side_by
     );
     assert_eq!(fork_refs(&on_app), "refs/heads/agent/fixture-7");
     assert_eq!(fork_refs(&on_token), "refs/heads/agent/fixture-7");
+}
+
+/// #662: a worker dies after Core's third call (the repro test written,
+/// the fix made); another claims the job and goes on from its checkpoint:
+/// a fresh tree with those changes, the same conversation (the same
+/// bytes, so the prompt cache holds), the issue not read nor classified
+/// again; the PR holds both changes. The checkpoint goes when the job ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_cut_short_goes_on_from_its_checkpoint() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let model = Scripted::new(
+        vec![
+            call("t1", "search_symbol", json!({"name": "Cart::add"})),
+            create_repro("t2"),
+            fix("t3"),
+        ],
+        vec![],
+    );
+    model
+        .hang_when_done
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+    let id = IssueId::parse("fixture-7").unwrap();
+
+    let first = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move { run(&p, CancellationToken::new()).await }
+    });
+    // Core's fourth call is in flight: three calls are checkpointed.
+    for _ in 0..600 {
+        if p.provider.requests_for("core").len() == 4 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(p.provider.requests_for("core").len(), 4);
+    first.abort();
+    let _ = first.await;
+    let checkpoint = p
+        .store
+        .checkpoint(&id)
+        .await
+        .unwrap()
+        .expect("a checkpoint");
+    assert!(
+        checkpoint.diff.contains("tests/fourth_item.rs"),
+        "{}",
+        checkpoint.diff
+    );
+    assert!(
+        checkpoint.diff.contains("src/lib.rs"),
+        "{}",
+        checkpoint.diff
+    );
+    let state = serde_json::to_string(&checkpoint.state).unwrap();
+    assert!(
+        !state.contains(&scratch.0.display().to_string()),
+        "no host path in the state"
+    );
+    // The dead worker's tree is gone, as on another machine.
+    assert!(!scratch.0.join("state/jobs/fixture-7/repo").exists());
+
+    p.provider.core.lock().unwrap().push_back(fixed_answer());
+    p.provider
+        .hang_when_done
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(
+        report.model_calls, 4,
+        "Core's three calls are not made again"
+    );
+
+    let core = p.provider.requests_for("core");
+    assert_eq!(core.len(), 5);
+    // The resumed call is the one in flight when the worker died.
+    assert_eq!(core[4], core[3], "the same request, byte for byte");
+    let classified = p
+        .store
+        .events(&id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e, LedgerEvent::Classified { .. }))
+        .count();
+    assert_eq!(classified, 1, "the issue is classified once");
+    let patch = report.patch.as_ref().unwrap();
+    assert!(
+        patch.diff.contains("tests/fourth_item.rs") && patch.diff.contains(">= MAX_ITEMS"),
+        "{}",
+        patch.diff
+    );
+    assert_eq!(fork_refs(&scratch), "refs/heads/agent/fixture-7");
+    assert!(
+        p.store.checkpoint(&id).await.unwrap().is_none(),
+        "cleared at the end"
+    );
+}
+
+/// #662: a worker dies while the gate checks the agent's answer; the next
+/// goes on from the answer, read again from its checkpoint, and runs the
+/// gate: Core is not asked again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_cut_short_in_its_gate_checks_the_same_answer_again() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let model = Scripted::new(
+        vec![
+            call("t1", "search_symbol", json!({"name": "Cart::add"})),
+            create_repro("t2"),
+            fix("t3"),
+            fixed_answer(),
+        ],
+        vec![],
+    );
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+    let id = IssueId::parse("fixture-7").unwrap();
+    let first = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move { run(&p, CancellationToken::new()).await }
+    });
+    // The answer is in: the gate is running.
+    for _ in 0..600 {
+        let events = p.store.events(&id).await.unwrap();
+        if events.iter().any(|e| matches!(e, LedgerEvent::Answered(_))) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    first.abort();
+    let _ = first.await;
+    let events = p.store.events(&id).await.unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, LedgerEvent::Finished { .. })),
+        "the job was cut short before it ended"
+    );
+
+    // Core's script is spent: a call to it would fail the test.
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(p.provider.requests_for("core").len(), 4);
+    assert_eq!(report.model_calls, 4);
+    assert!(p.store.checkpoint(&id).await.unwrap().is_none());
 }

@@ -17,6 +17,32 @@ where
     if cancel.is_cancelled() {
         return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
     }
+    // A job that stopped mid-way (a crash, a worker released) goes on
+    // from its checkpoint (#662): its issue was read, classified and
+    // counted already.
+    if issue.cve.is_none() {
+        let record = ledger.record();
+        let (id, calls) = (record.issue_id.clone(), record.model_calls);
+        if let Some(resume) = checkpoint::load(&platform.store, &id, &cfg.repo.path, calls).await {
+            let issue = &IssueInput {
+                title: redact(&issue.title).text,
+                body: redact(&issue.body).text,
+                ..issue.clone()
+            };
+            let profiles = cfg.repo.profiles(&platform.profiles)?;
+            return work_from(
+                platform,
+                ledger,
+                &profiles,
+                issue,
+                String::new(),
+                &Finish::Publish,
+                Some(resume),
+                cancel,
+            )
+            .await;
+        }
+    }
     // Issue text goes to the model too (design §7).
     let (title, body) = (redact(&issue.title), redact(&issue.body));
     ledger
@@ -104,15 +130,46 @@ where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
 {
+    work_from(
+        platform,
+        ledger,
+        profiles,
+        issue,
+        first_message,
+        finish,
+        None,
+        cancel,
+    )
+    .await
+}
+
+/// [`work`], from `resume` when given (#662): a fresh tree at the
+/// checkpoint's commit with its changes applied, its session and state.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn work_from<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    profiles: &RepoProfiles,
+    issue: &IssueInput,
+    first_message: String,
+    finish: &Finish,
+    resume: Option<checkpoint::Resume>,
+    cancel: &CancellationToken,
+) -> Result<Ending, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
     let cfg = &platform.config;
     // A review round starts from the PR's head and is still checked
     // against the PR's base (#243).
-    let (base, start) = match finish {
-        Finish::Update(round) => (
+    let (base, start) = match (&resume, finish) {
+        (Some(r), _) => (r.base.clone(), r.start.clone()),
+        (None, Finish::Update(round)) => (
             round.base(&cfg.repo.path, &cfg.repo.base)?,
             round.pull.head_sha.clone(),
         ),
-        _ => {
+        (None, _) => {
             let base = job::resolve(
                 &cfg.repo.path,
                 issue.base.as_deref().unwrap_or(&cfg.repo.base),
@@ -122,14 +179,27 @@ where
     };
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     let tree = Worktree::create(&cfg.repo.path, &start, &job_dir.join("repo"))?;
-
-    let map = module_map(cfg, profiles, tree.path(), &base)?;
-    let conventions = language_conventions(profiles);
-    let system = system_blocks(&RepoPrompt {
-        language_conventions: conventions.as_deref(),
-        repo_conventions: cfg.repo.conventions.as_deref(),
-        module_summary: Some(&map),
-    });
+    let (resumed, system) = match resume {
+        Some(r) => {
+            let at = tree.path().to_owned();
+            tokio::task::spawn_blocking(move || checkpoint::apply_diff(&at, &r.diff))
+                .await
+                .map_err(|e| LifecycleError::Config(format!("applying the checkpoint: {e}")))??;
+            tracing::info!(issue = %issue.id, turn = r.turn, "resuming the job from its checkpoint");
+            // The session keeps its own system blocks: the same bytes.
+            (Some(r.state), Vec::new())
+        }
+        None => {
+            let map = module_map(cfg, profiles, tree.path(), &base)?;
+            let conventions = language_conventions(profiles);
+            let system = system_blocks(&RepoPrompt {
+                language_conventions: conventions.as_deref(),
+                repo_conventions: cfg.repo.conventions.as_deref(),
+                module_summary: Some(&map),
+            });
+            (None, system)
+        }
+    };
 
     for part in profiles.parts() {
         let dir = tree.path().join(&part.dir);
@@ -145,8 +215,9 @@ where
         }
     }
     // A CVE job (#501, ADR 0015): the platform raises the package; the
-    // gate checks that first, and the agent works only if it fails.
-    let (policy, prepared, first_message) = match &issue.cve {
+    // gate checks that first, and the agent works only if it fails. A
+    // resumed job's upgrade, if any, is in its tree already.
+    let (policy, prepared, first_message) = match issue.cve.as_ref().filter(|_| resumed.is_none()) {
         None => (DependencyPolicy::Locked, None, first_message),
         Some(target) => {
             let root = &profiles.parts()[0];
@@ -175,6 +246,16 @@ where
         Message::user_text(first_message),
         CacheTtl::FiveMinutes,
     );
+    let issue_id = ledger.record().issue_id.clone();
+    // Checkpoints only where a job can go on from one (see `checkpoint`).
+    let saving =
+        (matches!(finish, Finish::Publish) && issue.cve.is_none()).then(|| checkpoint::Saving {
+            issue: &issue_id,
+            base: &base,
+            start: &start,
+            tree: tree.path(),
+            job_dir: &job_dir,
+        });
     let context = DriveContext {
         profiles,
         issue,
@@ -185,8 +266,12 @@ where
         },
         finish,
         policy: &policy,
+        saving,
     };
-    let result = drive(platform, ledger, &graph, session, context, prepared, cancel).await;
+    let result = drive(
+        platform, ledger, &graph, session, context, prepared, resumed, cancel,
+    )
+    .await;
     graph.close().await;
     tools.shutdown().await;
     drop(tree);

@@ -25,7 +25,7 @@ use aegis_ledger::{
 };
 use aegis_orchestrator::{
     INHERITED_ENV, LoopConfig, LoopEnd, McpServerSpec, McpTools, ModelSpec, RepoPrompt, Session,
-    TurnRecord, run_loop, system_blocks,
+    TurnRecord, run_loop_observed, system_blocks,
 };
 use aegis_provider::{CacheTtl, ContentBlock, Message, ModelProvider, ProviderConfig, Role};
 use aegis_router::{BudgetCheck, Classification, Decision, Router, Signal, Spent};
@@ -45,6 +45,7 @@ use crate::publish::{PublishContext, fork_remote, publish, publish_round};
 use crate::review::{MAX_DIFF_CHARS, ReviewRound};
 use crate::{IssueInput, LifecycleError, RunConfig};
 
+mod checkpoint;
 mod drive;
 mod gating;
 
@@ -224,6 +225,14 @@ where
     ledger
         .finished(ending.outcome, started.elapsed().as_secs_f64())
         .await?;
+    // The job ended: nothing to go on from (#662).
+    if let Err(e) = platform
+        .store
+        .clear_checkpoint(&ledger.record().issue_id)
+        .await
+    {
+        tracing::warn!(issue = %issue.id, error = %e, "removing the checkpoint");
+    }
     let record = ledger.record();
     Ok(IssueReport {
         issue_id: issue.id,

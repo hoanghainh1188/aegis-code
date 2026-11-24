@@ -18,7 +18,9 @@ pub struct ModelSpec {
     pub context_window: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+/// Serializable for a job's checkpoint (#662): what goes back to the
+/// model is the same bytes, so the prompt cache holds across a resume.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Session {
     system: Vec<String>,
     messages: Vec<Message>,

@@ -5,6 +5,7 @@
 //! [`IssueRecord`] is a fold over those events.
 
 mod bias;
+mod checkpoint;
 mod error;
 mod issue;
 mod kpi;
@@ -18,6 +19,7 @@ pub use bias::{
     ACCEPT_GAP_ALERT, BiasReport, BiasRow, BiasSection, COST_FLOOR_ALERT, COST_RATIO_ALERT,
     MIN_BIAS_SAMPLE, STOP_GAP_ALERT, STOP_RATE_ALERT, TRIAGE_MISS_RATE_ALERT,
 };
+pub use checkpoint::{CHECKPOINT_VERSION, Checkpoint};
 pub use error::LedgerError;
 pub use issue::{IssueLedger, MAX_CHANGES, MAX_NOTE_CHARS, MAX_TEXT_CHARS, MAX_TITLE_CHARS};
 pub use kpi::{
