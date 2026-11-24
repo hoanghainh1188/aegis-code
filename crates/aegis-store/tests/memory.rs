@@ -1,25 +1,31 @@
 //! Incident & Domain Memory storage and relevance recall (#456).
 
 use aegis_store::testing::test_db;
-use aegis_store::{
-    Actor, MemoryId, MemoryKind, ModeName, NewRepo, NewRepoMemory, Page, RepoId, RepoMemory,
-    rank_memories, score_repo_memory,
-};
-use time::OffsetDateTime;
+use aegis_store::{Actor, MemoryKind, MemoryScope, ModeName, NewRepo, NewRepoMemory, Page, RepoId};
 
-fn sample_memory(
-    id: i64,
+fn repo(slug: &str) -> NewRepo {
+    NewRepo {
+        slug: slug.into(),
+        url: format!("https://github.com/acme/{slug}"),
+        default_branch: "main".into(),
+        language: "rust".into(),
+        mode: ModeName::POC,
+        max_concurrent_jobs: 2,
+        config: serde_json::json!({}),
+    }
+}
+
+fn memory(
+    repo_id: RepoId,
     kind: MemoryKind,
     source_ref: &str,
     title: &str,
     summary: &str,
     paths: &[&str],
     keywords: &str,
-) -> RepoMemory {
-    let now = OffsetDateTime::now_utc();
-    RepoMemory {
-        id: MemoryId(id),
-        repo_id: RepoId(1),
+) -> NewRepoMemory {
+    NewRepoMemory {
+        repo_id,
         kind,
         source_ref: source_ref.into(),
         title: title.into(),
@@ -27,16 +33,20 @@ fn sample_memory(
         paths: paths.iter().map(|p| (*p).to_owned()).collect(),
         keywords: keywords.into(),
         job_id: None,
-        created_at: now,
-        updated_at: now,
+        scope: None,
     }
 }
 
-#[test]
-fn rank_memories_recalls_at_least_three_relevant_lessons_and_excludes_unrelated() {
-    let candidates = vec![
-        sample_memory(
-            1,
+/// #456, through the store since #596: at least three relevant lessons, and
+/// not the unrelated one.
+#[tokio::test]
+async fn recall_finds_the_relevant_lessons_and_not_the_unrelated_one() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let billing = s.create_repo(&repo("billing")).await.unwrap().id;
+    let entries = [
+        memory(
+            billing,
             MemoryKind::MergedPr,
             "https://github.com/acme/billing/pull/101",
             "Fix JPY invoice rounding in tax_calc.rs",
@@ -45,8 +55,8 @@ fn rank_memories_recalls_at_least_three_relevant_lessons_and_excludes_unrelated(
             &["src/billing/tax_calc.rs"],
             "jpy invoice rounding tax_calc currency",
         ),
-        sample_memory(
-            2,
+        memory(
+            billing,
             MemoryKind::ReviewLesson,
             "https://github.com/acme/billing/pull/101#review-1",
             "Review lesson: preserve zero-decimal currency invariant in tax_calc",
@@ -55,8 +65,8 @@ fn rank_memories_recalls_at_least_three_relevant_lessons_and_excludes_unrelated(
             &["src/billing/tax_calc.rs", "src/billing/ledger.rs"],
             "jpy krw zero_decimal currency tax_calc review",
         ),
-        sample_memory(
-            3,
+        memory(
+            billing,
             MemoryKind::BusinessRule,
             "rule:jpy-consumption-tax-rounding",
             "Business rule: Japanese consumption tax rounding per qualified invoice",
@@ -65,8 +75,8 @@ fn rank_memories_recalls_at_least_three_relevant_lessons_and_excludes_unrelated(
             &["src/billing/tax_calc.rs"],
             "jpy invoice consumption tax bucket rounding",
         ),
-        sample_memory(
-            4,
+        memory(
+            billing,
             MemoryKind::Runbook,
             "runbook:billing-tax-mismatch",
             "Runbook: diagnosing invoice tax total mismatch",
@@ -75,8 +85,8 @@ fn rank_memories_recalls_at_least_three_relevant_lessons_and_excludes_unrelated(
             &["src/billing/tax_calc.rs"],
             "invoice tax mismatch runbook tax_calc",
         ),
-        sample_memory(
-            5,
+        memory(
+            billing,
             MemoryKind::MergedPr,
             "https://github.com/acme/billing/pull/88",
             "Fix OAuth callback cookie SameSite attribute",
@@ -85,26 +95,235 @@ fn rank_memories_recalls_at_least_three_relevant_lessons_and_excludes_unrelated(
             "oauth cookie samesite session",
         ),
     ];
+    for entry in &entries {
+        s.upsert_repo_memory(entry).await.unwrap();
+    }
+    let recalled = s
+        .recall_repo_memories(
+            billing,
+            "JPY invoice tax rounding off by 1 yen in src/billing/tax_calc.rs",
+            "When computing 10% consumption tax on a multi-line JPY invoice, \
+             tax_calc.rs produces a 1 yen mismatch.",
+            5,
+        )
+        .await
+        .unwrap();
+    assert_eq!(recalled.len(), 4, "{recalled:#?}");
+    assert!(recalled.iter().all(|m| !m.title.contains("OAuth")));
+    db.drop().await;
+}
 
-    let query_title = "JPY invoice tax rounding off by 1 yen in src/billing/tax_calc.rs";
-    let query_body = "When computing 10% consumption tax on a multi-line JPY invoice, \
-                      tax_calc.rs produces a 1 yen mismatch.";
-
-    let recalled = rank_memories(candidates.clone(), query_title, query_body, 5);
-    assert!(
-        recalled.len() >= 3,
-        "expected at least 3 relevant historical lessons, got {}",
-        recalled.len()
+/// #596: the store searches every row, not only the 200 newest. The one
+/// lesson about the issue is the oldest of more than 500.
+#[tokio::test]
+async fn recall_reads_past_the_newest_hundreds() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = s.create_repo(&repo("shop")).await.unwrap().id;
+    s.upsert_repo_memory(&memory(
+        shop,
+        MemoryKind::MergedPr,
+        "https://github.com/acme/shop/pull/1",
+        "Fix double refund when the payment gateway times out",
+        "refund_worker retried a refund the gateway had already accepted.",
+        &["src/payments/refund_worker.rs"],
+        "refund gateway timeout idempotency",
+    ))
+    .await
+    .unwrap();
+    for i in 0..520 {
+        s.upsert_repo_memory(&memory(
+            shop,
+            MemoryKind::MergedPr,
+            &format!("https://github.com/acme/shop/pull/{}", i + 2),
+            &format!("Tweak catalog page layout {i}"),
+            "Adjusted product card spacing on the catalog page.",
+            &[&format!("web/catalog/card_{i}.css")],
+            "catalog layout css",
+        ))
+        .await
+        .unwrap();
+    }
+    let recalled = s
+        .recall_repo_memories(
+            shop,
+            "Customers refunded twice",
+            "The gateway timed out and refund_worker.rs sent the refund again.",
+            5,
+        )
+        .await
+        .unwrap();
+    assert_eq!(recalled.len(), 1, "{recalled:#?}");
+    assert_eq!(
+        recalled[0].source_ref,
+        "https://github.com/acme/shop/pull/1"
     );
-    assert_eq!(recalled.len(), 4);
-    assert!(
-        recalled.iter().all(|m| m.id != MemoryId(5)),
-        "unrelated OAuth PR should have zero overlap and be excluded"
+    db.drop().await;
+}
+
+/// #596: a Japanese ticket, without spaces between its words, finds a
+/// lesson that shares a phrase with it.
+#[tokio::test]
+async fn recall_finds_japanese_text_without_spaces() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = s.create_repo(&repo("shop")).await.unwrap().id;
+    s.upsert_repo_memory(&memory(
+        shop,
+        MemoryKind::BusinessRule,
+        "rule:receipt-reissue",
+        "領収書の再発行",
+        "領収書を再発行するときは元の領収書番号を必ず無効にする。",
+        &[],
+        "",
+    ))
+    .await
+    .unwrap();
+    s.upsert_repo_memory(&memory(
+        shop,
+        MemoryKind::BusinessRule,
+        "rule:points",
+        "ポイントの有効期限",
+        "ポイントは付与から一年で失効する。",
+        &[],
+        "",
+    ))
+    .await
+    .unwrap();
+    let recalled = s
+        .recall_repo_memories(shop, "領収書を再発行すると番号が重複する", "", 5)
+        .await
+        .unwrap();
+    assert_eq!(recalled.len(), 1, "{recalled:#?}");
+    assert_eq!(recalled[0].source_ref, "rule:receipt-reissue");
+    db.drop().await;
+}
+
+/// #596: a memory shared with the tenant reaches its other repos, after
+/// their own memories; never another tenant's repos, and a repo-scoped one
+/// stays in its repo.
+#[tokio::test]
+async fn tenant_memories_reach_the_tenants_other_repos_only() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let acme = s
+        .create_tenant_by("acme", "Acme", &Actor::cli())
+        .await
+        .unwrap();
+    let other = s
+        .create_tenant_by("other", "Other", &Actor::cli())
+        .await
+        .unwrap();
+    let orders = s.create_repo(&repo("orders")).await.unwrap().id;
+    let invoices = s.create_repo(&repo("invoices")).await.unwrap().id;
+    let elsewhere = s.create_repo(&repo("elsewhere")).await.unwrap().id;
+    for (r, t) in [
+        (orders, acme.id),
+        (invoices, acme.id),
+        (elsewhere, other.id),
+    ] {
+        s.set_repo_tenant_by(r, t, &Actor::cli()).await.unwrap();
+    }
+    let shared = s
+        .upsert_repo_memory(&NewRepoMemory {
+            scope: Some(MemoryScope::Tenant),
+            ..memory(
+                orders,
+                MemoryKind::BusinessRule,
+                "rule:customer-id",
+                "Customer ids are ULIDs across every service",
+                "Never parse customer_id as an integer; services exchange ULID strings.",
+                &[],
+                "customer_id ulid",
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(shared.scope, MemoryScope::Tenant);
+    s.upsert_repo_memory(&memory(
+        orders,
+        MemoryKind::Runbook,
+        "runbook:customer-id-orders",
+        "Orders: customer_id parsing",
+        "orders keeps customer_id as a ULID string in its own tables.",
+        &[],
+        "customer_id ulid",
+    ))
+    .await
+    .unwrap();
+    s.upsert_repo_memory(&memory(
+        invoices,
+        MemoryKind::Runbook,
+        "runbook:customer-id-invoices",
+        "Invoices: customer_id column",
+        "invoices stores customer_id ULID strings in invoice headers.",
+        &[],
+        "customer_id ulid",
+    ))
+    .await
+    .unwrap();
+    let issue = (
+        "customer_id parsed as integer",
+        "A ULID customer_id failed to parse.",
+    );
+
+    let refs = |m: Vec<aegis_store::RepoMemory>| -> Vec<String> {
+        m.into_iter().map(|m| m.source_ref).collect()
+    };
+    let in_invoices = s
+        .recall_repo_memories(invoices, issue.0, issue.1, 5)
+        .await
+        .unwrap();
+    assert_eq!(
+        refs(in_invoices),
+        ["runbook:customer-id-invoices", "rule:customer-id"],
+        "its own first, then the tenant's; not orders' own runbook"
+    );
+    let in_elsewhere = s
+        .recall_repo_memories(elsewhere, issue.0, issue.1, 5)
+        .await
+        .unwrap();
+    assert!(in_elsewhere.is_empty(), "{in_elsewhere:#?}");
+
+    // Extracted again without a scope, the shared memory stays shared.
+    let again = s
+        .upsert_repo_memory(&memory(
+            orders,
+            MemoryKind::BusinessRule,
+            "rule:customer-id",
+            "Customer ids are ULIDs across every service",
+            "Still ULIDs.",
+            &[],
+            "customer_id ulid",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(again.scope, MemoryScope::Tenant);
+    assert_eq!(
+        s.repo_memory_scope(orders, shared.id).await.unwrap(),
+        Some(MemoryScope::Tenant)
     );
     assert_eq!(
-        score_repo_memory(&candidates[4], query_title, query_body),
-        0
+        s.repo_memory_scope(invoices, shared.id).await.unwrap(),
+        None
     );
+    assert_eq!(
+        s.repo_memory_scope_of(orders, MemoryKind::BusinessRule, "rule:customer-id")
+            .await
+            .unwrap(),
+        Some(MemoryScope::Tenant)
+    );
+
+    // Moved to the other tenant, orders takes its shared memory along.
+    s.set_repo_tenant_by(orders, other.id, &Actor::cli())
+        .await
+        .unwrap();
+    let in_elsewhere = s
+        .recall_repo_memories(elsewhere, issue.0, issue.1, 5)
+        .await
+        .unwrap();
+    assert_eq!(refs(in_elsewhere), ["rule:customer-id"]);
+    db.drop().await;
 }
 
 #[tokio::test]
@@ -148,6 +367,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
             paths: vec!["src/webhook_sender.rs".into()],
             keywords: "webhook retry backoff timeout".into(),
             job_id: None,
+            scope: None,
         })
         .await
         .unwrap();
@@ -164,6 +384,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
             paths: vec!["src/webhook_sender.rs".into()],
             keywords: "webhook retry backoff dead_letter".into(),
             job_id: None,
+            scope: None,
         })
         .await
         .unwrap();
@@ -179,6 +400,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
         paths: vec!["src/webhook_sender.rs".into()],
         keywords: "webhook retry max_webhook_retries review".into(),
         job_id: None,
+        scope: None,
     })
     .await
     .unwrap();
@@ -192,6 +414,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
         paths: vec!["src/webhook_sender.rs".into()],
         keywords: "webhook retry storm queue".into(),
         job_id: None,
+        scope: None,
     })
     .await
     .unwrap();
@@ -207,6 +430,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
             paths: vec!["src/webhook_sender.rs".into()],
             keywords: "webhook retry idempotency header".into(),
             job_id: None,
+            scope: None,
         })
         .await
         .unwrap();
@@ -221,6 +445,7 @@ async fn store_upserts_lists_recalls_and_isolates_repo_memories() {
         paths: vec!["src/webhook_sender.rs".into()],
         keywords: "webhook retry idempotency".into(),
         job_id: None,
+        scope: None,
     })
     .await
     .unwrap();
@@ -299,6 +524,7 @@ async fn a_memory_cannot_name_another_repos_job() {
         paths: vec![],
         keywords: String::new(),
         job_id: job,
+        scope: None,
     };
     let refused = s
         .upsert_repo_memory_by(&entry(Some(their_job.id)), &Actor::cli())

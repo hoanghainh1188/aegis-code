@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, kind, source_ref, title, summary, paths,\n                    keywords, job_id, created_at, updated_at\n               FROM repo_memories\n              WHERE repo_id = $1\n                AND ($2::text IS NULL OR kind = $2)\n                AND ($3::bigint IS NULL OR id < $3)\n              ORDER BY id DESC\n              LIMIT $4",
+  "query": "SELECT id, repo_id, kind, source_ref, title, summary, paths,\n                    keywords, job_id, scope, created_at, updated_at\n               FROM repo_memories\n              WHERE repo_id = $1\n                AND ($2::text IS NULL OR kind = $2)\n                AND ($3::bigint IS NULL OR id < $3)\n              ORDER BY id DESC\n              LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -104,6 +104,17 @@
       },
       {
         "ordinal": 9,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -144,8 +155,9 @@
       false,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "8c2ac8eb346d35cc77dd46d58026d9187463c0b3bcaae01f21ac7ed73c915ac4"
+  "hash": "a2f117002172d3ff975901ba8a260a6e0e0d1cf444f3cdcf27b7d1673b816cee"
 }

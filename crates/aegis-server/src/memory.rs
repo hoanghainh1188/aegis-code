@@ -154,6 +154,7 @@ pub async fn extract_and_store(
                 paths: extracted.paths.clone(),
                 keywords: extracted.keywords.clone(),
                 job_id: Some(root.id),
+                scope: None,
             },
             actor,
         )
@@ -173,6 +174,7 @@ pub async fn extract_and_store(
                     paths: extracted.paths,
                     keywords: extracted.keywords,
                     job_id: last_round_id,
+                    scope: None,
                 },
                 actor,
             )

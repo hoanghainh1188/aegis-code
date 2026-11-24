@@ -1,8 +1,10 @@
 //! Per-repository Incident & Domain Memory (#456): merged PR summaries,
 //! review lessons from `/aegis fix` rounds, operational runbooks, and
-//! business rules.
+//! business rules. Recall is in [`recall`] (#596).
 
-use std::collections::BTreeSet;
+mod recall;
+
+pub use recall::{RecallScores, fuse};
 
 use serde_json::json;
 use time::OffsetDateTime;
@@ -15,7 +17,6 @@ const MAX_SOURCE_REF_CHARS: usize = 256;
 const MAX_TITLE_CHARS: usize = 500;
 const MAX_SUMMARY_CHARS: usize = 4000;
 const MAX_KEYWORDS_CHARS: usize = 2000;
-const MAX_RECALL_CANDIDATES: i64 = 200;
 
 /// Primary key of a row in `repo_memories`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -62,6 +63,40 @@ impl MemoryKind {
     }
 }
 
+/// Which repos recall a memory (#596).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryScope {
+    /// Its own repo only.
+    Repo,
+    /// Every repo of the tenant its repo belongs to: runbooks and business
+    /// rules shared by the services of one customer's system.
+    Tenant,
+}
+
+impl MemoryScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Repo => "repo",
+            Self::Tenant => "tenant",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "repo" => Some(Self::Repo),
+            "tenant" => Some(Self::Tenant),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn decode(column: &'static str, text: &str) -> Result<Self, StoreError> {
+        Self::parse(text).ok_or_else(|| StoreError::Decode {
+            column,
+            value: text.to_owned(),
+        })
+    }
+}
+
 /// Input to create or update a repository memory entry (#456).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewRepoMemory {
@@ -75,6 +110,9 @@ pub struct NewRepoMemory {
     pub paths: Vec<String>,
     pub keywords: String,
     pub job_id: Option<JobId>,
+    /// `None`: a new entry is [`MemoryScope::Repo`], an existing one keeps
+    /// its scope (a merged PR extracted again stays shared).
+    pub scope: Option<MemoryScope>,
 }
 
 /// Stored row in `repo_memories` (#456).
@@ -89,6 +127,7 @@ pub struct RepoMemory {
     pub paths: Vec<String>,
     pub keywords: String,
     pub job_id: Option<JobId>,
+    pub scope: MemoryScope,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -103,6 +142,7 @@ struct MemoryRow {
     paths: Vec<String>,
     keywords: String,
     job_id: Option<i64>,
+    scope: String,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
 }
@@ -121,6 +161,7 @@ impl TryFrom<MemoryRow> for RepoMemory {
             paths: row.paths,
             keywords: row.keywords,
             job_id: row.job_id.map(JobId),
+            scope: MemoryScope::decode("repo_memories.scope", &row.scope)?,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -200,10 +241,12 @@ impl Store {
             let saved: RepoMemory = sqlx::query_as!(
                 MemoryRow,
                 "INSERT INTO repo_memories (
-                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id
+                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id,
+                     scope
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'repo'))
                  ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET
+                     scope = coalesce($9, repo_memories.scope),
                      title = EXCLUDED.title,
                      summary = EXCLUDED.summary,
                      paths = EXCLUDED.paths,
@@ -211,7 +254,7 @@ impl Store {
                      job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),
                      updated_at = now()
                  RETURNING id, repo_id, kind, source_ref, title, summary, paths,
-                           keywords, job_id, created_at, updated_at",
+                           keywords, job_id, scope, created_at, updated_at",
                 entry.repo_id.0,
                 entry.kind.as_str(),
                 source_ref,
@@ -220,6 +263,7 @@ impl Store {
                 &paths,
                 keywords,
                 entry.job_id.map(|j| j.0),
+                entry.scope.map(MemoryScope::as_str) as Option<&str>,
             )
             .fetch_one(&mut *tx)
             .await
@@ -238,6 +282,7 @@ impl Store {
                     "kind": saved.kind.as_str(),
                     "source_ref": saved.source_ref,
                     "title": saved.title,
+                    "scope": saved.scope.as_str(),
                 }),
             )
             .await?;
@@ -258,7 +303,7 @@ impl Store {
         let rows = sqlx::query_as!(
             MemoryRow,
             "SELECT id, repo_id, kind, source_ref, title, summary, paths,
-                    keywords, job_id, created_at, updated_at
+                    keywords, job_id, scope, created_at, updated_at
                FROM repo_memories
               WHERE repo_id = $1
                 AND ($2::text IS NULL OR kind = $2)
@@ -293,7 +338,7 @@ impl Store {
             let Some(row) = sqlx::query!(
                 "DELETE FROM repo_memories
                   WHERE id = $1 AND repo_id = $2
-              RETURNING kind, source_ref",
+              RETURNING kind, source_ref, scope",
                 id.0,
                 repo_id.0,
             )
@@ -314,6 +359,7 @@ impl Store {
                     "memory_id": id.0,
                     "kind": row.kind,
                     "source_ref": row.source_ref,
+                    "scope": row.scope,
                 }),
             )
             .await?;
@@ -323,230 +369,45 @@ impl Store {
         tx::end(tx, work).await
     }
 
-    /// Recalls up to `limit` relevant historical lessons for `repo_id` matching
-    /// `query_title` and `query_body`, ranked by token and file-path overlap.
-    pub async fn recall_repo_memories(
+    /// The scope of memory `id` of `repo_id`, `None` when it has no such
+    /// memory: deleting a shared one takes a tenant's admin (#596).
+    pub async fn repo_memory_scope(
         &self,
         repo_id: RepoId,
-        query_title: &str,
-        query_body: &str,
-        limit: usize,
-    ) -> Result<Vec<RepoMemory>, StoreError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let rows = sqlx::query_as!(
-            MemoryRow,
-            "SELECT id, repo_id, kind, source_ref, title, summary, paths,
-                    keywords, job_id, created_at, updated_at
-               FROM repo_memories
-              WHERE repo_id = $1
-              ORDER BY updated_at DESC, id DESC
-              LIMIT $2",
+        id: MemoryId,
+    ) -> Result<Option<MemoryScope>, StoreError> {
+        let scope = sqlx::query_scalar!(
+            "SELECT scope FROM repo_memories WHERE id = $1 AND repo_id = $2",
+            id.0,
             repo_id.0,
-            MAX_RECALL_CANDIDATES,
         )
-        .fetch_all(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-
-        let candidates = rows
-            .into_iter()
-            .map(RepoMemory::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rank_memories(candidates, query_title, query_body, limit))
-    }
-}
-
-/// Ranks `candidates` against `(query_title, query_body)` and returns up to
-/// `limit` items with positive relevance score.
-pub fn rank_memories(
-    candidates: Vec<RepoMemory>,
-    query_title: &str,
-    query_body: &str,
-    limit: usize,
-) -> Vec<RepoMemory> {
-    if limit == 0 || candidates.is_empty() {
-        return Vec::new();
-    }
-    let combined_query = format!("{query_title}\n{query_body}");
-    let query_tokens = tokenize(&combined_query);
-    let query_paths = extract_path_stems(&combined_query);
-    if query_tokens.is_empty() && query_paths.is_empty() {
-        return Vec::new();
+        scope
+            .map(|s| MemoryScope::decode("repo_memories.scope", &s))
+            .transpose()
     }
 
-    let mut scored: Vec<(u32, RepoMemory)> = candidates
-        .into_iter()
-        .filter_map(|entry| {
-            let score = score_with(&entry, &query_tokens, &query_paths);
-            (score > 0).then_some((score, entry))
-        })
-        .collect();
-
-    scored.sort_by(|(sa, a), (sb, b)| sb.cmp(sa).then_with(|| b.id.0.cmp(&a.id.0)));
-    scored
-        .into_iter()
-        .take(limit)
-        .map(|(_, entry)| entry)
-        .collect()
-}
-
-/// Computes the deterministic relevance score of `entry` for `(query_title, query_body)`.
-pub fn score_repo_memory(entry: &RepoMemory, query_title: &str, query_body: &str) -> u32 {
-    let combined = format!("{query_title}\n{query_body}");
-    let tokens = tokenize(&combined);
-    let paths = extract_path_stems(&combined);
-    score_with(entry, &tokens, &paths)
-}
-
-fn score_with(
-    entry: &RepoMemory,
-    query_tokens: &BTreeSet<String>,
-    query_paths: &BTreeSet<String>,
-) -> u32 {
-    let mut score = 0u32;
-
-    for path in &entry.paths {
-        let lower = path.to_ascii_lowercase();
-        if query_paths.contains(&lower) {
-            score += 8;
-        }
-        for stem in extract_path_stems(&lower) {
-            if query_paths.contains(&stem) || query_tokens.contains(&stem) {
-                score += 5;
-            }
-        }
+    /// The scope of `repo_id`'s memory `(kind, source_ref)`, `None` when it
+    /// has none: an upsert that would change a shared one takes a tenant's
+    /// admin (#596).
+    pub async fn repo_memory_scope_of(
+        &self,
+        repo_id: RepoId,
+        kind: MemoryKind,
+        source_ref: &str,
+    ) -> Result<Option<MemoryScope>, StoreError> {
+        let scope = sqlx::query_scalar!(
+            "SELECT scope FROM repo_memories
+              WHERE repo_id = $1 AND kind = $2 AND source_ref = $3",
+            repo_id.0,
+            kind.as_str(),
+            source_ref.trim(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        scope
+            .map(|s| MemoryScope::decode("repo_memories.scope", &s))
+            .transpose()
     }
-
-    for token in tokenize(&entry.title) {
-        if query_tokens.contains(&token) {
-            score += 3;
-        }
-    }
-
-    for token in tokenize(&entry.keywords) {
-        if query_tokens.contains(&token) {
-            score += 3;
-        }
-    }
-
-    for token in tokenize(&entry.summary) {
-        if query_tokens.contains(&token) {
-            score += 1;
-        }
-    }
-
-    if score > 0 && matches!(entry.kind, MemoryKind::BusinessRule | MemoryKind::Runbook) {
-        score += 2;
-    }
-
-    score
-}
-
-fn tokenize(text: &str) -> BTreeSet<String> {
-    text.split(|c: char| !c.is_alphanumeric() && c != '_')
-        .map(|w| w.trim_matches('_').to_ascii_lowercase())
-        .filter(|w| w.chars().count() >= 3 && !is_stopword(w))
-        .collect()
-}
-
-fn extract_path_stems(text: &str) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    for raw in text.split_whitespace() {
-        let cleaned = raw.trim_matches(|c: char| {
-            matches!(
-                c,
-                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '<' | '>' | ',' | ';' | ':' | '.'
-            )
-        });
-        if (cleaned.contains('/') || cleaned.contains('.')) && cleaned.len() >= 3 {
-            let lower = cleaned.to_ascii_lowercase();
-            out.insert(lower.clone());
-            if let Some(last) = lower.rsplit('/').next() {
-                if last.len() >= 3 {
-                    out.insert(last.to_owned());
-                }
-                if let Some((stem, _)) = last.split_once('.')
-                    && stem.len() >= 3
-                    && !is_stopword(stem)
-                {
-                    out.insert(stem.to_owned());
-                }
-            }
-        }
-    }
-    out
-}
-
-fn is_stopword(word: &str) -> bool {
-    matches!(
-        word,
-        "the"
-            | "and"
-            | "for"
-            | "with"
-            | "that"
-            | "this"
-            | "from"
-            | "when"
-            | "where"
-            | "what"
-            | "which"
-            | "while"
-            | "into"
-            | "onto"
-            | "after"
-            | "before"
-            | "under"
-            | "over"
-            | "have"
-            | "has"
-            | "had"
-            | "does"
-            | "did"
-            | "not"
-            | "are"
-            | "was"
-            | "were"
-            | "been"
-            | "being"
-            | "should"
-            | "would"
-            | "could"
-            | "can"
-            | "will"
-            | "just"
-            | "more"
-            | "some"
-            | "such"
-            | "than"
-            | "then"
-            | "them"
-            | "they"
-            | "their"
-            | "there"
-            | "here"
-            | "issue"
-            | "bug"
-            | "fix"
-            | "error"
-            | "fails"
-            | "failed"
-            | "test"
-            | "tests"
-            | "code"
-            | "file"
-            | "files"
-            | "src"
-            | "lib"
-            | "mod"
-            | "main"
-            | "app"
-            | "pkg"
-            | "cmd"
-            | "bin"
-            | "internal"
-            | "crate"
-            | "crates"
-    )
 }
