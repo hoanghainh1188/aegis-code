@@ -47,6 +47,12 @@ use crate::{IssueInput, LifecycleError, RunConfig};
 
 mod drive;
 mod gating;
+
+/// A job's sandbox, fetch step and build cache for one part of a repo, for
+/// the pre-flight check's baseline gate (#599).
+pub(crate) use gating::{
+    build_cache as gate_build_cache, fetch_step as gate_fetch, sandbox as gate_sandbox,
+};
 mod prepare;
 mod review;
 mod tools;

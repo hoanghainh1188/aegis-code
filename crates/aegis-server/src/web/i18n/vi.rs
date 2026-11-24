@@ -4,6 +4,25 @@
 
 pub(super) fn get(en: &str) -> Option<&'static str> {
     Some(match en {
+        "Pre-flight check" => "Kiểm tra trước khi bật",
+        "Check" => "Mục kiểm tra",
+        "Result" => "Kết quả",
+        "No pre-flight check yet. It checks the repo's profile, clone, lockfiles, sandbox image and fetch hosts, then runs its gate on the base, as" => {
+            "Chưa có lần kiểm tra nào. Lần kiểm tra xem profile, bản clone, lockfile, image sandbox và các host tải phụ thuộc của repo, rồi chạy gate trên nhánh gốc, giống như"
+        }
+        "does." => ".",
+        "Run the pre-flight check" => "Chạy kiểm tra",
+        "Turn the repo on" => "Bật repo",
+        "Waiting for the first result: a check waits for a free slot, then runs the repo's gate on its base." => {
+            "Đang chờ kết quả đầu tiên: lần kiểm tra chờ đến lượt, rồi chạy gate của repo trên nhánh gốc."
+        }
+        "blocking" => "chặn",
+        "warn" => "cảnh báo",
+        "skip" => "bỏ qua",
+        "running" => "đang chạy",
+        "passed" => "đạt",
+        "warned" => "đạt, có cảnh báo",
+        "failed" => "không đạt",
         "the merge request" => "merge request",
         "the pull request" => "pull request",
         "Internal server error" => "Lỗi nội bộ của server",

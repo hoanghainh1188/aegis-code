@@ -20,7 +20,7 @@ pub(super) fn part_cache(cfg: &RunConfig, part: &ProfilePart) -> PathBuf {
 /// sandbox: every container sees the tree at the same `/work`, so a build
 /// started from another tree's directory is reused (#104). Directories the
 /// fetch step fills (a venv) are mounted, not cached here.
-pub(super) fn build_cache(cfg: &RunConfig, part: &ProfilePart) -> Option<BuildCache> {
+pub(crate) fn build_cache(cfg: &RunConfig, part: &ProfilePart) -> Option<BuildCache> {
     let profile = &part.profile;
     let deps = &profile.profile.dependencies.dirs;
     let dirs: Vec<String> = profile

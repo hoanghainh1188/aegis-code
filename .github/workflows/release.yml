@@ -5,8 +5,9 @@
 #   và linux/arm64 (#405), tag X.Y.Z và X.Y, ký bằng cosign keyless (OIDC
 #   của GitHub, không có khóa);
 # - gói offline cho mỗi kiến trúc: mỗi image một file `docker save`, kèm
-#   SHA-256, versions-<arch>.txt (digest, migration cuối) và load-images.sh,
-#   gắn vào Release;
+#   SHA-256, SBOM SPDX (syft), SHA256SUMS-<arch>.txt cho mọi file của gói,
+#   versions-<arch>.txt (digest, migration cuối) và load-images.sh, gắn vào
+#   Release (#599);
 # - client aegis cho bốn nền tảng, gắn vào Release, và một gói npm
 #   chứa cả bốn binary, publish bằng OIDC trusted publishing (không có
 #   token npm), như komainu.
@@ -189,7 +190,11 @@ jobs:
           password: ${{ github.token }}
       - name: Chỗ trống trên đĩa
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      # SBOMs of the bundle's images (#599).
+      - uses: anchore/sbom-action/download-syft@v0
       - run: scripts/release/save-images.sh "${{ needs.version.outputs.version }}" "$IMAGES" offline
+        env:
+          AEGIS_SBOM: "1"
       # Both legs write load-images.sh; amd64 attaches it.
       - name: Gắn vào Release
         env:

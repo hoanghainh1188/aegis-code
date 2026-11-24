@@ -1,0 +1,56 @@
+# Preset gcp-vertex-tokyo (#599): Claude on Vertex AI in asia-northeast1
+# (Tokyo), and Vertex's multilingual embedding model in the same region
+# for the memory's semantic recall (#655). Every request stays in that
+# region: `[residency] allowed_regions` refuses a provider elsewhere.
+#
+# Secret: VERTEX_ACCESS_TOKEN, an OAuth2 access token of a service account
+# with `aiplatform.endpoints.predict` (refreshed by your token broker; the
+# server reads it again when it changes). Check that the models below are
+# offered in asia-northeast1 for your project before you start.
+
+[provider]
+kind = "vertex_ai"
+project = "your-gcp-project"
+region = "asia-northeast1"
+access_token_env = "VERTEX_ACCESS_TOKEN"
+
+[residency]
+allowed_regions = ["asia-northeast1"]
+
+[models.light]
+id = "claude-haiku-5-5"
+
+[models.core]
+id = "claude-sonnet-5-5"
+
+[models.expert]
+id = "claude-opus-5-5"
+effort = "high"
+
+[run]
+state_dir = ".workspace/state-vertex"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+sandbox = true
+ledger = "postgres"
+
+[budget]
+max_cost_usd = 4.0
+
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+[memory.embedding]
+model = "text-multilingual-embedding-002"
+dimensions = 768
+[memory.embedding.provider]
+kind = "vertex_ai"
+project = "your-gcp-project"
+region = "asia-northeast1"
+access_token_env = "VERTEX_ACCESS_TOKEN"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

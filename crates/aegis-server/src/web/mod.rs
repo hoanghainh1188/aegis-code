@@ -21,6 +21,7 @@ mod issue_hint;
 mod jobs;
 mod patch;
 mod pause_all;
+mod preflight;
 mod repo_admin;
 mod repo_form;
 mod review;
@@ -146,6 +147,11 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
             get(repo_admin::edit_form).post(repo_admin::update),
         )
         .route("/admin/repos/{id}/clone", get(repo_admin::clone_part))
+        .route(
+            "/admin/repos/{id}/preflight",
+            get(preflight::part).post(preflight::start_check),
+        )
+        .route("/admin/repos/{id}/activate", post(preflight::activate))
         .route(
             "/admin/repos/{id}/connection",
             get(connection::show).post(connection::check),

@@ -1,0 +1,57 @@
+# Preset azure-openai-enterprise (#599): an Azure OpenAI resource in Japan
+# East (ADR 0018). Each tier's `id` is the name of a deployment of your
+# resource, not a model name; the embedding model is a deployment too
+# (text-embedding-3-small: 1536 dimensions). `[residency] allowed_regions`
+# refuses an endpoint that does not declare Japan East.
+#
+# Secret: AZURE_OPENAI_API_KEY, the resource's key. Copy azure-openai-enterprise-pricing.toml next
+# to this file (/etc/aegis/modes/) and put your contract's prices in it:
+# a deployment without a price stops a job at its first call.
+
+[provider]
+kind = "open_ai_compat"
+base_url = "https://your-resource.openai.azure.com"
+api_key_env = "AZURE_OPENAI_API_KEY"
+azure_api_version = "2024-10-21"
+region = "japaneast"
+
+[residency]
+allowed_regions = ["japaneast"]
+
+[models.light]
+id = "aegis-light"
+
+[models.core]
+id = "aegis-core"
+
+[models.expert]
+id = "aegis-expert"
+
+[run]
+state_dir = ".workspace/state-azure"
+pricing = "/etc/aegis/modes/azure-openai-enterprise-pricing.toml"
+step_timeout_s = 1800
+sandbox = true
+ledger = "postgres"
+
+[budget]
+max_cost_usd = 4.0
+
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+[memory.embedding]
+model = "aegis-embed"
+dimensions = 1536
+[memory.embedding.provider]
+kind = "open_ai_compat"
+base_url = "https://your-resource.openai.azure.com"
+api_key_env = "AZURE_OPENAI_API_KEY"
+azure_api_version = "2024-10-21"
+region = "japaneast"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

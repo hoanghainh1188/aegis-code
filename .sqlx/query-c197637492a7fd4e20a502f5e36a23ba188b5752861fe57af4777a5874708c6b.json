@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE repo_preflights SET items = items || jsonb_build_array($2::jsonb)\n              WHERE repo_id = $1 AND state = 'running' AND jsonb_array_length(items) < $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c197637492a7fd4e20a502f5e36a23ba188b5752861fe57af4777a5874708c6b"
+}

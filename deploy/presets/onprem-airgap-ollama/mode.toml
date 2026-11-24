@@ -1,0 +1,55 @@
+# Preset onprem-airgap-ollama (#599): no request leaves the deployment's
+# network. Ollama on the same Docker network (service `ollama`), open
+# coding models, and an open embedding model for the memory's semantic
+# recall (#655); `[residency] local_only` refuses any other endpoint.
+#
+# On the Ollama machine, once, with the network (or from an image you
+# carry in): `ollama pull qwen2.5-coder:7b`, `ollama pull qwen2.5-coder:32b`,
+# `ollama pull nomic-embed-text`. Start it with
+# `OLLAMA_CONTEXT_LENGTH=32768` (see context_window). No secret.
+
+[provider]
+kind = "local"
+base_url = "http://ollama:11434/v1"
+protocol = "openai"
+
+[residency]
+local_only = true
+
+[models.light]
+id = "qwen2.5-coder:7b"
+
+[models.core]
+id = "qwen2.5-coder:32b"
+
+[models.expert]
+id = "qwen2.5-coder:32b"
+effort = "high"
+
+[run]
+state_dir = ".workspace/state-local"
+pricing = "config/pricing.toml"
+step_timeout_s = 1800
+context_window = 32768
+sandbox = true
+ledger = "postgres"
+
+# $0: only free calls go through (#233).
+[budget]
+max_cost_usd = 0.0
+
+[codebase_memory]
+program = "codebase-memory-mcp"
+args = ["--ui=false"]
+env = [["HOME", "{index_dir}"]]
+
+[memory.embedding]
+model = "nomic-embed-text"
+dimensions = 768
+[memory.embedding.provider]
+kind = "local"
+base_url = "http://ollama:11434/v1"
+
+[identity]
+name = "aegis-bot"
+email = "aegis-bot@users.noreply.github.com"

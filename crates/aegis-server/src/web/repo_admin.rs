@@ -53,6 +53,8 @@ pub struct RepoAdmin {
     /// The instance's GitHub App (ADR 0017), for cloning repos on the app
     /// path.
     pub(super) github_app: Option<Arc<crate::github_app::AppHandle>>,
+    /// Slots of the pre-flight checks run from the pages (#599).
+    pub(super) preflights: Arc<tokio::sync::Semaphore>,
 }
 
 impl RepoAdmin {
@@ -76,6 +78,7 @@ impl RepoAdmin {
             ai_checks: Arc::default(),
             make_webhooks: false,
             github_app: None,
+            preflights: super::preflight::slots(),
         }
     }
 
@@ -311,7 +314,17 @@ pub async fn create(
             return form_page(&nonce, &me, None, &form, Some((status, &why)), Vec::new());
         }
     };
-    clone_in_background(&store, &admin, &repo).await?;
+    // It takes no job until its pre-flight check passes and an admin
+    // turns it on (#599); the check starts once its clone is made.
+    store
+        .pause_repo_by(
+            repo.id,
+            Some(super::preflight::AWAITING_PREFLIGHT),
+            false,
+            &access.actor,
+        )
+        .await?;
+    clone_in_background(&store, &admin, &repo, Some(&access.actor)).await?;
     Ok(Redirect::to(&format!("/admin/repos/{}?done=added", repo.id.0)).into_response())
 }
 
@@ -385,19 +398,23 @@ pub async fn update(
             );
         }
     };
-    clone_in_background(&store, &admin, &updated).await?;
+    clone_in_background(&store, &admin, &updated, None).await?;
     Ok(Redirect::to(&format!("/admin/repos/{id}?done=updated")).into_response())
 }
 
 /// Records the clone of `repo` as being made, then makes it (or fetches
 /// it) off the request: the page says how it went.
+/// With `then_check`, a pre-flight check by that actor follows a clone
+/// that is made (#599).
 async fn clone_in_background(
     store: &Store,
     admin: &RepoAdmin,
     repo: &Repo,
+    then_check: Option<&aegis_store::Actor>,
 ) -> Result<(), WebError> {
     store.start_clone(repo.id).await?;
     let (store, admin, repo) = (store.clone(), admin.clone(), repo.clone());
+    let then_check = then_check.cloned();
     tokio::spawn(async move {
         let failed = make_clone(&admin, &repo).await.err();
         if let Some(why) = &failed {
@@ -408,6 +425,11 @@ async fn clone_in_background(
             .await
         {
             tracing::error!(repo = %repo.slug, error = %e, "recording the clone");
+        }
+        if let (None, Some(actor)) = (&failed, then_check)
+            && let Err(e) = super::preflight::start(&store, &admin, &repo, &actor).await
+        {
+            tracing::error!(repo = %repo.slug, error = ?e, "starting the pre-flight check");
         }
     });
     Ok(())

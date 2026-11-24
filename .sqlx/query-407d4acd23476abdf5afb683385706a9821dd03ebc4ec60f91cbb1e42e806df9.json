@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO repo_preflights (repo_id, state, started_by)\n                 VALUES ($1, 'running', $2)\n                 ON CONFLICT (repo_id) DO UPDATE\n                 SET state = 'running', items = '[]'::jsonb, started_by = EXCLUDED.started_by,\n                     started_at = now(), finished_at = NULL\n                 WHERE repo_preflights.state <> 'running'\n                    OR repo_preflights.started_at < now() - make_interval(secs => $3)\n                 RETURNING repo_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_preflights",
+            "name": "repo_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "407d4acd23476abdf5afb683385706a9821dd03ebc4ec60f91cbb1e42e806df9"
+}
