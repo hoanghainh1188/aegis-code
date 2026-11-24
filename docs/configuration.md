@@ -87,6 +87,9 @@ local-airgap = "/etc/aegis/modes/local-airgap.toml"
 | `sonar.check_s` | `u64` | `60` | Interval in seconds to check which repos are due for Sonar warning polling (`0` disables). |
 | `reviews.max_rounds` | `u32` | `3` | Maximum automated review rounds (`/aegis fix` / *Request changes*) per PR. |
 | `web.make_webhooks` | `bool` | `false` | Allow admins to create forge webhooks from the UI using a one-time, unstored admin token. |
+| `web.default_locale` | `"en"` \| `"ja"` \| `"vi"` | `"en"` | Default UI and comment locale when no user cookie (`aegis_lang`), `Accept-Language`, or tenant `default_locale` overrides it. |
+
+**Dashboard UI Languages (`en` / `ja` / `vi`, #590):** The web dashboard renders in English (`en`), Japanese (`ja`), or Vietnamese (`vi`). Request language is selected in order: (1) `aegis_lang` cookie (set via `GET /lang/<code>`, e.g. `/lang/ja` or `/lang/vi`, from the masthead switcher), (2) browser `Accept-Language` header, (3) `[web] default_locale`. Tenants can also set a `default_locale` (`en`, `ja`, or `vi`) for their repos' comments.
 
 ### `[[chatops.channels]]`
 
@@ -249,11 +252,16 @@ Stored as JSONB in `repos.config` (registered via `aegis-server repo add`, `add-
 
 ### 3.2. Language, Monorepo & Policy Settings
 
+Supported `language` values: `python`, `rust`, `go`, `typescript`, `java`, `csharp`, and `kotlin` (`profiles/kotlin.toml`, Gradle-based, #586).
+
+- **Kotlin & Multi-Project Gradle Builds (#648, #649):** The `kotlin` profile runs `repro_test` (`gradle ... test --tests {test}`) across multi-project Gradle builds without failing on subprojects that do not contain the target test class, and caches `.gradle` and `.kotlin` per-build directories (including `build-logic/`).
+- **Custom `gate.repro_ran` (#648):** Any repository overriding `gate.repro_test` with its own command can also set `gate.repro_ran` (a regex pattern matched against test output to verify that at least one test actually ran, e.g. `repro_ran = '(?m)^aegis-gradle RAN '`). Setting `gate.repro_test = false` drops the profile's `repro_ran` pattern.
+
 | Key | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `conventions` | `string` | `None` | Repository-specific coding/testing conventions appended to the system prompt. |
 | `image` | `string` | `None` | Override the language profile's sandbox Docker image. |
-| `overrides` | table | `{}` | Override commands/settings from `profiles/<lang>.toml` (e.g., `fetch`, `gate.test`, `coverage`, `dependencies.upgrade`). |
+| `overrides` | table | `{}` | Override commands/settings from `profiles/<lang>.toml` (`python`, `rust`, `go`, `typescript`, `java`, `csharp`, `kotlin`), e.g. `fetch`, `gate.test`, `gate.repro_test`, `gate.repro_ran`, `coverage`, `dependencies.upgrade`. |
 | `dirs` | `DirConfig[]` | `[]` | Subdirectories using a different language profile (`path`, `language`, `overrides`, `hidden_test`). |
 | `allowed_packages` | `string[]` | `[]` | Additional package names a patch is allowed to add. |
 | `licenses` | `string[]` | `None` | Allowed dependency licenses (replaces `policies/licenses.toml`). |
