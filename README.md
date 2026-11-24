@@ -269,7 +269,7 @@ flowchart TD
 
 ## ⚡ 6. Core Capabilities
 
-* 📥 **Multi-Channel Ingestion:** Webhooks for GitHub/GitLab (e.g. `aegis` label), polling for Jira/Backlog, automatic detection of broken CI runs on `main`, and SonarQube alerts.
+* 📥 **Multi-Channel Ingestion:** Webhooks for GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, and Azure DevOps (e.g. `aegis` label, `/aegis fix` review rounds), polling for Jira/Backlog/JSM/ServiceNow, automatic detection of broken CI runs on `main`, and SonarQube alerts.
 * 🔁 **Review Rounds:** When an engineer clicks *"Request changes"* or comments `/aegis fix`, Aegis returns to the same branch, runs the gate, pushes an additional commit without force-pushing, and replies to review comments.
 * 🔍 **Automated Triage:** Light models prune stack traces and pinpoint likely candidate crates/modules before heavy synthesis begins.
 * 🧪 **Isolated Reproducing Tests:** Synthesizes dedicated test cases to verify the bug condition before proposing code changes.
@@ -305,7 +305,7 @@ aegis-code/
 │   │
 │   ├── # 4. Code Intelligence & Sandboxed Verification
 │   ├── aegis-aci/            # MCP tool server (`rmcp` stdio): bounded `open`, `search_symbol`, LSP navigation, syntax-safe `edit`
-│   ├── aegis-lang/           # Language profiles (Rust, Python, TS/JS, Java, Go, C#): Tree-sitter AST, linters, lockfiles (ADR 0004)
+│   ├── aegis-lang/           # Language profiles (Rust, Python, TS/JS, Java, Go, C#, Kotlin): Tree-sitter AST, linters, lockfiles (ADR 0004)
 │   ├── aegis-gate/           # 6-step Docker sandbox runner (`--network none`): fmt, lint, repro test, suite, coverage, Sonar
 │   │
 │   └── # 5. External Integrations & PR Delivery
@@ -370,25 +370,27 @@ The scope and the measurement milestone of each phase are in [Proposal §9](docs
 * [ADR 0015: CVE Remediation Lane](docs/adr/0015-cve-remediation-lane.md)
 * [ADR 0016: Platform Bias Scope and Measurement](docs/adr/0016-platform-bias-scope-and-measurement.md)
 * [ADR 0017: GitHub App Integration](docs/adr/0017-github-app.md)
+* [ADR 0018: Multi-Provider and Residency Failover](docs/adr/0018-multi-provider-and-residency-failover.md)
 
 ### Detailed Guides & Runbooks
 * [Documentation Hub](docs/README.md) – Full role-based index separating customer/operator docs from internal engineering docs
-* [Security & Compliance Overview](docs/security.md) & [Security Policy](SECURITY.md) – Data residency, sandbox & proxy isolation, prompt injection defense, and vulnerability reporting
-* [Configuration Reference](docs/configuration.md) – Complete schema for `server.toml`, mode TOML, and `repos.config`
+* [Security & Compliance Overview](docs/security.md) & [Security Policy](SECURITY.md) – Data residency (chat & embedding), sandbox & proxy isolation, prompt injection defense, offline bundle SBOMs/checksums, and vulnerability reporting
+* [Configuration Reference](docs/configuration.md) – Complete schema for `server.toml` (`[web] default_locale`), mode TOML (`[memory.embedding]`), language profiles (including Kotlin), and `repos.config`
+* [REST API & Webhook Reference](docs/api.md) – `/api/v1/*` endpoints (jobs, `repo`/`tenant` memories) and `/webhooks/*` ingress (GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, Azure DevOps)
 * [Proposal](docs/design/00-proposal.md), [Architecture Specification](docs/design/01-architecture-detail.md) and [Platform Topology](docs/design/02-platform-topology.md) – Scope, the four layers, KPIs, roadmap, system context and crates
 * [Reviewer Guide](docs/reviewing.md) – Reading an Aegis PR, asking for review rounds, recording the verdict
 * [Developer Client Guide (`aegis`)](docs/client.md) – Submitting and monitoring jobs from terminal
 * [Local End-to-End Trial Guide](docs/local-trial.md) – Step-by-step local platform walkthrough
 * [Production AWS Runbook](docs/runbook/README.md) – Deployment, secret rotation, and incident triage
 * [On-Premise Install Guide](docs/install-on-premise.md) – From a blank machine to the first PR, step by step
-* [On-Premise Operations Runbook](docs/runbook/on-premise.md) – Single-machine Docker Compose and systemd management
-* [Adding Repositories](docs/runbook/repos.md) – Registering a repo, roles, budget and webhooks, on every deployment
-* [Kubernetes Operations Runbook](docs/runbook/kubernetes.md) – Helm chart: install, upgrades, rollback
+* [On-Premise Operations Runbook](docs/runbook/on-premise.md) & [Self-Hosted Presets](deploy/presets/README.md) – Single-machine Docker Compose and systemd management, ready-to-use mode presets, `pgvector` setup, and web pre-flight onboarding
+* [Adding Repositories](docs/runbook/repos.md) – Registering a repo (web pre-flight wizard or CLI), polyglot monorepos (`[[repo.dirs]]`), roles, budget, and webhooks (GitHub, GitLab, Bitbucket, Azure DevOps)
+* [Kubernetes Operations Runbook](docs/runbook/kubernetes.md) – Helm chart: install, upgrades, rollback, and `pgvector` setup
 * [Tenants (Contracts) Runbook](docs/runbook/tenants.md) – Multi-contract isolation and `/ams` MTTR/SLA reporting
 * [Incident Runbook: Pausing Every Agent](docs/runbook/incident.md) – Global kill-switch (`intake` / `emergency`) and recovery
 * [Team Pilot Plan](docs/pilot/2026-11-team-pilot-plan.md) – The four-week on-premise pilot of #158 (in Vietnamese)
 * [Measurement Reports](docs/measurements/README.md) – Dated KPI and experiment reports (in Vietnamese)
-* [Release Operations](docs/release.md) – Release-please, GHCR container images, and offline packages
+* [Release Operations](docs/release.md) – Release-please, GHCR container images, and offline packages (SPDX SBOMs, `SHA256SUMS`)
 * [Contributing & Development Conventions](CLAUDE.md) – Commit formats, branching, and pre-PR verification
 
 > *Note: ADRs, design documents, runbooks and guides are in English. The measurement reports and the pilot plan are in Vietnamese.*

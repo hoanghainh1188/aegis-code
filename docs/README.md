@@ -17,20 +17,21 @@ For platform operators, security reviewers, developers, and PR reviewers deployi
 ### Configuration, Security & Governance
 | Guide | Purpose |
 | :--- | :--- |
-| [Configuration Reference](configuration.md) | Single reference for `server.toml`, mode TOML (`[provider]`, `[residency]`), and `repos.config` (`[settings]`). |
-| [Security & Compliance Overview](security.md) | Data flow, data residency, sandbox & `aegis-docker-proxy` isolation, prompt injection defense, RBAC, and auditability. |
+| [Configuration Reference](configuration.md) | Single reference for `server.toml` (`[web] default_locale`), mode TOML (`[provider]`, `[residency]`, `[memory.embedding]`), language profiles (including `kotlin`), and `repos.config` (`[settings]`). |
+| [REST API & Webhook Reference](api.md) | `/api/v1/*` endpoints (jobs, memories with `repo`/`tenant` scope) and `/webhooks/*` ingress (GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, Azure DevOps). |
+| [Security & Compliance Overview](security.md) | Data flow, data residency (chat & embedding), sandbox & `aegis-docker-proxy` isolation, prompt injection defense, RBAC, offline bundle SBOMs/checksums, and auditability. |
 | [Vulnerability Reporting Policy](../SECURITY.md) | Supported versions and private security reporting process. |
 
 ### Day-Two Operations Runbooks
 | Runbook | Purpose |
 | :--- | :--- |
-| [On-Premise Operations](runbook/on-premise.md) | Upgrades, rollback, backups, unattended installs, and systemd deployment. |
+| [On-Premise Operations](runbook/on-premise.md) | Upgrades, rollback, backups, unattended installs, [Self-Hosted presets](../deploy/presets/README.md), `pgvector` setup, web pre-flight onboarding, and systemd deployment. |
 | [AWS Production Runbook](runbook/README.md) | EC2/RDS/Secrets Manager deployment, secret rotation, and incident triage ([OpenTofu IaC](../deploy/tofu/README.md)). |
-| [Kubernetes Runbook](runbook/kubernetes.md) | Helm chart deployment with DinD + `aegis-docker-proxy` sidecars. |
-| [Adding Repositories](runbook/repos.md) | Registering repos, roles, budgets, webhooks, GitHub App, sidecars, and secret allow-lists. |
+| [Kubernetes Runbook](runbook/kubernetes.md) | Helm chart deployment with DinD + `aegis-docker-proxy` sidecars and `pgvector` configuration. |
+| [Adding Repositories](runbook/repos.md) | Registering repos (dashboard pre-flight wizard or CLI), polyglot monorepos (`[[repo.dirs]]`), roles, budgets, webhooks (GitHub, GitLab, Bitbucket, Azure DevOps), GitHub App, sidecars, and secret allow-lists. |
 | [Tenants (Contracts)](runbook/tenants.md) | Multi-contract isolation (roles, budgets, secret prefixes, disk paths) and the `/ams` MTTR/SLA report. |
 | [Incident Runbook: Pausing Every Agent](runbook/incident.md) | Global kill-switch (`intake` / `emergency`) via UI, API, or CLI. |
-| [Release Operations](release.md) | Versioning, GHCR images, npm CLI releases, and air-gapped offline bundles. |
+| [Release Operations](release.md) | Versioning, GHCR images, npm CLI releases, and air-gapped offline bundles (SPDX SBOMs, `SHA256SUMS-<arch>.txt`, `pgvector`, Ollama). |
 
 ### Developers & Reviewers
 | Guide | Purpose |
@@ -68,6 +69,7 @@ For contributors, architects, and benchmark maintainers.
 - [ADR 0015: CVE Remediation Lane](adr/0015-cve-remediation-lane.md)
 - [ADR 0016: Platform Bias Scope and Measurement](adr/0016-platform-bias-scope-and-measurement.md)
 - [ADR 0017: GitHub App Integration](adr/0017-github-app.md)
+- [ADR 0018: Multi-Provider and Residency Failover](adr/0018-multi-provider-and-residency-failover.md)
 
 ### Benchmarks, Measurements & Pilot (English / Vietnamese)
 - [Measurement Reports Index](measurements/README.md) — Current KPIs per language and chronological experiment reports (Vietnamese).

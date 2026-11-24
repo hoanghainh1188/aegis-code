@@ -26,7 +26,7 @@ flowchart LR
     classDef ext fill:#0c2d48,stroke:#38BDF8,stroke-width:1.5px,color:#F8FAFC;
     classDef llm fill:#2e1065,stroke:#A855F7,stroke-width:1.5px,color:#F3E8FF;
 
-    Forge["Git Forge / ITSM / APM<br/>(GitHub, GitLab, Jira, JSM,<br/>ServiceNow, Sentry, Datadog)"]:::ext
+    Forge["Git Forge / ITSM / APM<br/>(GitHub, GitLab, Bitbucket,<br/>Azure DevOps, Jira, JSM,<br/>ServiceNow, Sentry, Datadog)"]:::ext
     Server["aegis-server<br/>(Redact + Defang + Inert)"]:::host
     Sandbox["Verification Sandbox<br/>(--network none, no host env)"]:::sandbox
     Egress["Allow-Listed Egress Proxy<br/>(Package Registries Only)"]:::sandbox
@@ -41,6 +41,7 @@ flowchart LR
 - **Bounded Code Context:** Aegis never uploads entire repositories to an LLM. The Agent-Computer Interface (`aegis-aci`) reads files in capped 100-line windows and caps search results to 50 entries ([Architecture §3](design/01-architecture-detail.md)).
 - **Pre-Inference Secret Redaction:** All text sent to any model provider (issue bodies, code slices, CI logs, APM traces, gate output, recalled memory) passes through secret redaction (`aegis-gate/src/secrets.rs`).
 - **Regional Data Residency (`customer-jp`):** Repositories configured under `customer-jp` enforce `ModelPolicy::JapanOnly` in `aegis-provider`: every model ID must carry the `jp.` inference profile prefix and route exclusively to **AWS Bedrock Tokyo (`ap-northeast-1`)**. The server refuses to start if a `customer-jp` mode configuration violates this guard.
+- **Embedding Endpoint Residency (`[memory.embedding]`):** Embedding endpoints (`local`, `open_ai_compat`, `vertex_ai`, `bedrock`) are checked against `[residency]` (`allowed_regions` or `local_only`) just like chat providers, and all text is redacted before embedding. Under `customer-jp`, only Bedrock `ap-northeast-1` or `local` endpoints on the deployment's network are accepted; under `allowed_model_prefixes` alone (without `allowed_regions`), cloud embedding endpoints are rejected.
 - **Air-Gapped / On-Premise Local Inference:** For environments that prohibit external model APIs entirely, Aegis supports local inference endpoints (`ProviderConfig::Local`, e.g., Ollama) alongside offline container image bundles ([Release Operations](release.md)).
 
 ---
@@ -89,7 +90,7 @@ Aegis treats every external input—issues, PR review comments, CI logs, Jira/JS
 - **SSO via OIDC (PKCE):** Dashboard users authenticate through corporate OIDC IdPs (Authorization Code + PKCE, single-use state/nonce stored in PostgreSQL, `__Host-` `HttpOnly` cookies, automatic JWKS key rotation handling).
 - **Scoped API Tokens:** Developers and CI pipelines authenticate via personal or service tokens (stored hashed in PostgreSQL).
 - **Role-Based Access Control (RBAC):** Per-repository roles (`reviewer`, `maintainer`) plus tenant-level and platform-level `admin` roles. Review rounds (`/aegis fix`) are accepted only from users with repository write permissions.
-- **Webhook Verification:** All incoming GitHub/GitLab webhooks require valid HMAC signatures (`X-Hub-Signature-256` / `X-Gitlab-Token`) and are protected by rate limiting and deduplication (`webhook_deliveries`).
+- **Webhook Verification:** All incoming webhooks (GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, and Azure DevOps service hooks) require valid signatures or secrets (`X-Hub-Signature-256`, `X-Gitlab-Token`, `X-Hub-Signature`, or Basic auth / `X-Aegis-Webhook-Secret`) checked in constant time and are protected by rate limiting and deduplication (`webhook_deliveries`).
 
 ### 5.2. Secret Lifecycle & GitHub App
 - **Live Secret Rotation (`aegis-secrets`):** Secrets are loaded from AWS Secrets Manager, on-premise permission-checked secret files (`0600`, no world-writable state directories), or environment variables, and are re-read at use time so rotation requires **no server restart** ([AWS Runbook §3](runbook/README.md#3-secret-rotation)).
@@ -111,6 +112,7 @@ When operating multiple contracts on one instance, each tenant isolates:
 - **Allow-Listed Pre-Gate Fetch:** Dependency resolution runs before the air-gapped gate through an egress proxy restricted strictly to official package registries configured per language profile.
 - **Dedicated CVE Remediation Lane:** Vulnerability upgrades run in a separate `cve` job mode initiated only by a repository maintainer (never parsed from untrusted issue text). The **platform** executes the profile's deterministic upgrade command behind the egress proxy, verifies checksums, licenses, and advisories, and invokes the agent **only** to adapt application code if the upgrade introduces breaking changes.
 - **Platform Dependency Hygiene:** Aegis itself enforces `cargo deny check` in CI across all Rust dependencies (blocking yanked crates, unmaintained crates, unknown registries, and non-permissive licenses; see [deny.toml](../deny.toml)).
+- **Offline Bundle SBOMs & Checksums:** Each release offline bundle ships per-image SPDX SBOMs (`<file>.spdx.json` generated by `syft` with `AEGIS_SBOM=1` in release builds) and a `SHA256SUMS-<arch>.txt` manifest covering every file in the bundle, alongside per-file `.sha256` files ([Release Operations](release.md)).
 
 ---
 
