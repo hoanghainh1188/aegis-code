@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.19.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.18.0...v0.19.0) (2026-11-24)
+
+
+### Features
+
+* accept Azure DevOps project and repo names with spaces ([#641](https://github.com/hoanghainh1188/aegis-code/issues/641)) ([#645](https://github.com/hoanghainh1188/aegis-code/issues/645)) ([05ae965](https://github.com/hoanghainh1188/aegis-code/commit/05ae965a40ab5e7bc322c27c3be2970d4f3e3889))
+* add the Azure DevOps forge with review rounds from its service hooks ([#636](https://github.com/hoanghainh1188/aegis-code/issues/636)) ([#640](https://github.com/hoanghainh1188/aegis-code/issues/640)) ([99a8fd2](https://github.com/hoanghainh1188/aegis-code/commit/99a8fd2f441e8939748a02437991bd5aa26d6dfa))
+* add the Bitbucket Cloud forge with review rounds from its webhook ([#634](https://github.com/hoanghainh1188/aegis-code/issues/634)) ([#637](https://github.com/hoanghainh1188/aegis-code/issues/637)) ([73be680](https://github.com/hoanghainh1188/aegis-code/commit/73be6807696edda8279ddd4664a9e5a33bc655f7))
+* add the Bitbucket Data Center forge with review rounds from its webhook ([#635](https://github.com/hoanghainh1188/aegis-code/issues/635)) ([#639](https://github.com/hoanghainh1188/aegis-code/issues/639)) ([565cf94](https://github.com/hoanghainh1188/aegis-code/commit/565cf94376a1590d1e9e424a87b2b5cc3d180808))
+* check Azure DevOps writers by their effective permissions on the repo ([#646](https://github.com/hoanghainh1188/aegis-code/issues/646)) ([bc4f89b](https://github.com/hoanghainh1188/aegis-code/commit/bc4f89bfeeb56640df7965089e1a8ad0a3c94927))
+* recall repo memories by meaning with an optional pgvector channel ([#655](https://github.com/hoanghainh1188/aegis-code/issues/655)) ([#656](https://github.com/hoanghainh1188/aegis-code/issues/656)) ([a2aac6f](https://github.com/hoanghainh1188/aegis-code/commit/a2aac6fccfdf30b7f1168d22238c399b255d4ca2))
+* recall repo memories by paths, full text and substrings, shared per tenant ([#596](https://github.com/hoanghainh1188/aegis-code/issues/596)) ([#654](https://github.com/hoanghainh1188/aegis-code/issues/654)) ([fb5d602](https://github.com/hoanghainh1188/aegis-code/commit/fb5d602afcc0c4a497d4f055023b3d215f90c0ce))
+* run a repo's pre-flight check and turn it on from its page, with Self-Hosted presets ([#599](https://github.com/hoanghainh1188/aegis-code/issues/599)) ([#661](https://github.com/hoanghainh1188/aegis-code/issues/661)) ([ffe3ef1](https://github.com/hoanghainh1188/aegis-code/commit/ffe3ef1857a669fb7d33b0d7631bea1035869f85))
+* use an Azure DevOps service principal in long jobs, the webhook and the CLI ([#647](https://github.com/hoanghainh1188/aegis-code/issues/647)) ([5460bd1](https://github.com/hoanghainh1188/aegis-code/commit/5460bd1c63eac7be20c1390427ced8040902af10))
+
+
+### Bug Fixes
+
+* cache Gradle's and Kotlin's per-build state in the Kotlin sandbox ([#650](https://github.com/hoanghainh1188/aegis-code/issues/650)) ([74f2d6b](https://github.com/hoanghainh1188/aegis-code/commit/74f2d6b844cb5f4474e8c12d9401d51c9bd3b7e2)), closes [#649](https://github.com/hoanghainh1188/aegis-code/issues/649)
+* run the Kotlin repro test on multi-project Gradle builds ([#653](https://github.com/hoanghainh1188/aegis-code/issues/653)) ([318253f](https://github.com/hoanghainh1188/aegis-code/commit/318253f6e93d0c252f04bfba24c66c3245a5493a))
+
+
+### Documentation
+
+* add Kotlin KPI measurement report ([#626](https://github.com/hoanghainh1188/aegis-code/issues/626)) ([#652](https://github.com/hoanghainh1188/aegis-code/issues/652)) ([fc24785](https://github.com/hoanghainh1188/aegis-code/commit/fc247850f600b2490fa4795865d97e2d2b6a68ba))
+
 ## [0.18.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.17.1...v0.18.0) (2026-11-22)
 
 
