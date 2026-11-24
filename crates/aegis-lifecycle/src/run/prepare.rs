@@ -180,7 +180,7 @@ where
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     // The job's workspace (#663): everything below reaches it through
     // `env`.
-    let env = LocalExecutionEnv::create(&cfg.repo.path, &start, &job_dir)?;
+    let env = JobEnv::create(cfg, &start, &job_dir)?;
     let (resumed, system) = match resume {
         Some(r) => {
             env.apply_diff(&r.diff).await?;

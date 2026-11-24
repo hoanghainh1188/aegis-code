@@ -142,6 +142,66 @@ pub struct RunSection {
     /// the configuration: the command that opens it gets it from outside.
     #[serde(default)]
     pub ledger: LedgerBackend,
+    /// Run the repo's containers (the gate's steps, `run_tests`, the
+    /// formatter, sidecars) on a remote execution host's Docker, through
+    /// its `aegis-docker-proxy --listen-tls` (#664); unset, on this host's.
+    #[serde(default)]
+    pub remote_execution: Option<RemoteExecution>,
+}
+
+/// `[run.remote_execution]` (#664): the execution host's Docker proxy and
+/// this worker's certificate for it. The host mounts the run's
+/// `state_dir` at the same path as here (shared storage): a container
+/// there bind-mounts the job's tree by the path the worker gives.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteExecution {
+    /// `tcp://<host>:<port>` of the host's `--listen-tls`.
+    pub docker_host: String,
+    /// This worker's certificate and key, and the host's CA (PEM).
+    pub tls_cert: PathBuf,
+    pub tls_key: PathBuf,
+    pub tls_ca: PathBuf,
+}
+
+impl RemoteExecution {
+    /// A `tcp://` host the `docker` client takes, and paths a shell script
+    /// can quote.
+    pub fn check(&self) -> Result<(), String> {
+        let host = self
+            .docker_host
+            .strip_prefix("tcp://")
+            .filter(|h| {
+                !h.is_empty()
+                    && h.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "-.:[]".contains(c))
+            })
+            .ok_or_else(|| {
+                format!(
+                    "run.remote_execution.docker_host `{}` is not tcp://<host>:<port>",
+                    self.docker_host
+                )
+            })?;
+        if !host.contains(':') {
+            return Err(format!(
+                "run.remote_execution.docker_host `{}` needs its port",
+                self.docker_host
+            ));
+        }
+        for (name, path) in [
+            ("tls_cert", &self.tls_cert),
+            ("tls_key", &self.tls_key),
+            ("tls_ca", &self.tls_ca),
+        ] {
+            let text = path.to_string_lossy();
+            if !path.is_absolute() || text.contains(['\'', '\n', '\0']) {
+                return Err(format!(
+                    "run.remote_execution.{name} `{text}` must be an absolute path without `'`"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -697,6 +757,15 @@ impl RunConfig {
             }
         );
         self.memory.check(&self.residency, japan)?;
+        if let Some(remote) = &self.run.remote_execution {
+            remote.check().map_err(LifecycleError::Config)?;
+            if !self.run.sandbox {
+                return Err(LifecycleError::Config(
+                    "run.remote_execution needs run.sandbox: without it the gate runs on this host"
+                        .into(),
+                ));
+            }
+        }
         self.repo.profile_overrides()?;
         self.repo.check_dirs()?;
         let key = &self.repo.key;
