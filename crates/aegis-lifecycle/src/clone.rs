@@ -219,6 +219,44 @@ fn fetch_into(
     .map(drop)
 }
 
+/// The files of the clone's `branch` (`refs/heads/<branch>`, the main
+/// branch a fetch moved, never a PR's branch), with their sizes in bytes.
+pub fn branch_files(path: &Path, branch: &str) -> Result<Vec<(String, u64)>, LifecycleError> {
+    check_branch(branch)?;
+    let tree = format!("refs/heads/{branch}");
+    let listed = git(
+        Some(path),
+        &["ls-tree", "-r", "-l", "-z", "--end-of-options", &tree],
+        None,
+    )?;
+    Ok(listed
+        .split('\0')
+        .filter_map(|entry| {
+            let (meta, file) = entry.split_once('\t')?;
+            let mut fields = meta.split_whitespace();
+            let (_mode, kind, _object, size) = (
+                fields.next()?,
+                fields.next()?,
+                fields.next()?,
+                fields.next()?,
+            );
+            (kind == "blob").then(|| (file.to_owned(), size.parse().unwrap_or(u64::MAX)))
+        })
+        .collect())
+}
+
+/// The text of `file` on the clone's `branch`, as [`branch_files`] reads
+/// it.
+pub fn branch_file(path: &Path, branch: &str, file: &str) -> Result<String, LifecycleError> {
+    check_branch(branch)?;
+    let spec = format!("refs/heads/{branch}:{file}");
+    git(
+        Some(path),
+        &["cat-file", "blob", "--end-of-options", &spec],
+        None,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

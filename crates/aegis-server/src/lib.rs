@@ -21,6 +21,7 @@ pub mod lifecycle;
 pub mod locale;
 pub mod logs;
 pub mod memory;
+pub mod memory_sync;
 pub mod metrics;
 pub mod pause_all;
 pub mod repo_cli;

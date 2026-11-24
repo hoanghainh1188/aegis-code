@@ -110,6 +110,16 @@ impl RepoAdmin {
         Arc::clone(&self.modes)
     }
 
+    /// What syncs a repo's runbooks and business rules (#660), with the
+    /// modes, secrets and GitHub App of these pages.
+    pub fn memory_sync(&self) -> crate::memory_sync::MemorySync {
+        crate::memory_sync::MemorySync {
+            modes: Arc::clone(&self.modes),
+            secrets: self.secrets.clone(),
+            app: self.github_app.clone(),
+        }
+    }
+
     pub(super) fn modes(&self) -> &Modes {
         &self.modes
     }

@@ -31,6 +31,9 @@ pub enum Kind {
     /// An agent PR (`agent/*`) was merged (#456): extract `merged_pr` and
     /// `review_lesson` memories for its repository.
     PrMerged { pr_url: String },
+    /// A push to `branch` (#660): the repo's runbooks and business rules
+    /// are synced if it is its default branch.
+    Push { branch: String },
 }
 
 /// The command that asks for a review round in a comment on a PR.
@@ -283,6 +286,16 @@ pub fn repo_url(source: WebhookSource, body: &[u8]) -> Option<String> {
 
 pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     match event {
+        "push" => {
+            let e: GithubPush = parse(body)?;
+            let branch = pushed_branch(&e.pushed.pushed)?;
+            let path = checked_path(&e.repository.full_name, 2)?;
+            Ok(Wanted {
+                issue_ref: checked_ref(format!("{path}@{branch}"))?,
+                repo_url: e.repository.html_url,
+                kind: Kind::Push { branch },
+            })
+        }
         "pull_request_review" => {
             let e: GithubReview = parse(body)?;
             if e.action != "submitted" || !e.review.state.eq_ignore_ascii_case("changes_requested")
@@ -376,6 +389,36 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         }
         other => Err(ignored(format!("event `{other}`"))),
     }
+}
+
+/// A push, on GitHub and GitLab alike: the ref it moved.
+#[derive(Debug, Deserialize)]
+struct PushRef {
+    #[serde(rename = "ref")]
+    pushed: String,
+}
+
+/// The branch a push moved; `None` for a tag.
+fn pushed_branch(pushed: &str) -> Result<String, Skip> {
+    pushed
+        .strip_prefix("refs/heads/")
+        .filter(|b| !b.is_empty() && b.len() <= MAX_ISSUE_REF_LEN)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| ignored("a push of a tag, not a branch"))
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubPush {
+    #[serde(flatten)]
+    pushed: PushRef,
+    repository: GithubRepo,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitlabPush {
+    #[serde(flatten)]
+    pushed: PushRef,
+    project: GitlabProject,
 }
 
 #[derive(Debug, Deserialize)]
@@ -480,6 +523,16 @@ struct GitlabMergeRequestHook {
 /// A delivery of GitLab event `event` (`X-Gitlab-Event`).
 pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     match event {
+        "Push Hook" => {
+            let e: GitlabPush = parse(body)?;
+            let branch = pushed_branch(&e.pushed.pushed)?;
+            let path = checked_path(&e.project.path_with_namespace, MAX_GITLAB_PARTS)?;
+            Ok(Wanted {
+                issue_ref: checked_ref(format!("{path}@{branch}"))?,
+                repo_url: e.project.web_url,
+                kind: Kind::Push { branch },
+            })
+        }
         // `/aegis fix` on the agent's MR (#254); the sender is GitLab's
         // user id, whose access level is checked before a job is made.
         "Note Hook" => {

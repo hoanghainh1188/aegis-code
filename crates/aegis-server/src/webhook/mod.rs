@@ -64,8 +64,8 @@ use aegis_ledger::IssueId;
 use aegis_lifecycle::{IssueTrustConfig, IssueTrustPolicy};
 use aegis_secrets::Secrets;
 use aegis_store::{
-    Delivered, JobId, JobSource, NewDelivery, NewJob, NewWebhookEvent, RepoId, Store, StoreError,
-    WebhookOutcome, WebhookSource,
+    Delivered, JobId, JobSource, NewDelivery, NewJob, NewWebhookEvent, Repo, RepoId, Store,
+    StoreError, WebhookOutcome, WebhookSource,
 };
 use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::State;
@@ -195,6 +195,16 @@ impl WebhookConfig {
     /// With the modes whose Light model extracts merged PRs' memory (#456).
     pub fn with_modes(self, modes: Option<Arc<aegis_lifecycle::Modes>>) -> Self {
         Self { modes, ..self }
+    }
+
+    /// What syncs a repo's runbooks and business rules (#660), when the
+    /// modes are known.
+    fn memory_sync(&self) -> Option<crate::memory_sync::MemorySync> {
+        Some(crate::memory_sync::MemorySync {
+            modes: Arc::clone(self.modes.as_ref()?),
+            secrets: self.secrets.clone(),
+            app: self.app.clone(),
+        })
     }
 }
 
@@ -843,6 +853,9 @@ async fn deliver(
             Err(e) => internal(delivery, &e),
         };
     }
+    if let Kind::Push { branch } = &wanted.kind {
+        return pushed(hooks, delivery, &repo, branch);
+    }
     let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     if let Kind::Issue { author } = &wanted.kind {
         let policy = issue_trust_policy(&repo.config);
@@ -942,7 +955,9 @@ async fn deliver(
                 Some(repo.id),
             );
         }
-        (Kind::ReviewRound { .. } | Kind::PrMerged { .. }, _) => unreachable!("handled above"),
+        (Kind::ReviewRound { .. } | Kind::PrMerged { .. } | Kind::Push { .. }, _) => {
+            unreachable!("handled above")
+        }
     };
     let ledger_key = match IssueId::parse(default_ledger_key(&wanted.issue_ref)) {
         Ok(key) => key,
@@ -1100,8 +1115,42 @@ pub(crate) fn owner_and_name(url: &str) -> Option<(&str, &str)> {
     (!owner.is_empty() && !name.is_empty()).then_some((owner, name))
 }
 
+/// A push to `repo`'s default branch syncs its runbooks and business
+/// rules (#660), in the background; a push to any other branch, a PR's
+/// among them, syncs nothing.
+fn pushed(hooks: &Hooks, delivery: &str, repo: &Repo, branch: &str) -> Handled {
+    if branch != repo.default_branch {
+        return ignored_in(
+            delivery,
+            "a push to another branch than the default one",
+            Some(repo.id),
+        );
+    }
+    if crate::memory_sync::sources_of(repo).is_none() {
+        return ignored_in(delivery, "the repo names no memory sources", Some(repo.id));
+    }
+    let Some(sync) = hooks.config.memory_sync() else {
+        return ignored_in(
+            delivery,
+            "the server has no modes to read the repo with",
+            Some(repo.id),
+        );
+    };
+    sync.sync_in_background(&hooks.store, repo);
+    Handled::new(
+        answer(
+            StatusCode::ACCEPTED,
+            json!({ "status": "memory_sync_started", "branch": branch }),
+        ),
+        WebhookOutcome::Recorded,
+        Some(format!("syncing memory from {branch}")),
+        Some(repo.id),
+    )
+}
+
 /// Extracts `merged_pr` and `review_lesson` repository memories when an
-/// agent PR is merged (#456).
+/// agent PR is merged (#456); the merge moved the main branch, so the
+/// repo's runbooks and business rules are synced too (#660).
 async fn pr_merged(
     hooks: &Hooks,
     source: WebhookSource,
@@ -1144,6 +1193,11 @@ async fn pr_merged(
         Ok(saved) => {
             let repo_id = saved[0].repo_id;
             let job_id = saved[0].job_id;
+            if let (Some(sync), Ok(Some(repo))) =
+                (hooks.config.memory_sync(), hooks.store.repo(repo_id).await)
+            {
+                sync.sync_in_background(&hooks.store, &repo);
+            }
             let count = saved.len();
             let mut handled = Handled::new(
                 answer(
