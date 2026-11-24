@@ -39,7 +39,7 @@ use crate::code_graph::{self, CodeGraph, ServerCalls, changed_functions};
 use crate::cve;
 use crate::evidence::check_sources;
 use crate::issue::HiddenTests;
-use crate::job::{self, Worktree};
+use crate::job;
 use crate::light;
 use crate::publish::{PublishContext, fork_remote, publish, publish_round};
 use crate::review::{MAX_DIFF_CHARS, ReviewRound};
@@ -47,6 +47,7 @@ use crate::{IssueInput, LifecycleError, RunConfig};
 
 mod checkpoint;
 mod drive;
+mod env;
 mod gating;
 
 /// A job's sandbox, fetch step and build cache for one part of a repo, for
@@ -59,6 +60,7 @@ mod review;
 mod tools;
 
 use drive::*;
+use env::{ExecutionEnv, LocalExecutionEnv};
 pub(crate) use gating::*;
 pub(crate) use prepare::*;
 use review::*;
