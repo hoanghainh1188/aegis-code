@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO repo_memories (\n                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id\n                 )\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                 ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET\n                     title = EXCLUDED.title,\n                     summary = EXCLUDED.summary,\n                     paths = EXCLUDED.paths,\n                     keywords = EXCLUDED.keywords,\n                     job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),\n                     updated_at = now()\n                 RETURNING id, repo_id, kind, source_ref, title, summary, paths,\n                           keywords, job_id, created_at, updated_at",
+  "query": "INSERT INTO repo_memories (\n                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id,\n                     scope\n                 )\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'repo'))\n                 ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET\n                     scope = coalesce($9, repo_memories.scope),\n                     title = EXCLUDED.title,\n                     summary = EXCLUDED.summary,\n                     paths = EXCLUDED.paths,\n                     keywords = EXCLUDED.keywords,\n                     job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),\n                     updated_at = now()\n                 RETURNING id, repo_id, kind, source_ref, title, summary, paths,\n                           keywords, job_id, scope, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -104,6 +104,17 @@
       },
       {
         "ordinal": 9,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -134,7 +145,8 @@
         "Text",
         "TextArray",
         "Text",
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -148,8 +160,9 @@
       false,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "d9d54626f9588dfa0f440bd90b9fb4c48b0fb0d72d7e0316cdddbbaa371a6453"
+  "hash": "54265dc9a4e0039477052e51f8b2992122abb527ad5fc4dbea3e8b27747e34f2"
 }

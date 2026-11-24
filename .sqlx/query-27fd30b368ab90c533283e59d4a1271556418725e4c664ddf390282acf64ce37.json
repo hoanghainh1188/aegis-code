@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM repo_memories\n                  WHERE id = $1 AND repo_id = $2\n              RETURNING kind, source_ref",
+  "query": "DELETE FROM repo_memories\n                  WHERE id = $1 AND repo_id = $2\n              RETURNING kind, source_ref, scope",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,17 @@
             "name": "source_ref"
           }
         }
+      },
+      {
+        "ordinal": 2,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "scope"
+          }
+        }
       }
     ],
     "parameters": {
@@ -34,8 +45,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "9dcc779139e2fa209b119c30cca29dcb8889216977fd0470faa9ba32a6a7eead"
+  "hash": "27fd30b368ab90c533283e59d4a1271556418725e4c664ddf390282acf64ce37"
 }

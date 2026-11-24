@@ -57,7 +57,7 @@ pub use instance_pause::{INSTANCE_PAUSED, InstancePause, InstancePaused, PauseLe
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use memory::{
-    MemoryId, MemoryKind, NewRepoMemory, RepoMemory, rank_memories, score_repo_memory,
+    MemoryId, MemoryKind, MemoryScope, NewRepoMemory, RecallScores, RepoMemory, fuse,
 };
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};

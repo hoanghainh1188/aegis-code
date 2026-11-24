@@ -24,8 +24,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use aegis_ledger::IssueId;
 use aegis_lifecycle::CveTarget;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, MemoryId, MemoryKind, NewJob, NewRepoMemory, Page,
-    PageOf, RepoBudget, RepoId, RepoMemory, RepoRole, Run, SlaPriority, Store, StoreError,
+    Job, JobFilter, JobId, JobSource, JobStatus, MemoryId, MemoryKind, MemoryScope, NewJob,
+    NewRepoMemory, Page, PageOf, RepoBudget, RepoId, RepoMemory, RepoRole, Run, SlaPriority, Store,
+    StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -761,6 +762,7 @@ struct MemoryView {
     paths: Vec<String>,
     keywords: String,
     job_id: Option<i64>,
+    scope: &'static str,
     created_at: String,
     updated_at: String,
 }
@@ -777,6 +779,7 @@ impl From<RepoMemory> for MemoryView {
             paths: m.paths,
             keywords: m.keywords,
             job_id: m.job_id.map(|j| j.0),
+            scope: m.scope.as_str(),
             created_at: crate::when::rfc3339(m.created_at),
             updated_at: crate::when::rfc3339(m.updated_at),
         }
@@ -826,6 +829,24 @@ struct UpsertMemory {
     keywords: String,
     #[serde(default)]
     job_id: Option<i64>,
+    /// `repo` or `tenant` (#596); left out, a new memory is `repo` and an
+    /// existing one keeps its scope.
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+/// A memory shared with the tenant reaches every repo of it: only the
+/// tenant's admin (or the platform's) shares one, changes one or deletes
+/// one (#596).
+fn shares(access: &Access, repo: RepoId) -> Result<(), ApiError> {
+    if access.administers(repo) {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "a memory shared with the tenant takes an admin of the tenant".to_owned(),
+    ))
 }
 
 async fn upsert_repo_memory(
@@ -843,6 +864,18 @@ async fn upsert_repo_memory(
             body.kind
         ))
     })?;
+    let scope = match body.scope.as_deref().map(str::trim) {
+        Some(raw) => Some(MemoryScope::parse(raw).ok_or_else(|| {
+            ApiError::invalid(format!("scope: unknown `{raw}`, expected repo or tenant"))
+        })?),
+        None => None,
+    };
+    let existing = store
+        .repo_memory_scope_of(repo, kind, &body.source_ref)
+        .await?;
+    if scope == Some(MemoryScope::Tenant) || existing == Some(MemoryScope::Tenant) {
+        shares(&access, repo)?;
+    }
     let saved = store
         .upsert_repo_memory_by(
             &NewRepoMemory {
@@ -854,6 +887,7 @@ async fn upsert_repo_memory(
                 paths: body.paths,
                 keywords: body.keywords,
                 job_id: body.job_id.map(JobId),
+                scope,
             },
             &access.actor,
         )
@@ -868,6 +902,9 @@ async fn delete_repo_memory(
 ) -> ApiResult {
     let Path((id, memory_id)) = path?;
     let repo = repo_for(&access, id, RepoRole::Maintainer)?;
+    if store.repo_memory_scope(repo, MemoryId(memory_id)).await? == Some(MemoryScope::Tenant) {
+        shares(&access, repo)?;
+    }
     let deleted = store
         .delete_repo_memory_by(repo, MemoryId(memory_id), &access.actor)
         .await?;

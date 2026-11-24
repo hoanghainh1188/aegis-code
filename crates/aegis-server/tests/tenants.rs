@@ -5,7 +5,7 @@ mod common;
 
 use aegis_server::api::router;
 use aegis_store::testing::test_db;
-use aegis_store::{Actor, ModeName, NewRepo, RepoId, Store, TenantId, UserKind};
+use aegis_store::{Actor, ModeName, NewRepo, RepoId, RepoRole, Store, TenantId, UserKind};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -185,5 +185,91 @@ async fn a_tenant_admins_token_sees_its_tenants_repos_only() {
         .map(|r| r["id"].as_i64().unwrap())
         .collect();
     assert_eq!(ids, [mine.0]);
+    db.drop().await;
+}
+
+/// #596: a memory shared with the tenant reaches all its repos, so only
+/// the tenant's admin shares one, changes one or deletes one; a repo's
+/// maintainer keeps writing the repo's own.
+#[tokio::test]
+async fn only_a_tenant_admin_shares_a_memory_with_the_tenant() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let acme = s
+        .create_tenant_by("acme", "Acme", &Actor::cli())
+        .await
+        .unwrap();
+    let repo = repo_in(s, "acme-app", acme.id).await;
+    s.set_tenant_admin_by(acme.id, UserKind::Service, "acme-bot", true, &Actor::cli())
+        .await
+        .unwrap();
+    common::grant(s, "acme-dev", repo, RepoRole::Maintainer).await;
+    let admin = common::token(s, "acme-bot").await;
+    let dev = common::token(s, "acme-dev").await;
+    let app = router(s.clone(), common::auth(s));
+    let uri = format!("/api/v1/repos/{}/memories", repo.0);
+    let call = |token: &str, method: &str, uri: &str, body: Option<Value>| {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
+            .unwrap();
+        let app = app.clone();
+        async move {
+            let (status, text) = send(&app, request).await;
+            (
+                status,
+                serde_json::from_str::<Value>(&text).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let rule = |scope: Option<&str>| {
+        let mut body = json!({
+            "kind": "business_rule",
+            "source_ref": "rule:customer-id",
+            "title": "Customer ids are ULIDs",
+            "summary": "Every service exchanges customer_id as a ULID string.",
+        });
+        if let Some(scope) = scope {
+            body["scope"] = json!(scope);
+        }
+        body
+    };
+
+    let (status, body) = call(&dev, "POST", &uri, Some(rule(Some("tenant")))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = call(&dev, "POST", &uri, Some(rule(Some("team")))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, body) = call(&admin, "POST", &uri, Some(rule(Some("tenant")))).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["scope"], "tenant");
+    let id = body["data"]["id"].as_i64().unwrap();
+
+    // Not even without a scope, which would keep it shared.
+    let (status, body) = call(&dev, "POST", &uri, Some(rule(None))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = call(&dev, "DELETE", &format!("{uri}/{id}"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, body) = call(
+        &dev,
+        "POST",
+        &uri,
+        Some(json!({
+            "kind": "runbook",
+            "source_ref": "runbook:restart",
+            "title": "Restart the worker",
+            "summary": "Drain the queue, then restart.",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["scope"], "repo");
+
+    let (status, body) = call(&admin, "DELETE", &format!("{uri}/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     db.drop().await;
 }
