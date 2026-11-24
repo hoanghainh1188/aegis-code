@@ -48,6 +48,7 @@ Across three rounds of engine optimization, Rust acceptance leveled at 39%. The 
 - **Review time calibration:** In Phase 1, reviews averaged 1.8 minutes, where reviewers had prior visibility into hidden test results. The Phase 2 human review interface (#28) will measure authentic reviewer time while keeping hidden test outcomes blind to reviewers.
 - **Open-source benchmark evaluation:** `typst` and `scrapy` are public repositories where models may have pre-training exposure to fixes. As enterprise repositories onboard, re-validate with these identical thresholds.
 - The per-language baseline threshold ($\ge 35\%$) applies to new Phase 2 profiles (TypeScript, Java, Go, C#).
+- **Kotlin (#626):** 2/10 hidden tests passed (20%), below the 35% threshold of ADR 0005; small sample (5 issues); 3 issues failed because the agent's repro tests were narrower than upstream's, not due to the language profile ([report](../measurements/2026-11-24-kotlin-kpi.md)).
 
 ## Considered Alternatives
 
