@@ -42,7 +42,7 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    slug = "typst"                         # Identifier in paths, branches, dashboard
    url = "https://github.com/typst/typst" # Upstream repo URL matched against webhooks
    default_branch = "main"
-   language = "rust"                      # python, rust, go, typescript, java, csharp
+   language = "rust"                      # python, rust, go, typescript, java, csharp, kotlin
    mode = "poc"                           # or customer-jp
    max_concurrent_jobs = 1
 
@@ -77,6 +77,18 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 5. Management commands: `... repo show <slug> > repo.json`, edit, then `... repo update repo.json`. List repositories via `... repo list` (a paused one ends with `paused`). Pause a repository that runs wrong or spends too fast with `... repo pause <slug> [--reason <text>] [--cancel-queued]`: its queued jobs wait (or are cancelled) and new ones are still recorded until `... repo resume <slug>`; the repository's admin page does the same (#374). To stop every repository at once in an incident, pause all agents instead ([incident.md](incident.md), #510).
 
 6. **Writing Effective Conventions:** Detail commands required to execute a **single** test and specify where reproduction tests should be authored. General language test conventions already exist in `prompts/conventions/`; repository conventions should focus on project-specific guidelines.
+
+   **Polyglot Monorepos (#598):** Declare multi-language repositories with `[[repo.dirs]]` in `RunConfig` (or `[[settings.dirs]]` in a server repo file). Each file is routed to the deepest matching `dirs` entry (or the root `language` if none matches), using that part's language profile, sandbox image, dependency fetch, lockfile check, and build cache; the gate runs only the parts touched by a patch and combines them into one report. Example (Go backend at the root, TypeScript frontend in `web/`):
+
+   ```toml
+   [repo]
+   language = "go"          # root, i.e. the backend
+
+   [[repo.dirs]]
+   path = "web"             # the frontend module
+   language = "typescript"
+   ```
+   *(In a server repo registration file, set top-level `language = "go"` and use `[[settings.dirs]]` with `path = "web"` and `language = "typescript"`.)*
 
 7. **Services the tests need (#490, [ADR 0013](../adr/0013-ephemeral-database-sidecars.md)):** tests that connect to PostgreSQL, Redis or MySQL fail in the gate's `--network none` sandbox, and `aegis-local check-repo` reports them under "Network & DB Isolation". Declare each service in the repo file, under `[settings]`:
 
