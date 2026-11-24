@@ -35,6 +35,11 @@ lsp = ["kotlin-language-server"]
 # Lỗi biên dịch, kể cả test, chặn bản vá ngay.
 lint = ["gradle", "--offline", "--no-configuration-cache", "-q", "testClasses"]
 repro_test = ["gradle", "--offline", "--no-configuration-cache", "-q", "test", "--tests", "{test}"]
+# `test --tests` chạy task test của mọi project; init script của image cho
+# task không có test khớp pass, và in `aegis-gradle RAN <Class>#<test>`
+# cho mỗi test đã chạy. Không có dòng nào thì id không chọn test nào
+# (#235, #648).
+repro_ran = '(?m)^aegis-gradle RAN '
 # `--continue`: test của một project fail sẵn ở nhánh gốc không chặn test
 # của các project khác.
 test = ["gradle", "--offline", "--no-configuration-cache", "-q", "--continue", "test"]
@@ -58,7 +63,7 @@ fetch = ["gradle", "--no-configuration-cache", "-q", "aegisFetch", "testClasses"
 # Registry hosts the fetch container may reach (#66, #279): plugins from the
 # Gradle Plugin Portal (its artifacts redirect to plugins-artifacts and
 # Maven Central), dependencies from Maven Central, and the Gradle
-# distribution a repo's wrapper pins. Gradle reads the proxy from the
+# distribution a repo's wrapper pins (Gradle 9's from GitHub). Gradle reads the proxy from the
 # system properties the image's `gradle` passes (docker/kotlin/gradle).
 fetch_hosts = [
     "repo.maven.apache.org",
@@ -66,6 +71,10 @@ fetch_hosts = [
     "plugins-artifacts.gradle.org",
     "services.gradle.org",
     "downloads.gradle.org",
+    # services.gradle.org chuyển bản Gradle 9 của wrapper sang release
+    # assets của GitHub (#648).
+    "github.com",
+    "release-assets.githubusercontent.com",
 ]
 audit = ["osv-scanner", "scan", "source", "--lockfile", "{lockfile}", "--licenses={licenses}", "--config={osv_config}"]
 # OSV advisories and deps.dev license data; nothing else (#159).

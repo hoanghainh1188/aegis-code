@@ -61,11 +61,7 @@ conventions = """
 [repo.overrides]
 # Detekt resolves Kotlin analysis-api artifacts from JetBrains' redirector
 # (settings.gradle.kts), and the Develocity plugin is on the Plugin Portal.
-# services.gradle.org redirects the wrapper's Gradle 9 download to GitHub's
-# release assets (#648).
 fetch_hosts = [
-    "github.com",
-    "release-assets.githubusercontent.com",
     "redirector.kotlinlang.org",
     # Where the redirector's intellij-dependencies artifacts are served from.
     "db2uklzeiyqq6.cloudfront.net",
@@ -78,14 +74,10 @@ fetch_hosts = [
     "maven.pkg.jetbrains.space",
 ]
 
-# The profile's repro_test runs `test --tests {test}` in every project, and
-# each of detekt's 31 projects without that class fails the build with "No
-# tests found for given includes". Here a test task whose filter matches
-# nothing passes instead. A wrong id then passes with the patch too, and is
-# refused on the base, not by the #235 check.
-# Two workers for every step that builds all projects: with the profile's default, the full suite (32 projects,
-# each test JVM embedding the Kotlin compiler) killed the Gradle daemon in a
-# Docker VM of 8 GB; with two it passes offline in about 5 minutes.
+# Two workers for every step that builds all projects: with the profile's
+# default, the full suite (32 projects, each test JVM embedding the Kotlin
+# compiler) killed the Gradle daemon in a Docker VM of 8 GB; with two it
+# passes offline in about 5 minutes.
 [repo.overrides.gate]
 lint = ["gradle", "--offline", "--no-configuration-cache", "-q", "--max-workers=2", "testClasses"]
 test = ["gradle", "--offline", "--no-configuration-cache", "-q", "--continue", "--max-workers=2", "test"]
@@ -95,8 +87,11 @@ test_output = "gradle"
 # fetch does not resolve, and the profile's root-project report does not
 # exist here.
 coverage = false
-repro_test = ["sh", "-c", """printf '%s\\n' 'allprojects { tasks.withType(Test).configureEach { filter.failOnNoMatchingTests = false } }' > /tmp/aegis-repro.gradle
-exec gradle --offline --no-configuration-cache -q --max-workers=2 -I /tmp/aegis-repro.gradle test --tests "$1"""", "sh", "{test}"]
+# The profile's repro_test with two workers: it compiles every project's
+# tests. Its `repro_ran` goes with it, so an id that selects no test is still
+# caught (#235, #648).
+repro_test = ["gradle", "--offline", "--no-configuration-cache", "-q", "--max-workers=2", "test", "--tests", "{test}"]
+repro_ran = '(?m)^aegis-gradle RAN '
 
 [repo.fork]
 owner = "hoanghainh1188"

@@ -229,7 +229,10 @@ fn gate_passes(
         .iter()
         .map(|(host, dir)| (host.clone(), format!("{dir}:ro")))
         .collect();
-    docker_run(&image, &repo, &read_only, false, &repro);
+    let out = docker_run(&image, &repo, &read_only, false, &repro);
+    // The image prints what the profile's `repro_ran` reads (#235, #648).
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!profile.gate.repro_ran_nothing(&stdout), "{stdout}");
 }
 
 #[test]
