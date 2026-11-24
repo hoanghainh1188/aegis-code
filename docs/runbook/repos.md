@@ -115,7 +115,13 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
    Workers fetch latest commits from the default branch before starting every job, requiring no manual git sync.
 
-   **On the dashboard instead (#330):** an admin can do step 4 at `/admin/repos` → **Add a repo**. It runs the same checks, takes the fork token by the name of its secret (**Token: name of the secret**), clones in the background, and shows the result on the repo's page, with the end of git's output if the clone failed. An invalid token shows as `could not read Username for 'https://github.com'`.
+   **On the dashboard instead (#330, #599):** an admin can do step 4 at **Admin → Repos → Add** (`/admin/repos`):
+   1. The repo is registered and immediately paused with the reason *"Added from the pages: waiting for its pre-flight check"*.
+   2. After the background clone finishes, the pre-flight check starts automatically and streams each item as it completes (same checks as `aegis-local check-repo`: *Repository Path*, *Git Repository*, *Base Revision*, *Working Tree*, *Lockfile*, *Language Profiles* / *Profile Resolution*, *Docker Daemon*, *Sandbox Image*, *Fetch Hosts*, and *Baseline Gate* — format, lint, unit tests under `--network none`, *Network & DB Isolation*, and *Execution Duration*).
+   3. At most **2** pre-flight checks run concurrently on the server. To re-run after fixing an issue, click **Run the pre-flight check**.
+   4. Once the check ends as `passed` or `warned`, click **Turn the repo on** to resume the repository.
+
+   `aegis-server repo add` and `add-repo.sh` remain supported as before (and editing an existing repo does not start a check). An invalid token during clone shows as `could not read Username for 'https://github.com'`.
 
 5. Management commands: `... repo show <slug> > repo.json`, edit, then `... repo update repo.json`. List repositories via `... repo list` (a paused one ends with `paused`). Pause a repository that runs wrong or spends too fast with `... repo pause <slug> [--reason <text>] [--cancel-queued]`: its queued jobs wait (or are cancelled) and new ones are still recorded until `... repo resume <slug>`; the repository's admin page does the same (#374). To stop every repository at once in an incident, pause all agents instead ([incident.md](incident.md), #510).
 
