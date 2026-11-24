@@ -1,4 +1,5 @@
-//! The proxy itself: HTTP/1.1 on a Unix socket, each call checked by
+//! The proxy itself: HTTP/1.1 on a Unix socket (or over mutual TLS for a
+//! remote worker, #664), each call checked by
 //! [`crate::policy`] and then passed to the daemon's socket. Upgraded
 //! connections (`docker run`'s `attach`) are relayed both ways once the
 //! daemon accepts them.
@@ -15,7 +16,7 @@ use hyper::header::{
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::Value;
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::{TcpListener, UnixListener, UnixStream};
 
 use crate::policy::{self, Policy, Route};
 
@@ -37,20 +38,48 @@ impl Proxy {
         let proxy = Arc::new(self);
         loop {
             let (stream, _) = listener.accept().await?;
-            let proxy = Arc::clone(&proxy);
+            tokio::spawn(Arc::clone(&proxy).serve_connection(stream));
+        }
+    }
+
+    /// Serves `listener` over mutual TLS (#664): a remote worker's calls
+    /// go through the same checks as a local one's. A client whose
+    /// certificate is not the worker CA's is refused in the handshake,
+    /// before any call is read.
+    pub async fn serve_tls(
+        self,
+        listener: TcpListener,
+        tls: aegis_mtls::TlsAcceptor,
+    ) -> std::io::Result<()> {
+        let proxy = Arc::new(self);
+        loop {
+            let (tcp, peer) = listener.accept().await?;
+            let (proxy, tls) = (Arc::clone(&proxy), tls.clone());
             tokio::spawn(async move {
-                let service = hyper::service::service_fn(move |req| {
-                    let proxy = Arc::clone(&proxy);
-                    async move { Ok::<_, hyper::Error>(proxy.handle(req).await) }
-                });
-                if let Err(e) = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service)
-                    .with_upgrades()
-                    .await
-                {
-                    tracing::debug!(error = %e, "client connection ended");
+                match tls.accept(tcp).await {
+                    Ok(stream) => proxy.serve_connection(stream).await,
+                    Err(e) => tracing::warn!(%peer, error = %e, "TLS handshake refused"),
                 }
             });
+        }
+    }
+
+    /// One client connection, its calls checked one by one.
+    async fn serve_connection<S>(self: Arc<Self>, stream: S)
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let proxy = self;
+        let service = hyper::service::service_fn(move |req| {
+            let proxy = Arc::clone(&proxy);
+            async move { Ok::<_, hyper::Error>(proxy.handle(req).await) }
+        });
+        if let Err(e) = hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .with_upgrades()
+            .await
+        {
+            tracing::debug!(error = %e, "client connection ended");
         }
     }
 

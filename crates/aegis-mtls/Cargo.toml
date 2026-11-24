@@ -1,0 +1,19 @@
+[package]
+name = "aegis-mtls"
+description = "Mutual TLS between a worker and a remote execution host: the ACI's and the Docker proxy's network listeners (#664)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }

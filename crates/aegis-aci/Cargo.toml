@@ -8,16 +8,23 @@ publish = false
 
 [dependencies]
 aegis-gate = { path = "../aegis-gate" }
+aegis-mtls = { path = "../aegis-mtls" }
+bytes = "1.12.1"
+http-body-util.workspace = true
+hyper = { version = "1.12.0", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1.21", features = ["http1", "http2", "server", "server-auto", "service", "tokio"] }
 aegis-lang = { path = "../aegis-lang" }
 regex.workspace = true
-rmcp = { workspace = true, features = ["default", "server", "macros", "transport-io"] }
+rmcp = { workspace = true, features = ["default", "server", "macros", "transport-io", "transport-streamable-http-server"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "net", "signal"] }
+tower = { version = "0.5", features = ["util"] }
 toml.workspace = true
 
 [dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 aegis-orchestrator = { path = "../aegis-orchestrator" }
 aegis-provider = { path = "../aegis-provider" }
 serde_json.workspace = true

@@ -1,6 +1,7 @@
 //! [`ToolExecutor`] over MCP servers (ADR 0001, #8): the ACI server and
-//! Codebase-Memory run as child processes speaking MCP on stdio, and the
-//! agent sees their tools as one list.
+//! Codebase-Memory run as child processes speaking MCP on stdio, or on a
+//! remote execution host over Streamable HTTP with mutual TLS (#664), and
+//! the agent sees their tools as one list.
 //!
 //! The list is fixed when the servers connect and sorted by name, so the
 //! cached prompt prefix stays byte-identical for the whole session (design
@@ -16,6 +17,9 @@ use aegis_provider::ToolDefinition;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;
 use rmcp::transport::TokioChildProcess;
+use rmcp::transport::streamable_http_client::{
+    StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::Value;
 use thiserror::Error;
@@ -36,6 +40,43 @@ pub struct McpServerSpec {
     pub env: Vec<(String, String)>,
     /// Tools to offer the agent; `None` offers every tool of the server.
     pub tools: Option<Vec<String>>,
+}
+
+/// One MCP server on a remote execution host (#664): Streamable HTTP at
+/// `url` (`https://<host>:<port>/mcp`), the worker's certificate shown,
+/// only a host whose certificate chains to `tls.ca` and names the URL's
+/// host trusted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteMcpSpec {
+    /// Shown in errors.
+    pub name: String,
+    pub url: String,
+    pub tls: aegis_mtls::MtlsFiles,
+    /// Tools to offer the agent; `None` offers every tool of the server.
+    pub tools: Option<Vec<String>>,
+}
+
+/// A server to connect to, local or remote.
+#[derive(Clone, Copy)]
+enum Endpoint<'a> {
+    Local(&'a McpServerSpec),
+    Remote(&'a RemoteMcpSpec),
+}
+
+impl Endpoint<'_> {
+    fn name(&self) -> &str {
+        match self {
+            Self::Local(s) => &s.name,
+            Self::Remote(s) => &s.name,
+        }
+    }
+
+    fn tools(&self) -> Option<&Vec<String>> {
+        match self {
+            Self::Local(s) => s.tools.as_ref(),
+            Self::Remote(s) => s.tools.as_ref(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -112,37 +153,66 @@ async fn start(spec: &McpServerSpec) -> Result<RunningService<RoleClient, ()>, M
     ().serve(transport).await.map_err(|e| failed(e.to_string()))
 }
 
-/// The server's tools as definitions, narrowed to `spec.tools`.
+/// Connects to a remote server over mutual TLS (#664).
+async fn start_remote(
+    spec: &RemoteMcpSpec,
+) -> Result<RunningService<RoleClient, ()>, McpToolsError> {
+    let failed = |message: String| McpToolsError::Start {
+        server: spec.name.clone(),
+        message,
+    };
+    if !spec.url.starts_with("https://") {
+        return Err(failed(format!("`{}` is not an https:// URL", spec.url)));
+    }
+    let tls = aegis_mtls::client_config(&spec.tls).map_err(|e| failed(e.to_string()))?;
+    let client = reqwest::Client::builder()
+        .tls_backend_preconfigured((*tls).clone())
+        .https_only(true)
+        .build()
+        .map_err(|e| failed(e.to_string()))?;
+    let transport = StreamableHttpClientTransport::with_client(
+        client,
+        StreamableHttpClientTransportConfig::with_uri(spec.url.clone()),
+    );
+    ().serve(transport).await.map_err(|e| failed(e.to_string()))
+}
+
+async fn start_endpoint(
+    endpoint: Endpoint<'_>,
+) -> Result<RunningService<RoleClient, ()>, McpToolsError> {
+    match endpoint {
+        Endpoint::Local(spec) => start(spec).await,
+        Endpoint::Remote(spec) => start_remote(spec).await,
+    }
+}
+
+/// The server's tools as definitions, narrowed to its allow-list.
 async fn definitions_of(
-    spec: &McpServerSpec,
+    spec: Endpoint<'_>,
     service: &RunningService<RoleClient, ()>,
 ) -> Result<Vec<ToolDefinition>, McpToolsError> {
     let tools = service
         .list_all_tools()
         .await
         .map_err(|e| McpToolsError::ListTools {
-            server: spec.name.clone(),
+            server: spec.name().to_owned(),
             message: e.to_string(),
         })?;
     let offered: BTreeSet<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     if let Some(tool) = spec
-        .tools
-        .iter()
+        .tools()
+        .into_iter()
         .flatten()
         .find(|w| !offered.contains(w.as_str()))
     {
         return Err(McpToolsError::MissingTool {
-            server: spec.name.clone(),
+            server: spec.name().to_owned(),
             tool: tool.clone(),
         });
     }
     Ok(tools
         .into_iter()
-        .filter(|t| {
-            spec.tools
-                .as_ref()
-                .is_none_or(|w| w.iter().any(|n| *n == t.name))
-        })
+        .filter(|t| spec.tools().is_none_or(|w| w.iter().any(|n| *n == t.name)))
         .map(|t| ToolDefinition {
             name: t.name.into_owned(),
             description: t.description.map(|d| d.into_owned()).unwrap_or_default(),
@@ -185,13 +255,27 @@ impl McpTools {
     /// Starts every server and builds the tool list. Servers already
     /// started are shut down when a later one fails.
     pub async fn connect(specs: &[McpServerSpec]) -> Result<Self, McpToolsError> {
+        Self::connect_with(specs, &[]).await
+    }
+
+    /// [`Self::connect`], with servers on a remote execution host too
+    /// (#664), after the local ones.
+    pub async fn connect_with(
+        local: &[McpServerSpec],
+        remote: &[RemoteMcpSpec],
+    ) -> Result<Self, McpToolsError> {
         let mut tools = Self {
             servers: Vec::new(),
             routes: BTreeMap::new(),
             definitions: Vec::new(),
             call_timeout: Self::DEFAULT_CALL_TIMEOUT,
         };
-        match tools.add_all(specs).await {
+        let endpoints: Vec<Endpoint<'_>> = local
+            .iter()
+            .map(Endpoint::Local)
+            .chain(remote.iter().map(Endpoint::Remote))
+            .collect();
+        match tools.add_all(&endpoints).await {
             Ok(()) => Ok(tools),
             Err(e) => {
                 tools.shutdown().await;
@@ -200,17 +284,17 @@ impl McpTools {
         }
     }
 
-    async fn add_all(&mut self, specs: &[McpServerSpec]) -> Result<(), McpToolsError> {
-        for spec in specs {
+    async fn add_all(&mut self, specs: &[Endpoint<'_>]) -> Result<(), McpToolsError> {
+        for &spec in specs {
             let timed_out = || McpToolsError::Start {
-                server: spec.name.clone(),
+                server: spec.name().to_owned(),
                 message: format!("no answer within {}s", Self::CONNECT_TIMEOUT.as_secs()),
             };
-            let service = tokio::time::timeout(Self::CONNECT_TIMEOUT, start(spec))
+            let service = tokio::time::timeout(Self::CONNECT_TIMEOUT, start_endpoint(spec))
                 .await
                 .map_err(|_| timed_out())??;
             let index = self.servers.len();
-            self.servers.push((spec.name.clone(), service));
+            self.servers.push((spec.name().to_owned(), service));
             let definitions = tokio::time::timeout(
                 Self::CONNECT_TIMEOUT,
                 definitions_of(spec, &self.servers[index].1),
@@ -222,7 +306,7 @@ impl McpTools {
                     return Err(McpToolsError::DuplicateTool {
                         tool: definition.name,
                         first: self.servers[other].0.clone(),
-                        second: spec.name.clone(),
+                        second: spec.name().to_owned(),
                     });
                 }
                 self.routes.insert(definition.name.clone(), index);
