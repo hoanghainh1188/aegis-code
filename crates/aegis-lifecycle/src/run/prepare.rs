@@ -178,19 +178,18 @@ where
         }
     };
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
-    let tree = Worktree::create(&cfg.repo.path, &start, &job_dir.join("repo"))?;
+    // The job's workspace (#663): everything below reaches it through
+    // `env`.
+    let env = LocalExecutionEnv::create(&cfg.repo.path, &start, &job_dir)?;
     let (resumed, system) = match resume {
         Some(r) => {
-            let at = tree.path().to_owned();
-            tokio::task::spawn_blocking(move || checkpoint::apply_diff(&at, &r.diff))
-                .await
-                .map_err(|e| LifecycleError::Config(format!("applying the checkpoint: {e}")))??;
+            env.apply_diff(&r.diff).await?;
             tracing::info!(issue = %issue.id, turn = r.turn, "resuming the job from its checkpoint");
             // The session keeps its own system blocks: the same bytes.
             (Some(r.state), Vec::new())
         }
         None => {
-            let map = module_map(cfg, profiles, tree.path(), &base)?;
+            let map = module_map(cfg, profiles, env.root(), &base)?;
             let conventions = language_conventions(profiles);
             let system = system_blocks(&RepoPrompt {
                 language_conventions: conventions.as_deref(),
@@ -201,18 +200,8 @@ where
         }
     };
 
-    for part in profiles.parts() {
-        let dir = tree.path().join(&part.dir);
-        if let Some(why) = fetch_base(cfg, part, &dir, &job_dir, cancel).await? {
-            return Ok(Ending::stop(Outcome::StoppedSteps, why));
-        }
-        // The gate would start the tree's build from the cache anyway; doing
-        // it now spares the agent's first `run_tests` a cold build (#137).
-        if let Some(cache) = build_cache(cfg, part) {
-            tokio::task::spawn_blocking(move || cache.seed(&dir))
-                .await
-                .map_err(|e| LifecycleError::Config(format!("seeding the build cache: {e}")))??;
-        }
+    if let Some(why) = env.prepare_parts(cfg, profiles, cancel).await? {
+        return Ok(Ending::stop(Outcome::StoppedSteps, why));
     }
     // A CVE job (#501, ADR 0015): the platform raises the package; the
     // gate checks that first, and the agent works only if it fails. A
@@ -222,7 +211,7 @@ where
         Some(target) => {
             let root = &profiles.parts()[0];
             let upgrade =
-                match cve::upgrade(cfg, root, tree.path(), &job_dir, target, cancel).await? {
+                match cve::upgrade(cfg, root, env.root(), env.job_dir(), target, cancel).await? {
                     Ok(upgrade) => upgrade,
                     Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
                 };
@@ -232,9 +221,9 @@ where
         }
     };
     let first_message = first_message + &crate::language::directive(cfg.repo.locale);
-    let tools = McpTools::connect(&tool_specs(cfg, profiles, tree.path(), &job_dir)?).await?;
+    let tools = McpTools::connect(&env.tool_servers(cfg, profiles)?).await?;
     let queries = cfg.codebase_memory.as_ref().map(|c| c.tools.as_slice());
-    let graph = match CodeGraph::open(&tools, queries, tree.path()).await {
+    let graph = match CodeGraph::open(&tools, queries, env.root()).await {
         Ok(graph) => graph,
         Err(e) => {
             tools.shutdown().await;
@@ -253,17 +242,12 @@ where
             issue: &issue_id,
             base: &base,
             start: &start,
-            tree: tree.path(),
-            job_dir: &job_dir,
         });
     let context = DriveContext {
         profiles,
         issue,
-        job: JobTree {
-            tree: tree.path(),
-            base: &base,
-            job_dir: &job_dir,
-        },
+        env: &env,
+        base: &base,
         finish,
         policy: &policy,
         saving,
@@ -274,7 +258,7 @@ where
     .await;
     graph.close().await;
     tools.shutdown().await;
-    drop(tree);
+    drop(env);
     result
 }
 

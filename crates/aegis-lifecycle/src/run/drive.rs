@@ -70,11 +70,13 @@ pub(super) const IMPACT_CALLS: u32 = 4;
 /// The job [`drive`] works on: the repo's profiles, the issue, the tree
 /// the gate runs on, what to do with a patch that passes, and what the
 /// patch may change in the dependencies (#500).
-#[derive(Clone, Copy)]
-pub(super) struct DriveContext<'a> {
+pub(super) struct DriveContext<'a, E> {
     pub(super) profiles: &'a RepoProfiles,
     pub(super) issue: &'a IssueInput,
-    pub(super) job: JobTree<'a>,
+    /// The job's workspace, reached through it only (#663).
+    pub(super) env: &'a E,
+    /// The commit the patch is checked against.
+    pub(super) base: &'a str,
     pub(super) finish: &'a Finish,
     pub(super) policy: &'a DependencyPolicy,
     /// Where the job's checkpoints go (#662); `None`: none are kept.
@@ -84,9 +86,10 @@ pub(super) struct DriveContext<'a> {
 /// Each model call of a loop, as it ends: recorded in the ledger, then
 /// the job's checkpoint written (#662), so a crash loses at most the call
 /// in flight.
-struct Progress<'p, 'l, 's, S> {
+struct Progress<'p, 'l, 's, S, E> {
     ledger: &'l mut IssueLedger<'s, S>,
     store: &'p S,
+    env: &'p E,
     saving: Option<checkpoint::Saving<'p>>,
     tier: Tier,
     /// The router as the loop started, and the calls before it.
@@ -100,9 +103,10 @@ struct Progress<'p, 'l, 's, S> {
     error: Option<LifecycleError>,
 }
 
-impl<S> aegis_orchestrator::TurnObserver for Progress<'_, '_, '_, S>
+impl<S, E> aegis_orchestrator::TurnObserver for Progress<'_, '_, '_, S, E>
 where
     S: LedgerStore + Send + Sync,
+    E: ExecutionEnv,
 {
     async fn turn_done(&mut self, session: &Session, turns: &[TurnRecord]) {
         let Some(turn) = turns.last() else { return };
@@ -140,19 +144,19 @@ where
             ..self.base.clone()
         };
         let turn_no = self.ledger.record().model_calls;
-        checkpoint::save(self.store, saving, turn_no, &state).await;
+        checkpoint::save(self.store, self.env, saving, turn_no, &state).await;
     }
 }
 
 /// The Core/Expert loop with gate runs between attempts. `prepared` is an
 /// answer to check before any agent turn: a CVE job's upgrade (#501).
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn drive<P, S, T>(
+pub(super) async fn drive<P, S, T, E>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
     tools: &CodeGraph<'_, T>,
     session: Session,
-    context: DriveContext<'_>,
+    context: DriveContext<'_, E>,
     prepared: Option<FinalAnswer>,
     resume: Option<checkpoint::DriveState>,
     cancel: &CancellationToken,
@@ -161,20 +165,18 @@ where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
     T: ServerCalls + Sync,
+    E: ExecutionEnv,
 {
     let DriveContext {
         profiles,
         issue,
-        job,
+        env,
+        base,
         finish,
         policy,
         saving,
     } = context;
-    let JobTree {
-        tree,
-        base,
-        job_dir,
-    } = job;
+    let (tree, job_dir) = (env.root(), env.job_dir());
     let mut prepared = prepared;
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
@@ -238,6 +240,7 @@ where
                 let mut progress = Progress {
                     ledger: &mut *ledger,
                     store: &platform.store,
+                    env,
                     saving,
                     tier,
                     router,
@@ -430,7 +433,9 @@ where
         }
 
         let gate_started = Instant::now();
-        let report = gate(cfg, profiles, job, &answer, policy, cancel).await?;
+        let report = env
+            .run_gate(cfg, profiles, base, &answer, policy, cancel)
+            .await?;
         ledger
             .gate_run(gate_run(&report, gate_started.elapsed()))
             .await?;
@@ -588,7 +593,7 @@ where
                 pending_escalation: None,
             };
             let turn = ledger.record().model_calls;
-            checkpoint::save(&platform.store, saving, turn, &state).await;
+            checkpoint::save(&platform.store, env, saving, turn, &state).await;
         }
     }
 }

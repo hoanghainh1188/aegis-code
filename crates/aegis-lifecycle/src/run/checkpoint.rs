@@ -21,6 +21,7 @@ use aegis_orchestrator::Session;
 use aegis_router::RouterState;
 use serde::{Deserialize, Serialize};
 
+use super::env::ExecutionEnv;
 use crate::LifecycleError;
 
 /// What the Core/Expert loop needs to go on.
@@ -151,20 +152,24 @@ pub(crate) fn apply_diff(tree: &Path, diff: &str) -> Result<(), LifecycleError> 
     .map(drop)
 }
 
-/// Where a checkpoint of the job in `tree` is written.
+/// Where a checkpoint of the job is written.
 #[derive(Clone, Copy)]
 pub(crate) struct Saving<'a> {
     pub issue: &'a IssueId,
     pub base: &'a str,
     pub start: &'a str,
-    pub tree: &'a Path,
-    pub job_dir: &'a Path,
 }
 
 /// Keeps `state` and the tree's changes as the job's checkpoint at its
 /// `turn`-th model call. A checkpoint that cannot be written is said in
 /// the log: the job goes on, and would start over after a crash.
-pub(crate) async fn save<S: LedgerStore>(store: &S, at: Saving<'_>, turn: u32, state: &DriveState) {
+pub(crate) async fn save<S: LedgerStore, E: ExecutionEnv>(
+    store: &S,
+    env: &E,
+    at: Saving<'_>,
+    turn: u32,
+    state: &DriveState,
+) {
     let state = match serde_json::to_value(state) {
         Ok(state) => state,
         Err(e) => {
@@ -172,18 +177,8 @@ pub(crate) async fn save<S: LedgerStore>(store: &S, at: Saving<'_>, turn: u32, s
             return;
         }
     };
-    let (tree, start, scratch) = (
-        at.tree.to_owned(),
-        at.start.to_owned(),
-        at.job_dir.join("checkpoint.index"),
-    );
-    let diff = tokio::task::spawn_blocking(move || tree_diff(&tree, &start, &scratch)).await;
-    let diff = match diff {
-        Ok(Ok(diff)) => diff,
-        Ok(Err(e)) => {
-            tracing::warn!(issue = %at.issue, error = %e, "the tree's changes for the checkpoint");
-            return;
-        }
+    let diff = match env.export_diff(at.start).await {
+        Ok(diff) => diff,
         Err(e) => {
             tracing::warn!(issue = %at.issue, error = %e, "the tree's changes for the checkpoint");
             return;
