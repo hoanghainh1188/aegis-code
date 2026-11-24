@@ -16,10 +16,12 @@ Chỉ số là tỉ lệ được chấp nhận. Ngưỡng là ≥ 35% cho mỗi
 | Go (gin) | **100%** (6/6) | Gate và test ẩn, quy tắc #424 | #448, 2026-11-13 | [csharp-prompt-rules](2026-11-13-csharp-prompt-rules.md#typescript-zod-và-go-gin) |
 | Java (gson) | **83%** (5/6) | Gate và test ẩn, quy tắc #424 | #425, 2026-11-11 | [java-rerun-kpi](2026-11-11-java-rerun-kpi.md) |
 | C# (Polly, NSubstitute, StackExchange.Redis) | **50%** (4/8) | Gate và test ẩn, quy tắc #424 | #448, 2026-11-13 | [csharp-prompt-rules](2026-11-13-csharp-prompt-rules.md) |
+| Kotlin (detekt) | **20%** (2/10) | Gate và test ẩn | #626, 2026-11-24 | [kotlin-kpi](2026-11-24-kotlin-kpi.md) |
 
 Đọc bảng này cần lưu ý:
 - **Hai cách chấm khác nhau.** Chỉ Phase 1 (#18) có người duyệt chấm từng PR. Các lượt sau chạy với `--no-pr`: "được chấp nhận" là qua gate và qua test ẩn, không có người duyệt. Số liệu có người duyệt thật sẽ đến từ đợt chạy thử #158.
 - **Quy tắc #424** bỏ khỏi phần chấm các issue mà test ẩn gắn với một lựa chọn riêng của upstream ([eval/README.md](../../eval/README.md#scoring-hidden-tests-bound-to-upstream-choices-424)). Chấm nghiêm thì Java là 50% (5/10) và C# là 40% (4/10).
+- **Kotlin (#626):** 2/10 test ẩn qua (20%), chưa đạt ngưỡng 35% của ADR 0005; mẫu nhỏ (5 issue); 3 issue trượt vì test tái hiện hẹp hơn test upstream, không phải do language profile.
 - **Mẫu nhỏ.** Bốn profile mới có 5–6 issue mỗi ngôn ngữ, mỗi issue hai lượt. Một lượt đổi kết quả làm tỉ lệ đổi 12–17 điểm.
 - **Rust ở trần 40 lượt** là 39% (7/18, #145). Trần 80 thành mặc định của profile Rust từ [ADR 0014](../adr/0014-per-language-call-cap.md).
 - **Python ở #448** là 8/12 trên các lượt đo được, chạy như phép thử hồi quy cho prompt, với 2 issue bị loại vì lỗi môi trường.
@@ -42,6 +44,7 @@ Các KPI còn lại ở Phase 1 ([eval-kpi](2026-10-24-eval-kpi.md)): không PR 
 | 11-11 | [java-rerun-kpi](2026-11-11-java-rerun-kpi.md) (#425) | Java sau bước tự kiểm trong prompt: 83% | **Hiện hành cho Java** |
 | 11-13 | [csharp-prompt-rules](2026-11-13-csharp-prompt-rules.md) (#448) | Hai quy tắc prompt cho C#, và hồi quy trên TypeScript, Go, Python, Rust | **Hiện hành cho C#, TypeScript, Go, Rust** |
 | 11-14 | [typst-call-cap](2026-11-14-typst-call-cap.md) (#156) | Trần 80 lượt gọi trên 8 issue typst, đo hai lần | Cơ sở của ADR 0014 |
+| 11-24 | [kotlin-kpi](2026-11-24-kotlin-kpi.md) (#626) | Kotlin trên 5 issue detekt: 2/10 (20%), chưa đạt ngưỡng 35% | **Hiện hành cho Kotlin** |
 
 ## Thí nghiệm trên lõi agent
 
