@@ -26,6 +26,49 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
 
    **GitLab Forks (#252):** In `[settings.fork]`, specify `platform = "gitlab"` and configure `api` as the instance API root (`https://gitlab.com/api/v4` or self-hosted); `owner` is the namespace (including subgroups), `name` is the project slug. The agent pushes branches over HTTPS (token authenticated via user `oauth2`) and opens **merge requests** (draft when `draft_prs = true`). Token requires scopes `api` and `write_repository` (plus `read_repository` for private repos). GitLab issues (labeled `aegis`) and broken CI pipelines on the default branch (#253) trigger automated repair jobs. **Review rounds on MRs (#254):** Comments containing `/aegis fix` by project members with Developer role or higher trigger repair cycles on the agent's branch.
 
+   **Bitbucket Cloud (#634):** In `[settings.fork]` (or `[repo.fork]` in `aegis run`), set:
+   ```toml
+   [settings.fork]
+   platform = "bitbucket"
+   api = "https://api.bitbucket.org/2.0"
+   owner = "<workspace>"
+   name = "<repo-slug>"
+   token_env = "AEGIS_TOKEN_MY_REPO"
+   ```
+   The agent pushes over HTTPS as `x-token-auth` and calls the REST API 2.0 with a Bearer token. Review rounds trigger on `/aegis fix` comments or *Changes requested* by users with `write` permission or higher. Server environment/secrets: `AEGIS_BITBUCKET_WEBHOOK_SECRET` (HMAC-SHA256 `X-Hub-Signature`), `AEGIS_BITBUCKET_COMMENT_TOKEN` (requires repository admin scope to read user permissions), and optionally `AEGIS_BITBUCKET_API` (defaults to `https://api.bitbucket.org/2.0`).
+
+   **Bitbucket Data Center (#635):** In `[settings.fork]` (or `[repo.fork]`), set:
+   ```toml
+   [settings.fork]
+   platform = "bitbucket-dc"
+   api = "https://<host>/rest/api/1.0" # include context path if configured
+   owner = "<PROJECT_KEY>"             # upper-cased automatically
+   name = "<repo-slug>"
+   token_env = "AEGIS_TOKEN_MY_REPO"
+   ```
+   Register the repository with its HTTP clone URL (`https://<host>/scm/<key>/<slug>.git`). The HTTP access token is sent to git as `Authorization: Bearer`. Effective repository write permissions (`REPO_WRITE`) are checked via REST API 1.0 (`SERVICE` accounts and the agent's own replies are skipped). Server environment/secrets: `AEGIS_BITBUCKET_DC_API` (required to enable webhook writer checks and PR comments), `AEGIS_BITBUCKET_DC_WEBHOOK_SECRET`, and `AEGIS_BITBUCKET_DC_COMMENT_TOKEN`.
+
+   **Azure DevOps (#636, #641, #642, #643):** In `[settings.fork]` (or `[repo.fork]`), set:
+   ```toml
+   [settings.fork]
+   platform = "azure-devops"
+   api = "https://dev.azure.com/<org>" # or "https://<host>/tfs/<collection>" for Server
+   owner = "My Project"                # exact project name as shown in Azure
+   name = "<repo-name>"
+   token_env = "AEGIS_TOKEN_MY_REPO"   # PAT with Code (Read & write) scope
+   ```
+   - **Names with spaces (#641):** Project and repository names containing spaces are written verbatim (e.g., `owner = "My Project"`); Aegis encodes spaces as `%20` in URLs. Names containing `/`, `..`, `%`, control characters, or leading/trailing spaces are rejected.
+   - **Writer permission check (#642):** Aegis checks the user's effective permissions on the repository (`GenericContribute`). The token needs permission to read security; if it cannot (e.g., 401/403 or older servers), Aegis falls back to checking membership in `[<project>]\Contributors` or `[<project>]\Project Administrators`.
+   - **Microsoft Entra service principal (#636, #643):** Instead of a PAT, add `[settings.fork.entra]` (or `[repo.fork.entra]`):
+     ```toml
+     [settings.fork.entra]
+     tenant = "<tenant-id-or-domain>"
+     client_id = "<application-client-id>"
+     # authority = "login.microsoftonline.com" # optional default
+     ```
+     With `[settings.fork.entra]` set, `token_env` holds the client secret, and the service principal must be added to the organization and to the project's Contributors group. Service principals work for the server fork token, `aegis run` (client secret in `token_env`), and the webhook notifier (set `AEGIS_AZURE_DEVOPS_TENANT`, `AEGIS_AZURE_DEVOPS_CLIENT_ID`, optionally `AEGIS_AZURE_DEVOPS_AUTHORITY`, and put the client secret in `AEGIS_AZURE_DEVOPS_COMMENT_TOKEN`). Tokens automatically refresh before expiring, so jobs can run longer than the token's one-hour lifetime.
+   - **Server environment/secrets:** `AEGIS_AZURE_DEVOPS_URL` (organization or collection URL), `AEGIS_AZURE_DEVOPS_WEBHOOK_SECRET`, `AEGIS_AZURE_DEVOPS_COMMENT_TOKEN` (PAT able to read identities/security and comment on PRs, or the Entra client secret when `AEGIS_AZURE_DEVOPS_TENANT` and `AEGIS_AZURE_DEVOPS_CLIENT_ID` are set).
+
    **GitHub App instead of a fork and a token ([ADR 0017](../adr/0017-github-app.md), #539):** on an instance with `[github_app]` in `server.toml` (`app_id` or `client_id`; the app's private key in the secret store as `AEGIS_GITHUB_APP_PRIVATE_KEY`), a GitHub repo may name `[settings.app]` instead of `[settings.fork]`: exactly one of the two. It names no secret, the app must be installed on the repo, and the agent's `agent/*` branches and PRs go to the repo itself (the *Direct Upstream* model, written by the app). Each use takes its own installation token, for that repo only, with only that use's permissions, minted when it is needed: a job longer than a token's hour still pushes. `api` in `[settings.app]` is only for a GitHub Enterprise Server root and must match the app's. Repos on `[settings.fork]` keep working unchanged.
 
    **Creating the app (#542):** `sudo ./github-app.sh` in `deploy/compose` writes a manifest page; one click on GitHub creates the app with exactly these permissions and events, and the script saves its id, key and webhook secret ([install guide, B10](../install-on-premise.md#b10-the-github-app-instead-of-a-bot-and-tokens)). On the app path the agent's PRs run the repo's CI as same-repo PRs, **with its Actions secrets**: keep the secrets that matter in environments with required reviewers, add a ruleset on the default branch requiring a PR (no bypass for the app), or keep the repo on the token path.
@@ -174,6 +217,21 @@ On-premise Compose, GitHub repos: `sudo ./add-repo.sh` asks for the values and d
    **Repos on the GitHub App path (ADR 0017, #540):** no webhook per repo. The app has one webhook: in the app's settings, *Webhook URL* `https://<domain>/webhooks/github`, *Secret* the value of `AEGIS_GITHUB_APP_WEBHOOK_SECRET` (a value of its own, never the repo webhooks' secret), and the events **Issues**, **Workflow runs**, **Pull request reviews**, **Pull request review comments**, **Issue comments**, plus **Installation** and **Installation repositories**. The server tells the two webhooks apart by the secret that verifies a delivery, not by what it says: the app's deliveries count only for repos on `[settings.app]`, a repo webhook's only for repos on `[settings.fork]`, so a repo moved from one path to the other never gets a job twice. Installation events are recorded: a repo whose installation is suspended, removed or no longer given the repo takes no job, and its connection page says why. The app also comments on the issues of its repos and checks who may ask for a job or a review round, so an instance with app repos only needs neither `AEGIS_GITHUB_COMMENT_TOKEN` nor per-repo webhooks. **Add repo** lists the repos the app is installed on that are not registered yet.
 
 10. **GitLab:** Project $\rightarrow$ Settings $\rightarrow$ Webhooks: URL `https://<domain>/webhooks/gitlab`, *Secret token*: `AEGIS_GITLAB_WEBHOOK_TOKEN`, events: **Issues events**, **Pipeline events**, and **Comments** (#254).
+
+11. **Bitbucket Cloud (#634):** Fork repository $\rightarrow$ Repository settings $\rightarrow$ Webhooks $\rightarrow$ Add webhook:
+    - *URL*: `<public_url>/webhooks/bitbucket`
+    - *Secret*: Value of `AEGIS_BITBUCKET_WEBHOOK_SECRET` (verified via `X-Hub-Signature` HMAC-SHA256)
+    - *Triggers*: Pull Request **Comment created**, **Changes request created**, and **Merged**.
+
+12. **Bitbucket Data Center (#635):** Fork repository $\rightarrow$ Repository settings $\rightarrow$ Webhooks $\rightarrow$ Create webhook:
+    - *URL*: `<public_url>/webhooks/bitbucket-dc`
+    - *Secret*: Value of `AEGIS_BITBUCKET_DC_WEBHOOK_SECRET` (verified via `X-Hub-Signature` HMAC-SHA256)
+    - *Events*: Pull Request **Comment added**, **Reviewer needs work**, and **Merged**.
+
+13. **Azure DevOps (#636):** Project settings $\rightarrow$ Service hooks $\rightarrow$ Create subscription $\rightarrow$ **Web Hooks**:
+    - *Triggers*: **Pull request commented on** (`ms.vss-code.git-pullrequest-comment-event`) and **Pull request updated** (`git.pullrequest.updated`, status changed).
+    - *URL*: `<public_url>/webhooks/azure-devops`
+    - *Authentication*: Set **Basic authentication password** (any username) to `AEGIS_AZURE_DEVOPS_WEBHOOK_SECRET`, or send HTTP header `X-Aegis-Webhook-Secret: <secret>`.
 
 ### Verification
 

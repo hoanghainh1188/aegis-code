@@ -121,7 +121,14 @@ Enables the GitHub App integration ([ADR 0017](adr/0017-github-app.md)) for repo
 | `AEGIS_OIDC_CLIENT_SECRET` | `api`, `all` | OIDC client secret when `[auth.oidc]` is configured. |
 | `AEGIS_GITHUB_WEBHOOK_SECRET` | `api`, `all` | HMAC secret for token-path GitHub webhooks. |
 | `AEGIS_GITLAB_WEBHOOK_TOKEN` | `api`, `all` | Secret token for GitLab webhooks. |
+| `AEGIS_BITBUCKET_WEBHOOK_SECRET` | `api`, `all` | HMAC-SHA256 secret for Bitbucket Cloud webhooks. |
+| `AEGIS_BITBUCKET_DC_WEBHOOK_SECRET` | `api`, `all` | HMAC-SHA256 secret for Bitbucket Data Center webhooks. |
+| `AEGIS_AZURE_DEVOPS_WEBHOOK_SECRET` | `api`, `all` | Basic auth password or `X-Aegis-Webhook-Secret` value for Azure DevOps service hooks. |
 | `AEGIS_GITHUB_COMMENT_TOKEN` | `api`, `worker`, `all` | Token for commenting on upstream GitHub issues (token path). |
+| `AEGIS_GITLAB_COMMENT_TOKEN` | `api`, `worker`, `all` | Token for commenting on GitLab issues/MRs and checking permissions. |
+| `AEGIS_BITBUCKET_COMMENT_TOKEN` | `api`, `worker`, `all` | Token for checking Bitbucket Cloud permissions and commenting on PRs. |
+| `AEGIS_BITBUCKET_DC_COMMENT_TOKEN` | `api`, `worker`, `all` | Token for checking Bitbucket Data Center permissions and commenting on PRs. |
+| `AEGIS_AZURE_DEVOPS_COMMENT_TOKEN` | `api`, `worker`, `all` | PAT (or Entra client secret when `AEGIS_AZURE_DEVOPS_TENANT` + `AEGIS_AZURE_DEVOPS_CLIENT_ID` are set) for Azure DevOps writer checks and PR comments. |
 | `AEGIS_GITHUB_APP_PRIVATE_KEY` | `api`, `worker`, `all` | GitHub App PEM key (when `[github_app]` is set). |
 | `AEGIS_GITHUB_APP_WEBHOOK_SECRET` | `api`, `all` | GitHub App webhook HMAC secret (when `[github_app]` is set). |
 
@@ -230,12 +237,13 @@ Stored as JSONB in `repos.config` (registered via `aegis-server repo add`, `add-
 
 ### 3.1. Forge Connection (Exactly one of `fork` or `app` is required)
 
-- **`[settings.fork]`** (Token path — GitHub or GitLab):
-  - `platform`: `"github"` (default) or `"gitlab"`
-  - `owner`, `name`: fork (or upstream) repository/project path
-  - `api`: API root (default `"https://api.github.com"`; required for GitLab, e.g., `"https://gitlab.com/api/v4"`)
-  - `token_env`: secret name holding the bot/project token (must start with `<TENANT>_` for non-default tenants)
+- **`[settings.fork]`** (Token / Service Principal path — GitHub, GitLab, Bitbucket, Azure DevOps):
+  - `platform`: `"github"` (default), `"gitlab"`, `"bitbucket"`, `"bitbucket-dc"`, or `"azure-devops"`
+  - `owner`, `name`: fork (or upstream) repository/project path (for Bitbucket DC: project key & repo slug; for Azure DevOps: project name & repo name, spaces allowed verbatim)
+  - `api`: API root (default `"https://api.github.com"`; required for GitLab e.g. `"https://gitlab.com/api/v4"`, Bitbucket Cloud `"https://api.bitbucket.org/2.0"`, Bitbucket DC `"https://<host>/rest/api/1.0"`, Azure DevOps `"https://dev.azure.com/<org>"` or `"https://<host>/tfs/<collection>"`)
+  - `token_env`: secret name holding the bot/project token or Entra client secret (must start with `<TENANT>_` for non-default tenants)
   - `push_to_local`: optional local bare repo path for dry runs
+  - `entra` (`[settings.fork.entra]` / `[repo.fork.entra]`, Azure DevOps only): optional Microsoft Entra service principal (`tenant`, `client_id`, optional `authority` defaulting to `"login.microsoftonline.com"`)
 - **`[settings.app]`** (GitHub App path — [ADR 0017](adr/0017-github-app.md), GitHub only):
   - `api`: optional GitHub Enterprise Server API root (defaults to `[github_app].api`). No secret name is needed.
 

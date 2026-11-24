@@ -166,6 +166,29 @@ Webhooks have their own delivery size limit (larger than the 64 KiB API limit) a
   - `Note Hook` (`/aegis fix` on an agent MR): enqueues a review round.
   - `Merge Request Hook` (`merged` on an agent MR): triggers `merged_pr` memory extraction.
 
+### `POST /webhooks/bitbucket`
+- **Verification:** `X-Hub-Signature` (`sha256=<hex>`) checked in constant time against `AEGIS_BITBUCKET_WEBHOOK_SECRET`.
+- **Headers:** `X-Event-Key`, `X-Request-UUID`.
+- **Handled Events:**
+  - `pullrequest:comment_created` (`/aegis fix` on an agent PR) and `pullrequest:changes_request_created`: enqueues a review round (requires `write` permission checked via `AEGIS_BITBUCKET_COMMENT_TOKEN`).
+  - `pullrequest:fulfilled`: triggers `merged_pr` memory extraction.
+  - `diagnostics:ping`: returns pong.
+
+### `POST /webhooks/bitbucket-dc`
+- **Verification:** `X-Hub-Signature` (`sha256=<hex>`) checked in constant time against `AEGIS_BITBUCKET_DC_WEBHOOK_SECRET`.
+- **Headers:** `X-Event-Key`, `X-Request-Id`.
+- **Handled Events:**
+  - `pr:comment:added` (`/aegis fix` on an agent PR) and `pr:reviewer:needs_work`: enqueues a review round (requires `REPO_WRITE` effective permission checked via `AEGIS_BITBUCKET_DC_API` and `AEGIS_BITBUCKET_DC_COMMENT_TOKEN`).
+  - `pr:merged`: triggers `merged_pr` memory extraction.
+  - `diagnostics:ping`: returns pong.
+
+### `POST /webhooks/azure-devops`
+- **Verification:** `AEGIS_AZURE_DEVOPS_WEBHOOK_SECRET` checked in constant time as the Basic auth password (any username) or in the `X-Aegis-Webhook-Secret` header.
+- **Handled Events:**
+  - `ms.vss-code.git-pullrequest-comment-event` (`/aegis fix` on an active agent PR): enqueues a review round (checks effective `GenericContribute` permission or fallback groups via `AEGIS_AZURE_DEVOPS_URL` and `AEGIS_AZURE_DEVOPS_COMMENT_TOKEN` / Entra credentials).
+  - `git.pullrequest.updated` (`status = completed` on an agent PR): triggers `merged_pr` memory extraction.
+  - `service.hook.test`: returns pong.
+
 ---
 
 ## 4. Further Reading
