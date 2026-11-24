@@ -212,7 +212,7 @@ Redo the bundle when you upgrade, so it keeps the new image's CAs.
 sudo ./aegis-deploy.sh X.Y.Z
 ```
 
-It pulls the server and sandbox images of `X.Y.Z` from GHCR, starts PostgreSQL and Aegis, and waits until they are healthy. The database schema is created on the first start. The first pull takes a few minutes; the sandbox images are large.
+It pulls the server and sandbox images of `X.Y.Z` from GHCR, starts PostgreSQL and Aegis, and waits until they are healthy. The database schema is created on the first start (requiring the database owner to be able to run `CREATE EXTENSION IF NOT EXISTS pg_trgm`, standard on PostgreSQL 13+, RDS, Cloud SQL, and Azure). To enable semantic memory recall (`[memory.embedding]`), set `AEGIS_POSTGRES_IMAGE=pgvector/pgvector:pg17` in `.env` (and run `REINDEX DATABASE aegis;` if switching on an existing volume); without `pgvector` or `[memory.embedding]`, recall uses keyword matching only. The first pull takes a few minutes; the sandbox images are large.
 
 **Check:** the last line is `aegis X.Y.Z healthy`, and:
 

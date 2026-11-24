@@ -116,9 +116,9 @@ curl -sS -X POST "$AEGIS/api/v1/repos/1/cve-jobs" \
 
 | Method & Path | Role | Description |
 | :--- | :--- | :--- |
-| `GET /api/v1/repos/{id}/memories` | `viewer` | Lists stored memories newest-first. Query: `kind` (`merged_pr`\|`review_lesson`\|`runbook`\|`business_rule`), `limit`, `cursor`. |
-| `POST /api/v1/repos/{id}/memories` | `maintainer` | Idempotently upserts a memory on `(repo_id, kind, source_ref)`. Returns `201 Created` with `MemoryView`. |
-| `DELETE /api/v1/repos/{id}/memories/{memory_id}` | `maintainer` | Deletes a memory entry (`200 OK` with `{"deleted": true, "id": ...}`). |
+| `GET /api/v1/repos/{id}/memories` | `viewer` | Lists stored memories newest-first (each `MemoryView` includes `scope`: `"repo"` \| `"tenant"`). Query: `kind` (`merged_pr`\|`review_lesson`\|`runbook`\|`business_rule`), `limit`, `cursor`. |
+| `POST /api/v1/repos/{id}/memories` | `maintainer` / `admin` | Idempotently upserts a memory on `(repo_id, kind, source_ref)`. Returns `201 Created` with `MemoryView`. |
+| `DELETE /api/v1/repos/{id}/memories/{memory_id}` | `maintainer` / `admin` | Deletes a memory entry (`200 OK` with `{"deleted": true, "id": ...}`). |
 
 **`POST /api/v1/repos/{id}/memories` Request Body:**
 ```json
@@ -129,9 +129,12 @@ curl -sS -X POST "$AEGIS/api/v1/repos/1/cve-jobs" \
   "summary": "Never delete refund_entries when cancelling an order; mark status = voided instead.",
   "paths": ["src/orders/cancel.rs", "src/billing/refund.rs"],
   "keywords": "cancel order refund voided ledger",
+  "scope": "repo",
   "job_id": null
 }
 ```
+- `scope`: `"repo"` (default for new entries; visible only to this repo) or `"tenant"` (shared across all repos of the repo's tenant). Omitting `scope` on an existing memory preserves its current scope. Invalid values return `422 invalid`.
+- **Authorization:** Only a **tenant admin** or **platform admin** can share a memory (`"scope": "tenant"`), update an already shared memory, or delete a shared memory; other callers (including repo `maintainer`) receive `403 forbidden`.
 
 ### Global Instance Pause (Admin Only)
 
