@@ -11,6 +11,9 @@
 //!    `search_text` (trigram GIN), for text whose words are not split by
 //!    spaces.
 //!
+//! A mode with an embedding model adds a fourth, [`super::vector`]: the
+//! memories nearest the issue's embedding (#655).
+//!
 //! [`fuse`] merges them by Reciprocal Rank Fusion, weighs the repo's own
 //! memories over its tenant's, guidance (runbooks, business rules) a little
 //! over history, and lets older memories fade.
@@ -19,7 +22,8 @@ use std::collections::BTreeSet;
 
 use time::OffsetDateTime;
 
-use super::{MemoryId, MemoryKind, MemoryScope, RepoMemory};
+use super::vector::NearQuery;
+use super::{MemoryId, MemoryKind, MemoryRow, MemoryScope, RepoMemory};
 use crate::{JobId, RepoId, Store, StoreError};
 
 /// RRF's constant (Cormack et al., 2009): ranks far down a channel still
@@ -46,6 +50,8 @@ pub struct RecallScores {
     pub path: Option<i64>,
     pub text: Option<i64>,
     pub substring: Option<i64>,
+    /// Among the nearest embeddings (#655).
+    pub vector: Option<i64>,
 }
 
 /// What the channels search for, from an issue's title and body.
@@ -129,6 +135,7 @@ impl TryFrom<RecallRow> for (RepoMemory, RecallScores) {
             path: row.path_rank,
             text: row.text_rank,
             substring: row.substring_rank,
+            vector: None,
         };
         Ok((memory, scores))
     }
@@ -145,12 +152,71 @@ impl Store {
         query_body: &str,
         limit: usize,
     ) -> Result<Vec<RepoMemory>, StoreError> {
+        self.recall_repo_memories_near(repo_id, query_title, query_body, limit, None)
+            .await
+    }
+
+    /// [`Self::recall_repo_memories`], with the memories nearest `near` as a
+    /// fourth channel when given (#655): the caller checked
+    /// [`Self::vector_search_ready`] for its dimensions.
+    pub async fn recall_repo_memories_near(
+        &self,
+        repo_id: RepoId,
+        query_title: &str,
+        query_body: &str,
+        limit: usize,
+        near: Option<NearQuery<'_>>,
+    ) -> Result<Vec<RepoMemory>, StoreError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let Some(query) = RecallQuery::of(query_title, query_body) else {
-            return Ok(Vec::new());
+        let mut hits = match RecallQuery::of(query_title, query_body) {
+            Some(query) => self.lexical_hits(repo_id, &query).await?,
+            None => Vec::new(),
         };
+        if let Some(near) = near {
+            let nearest = self.near_memories(repo_id, near).await?;
+            let missing: Vec<i64> = nearest
+                .iter()
+                .filter(|(id, _)| !hits.iter().any(|(m, _)| m.id == *id))
+                .map(|(id, _)| id.0)
+                .collect();
+            for memory in self.memories_by_id(&missing).await? {
+                hits.push((memory, RecallScores::default()));
+            }
+            for (memory, scores) in &mut hits {
+                scores.vector = nearest
+                    .iter()
+                    .find(|(id, _)| *id == memory.id)
+                    .map(|(_, rank)| *rank);
+            }
+        }
+        Ok(fuse(hits, repo_id, OffsetDateTime::now_utc(), limit))
+    }
+
+    async fn memories_by_id(&self, ids: &[i64]) -> Result<Vec<RepoMemory>, StoreError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query_as!(
+            MemoryRow,
+            "SELECT id, repo_id, kind, source_ref, title, summary, paths,
+                    keywords, job_id, scope, created_at, updated_at
+               FROM repo_memories
+              WHERE id = ANY($1)",
+            ids,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(RepoMemory::try_from).collect()
+    }
+
+    /// The memories the three lexical channels find, with their ranks.
+    async fn lexical_hits(
+        &self,
+        repo_id: RepoId,
+        query: &RecallQuery,
+    ) -> Result<Vec<(RepoMemory, RecallScores)>, StoreError> {
         let rows = sqlx::query_as!(
             RecallRow,
             r#"WITH tenant_repos AS (
@@ -225,11 +291,9 @@ impl Store {
         )
         .fetch_all(&self.pool)
         .await?;
-        let hits = rows
-            .into_iter()
+        rows.into_iter()
             .map(<(RepoMemory, RecallScores)>::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(fuse(hits, repo_id, OffsetDateTime::now_utc(), limit))
+            .collect()
     }
 }
 
@@ -252,7 +316,7 @@ pub fn fuse(
 }
 
 fn score(memory: &RepoMemory, scores: RecallScores, repo: RepoId, now: OffsetDateTime) -> f64 {
-    let rrf: f64 = [scores.path, scores.text, scores.substring]
+    let rrf: f64 = [scores.path, scores.text, scores.substring, scores.vector]
         .into_iter()
         .flatten()
         .map(|rank| 1.0 / (RRF_K + rank as f64))
@@ -456,6 +520,7 @@ mod tests {
             path,
             text,
             substring,
+            vector: None,
         }
     }
 

@@ -315,6 +315,12 @@ pub(crate) fn defang_memory_text(text: &str) -> String {
         .replace("</REPO-MEMORY", "<\u{200b}/REPO-MEMORY")
 }
 
+/// `text` with its secrets hidden, as it may be sent to an embedding
+/// model (#655): an issue or a memory leaves the platform like a prompt.
+pub fn redact_for_embedding(text: &str) -> String {
+    redact(text).text
+}
+
 fn sanitize_field(raw: &str, max_chars: usize) -> String {
     let redacted = redact(raw.trim());
     let single_line = redacted

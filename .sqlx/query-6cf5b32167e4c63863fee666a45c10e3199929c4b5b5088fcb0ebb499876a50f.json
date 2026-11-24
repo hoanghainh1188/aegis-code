@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO repo_memory_embeddings (memory_id, model, dimensions, embedding)\n                 SELECT id, $2, $3, $4 FROM repo_memories WHERE id = $1\n                 ON CONFLICT (memory_id) DO UPDATE SET\n                     model = EXCLUDED.model,\n                     dimensions = EXCLUDED.dimensions,\n                     embedding = EXCLUDED.embedding,\n                     created_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int4",
+        "Float4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6cf5b32167e4c63863fee666a45c10e3199929c4b5b5088fcb0ebb499876a50f"
+}

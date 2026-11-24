@@ -41,7 +41,8 @@ pub use answer::{FinalAnswer, ReviewReply, Status, SuspiciousInput, parse_answer
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
     AppConnection, BudgetSection, DirConfig, EntraConfig, ExtraServer, ForkConfig, ForkPlatform,
-    IdentityConfig, LedgerBackend, RepoConfig, RunConfig, RunSection, SonarConfig, upstream_of,
+    IdentityConfig, LedgerBackend, MemorySection, RepoConfig, RunConfig, RunSection, SonarConfig,
+    upstream_of,
 };
 pub use cve::CveTarget;
 pub use diagnose::TriageLane;
@@ -50,7 +51,7 @@ pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput, IssueSummary, open_github_issues};
 pub use memory::{
     ExtractedMemory, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
-    fallback_extract_from_merged_pr, format_for_bp3,
+    fallback_extract_from_merged_pr, format_for_bp3, redact_for_embedding,
 };
 pub use publish::{fork_forge_of, fork_token, fork_token_source};
 pub use registry::{

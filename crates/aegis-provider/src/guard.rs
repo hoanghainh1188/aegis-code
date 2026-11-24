@@ -154,6 +154,28 @@ impl ResidencyConfig {
         Ok(policy)
     }
 
+    /// Whether the embedding endpoint `provider` of `[memory.embedding]`
+    /// keeps to the section (#655): its region, or a local network for
+    /// `local_only`. Model prefixes name inference profiles, which an
+    /// embedding model has none of: under `allowed_model_prefixes` a cloud
+    /// endpoint needs `allowed_regions` to say where it may run.
+    pub fn check_embedding(&self, provider: &ProviderConfig) -> Result<(), String> {
+        let policy = self.policy()?;
+        if matches!(policy, ModelPolicy::AllowedPrefixes(_))
+            && self.allowed_regions.is_none()
+            && !matches!(provider, ProviderConfig::Local { .. })
+        {
+            return Err(
+                "[memory.embedding]: `allowed_model_prefixes` does not apply to embedding \
+                 models; list the endpoint's region in `[residency] allowed_regions`, or \
+                 use a `local` endpoint"
+                    .into(),
+            );
+        }
+        self.check_provider(provider, &policy, false)
+            .map_err(|e| e.replacen("[residency]", "[memory.embedding] [residency]", 1))
+    }
+
     fn check_provider(
         &self,
         provider: &ProviderConfig,
@@ -478,5 +500,36 @@ mod tests {
         };
         let err = airgap.check(&mixed, ["m"]).unwrap_err();
         assert!(err.contains("local_only"), "{err}");
+    }
+
+    /// #655: an embedding endpoint keeps to `[residency]` as the chat
+    /// provider does, by region or local network, not by model prefix.
+    #[test]
+    fn an_embedding_endpoint_keeps_to_the_residency() {
+        let none = ResidencyConfig::default();
+        assert!(none.check_embedding(&bedrock("us-east-1")).is_ok());
+
+        let tokyo = residency("allowed_regions = [\"ap-northeast-1\"]\n").unwrap();
+        assert!(tokyo.check_embedding(&bedrock("ap-northeast-1")).is_ok());
+        let err = tokyo.check_embedding(&bedrock("us-east-1")).unwrap_err();
+        assert!(err.contains("us-east-1"), "{err}");
+
+        let eu = residency("allowed_model_prefixes = [\"eu.\"]\n").unwrap();
+        let err = eu.check_embedding(&bedrock("eu-west-1")).unwrap_err();
+        assert!(err.contains("allowed_regions"), "{err}");
+        assert!(eu.check_embedding(&local()).is_ok());
+        let eu_regions =
+            residency("allowed_model_prefixes = [\"eu.\"]\nallowed_regions = [\"eu-west-1\"]\n")
+                .unwrap();
+        assert!(eu_regions.check_embedding(&bedrock("eu-west-1")).is_ok());
+
+        let airgap = residency("local_only = true\n").unwrap();
+        assert!(airgap.check_embedding(&local()).is_ok());
+        assert!(airgap.check_embedding(&bedrock("ap-northeast-1")).is_err());
+        assert!(
+            airgap
+                .check_embedding(&local_at("https://embed.example.com/v1"))
+                .is_err()
+        );
     }
 }

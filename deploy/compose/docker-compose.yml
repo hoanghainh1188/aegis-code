@@ -9,7 +9,11 @@ name: aegis
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # `AEGIS_POSTGRES_IMAGE=pgvector/pgvector:pg17` adds pgvector, for the
+    # semantic recall of a mode's `[memory.embedding]` (#655). On an
+    # existing volume, run `REINDEX DATABASE aegis` after the switch: that
+    # image is Debian's, whose text collation differs from Alpine's.
+    image: ${AEGIS_POSTGRES_IMAGE:-postgres:17-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_USER: aegis

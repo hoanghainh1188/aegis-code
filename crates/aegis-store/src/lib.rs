@@ -57,7 +57,8 @@ pub use instance_pause::{INSTANCE_PAUSED, InstancePause, InstancePaused, PauseLe
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use memory::{
-    MemoryId, MemoryKind, MemoryScope, NewRepoMemory, RecallScores, RepoMemory, fuse,
+    EmbeddingSpace, MemoryId, MemoryKind, MemoryScope, MemoryToEmbed, NearQuery, NewRepoMemory,
+    RecallScores, RepoMemory, fuse,
 };
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};
@@ -99,6 +100,8 @@ pub struct Store {
     /// How long a queued job waits before it is claimed as if one SLA level
     /// higher (#524), so none waits for ever behind newer `P1`s.
     sla_aging: std::time::Duration,
+    /// Which embedding dimensions pgvector searches (#655).
+    vectors: Arc<memory::VectorIndexes>,
 }
 
 impl Store {
@@ -119,6 +122,7 @@ impl Store {
             budget: Arc::default(),
             max_review_rounds: reviews::DEFAULT_MAX_REVIEW_ROUNDS,
             sla_aging: queue::DEFAULT_SLA_AGING,
+            vectors: Arc::default(),
         })
     }
 

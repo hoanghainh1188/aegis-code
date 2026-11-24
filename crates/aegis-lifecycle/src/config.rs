@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use aegis_lang::{Language, ProfileOverrides, Profiles, RepoProfiles, check_dir};
-use aegis_provider::{ModelPolicy, ProviderConfig, ResidencyConfig};
+use aegis_provider::{EmbeddingConfig, ModelPolicy, ProviderConfig, ResidencyConfig};
 use aegis_router::{BudgetLimits, EscalationRules, ModelsConfig};
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +32,61 @@ pub struct RunConfig {
     /// only. Without it, any model and endpoint.
     #[serde(default)]
     pub residency: ResidencyConfig,
+    /// Incident & Domain Memory (#655): read by the server only.
+    #[serde(default)]
+    pub memory: MemorySection,
+}
+
+/// `[memory]` of a run configuration or a mode.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemorySection {
+    /// The embedding model of semantic recall (#655); without it, recall
+    /// is lexical only (paths, full text, substrings).
+    #[serde(default)]
+    pub embedding: Option<EmbeddingConfig>,
+}
+
+/// Bedrock's region for `customer-jp` (design §7).
+const JAPAN_REGION: &str = "ap-northeast-1";
+
+impl MemorySection {
+    /// Whether the embedding endpoint keeps to `residency`, and for a
+    /// Japan configuration (`japan`) also stays in Japan: Bedrock in
+    /// Tokyo, or a `local` endpoint on the deployment's own network.
+    pub fn check(&self, residency: &ResidencyConfig, japan: bool) -> Result<(), LifecycleError> {
+        let Some(embedding) = &self.embedding else {
+            return Ok(());
+        };
+        embedding.check().map_err(LifecycleError::Config)?;
+        if japan {
+            match &embedding.provider {
+                ProviderConfig::Bedrock { region, .. } if region == JAPAN_REGION => {}
+                ProviderConfig::Local { .. } => {}
+                _ => {
+                    return Err(LifecycleError::Config(format!(
+                        "customer-jp guard (design §7): [memory.embedding] must be Bedrock in \
+                         `{JAPAN_REGION}` or a `local` endpoint"
+                    )));
+                }
+            }
+            if let ProviderConfig::Local { .. } = &embedding.provider {
+                // Its host is checked as `local_only` checks one.
+                let local = ResidencyConfig {
+                    local_only: true,
+                    local_hosts: residency.local_hosts.clone(),
+                    ..ResidencyConfig::default()
+                };
+                return local
+                    .check_embedding(&embedding.provider)
+                    .map_err(|e| LifecycleError::Config(format!("customer-jp guard: {e}")));
+            }
+            return Ok(());
+        }
+        residency
+            .check_embedding(&embedding.provider)
+            .map_err(LifecycleError::Config)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -634,6 +689,14 @@ impl RunConfig {
     /// key: `.` is allowed past the first character.
     pub(crate) fn check(self) -> Result<Self, LifecycleError> {
         self.model_policy()?;
+        let japan = matches!(
+            self.provider,
+            ProviderConfig::Bedrock {
+                require_jp_profile: true,
+                ..
+            }
+        );
+        self.memory.check(&self.residency, japan)?;
         self.repo.profile_overrides()?;
         self.repo.check_dirs()?;
         let key = &self.repo.key;

@@ -1,7 +1,10 @@
 //! Incident & Domain Memory storage and relevance recall (#456).
 
 use aegis_store::testing::test_db;
-use aegis_store::{Actor, MemoryKind, MemoryScope, ModeName, NewRepo, NewRepoMemory, Page, RepoId};
+use aegis_store::{
+    Actor, EmbeddingSpace, MemoryKind, MemoryScope, ModeName, NearQuery, NewRepo, NewRepoMemory,
+    Page, RepoId,
+};
 
 fn repo(slug: &str) -> NewRepo {
     NewRepo {
@@ -566,5 +569,162 @@ async fn a_memory_cannot_name_another_repos_job() {
             .await
             .unwrap()
     );
+    db.drop().await;
+}
+
+const SPACE: EmbeddingSpace<'static> = EmbeddingSpace {
+    model: "test-embed",
+    dimensions: 3,
+};
+
+/// #655: with pgvector, a Japanese ticket finds the English lesson of the
+/// same meaning, sharing no word or characters with it; an embedding of
+/// another model, or one that is not near enough, is not taken. Skipped
+/// where the server has no pgvector (see the next test).
+#[tokio::test]
+async fn semantic_recall_finds_a_lesson_with_no_word_in_common() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    if !s.vector_search_ready(SPACE.dimensions).await {
+        eprintln!("skipped: the test server has no pgvector");
+        db.drop().await;
+        return;
+    }
+    let shop = s.create_repo(&repo("shop")).await.unwrap().id;
+    let refund = s
+        .upsert_repo_memory(&memory(
+            shop,
+            MemoryKind::MergedPr,
+            "https://github.com/acme/shop/pull/7",
+            "Stop paying customers back twice",
+            "A retried request reimbursed the same order again.",
+            &[],
+            "",
+        ))
+        .await
+        .unwrap();
+    let catalog = s
+        .upsert_repo_memory(&memory(
+            shop,
+            MemoryKind::MergedPr,
+            "https://github.com/acme/shop/pull/8",
+            "Catalog card spacing",
+            "Adjusted product card margins.",
+            &[],
+            "",
+        ))
+        .await
+        .unwrap();
+    let todo = s.memories_to_embed(shop, SPACE, 10).await.unwrap();
+    assert_eq!(todo.len(), 2);
+    assert!(
+        todo[0].text.contains("Catalog card spacing"),
+        "newest first"
+    );
+    s.save_memory_embeddings(
+        SPACE,
+        &[
+            (refund.id, vec![1.0, 0.0, 0.0]),
+            (catalog.id, vec![0.0, 1.0, 0.0]),
+        ],
+    )
+    .await
+    .unwrap();
+    assert!(
+        s.memories_to_embed(shop, SPACE, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let ticket = ("返金が二重に発生", "同じ注文に二回払い戻された");
+    let lexical = s
+        .recall_repo_memories(shop, ticket.0, ticket.1, 5)
+        .await
+        .unwrap();
+    assert!(lexical.is_empty(), "{lexical:#?}");
+    let query = [0.95_f32, 0.2, 0.0];
+    let near = |space, min_similarity| NearQuery {
+        space,
+        vector: &query,
+        min_similarity,
+    };
+    let recalled = s
+        .recall_repo_memories_near(shop, ticket.0, ticket.1, 5, Some(near(SPACE, 0.5)))
+        .await
+        .unwrap();
+    assert_eq!(recalled.len(), 1, "{recalled:#?}");
+    assert_eq!(recalled[0].id, refund.id);
+    let other_model = EmbeddingSpace {
+        model: "other-embed",
+        ..SPACE
+    };
+    assert!(
+        s.recall_repo_memories_near(shop, ticket.0, ticket.1, 5, Some(near(other_model, 0.5)))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        s.recall_repo_memories_near(shop, ticket.0, ticket.1, 5, Some(near(SPACE, 0.999)))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // Its text changed: embedded again before its next recall.
+    s.upsert_repo_memory(&memory(
+        shop,
+        MemoryKind::MergedPr,
+        "https://github.com/acme/shop/pull/7",
+        "Stop paying customers back twice",
+        "Refunds are keyed by order id now.",
+        &[],
+        "",
+    ))
+    .await
+    .unwrap();
+    let todo = s.memories_to_embed(shop, SPACE, 10).await.unwrap();
+    assert_eq!(todo.iter().map(|m| m.id).collect::<Vec<_>>(), [refund.id]);
+    let wrong = s
+        .save_memory_embeddings(SPACE, &[(refund.id, vec![1.0, 0.0])])
+        .await;
+    assert!(wrong.is_err(), "two values for three dimensions");
+    db.drop().await;
+}
+
+/// #655: without pgvector the vector channel is off, and recall stays the
+/// lexical one of #596. Skipped where the server has pgvector.
+#[tokio::test]
+async fn without_pgvector_recall_stays_lexical() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    if s.vector_search_ready(SPACE.dimensions).await {
+        eprintln!("skipped: the test server has pgvector");
+        db.drop().await;
+        return;
+    }
+    let shop = s.create_repo(&repo("shop")).await.unwrap().id;
+    let saved = s
+        .upsert_repo_memory(&memory(
+            shop,
+            MemoryKind::Runbook,
+            "runbook:refunds",
+            "Refund retries",
+            "Refunds are keyed by order id.",
+            &[],
+            "refund",
+        ))
+        .await
+        .unwrap();
+    // Embeddings are kept anyway, for when the extension is installed.
+    s.save_memory_embeddings(SPACE, &[(saved.id, vec![1.0, 0.0, 0.0])])
+        .await
+        .unwrap();
+    let recalled = s
+        .recall_repo_memories(shop, "Refund sent twice", "", 5)
+        .await
+        .unwrap();
+    assert_eq!(recalled.len(), 1);
     db.drop().await;
 }

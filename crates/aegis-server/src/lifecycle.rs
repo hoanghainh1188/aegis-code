@@ -442,7 +442,14 @@ impl LifecycleRunner {
         };
         if round.is_none() && !matches!(job.source, JobSource::Cve | JobSource::Sonar) {
             enrich_with_apm(&repo, &self.secrets, &mut issue).await;
-            crate::memory::enrich_with_memory(&self.store, repo.id, &mut issue).await;
+            let embedder = match config.model_policy() {
+                Ok(policy) => {
+                    crate::memory::embedder_of(&config.memory, policy, &self.secrets).await
+                }
+                Err(_) => None,
+            };
+            crate::memory::enrich_with_memory(&self.store, repo.id, &mut issue, embedder.as_ref())
+                .await;
         }
         // Preserve the PostgreSQL queue's canonical intake source (#511).
         if round.is_none() {

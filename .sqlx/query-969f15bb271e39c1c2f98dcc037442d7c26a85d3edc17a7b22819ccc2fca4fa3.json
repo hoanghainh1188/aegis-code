@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH tenant_repos AS (\n                   SELECT r.id\n                     FROM repos r\n                     JOIN repos me ON me.tenant_id = r.tenant_id\n                    WHERE me.id = $1\n               )\n               SELECT m.id, m.title, m.keywords, m.summary\n                 FROM repo_memories m\n                 LEFT JOIN repo_memory_embeddings e\n                        ON e.memory_id = m.id AND e.model = $2 AND e.dimensions = $3\n                WHERE (m.repo_id = $1\n                       OR (m.scope = 'tenant' AND m.repo_id IN (SELECT id FROM tenant_repos)))\n                  AND e.memory_id IS NULL\n                ORDER BY m.updated_at DESC, m.id DESC\n                LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "keywords",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "keywords"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "summary"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "969f15bb271e39c1c2f98dcc037442d7c26a85d3edc17a7b22819ccc2fca4fa3"
+}

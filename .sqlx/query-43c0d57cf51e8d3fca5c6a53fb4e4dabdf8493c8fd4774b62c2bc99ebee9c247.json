@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS \"installed!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "installed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "43c0d57cf51e8d3fca5c6a53fb4e4dabdf8493c8fd4774b62c2bc99ebee9c247"
+}

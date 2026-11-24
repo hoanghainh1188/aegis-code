@@ -541,6 +541,7 @@ async fn repo_memories_api_and_merged_pr_extraction_work_end_to_end() {
         &db.store,
         aegis_store::RepoId(repo_id),
         &mut incoming,
+        None,
     )
     .await;
     let bp3 = incoming.first_message("Tax rounding mismatch in src/tax.rs.", true);
