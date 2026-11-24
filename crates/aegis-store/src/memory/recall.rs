@@ -203,7 +203,7 @@ impl Store {
             "SELECT id, repo_id, kind, source_ref, title, summary, paths,
                     keywords, job_id, scope, created_at, updated_at
                FROM repo_memories
-              WHERE id = ANY($1)",
+              WHERE id = ANY($1) AND obsolete_at IS NULL",
             ids,
         )
         .fetch_all(&self.pool)
@@ -235,6 +235,7 @@ impl Store {
                      FROM repo_memories m
                     WHERE (m.repo_id = $1
                            OR (m.scope = 'tenant' AND m.repo_id IN (SELECT id FROM tenant_repos)))
+                      AND m.obsolete_at IS NULL
                       AND m.path_keys && $2::text[]
                     ORDER BY rank
                     LIMIT $5
@@ -251,6 +252,7 @@ impl Store {
                      FROM repo_memories m, words
                     WHERE (m.repo_id = $1
                            OR (m.scope = 'tenant' AND m.repo_id IN (SELECT id FROM tenant_repos)))
+                      AND m.obsolete_at IS NULL
                       AND m.search_tsv @@ words.query
                     ORDER BY rank
                     LIMIT $5
@@ -265,6 +267,7 @@ impl Store {
                           WHERE (m.repo_id = $1
                                  OR (m.scope = 'tenant'
                                      AND m.repo_id IN (SELECT id FROM tenant_repos)))
+                            AND m.obsolete_at IS NULL
                             AND m.search_text ILIKE ANY ($4::text[])
                      ) AS h
                     WHERE hits >= $6

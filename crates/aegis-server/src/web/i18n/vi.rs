@@ -4,6 +4,15 @@
 
 pub(super) fn get(en: &str) -> Option<&'static str> {
     Some(match en {
+        "Repo memories the job was given" => "Memory của repo được đưa cho job",
+        "Recalled from the repo's history and runbooks, as reference for the agent. One that no longer holds can be marked obsolete: no job is given it again until its text changes." => {
+            "Lấy từ lịch sử và runbook của repo, làm tài liệu tham khảo cho agent. Memory nào không còn đúng có thể đánh dấu lỗi thời: không job nào nhận lại nó cho đến khi nội dung của nó thay đổi."
+        }
+        "Memory" => "Memory",
+        "Source" => "Nguồn",
+        "(shared with the tenant)" => "(dùng chung trong tenant)",
+        "Obsolete:" => "Lỗi thời:",
+        "Mark obsolete" => "Đánh dấu lỗi thời",
         "Pre-flight check" => "Kiểm tra trước khi bật",
         "Check" => "Mục kiểm tra",
         "Result" => "Kết quả",

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_recalled_memories (job_id, memory_id, rank)\n                 SELECT $1, id, rank::int\n                   FROM unnest($2::bigint[]) WITH ORDINALITY AS given (id, rank)\n                  WHERE EXISTS (SELECT 1 FROM repo_memories m WHERE m.id = given.id)\n                 ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "361805fffe61b8c90db161c46c87a7f49b71be734e61d65aeb4206d98186e2d4"
+}

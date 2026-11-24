@@ -505,6 +505,37 @@ struct JobPage<'a> {
     patch: Option<PatchView>,
     /// The report the diagnosis lane wrote back to the ticket (#451).
     diagnosis: Option<String>,
+    /// The repo memories it was given (#658).
+    memories: Vec<RecalledView>,
+}
+
+/// One memory a job was given, as its page shows it.
+struct RecalledView {
+    id: i64,
+    rank: i32,
+    kind: &'static str,
+    title: String,
+    source_ref: String,
+    shared: bool,
+    /// Who marked it obsolete, and when.
+    obsolete: Option<String>,
+    can_mark: bool,
+}
+
+fn recalled_view(access: &Access, r: aegis_store::RecalledMemory) -> RecalledView {
+    let can_mark = r.obsolete.is_none() && super::actions::may_curate(access, &r.memory);
+    RecalledView {
+        id: r.memory.id.0,
+        rank: r.rank,
+        kind: r.memory.kind.as_str(),
+        title: r.memory.title,
+        source_ref: r.memory.source_ref,
+        shared: r.memory.scope == aegis_store::MemoryScope::Tenant,
+        obsolete: r
+            .obsolete
+            .map(|(at, by)| format!("{by}, {}", crate::when::second(at))),
+        can_mark,
+    }
 }
 
 #[derive(Template)]
@@ -559,6 +590,12 @@ pub async fn detail(
         input_flags: record.input_flags.clone(),
         patch: super::patch::of(&store, job.id).await?,
         diagnosis: store.diagnosis(job.id).await?,
+        memories: store
+            .recalled_memories(job.id)
+            .await?
+            .into_iter()
+            .map(|r| recalled_view(&access, r))
+            .collect(),
     })
 }
 

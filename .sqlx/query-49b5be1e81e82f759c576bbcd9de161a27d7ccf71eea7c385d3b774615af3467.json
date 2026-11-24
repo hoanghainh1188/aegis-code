@@ -1,0 +1,196 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id, m.repo_id, m.kind, m.source_ref, m.title, m.summary, m.paths,\n                    m.keywords, m.job_id, m.scope, m.created_at, m.updated_at,\n                    m.obsolete_at, m.obsolete_by, r.rank\n               FROM job_recalled_memories r\n               JOIN repo_memories m ON m.id = r.memory_id\n              WHERE r.job_id = $1\n              ORDER BY r.rank",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "repo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "repo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "source_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "source_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "paths",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "paths"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "keywords",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "keywords"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "job_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "obsolete_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "obsolete_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "obsolete_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repo_memories",
+            "name": "obsolete_by"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "rank",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job_recalled_memories",
+            "name": "rank"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "49b5be1e81e82f759c576bbcd9de161a27d7ccf71eea7c385d3b774615af3467"
+}

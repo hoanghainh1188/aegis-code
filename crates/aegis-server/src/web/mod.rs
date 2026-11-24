@@ -114,6 +114,10 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/jobs/{id}/head", get(jobs::head))
         .route("/jobs/{id}/cancel", post(actions::cancel))
         .route("/jobs/{id}/retry", post(actions::retry))
+        .route(
+            "/jobs/{id}/memories/{memory_id}/obsolete",
+            post(actions::mark_memory_obsolete),
+        )
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
         .route("/admin/ai", get(ai::show))
         .route("/admin/ai/{mode}/check", post(ai::check))

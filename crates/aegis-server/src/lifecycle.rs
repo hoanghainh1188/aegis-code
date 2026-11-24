@@ -448,8 +448,19 @@ impl LifecycleRunner {
                 }
                 Err(_) => None,
             };
-            crate::memory::enrich_with_memory(&self.store, repo.id, &mut issue, embedder.as_ref())
-                .await;
+            let tree = crate::memory::base_tree(&config.repo.path, &repo.default_branch).await;
+            let recall = crate::memory::RecallFor {
+                job: Some(job.id),
+                tree: tree.as_ref(),
+            };
+            crate::memory::enrich_with_memory_for(
+                &self.store,
+                repo.id,
+                &mut issue,
+                embedder.as_ref(),
+                recall,
+            )
+            .await;
         }
         // Preserve the PostgreSQL queue's canonical intake source (#511).
         if round.is_none() {
