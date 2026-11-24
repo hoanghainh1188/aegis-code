@@ -4,6 +4,15 @@
 
 pub(super) fn get(en: &str) -> Option<&'static str> {
     Some(match en {
+        "Repo memories the job was given" => "このジョブに渡されたリポジトリのメモリ",
+        "Recalled from the repo's history and runbooks, as reference for the agent. One that no longer holds can be marked obsolete: no job is given it again until its text changes." => {
+            "リポジトリの履歴とランブックから、エージェントの参考として呼び出されたものです。もう当てはまらないものは廃止にできます。内容が変わるまで、どのジョブにも再び渡されません。"
+        }
+        "Memory" => "メモリ",
+        "Source" => "出典",
+        "(shared with the tenant)" => "（テナントで共有）",
+        "Obsolete:" => "廃止:",
+        "Mark obsolete" => "廃止にする",
         "Pre-flight check" => "事前チェック",
         "Check" => "チェック",
         "Result" => "結果",

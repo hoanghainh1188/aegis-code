@@ -4,6 +4,8 @@
 //! - Recall of top relevant repository memories into `IssueInput` (`BP3`)
 //!   before triage, diagnosis, and fix execution.
 
+use std::collections::BTreeSet;
+
 use aegis_ledger::{AnswerChange, IssueId, IssueRecord, LedgerStore};
 use aegis_lifecycle::{
     IssueInput, MemoryLesson, MemorySection, MergedPrFacts, Modes, extract_from_merged_pr,
@@ -11,13 +13,132 @@ use aegis_lifecycle::{
 };
 use aegis_provider::{EmbedPurpose, Embedder, ModelPolicy, Provider};
 use aegis_secrets::Secrets;
+
 use aegis_store::{
-    Actor, EmbeddingSpace, MemoryKind, NearQuery, NewRepoMemory, Repo, RepoId, RepoMemory, Store,
-    StoreError,
+    Actor, EmbeddingSpace, JobId, MemoryId, MemoryKind, NearQuery, NewRepoMemory, Repo, RepoId,
+    RepoMemory, Store, StoreError,
 };
 
 /// Maximum number of relevant repository memories recalled into `BP3` per job.
 pub const DEFAULT_RECALL_LIMIT: usize = 5;
+/// Candidates recalled before curation (#658): the stale and the
+/// near-duplicate ones give their slots to the next.
+pub const RECALL_POOL: usize = 15;
+/// Two historical memories sharing this much of their paths and keywords
+/// (Jaccard) say the same thing: the better ranked one is kept.
+pub const DUPLICATE_OVERLAP: f64 = 0.6;
+
+/// The files of `branch` in the clone at `clone`, for [`RecallFor::tree`];
+/// `None` (said in the log) when they cannot be read.
+pub async fn base_tree(clone: &std::path::Path, branch: &str) -> Option<BTreeSet<String>> {
+    let (clone, branch) = (clone.to_owned(), branch.to_owned());
+    let listed =
+        tokio::task::spawn_blocking(move || aegis_lifecycle::clone::branch_files(&clone, &branch))
+            .await;
+    match listed {
+        Ok(Ok(files)) => Some(files.into_iter().map(|(f, _)| f).collect()),
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "reading the base branch's files; memories are not checked for staleness");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "reading the base branch's files");
+            None
+        }
+    }
+}
+
+/// What the job a recall is for adds to it (#658).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RecallFor<'a> {
+    /// The job given the memories, kept for its page.
+    pub job: Option<JobId>,
+    /// The files of the repo's base branch: a merged PR or a review
+    /// lesson none of whose paths is still there is down-ranked.
+    pub tree: Option<&'a BTreeSet<String>>,
+}
+
+fn historical(kind: MemoryKind) -> bool {
+    matches!(kind, MemoryKind::MergedPr | MemoryKind::ReviewLesson)
+}
+
+/// Whether `path` (a file, maybe with `:line`, or a directory) is still
+/// in `tree`.
+fn exists(tree: &BTreeSet<String>, path: &str) -> bool {
+    let path = path.trim().trim_start_matches("./");
+    let file = path.split(':').next().unwrap_or(path).trim_end_matches('/');
+    if file.is_empty() {
+        return false;
+    }
+    if tree.contains(file) {
+        return true;
+    }
+    let dir = format!("{file}/");
+    tree.range(dir.clone()..)
+        .next()
+        .is_some_and(|f| f.starts_with(&dir))
+}
+
+/// A merged PR or review lesson that names paths, none of them on the
+/// base branch any more.
+fn stale(memory: &RepoMemory, tree: &BTreeSet<String>) -> bool {
+    historical(memory.kind)
+        && !memory.paths.is_empty()
+        && !memory.paths.iter().any(|p| exists(tree, p))
+}
+
+fn tokens(memory: &RepoMemory) -> BTreeSet<String> {
+    memory
+        .paths
+        .iter()
+        .map(|p| p.trim().to_lowercase())
+        .chain(
+            memory
+                .keywords
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .filter(|w| w.chars().count() > 2)
+                .map(str::to_lowercase),
+        )
+        .collect()
+}
+
+fn overlap(a: &BTreeSet<String>, b: &BTreeSet<String>) -> f64 {
+    let union = a.union(b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    a.intersection(b).count() as f64 / union as f64
+}
+
+/// The `limit` memories a job is given out of `recalled` (best first):
+/// stale ones after the others, and a historical memory that repeats a
+/// better ranked one of its kind and module left out (#658): a merged PR
+/// and its review lesson say different things. Runbooks and business
+/// rules are never stale nor merged.
+pub fn curate(
+    recalled: Vec<RepoMemory>,
+    tree: Option<&BTreeSet<String>>,
+    limit: usize,
+) -> Vec<RepoMemory> {
+    let (fresh, old): (Vec<_>, Vec<_>) = recalled
+        .into_iter()
+        .partition(|m| tree.is_none_or(|t| !stale(m, t)));
+    let mut kept: Vec<(RepoMemory, BTreeSet<String>)> = Vec::new();
+    for memory in fresh.into_iter().chain(old) {
+        if kept.len() == limit {
+            break;
+        }
+        let words = tokens(&memory);
+        let repeats = historical(memory.kind)
+            && kept
+                .iter()
+                .any(|(k, w)| k.kind == memory.kind && overlap(w, &words) >= DUPLICATE_OVERLAP);
+        if !repeats {
+            kept.push((memory, words));
+        }
+    }
+    kept.into_iter().map(|(m, _)| m).collect()
+}
 /// Memories without an embedding embedded before one recall (#655): those
 /// written before the model was set, or after it changed, catch up a few
 /// at a time.
@@ -97,6 +218,18 @@ pub async fn enrich_with_memory(
     issue: &mut IssueInput,
     embedder: Option<&Embedder>,
 ) {
+    enrich_with_memory_for(store, repo_id, issue, embedder, RecallFor::default()).await;
+}
+
+/// [`enrich_with_memory`] for a job: curated against its base branch's
+/// files, and what it was given kept for its page (#658).
+pub async fn enrich_with_memory_for(
+    store: &Store,
+    repo_id: RepoId,
+    issue: &mut IssueInput,
+    embedder: Option<&Embedder>,
+    recall: RecallFor<'_>,
+) {
     let vector = match embedder {
         Some(embedder) => near_vector(store, repo_id, issue, embedder).await,
         None => None,
@@ -110,13 +243,7 @@ pub async fn enrich_with_memory(
         min_similarity: e.min_similarity(),
     });
     let recalled = match store
-        .recall_repo_memories_near(
-            repo_id,
-            &issue.title,
-            &issue.body,
-            DEFAULT_RECALL_LIMIT,
-            near,
-        )
+        .recall_repo_memories_near(repo_id, &issue.title, &issue.body, RECALL_POOL, near)
         .await
     {
         Ok(items) => items,
@@ -130,6 +257,13 @@ pub async fn enrich_with_memory(
             return;
         }
     };
+    let recalled = curate(recalled, recall.tree, DEFAULT_RECALL_LIMIT);
+    if let Some(job) = recall.job {
+        let ids: Vec<MemoryId> = recalled.iter().map(|m| m.id).collect();
+        if let Err(e) = store.record_recalled_memories(job, &ids).await {
+            tracing::warn!(job = job.0, error = %e, "keeping the job's recalled memories failed");
+        }
+    }
     if recalled.is_empty() {
         return;
     }
@@ -352,4 +486,121 @@ fn extract_paths_from_changes(changes: &[AnswerChange]) -> Vec<String> {
             (!file.is_empty()).then(|| file.to_owned())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aegis_store::{MemoryId, MemoryScope};
+
+    fn memory(id: i64, kind: MemoryKind, paths: &[&str], keywords: &str) -> RepoMemory {
+        RepoMemory {
+            id: MemoryId(id),
+            repo_id: RepoId(1),
+            kind,
+            source_ref: format!("ref-{id}"),
+            title: format!("memory {id}"),
+            summary: "s".into(),
+            paths: paths.iter().map(|p| (*p).to_owned()).collect(),
+            keywords: keywords.into(),
+            job_id: None,
+            scope: MemoryScope::Repo,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            updated_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn ids(kept: &[RepoMemory]) -> Vec<i64> {
+        kept.iter().map(|m| m.id.0).collect()
+    }
+
+    fn tree(files: &[&str]) -> BTreeSet<String> {
+        files.iter().map(|f| (*f).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_lesson_on_files_gone_from_the_base_goes_last() {
+        let base = tree(&["src/pay/charge.rs", "src/pay/refund/mod.rs"]);
+        let recalled = vec![
+            memory(
+                1,
+                MemoryKind::MergedPr,
+                &["src/old/billing.rs"],
+                "billing retry",
+            ),
+            memory(
+                2,
+                MemoryKind::ReviewLesson,
+                &["src/pay/charge.rs:42"],
+                "charge",
+            ),
+            memory(3, MemoryKind::MergedPr, &["src/pay/refund"], "refund dir"),
+            // A runbook is never stale, paths or not.
+            memory(4, MemoryKind::Runbook, &["ops/gone.md"], "runbook"),
+            // Names no path: nothing to check.
+            memory(5, MemoryKind::MergedPr, &[], "no paths"),
+        ];
+        let kept = curate(recalled.clone(), Some(&base), 5);
+        assert_eq!(ids(&kept), [2, 3, 4, 5, 1]);
+        assert_eq!(ids(&curate(recalled.clone(), Some(&base), 4)), [2, 3, 4, 5]);
+        // Without the base's files, the order is the recall's.
+        assert_eq!(ids(&curate(recalled, None, 5)), [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn a_repeated_fix_of_one_module_gives_its_slot_to_the_next() {
+        let recalled = vec![
+            memory(
+                1,
+                MemoryKind::MergedPr,
+                &["src/pay/charge.rs"],
+                "charge retry idempotency",
+            ),
+            memory(
+                2,
+                MemoryKind::MergedPr,
+                &["src/pay/charge.rs"],
+                "charge retry idempotency key",
+            ),
+            memory(
+                3,
+                MemoryKind::ReviewLesson,
+                &["src/pay/charge.rs"],
+                "charge retry idempotency",
+            ),
+            memory(
+                4,
+                MemoryKind::MergedPr,
+                &["src/auth/session.rs"],
+                "session expiry",
+            ),
+            // Rules and runbooks of the same words are kept: curated by hand.
+            memory(
+                5,
+                MemoryKind::BusinessRule,
+                &["src/pay/charge.rs"],
+                "charge retry idempotency",
+            ),
+            memory(
+                6,
+                MemoryKind::MergedPr,
+                &["src/report/csv.rs"],
+                "csv export",
+            ),
+        ];
+        // The review lesson of the same fix says something else: kept.
+        assert_eq!(ids(&curate(recalled, None, 4)), [1, 3, 4, 5]);
+    }
+
+    #[test]
+    fn a_path_is_matched_as_a_file_or_a_directory() {
+        let base = tree(&["src/a.rs", "src/lib/b.rs", "src/library.rs"]);
+        assert!(exists(&base, "src/a.rs"));
+        assert!(exists(&base, "./src/a.rs:10"));
+        assert!(exists(&base, "src/lib"));
+        assert!(exists(&base, "src/lib/"));
+        assert!(!exists(&base, "src/li"));
+        assert!(!exists(&base, "src/b.rs"));
+        assert!(!exists(&base, ""));
+    }
 }

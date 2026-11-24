@@ -266,6 +266,7 @@ impl Store {
                      JOIN repo_memories m ON m.id = e.memory_id
                     WHERE e.dimensions = {d}
                       AND e.model = $3
+                      AND m.obsolete_at IS NULL
                       AND (m.repo_id = $1
                            OR (m.scope = 'tenant'
                                AND m.repo_id IN (SELECT id FROM tenant_repos)))

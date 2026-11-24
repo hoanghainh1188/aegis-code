@@ -67,6 +67,34 @@
 </section>
 {% endif %}
 {% include "patch.html" %}
+{% if !memories.is_empty() %}
+<section aria-labelledby="memories-heading" class="band">
+  <h2 id="memories-heading">{{ crate::t("Repo memories the job was given") }}</h2>
+  <p class="note">{{ crate::t("Recalled from the repo's history and runbooks, as reference for the agent. One that no longer holds can be marked obsolete: no job is given it again until its text changes.") }}</p>
+  <table>
+    <thead><tr><th>#</th><th>{{ crate::t("Kind") }}</th><th>{{ crate::t("Memory") }}</th><th>{{ crate::t("Source") }}</th><th></th></tr></thead>
+    <tbody>
+    {% for m in memories %}
+      <tr>
+        <td>{{ m.rank }}</td>
+        <td><code>{{ m.kind }}</code>{% if m.shared %} {{ crate::t("(shared with the tenant)") }}{% endif %}</td>
+        <td>{{ m.title }}</td>
+        <td><code>{{ m.source_ref }}</code></td>
+        <td>
+          {% if let Some(by) = m.obsolete %}{{ crate::t("Obsolete:") }} {{ by }}
+          {% else if m.can_mark %}
+          <form method="post" action="/jobs/{{ head.id }}/memories/{{ m.id }}/obsolete" class="inline">
+            {% include "form_guard.html" %}
+            <button type="submit" class="ghost">{{ crate::t("Mark obsolete") }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
 
 <section aria-labelledby="runs-heading" class="band">
   <h2 id="runs-heading">{{ crate::t("Attempts") }}</h2>

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, kind, source_ref, title, summary, paths,\n                    keywords, job_id, scope, created_at, updated_at\n               FROM repo_memories\n              WHERE id = ANY($1)",
+  "query": "SELECT id, repo_id, kind, source_ref, title, summary, paths,\n                    keywords, job_id, scope, created_at, updated_at\n               FROM repo_memories\n              WHERE id = ANY($1) AND obsolete_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -156,5 +156,5 @@
       false
     ]
   },
-  "hash": "83230a46aa9eb93875796eba3ba583f9d94b800f58f70354c773973bc4558ba8"
+  "hash": "f5d4d1f6d8c9d2ad4d5092cf66a40674a7b388e0b5905e2a563ec0e3ddad311c"
 }

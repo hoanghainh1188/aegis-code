@@ -2,10 +2,12 @@
 //! review lessons from `/aegis fix` rounds, operational runbooks, and
 //! business rules. Recall is in [`recall`] (#596).
 
+mod curation;
 mod recall;
 mod sync;
 mod vector;
 
+pub use curation::RecalledMemory;
 pub use recall::{RecallScores, fuse};
 pub use sync::{GIT_SOURCE_PREFIX, GitSync};
 pub(crate) use vector::VectorIndexes;
@@ -246,6 +248,18 @@ pub(crate) async fn upsert_in(
                  paths = EXCLUDED.paths,
                  keywords = EXCLUDED.keywords,
                  job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),
+                 -- A memory marked obsolete stays so until its text changes
+                 -- (#658).
+                 obsolete_at = CASE
+                     WHEN repo_memories.title = EXCLUDED.title
+                      AND repo_memories.summary = EXCLUDED.summary
+                     THEN repo_memories.obsolete_at
+                 END,
+                 obsolete_by = CASE
+                     WHEN repo_memories.title = EXCLUDED.title
+                      AND repo_memories.summary = EXCLUDED.summary
+                     THEN repo_memories.obsolete_by
+                 END,
                  updated_at = now()
              RETURNING id, repo_id, kind, source_ref, title, summary, paths,
                        keywords, job_id, scope, created_at, updated_at",

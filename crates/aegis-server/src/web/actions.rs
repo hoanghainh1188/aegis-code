@@ -44,6 +44,8 @@ pub enum Done {
     Retried,
     /// A review was recorded from the form (#562).
     Reviewed,
+    /// A recalled memory was marked obsolete from the job's page (#658).
+    MemoryObsolete,
 }
 
 impl Done {
@@ -59,15 +61,19 @@ impl Done {
                 "Review recorded for the measures. The PR itself is unchanged: approve, \
                  merge or ask for changes on its forge."
             }
+            Self::MemoryObsolete => {
+                "Memory marked obsolete: no job is given it again until its text changes."
+            }
         }
     }
 
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Created,
         Self::Cancelled,
         Self::CancelRequested,
         Self::Retried,
         Self::Reviewed,
+        Self::MemoryObsolete,
     ];
 
     fn word(self) -> &'static str {
@@ -77,6 +83,7 @@ impl Done {
             Self::CancelRequested => "cancel_requested",
             Self::Retried => "retried",
             Self::Reviewed => "reviewed",
+            Self::MemoryObsolete => "memory_obsolete",
         }
     }
 
@@ -174,6 +181,48 @@ pub async fn cancel(
         _ => Done::CancelRequested,
     };
     Ok(to_job(job.id, done))
+}
+
+/// Whether `access` may mark `memory` obsolete: a maintainer of its repo,
+/// and for one shared with the tenant its admin (#596, #658).
+pub(super) fn may_curate(access: &Access, memory: &aegis_store::RepoMemory) -> bool {
+    match memory.scope {
+        aegis_store::MemoryScope::Repo => access.can(memory.repo_id, RepoRole::Maintainer),
+        aegis_store::MemoryScope::Tenant => access.administers(memory.repo_id),
+    }
+}
+
+/// Marks a memory job `id` was given obsolete (#658): recall leaves it
+/// out until its text changes. Only a memory of this job's, by who may
+/// curate it.
+pub async fn mark_memory_obsolete(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path((id, memory_id)): Path<(i64, i64)>,
+) -> WebResult {
+    let job = job_for(&store, &access, id, RepoRole::Viewer).await?;
+    let given = store
+        .recalled_memories(job.id)
+        .await?
+        .into_iter()
+        .find(|r| r.memory.id.0 == memory_id)
+        .ok_or_else(|| WebError::not_found(format!("memory {memory_id} of job {id}")))?;
+    if !may_curate(&access, &given.memory) {
+        return Err(WebError::new(
+            StatusCode::FORBIDDEN,
+            "marking this memory obsolete takes a maintainer of its repo, or the tenant's \
+             admin for one shared with the tenant",
+        ));
+    }
+    store
+        .mark_memory_obsolete_by(
+            given.memory.repo_id,
+            given.memory.id,
+            &access.actor,
+            Some(job.id),
+        )
+        .await?;
+    Ok(to_job(job.id, Done::MemoryObsolete))
 }
 
 pub async fn retry(

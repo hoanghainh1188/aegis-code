@@ -59,7 +59,7 @@ pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use memory::{
     EmbeddingSpace, GIT_SOURCE_PREFIX, GitSync, MemoryId, MemoryKind, MemoryScope, MemoryToEmbed,
-    NearQuery, NewRepoMemory, RecallScores, RepoMemory, fuse,
+    NearQuery, NewRepoMemory, RecallScores, RecalledMemory, RepoMemory, fuse,
 };
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};
