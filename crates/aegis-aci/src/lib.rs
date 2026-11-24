@@ -14,6 +14,7 @@ mod error;
 mod formatter;
 mod lsp;
 mod navigate;
+pub mod remote;
 mod run_tests;
 pub mod sbfl;
 mod search;

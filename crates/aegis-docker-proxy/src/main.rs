@@ -8,13 +8,20 @@
 //! `--writable-image` an image that may run with a writable root (the
 //! scanner's), and `--sidecar-image` an image a gate run's sidecar may run
 //! (`postgres:16-alpine`, #490). Logs one line per refused call.
+//!
+//! `--listen-tls <addr:port> --tls-cert <pem> --tls-key <pem>
+//! --tls-client-ca <pem>` serves the same API to a remote worker over
+//! mutual TLS (#664): only a client whose certificate chains to the
+//! client CA is served, every call checked as on the socket. One of
+//! `--listen` and `--listen-tls` is needed; both may be given.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use aegis_docker_proxy::{Policy, Proxy, bind};
 
-const USAGE: &str = "usage: aegis-docker-proxy --listen <socket> [--upstream <socket>]
+const USAGE: &str = "usage: aegis-docker-proxy [--listen <socket>] [--upstream <socket>]
+       [--listen-tls <addr:port> --tls-cert <pem> --tls-key <pem> --tls-client-ca <pem>]
        --mount-root <dir>... [--network <name>]... [--writable-image <image>]...
        [--sidecar-image <image>]...";
 
@@ -25,10 +32,13 @@ struct Args {
     listen: Option<PathBuf>,
     upstream: Option<PathBuf>,
     policy: Policy,
+    listen_tls: Option<String>,
+    tls: Option<aegis_mtls::MtlsFiles>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut parsed = Args::default();
+    let (mut cert, mut key, mut ca) = (None, None, None);
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
         match flag.as_str() {
@@ -38,12 +48,22 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--network" => parsed.policy.networks.push(value()?),
             "--writable-image" => parsed.policy.writable_images.push(value()?),
             "--sidecar-image" => parsed.policy.sidecar_images.push(value()?),
+            "--listen-tls" => parsed.listen_tls = Some(value()?),
+            "--tls-cert" => cert = Some(PathBuf::from(value()?)),
+            "--tls-key" => key = Some(PathBuf::from(value()?)),
+            "--tls-client-ca" => ca = Some(PathBuf::from(value()?)),
             "--help" | "-h" => return Err(USAGE.into()),
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
     }
-    if parsed.listen.is_none() {
-        return Err(format!("--listen is required\n{USAGE}"));
+    parsed.tls = aegis_mtls::MtlsFiles::from_flags(cert, key, ca)?;
+    if parsed.listen_tls.is_some() != parsed.tls.is_some() {
+        return Err(format!(
+            "--listen-tls needs --tls-cert, --tls-key and --tls-client-ca, and they need it\n{USAGE}"
+        ));
+    }
+    if parsed.listen.is_none() && parsed.listen_tls.is_none() {
+        return Err(format!("--listen or --listen-tls is required\n{USAGE}"));
     }
     if parsed.policy.mount_roots.is_empty() {
         return Err(format!("at least one --mount-root is required\n{USAGE}"));
@@ -67,24 +87,69 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let listen = args.listen.unwrap_or_default();
-    let listener = match bind(&listen) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!(
-                "aegis-docker-proxy: cannot listen on {}: {e}",
-                listen.display()
-            );
-            return ExitCode::FAILURE;
-        }
-    };
     let proxy = Proxy {
         upstream: args.upstream.unwrap_or_else(|| DEFAULT_UPSTREAM.into()),
         policy: args.policy,
     };
-    tracing::info!(listen = %listen.display(), upstream = %proxy.upstream.display(), "serving");
+    let local = match &args.listen {
+        Some(path) => match bind(path) {
+            Ok(l) => Some((path.clone(), l)),
+            Err(e) => {
+                eprintln!(
+                    "aegis-docker-proxy: cannot listen on {}: {e}",
+                    path.display()
+                );
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let remote = match (&args.listen_tls, &args.tls) {
+        (Some(addr), Some(files)) => {
+            let tls = match aegis_mtls::acceptor(files) {
+                Ok(tls) => tls,
+                Err(e) => {
+                    eprintln!("aegis-docker-proxy: TLS: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match tokio::net::TcpListener::bind(addr).await {
+                Ok(l) => Some((l, tls)),
+                Err(e) => {
+                    eprintln!("aegis-docker-proxy: cannot listen on {addr}: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        _ => None,
+    };
+    tracing::info!(
+        listen = ?args.listen,
+        listen_tls = ?args.listen_tls,
+        upstream = %proxy.upstream.display(),
+        "serving"
+    );
+    let socket_path = local.as_ref().map(|(p, _)| p.clone());
+    let serve_local = async {
+        match local {
+            Some((_, l)) => proxy.clone().serve(l).await,
+            None => std::future::pending().await,
+        }
+    };
+    let serve_remote = async {
+        match remote {
+            Some((l, tls)) => proxy.clone().serve_tls(l, tls).await,
+            None => std::future::pending().await,
+        }
+    };
     tokio::select! {
-        result = proxy.serve(listener) => {
+        result = serve_local => {
+            if let Err(e) = result {
+                eprintln!("aegis-docker-proxy: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+        result = serve_remote => {
             if let Err(e) = result {
                 eprintln!("aegis-docker-proxy: {e}");
                 return ExitCode::FAILURE;
@@ -93,7 +158,9 @@ async fn main() -> ExitCode {
         _ = tokio::signal::ctrl_c() => {}
         _ = terminate() => {}
     }
-    let _ = std::fs::remove_file(&listen);
+    if let Some(path) = socket_path {
+        let _ = std::fs::remove_file(&path);
+    }
     ExitCode::SUCCESS
 }
 
@@ -132,6 +199,7 @@ mod tests {
         .unwrap();
         assert_eq!(args.listen, Some("/run/aegis-docker/docker.sock".into()));
         assert_eq!(args.upstream, None);
+        assert_eq!(args.listen_tls, None);
         assert_eq!(
             args.policy,
             Policy {
@@ -149,6 +217,48 @@ mod tests {
         assert!(no_root.contains("--mount-root"), "{no_root}");
         let no_listen = parse(&["--mount-root", "/w"]).unwrap_err();
         assert!(no_listen.contains("--listen"), "{no_listen}");
+        // #664: the TLS listener takes its three files, and only with them.
+        let tls = parse(&[
+            "--listen-tls",
+            "0.0.0.0:2376",
+            "--tls-cert",
+            "/c",
+            "--tls-key",
+            "/k",
+            "--tls-client-ca",
+            "/ca",
+            "--mount-root",
+            "/w",
+        ])
+        .unwrap();
+        assert_eq!(tls.listen, None);
+        assert_eq!(tls.listen_tls.as_deref(), Some("0.0.0.0:2376"));
+        assert_eq!(tls.tls.unwrap().ca, PathBuf::from("/ca"));
+        for half in [
+            &["--listen-tls", "0.0.0.0:2376", "--mount-root", "/w"][..],
+            &[
+                "--listen",
+                "/s",
+                "--tls-cert",
+                "/c",
+                "--tls-key",
+                "/k",
+                "--tls-client-ca",
+                "/ca",
+                "--mount-root",
+                "/w",
+            ],
+            &[
+                "--listen-tls",
+                "0.0.0.0:2376",
+                "--tls-cert",
+                "/c",
+                "--mount-root",
+                "/w",
+            ],
+        ] {
+            assert!(parse(half).is_err(), "{half:?}");
+        }
         let unknown = parse(&["--listen", "/s", "--mount-root", "/w", "--x"]).unwrap_err();
         assert!(unknown.contains("unknown argument --x"), "{unknown}");
     }

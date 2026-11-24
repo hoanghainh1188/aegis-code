@@ -7,8 +7,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
+aegis-mtls = { path = "../aegis-mtls" }
 aegis-provider = { path = "../aegis-provider" }
-rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+reqwest = { workspace = true, features = ["rustls"] }
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

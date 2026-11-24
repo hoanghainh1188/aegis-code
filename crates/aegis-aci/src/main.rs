@@ -20,6 +20,12 @@
 //! holds the repo's services (`[[sidecar]]`, as `[[repo.sidecars]]`, #491):
 //! with `--format-image`, `run_tests` reaches them as the gate's test steps
 //! do, fresh for each run, and they are removed when the session ends.
+//!
+//! With `--listen <addr:port> --tls-cert <pem> --tls-key <pem>
+//! --tls-client-ca <pem> [--allowed-host <name>]...` (#664) the same tools
+//! are served to a remote worker over MCP Streamable HTTP at `/mcp`, only
+//! to a client whose certificate chains to the client CA (mutual TLS);
+//! `--allowed-host` names the host as the worker dials it.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -37,7 +43,9 @@ const USAGE: &str = "usage: aegis-aci --repo <dir> --language <id> [--overrides 
         [--sandbox-memory-mb <n>] [--sandbox-cpus <n>] [--sandbox-pids <n>] [--sandbox-tmp-mb <n>]
         [--sandbox-runtime <name>]]
        [--test-env <key>=<value>]... [--test-timeout <secs>] [--test-dir <dir>]
-       [--sidecars <file.toml>]";
+       [--sidecars <file.toml>]
+       [--listen <addr:port> --tls-cert <pem> --tls-key <pem> --tls-client-ca <pem>
+        [--allowed-host <name>]...]";
 
 /// How long `run_tests` waits for a test still running to stop when the
 /// client goes.
@@ -59,13 +67,30 @@ struct Args {
     test_timeout: Option<Duration>,
     test_dir: Option<PathBuf>,
     sidecars: Option<PathBuf>,
+    /// Served over mutual TLS instead of stdio (#664).
+    remote: Option<Remote>,
+}
+
+/// Where and how the tools are served to a remote worker (#664).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Remote {
+    listen: String,
+    tls: aegis_mtls::MtlsFiles,
+    allowed_hosts: Vec<String>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut parsed = Args::default();
+    let (mut listen, mut cert, mut key, mut ca) = (None, None, None, None);
+    let mut allowed_hosts = Vec::new();
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{flag} needs a value"));
         match flag.as_str() {
+            "--listen" => listen = Some(value()?),
+            "--tls-cert" => cert = Some(PathBuf::from(value()?)),
+            "--tls-key" => key = Some(PathBuf::from(value()?)),
+            "--tls-client-ca" => ca = Some(PathBuf::from(value()?)),
+            "--allowed-host" => allowed_hosts.push(value()?),
             "--repo" => parsed.repo = Some(value()?.into()),
             "--language" => parsed.language = Some(value()?),
             "--overrides" => parsed.overrides = Some(value()?.into()),
@@ -110,6 +135,26 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             _ => return Err(format!("unknown argument `{flag}`")),
         }
     }
+    let tls = aegis_mtls::MtlsFiles::from_flags(cert, key, ca)?;
+    parsed.remote = match (listen, tls) {
+        (None, None) if allowed_hosts.is_empty() => None,
+        (Some(listen), Some(tls)) => Some(Remote {
+            listen,
+            tls,
+            // The name it is dialed by; localhost for a local test.
+            allowed_hosts: if allowed_hosts.is_empty() {
+                vec!["localhost".into(), "127.0.0.1".into()]
+            } else {
+                allowed_hosts
+            },
+        }),
+        // Never on the network without mutual TLS.
+        _ => {
+            return Err(
+                "--listen needs --tls-cert, --tls-key and --tls-client-ca, and they need it".into(),
+            );
+        }
+    };
     Ok(parsed)
 }
 
@@ -260,8 +305,10 @@ fn test_sandbox(container: &FormatContainer) -> Sandbox {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let aci = match parse_args(std::env::args().skip(1)).and_then(build) {
-        Ok(aci) => aci,
+    let built = parse_args(std::env::args().skip(1))
+        .and_then(|args| Ok((args.remote.clone(), build(args)?)));
+    let (remote, aci) = match built {
+        Ok(built) => built,
         Err(message) => {
             eprintln!("aegis-aci: {message}\n{USAGE}");
             return ExitCode::from(2);
@@ -270,21 +317,9 @@ async fn main() -> ExitCode {
     // The language server starts at the first find_definition /
     // find_references (#268), not here.
     let server = AciServer::new(aci);
-    let served = async {
-        server
-            .clone()
-            .serve(rmcp::transport::stdio())
-            .await?
-            .waiting()
-            .await?;
-        Ok::<_, Box<dyn std::error::Error>>(())
-    };
-    let code = match served.await {
-        Ok(()) => 0,
-        Err(e) => {
-            eprintln!("aegis-aci: {e}");
-            1
-        }
+    let code = match remote {
+        None => serve_stdio(server.clone()).await,
+        Some(remote) => serve_remote(server.clone(), remote).await,
     };
     // A test still running would keep its container after the client
     // has gone.
@@ -292,6 +327,68 @@ async fn main() -> ExitCode {
     // Exit now: returning would wait for a tool still running on a
     // blocking thread (a formatter) after the client has gone.
     std::process::exit(code)
+}
+
+async fn serve_stdio(server: AciServer) -> i32 {
+    let served = async {
+        server
+            .serve(rmcp::transport::stdio())
+            .await?
+            .waiting()
+            .await?;
+        Ok::<_, Box<dyn std::error::Error>>(())
+    };
+    match served.await {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("aegis-aci: {e}");
+            1
+        }
+    }
+}
+
+/// Serves a remote worker until SIGTERM or Ctrl-C (#664).
+async fn serve_remote(server: AciServer, remote: Remote) -> i32 {
+    let tls = match aegis_mtls::acceptor(&remote.tls) {
+        Ok(tls) => tls,
+        Err(e) => {
+            eprintln!("aegis-aci: TLS: {e}");
+            return 2;
+        }
+    };
+    let listener = match tokio::net::TcpListener::bind(&remote.listen).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("aegis-aci: cannot listen on {}: {e}", remote.listen);
+            return 1;
+        }
+    };
+    eprintln!(
+        "aegis-aci: serving https://{}{} over mutual TLS",
+        remote.listen,
+        aegis_aci::remote::MCP_PATH
+    );
+    let mut terminate =
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("aegis-aci: {e}");
+                return 1;
+            }
+        };
+    tokio::select! {
+        served = aegis_aci::remote::serve_mtls(server, listener, tls, remote.allowed_hosts) => {
+            match served {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("aegis-aci: {e}");
+                    1
+                }
+            }
+        }
+        _ = tokio::signal::ctrl_c() => 0,
+        _ = terminate.recv() => 0,
+    }
 }
 
 #[cfg(test)]
@@ -314,5 +411,37 @@ mod tests {
         );
         assert!(args(&["--sandbox-runtime", "--privileged"]).is_err());
         assert!(args(&["--sandbox-runtime"]).is_err());
+    }
+
+    #[test]
+    fn the_network_listener_needs_mutual_tls() {
+        assert_eq!(args(&[]).unwrap().remote, None);
+        let tls = [
+            "--tls-cert",
+            "/c",
+            "--tls-key",
+            "/k",
+            "--tls-client-ca",
+            "/ca",
+        ];
+        let remote = args(
+            &[
+                &["--listen", "0.0.0.0:7443"][..],
+                &tls,
+                &["--allowed-host", "exec.internal"],
+            ]
+            .concat(),
+        )
+        .unwrap()
+        .remote
+        .unwrap();
+        assert_eq!(remote.listen, "0.0.0.0:7443");
+        assert_eq!(remote.allowed_hosts, ["exec.internal"]);
+        assert!(
+            args(&["--listen", "0.0.0.0:7443"]).is_err(),
+            "no TLS: refused"
+        );
+        assert!(args(&tls).is_err(), "TLS without a listener");
+        assert!(args(&["--allowed-host", "x"]).is_err());
     }
 }

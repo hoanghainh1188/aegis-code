@@ -10,6 +10,6 @@ pub use agent_loop::{
     ToolCallRecord, ToolExecutor, ToolOutcome, TurnObserver, TurnRecord, Warning, run_loop,
     run_loop_observed,
 };
-pub use mcp_tools::{INHERITED_ENV, McpServerSpec, McpTools, McpToolsError};
+pub use mcp_tools::{INHERITED_ENV, McpServerSpec, McpTools, McpToolsError, RemoteMcpSpec};
 pub use prompt::{RepoPrompt, SYSTEM_PROMPT, system_blocks};
 pub use session::{COLLAPSED, ModelSpec, Session};
