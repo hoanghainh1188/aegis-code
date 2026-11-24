@@ -3,8 +3,11 @@
 //! business rules. Recall is in [`recall`] (#596).
 
 mod recall;
+mod vector;
 
 pub use recall::{RecallScores, fuse};
+pub(crate) use vector::VectorIndexes;
+pub use vector::{EmbeddingSpace, MemoryToEmbed, NearQuery};
 
 use serde_json::json;
 use time::OffsetDateTime;
@@ -269,6 +272,14 @@ impl Store {
             .await
             .map_err(StoreError::from_db)?
             .try_into()?;
+            // Its text may have changed: embedded again before its next
+            // recall (#655).
+            sqlx::query!(
+                "DELETE FROM repo_memory_embeddings WHERE memory_id = $1",
+                saved.id.0
+            )
+            .execute(&mut *tx)
+            .await?;
             audit::record(
                 &mut tx,
                 actor,

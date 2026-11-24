@@ -185,6 +185,38 @@ jobs:
       - if: needs.changes.outputs.code != 'true'
         run: echo "Skipping sqlx for documentation-only changes"
 
+  # Semantic memory recall (#655) on a PostgreSQL with pgvector; the
+  # `test` job above runs the same tests without it, where recall stays
+  # lexical.
+  pgvector:
+    name: test (pgvector)
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      AEGIS_TEST_DATABASE_URL: postgres://postgres:aegis@localhost:5432/postgres
+      AEGIS_REQUIRE_POSTGRES: "1"
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: aegis
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - if: needs.changes.outputs.code == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: needs.changes.outputs.code == 'true'
+        uses: Swatinem/rust-cache@v2
+      - if: needs.changes.outputs.code == 'true'
+        name: memory recall with pgvector
+        run: |
+          cargo test -p aegis-store --test memory
+          cargo test -p aegis-server --test memory_vector
+      - if: needs.changes.outputs.code != 'true'
+        run: echo "Skipping pgvector tests for documentation-only changes"
+
   # Alert rules (#32): valid, and each fires when it should (and only then).
   alerts:
     name: alerts

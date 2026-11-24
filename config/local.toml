@@ -96,3 +96,14 @@ token_env = "GITHUB_TOKEN"
 [identity]
 name = "aegis-bot"
 email = "aegis-bot@users.noreply.github.com"
+
+# Semantic recall of repo memories (#655), with a PostgreSQL that has
+# pgvector: an embedding model on the same Ollama. Without this section,
+# recall is lexical (paths, full text, substrings).
+# [memory.embedding]
+# model = "nomic-embed-text"
+# dimensions = 768
+# min_similarity = 0.5
+# [memory.embedding.provider]
+# kind = "local"
+# base_url = "http://localhost:11434/v1"

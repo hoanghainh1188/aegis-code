@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::LifecycleError;
 use crate::config::{
-    BudgetSection, DirConfig, ExtraServer, ForkConfig, IdentityConfig, RepoConfig, RunConfig,
-    RunSection, SonarConfig, residency_policy,
+    BudgetSection, DirConfig, ExtraServer, ForkConfig, IdentityConfig, MemorySection, RepoConfig,
+    RunConfig, RunSection, SonarConfig, residency_policy,
 };
 
 /// Bedrock in Tokyo for `customer-jp` (design §1, §7).
@@ -45,6 +45,9 @@ pub struct ModeConfig {
     /// Where the mode's code may go (#592); see [`ResidencyConfig`].
     #[serde(default)]
     pub residency: ResidencyConfig,
+    /// Its memory's embedding model (#655); see [`MemorySection`].
+    #[serde(default)]
+    pub memory: MemorySection,
 }
 
 fn is_customer_jp(mode: &ModeName) -> bool {
@@ -106,6 +109,12 @@ impl ModeConfig {
                 other => other,
             },
         )?;
+        self.memory
+            .check(&self.residency, customer_jp)
+            .map_err(|e| match e {
+                LifecycleError::Config(why) => LifecycleError::Config(format!("{mode}: {why}")),
+                other => other,
+            })?;
         Ok(match policy {
             ModelPolicy::Any if customer_jp => ModelPolicy::japan_only(),
             policy => policy,
@@ -630,6 +639,7 @@ impl Modes {
             codebase_memory: mode.codebase_memory.clone(),
             sonar: settings.sonar,
             residency: mode.residency.clone(),
+            memory: mode.memory.clone(),
         }
         .check()
         .map_err(|e| match e {
@@ -1018,6 +1028,52 @@ mod tests {
         poc.check(&ModeName::POC).unwrap();
         let err = poc.check(&ModeName::CUSTOMER_JP).unwrap_err().to_string();
         assert!(err.contains("must be Bedrock"), "{err}");
+    }
+
+    /// #655: a mode's embedding endpoint keeps to its residency, and the
+    /// customer-jp guard keeps it in Japan.
+    #[test]
+    fn a_modes_embedding_endpoint_keeps_to_its_guard() {
+        let with = |base: &str, embedding: &str| {
+            ModeConfig::from_toml(&format!("{base}\n[memory.embedding]\n{embedding}")).unwrap()
+        };
+        let tokyo = "model = \"amazon.titan-embed-text-v2:0\"\ndimensions = 1024\n\
+                     [memory.embedding.provider]\nkind = \"bedrock\"\n\
+                     region = \"ap-northeast-1\"\nrequire_jp_profile = false\n";
+        let virginia = tokyo.replace("ap-northeast-1", "us-east-1");
+        let ollama = "model = \"nomic-embed-text\"\ndimensions = 768\n\
+                      [memory.embedding.provider]\nkind = \"local\"\n\
+                      base_url = \"http://ollama:11434/v1\"\n";
+        let outside = ollama.replace("http://ollama:11434", "https://embed.example.com");
+        let claude = "model = \"x\"\ndimensions = 8\n[memory.embedding.provider]\n\
+                      kind = \"claude_api\"\n";
+
+        with(JP, tokyo).check(&ModeName::CUSTOMER_JP).unwrap();
+        with(JP, ollama).check(&ModeName::CUSTOMER_JP).unwrap();
+        for (embedding, why) in [
+            (virginia.as_str(), "must be Bedrock"),
+            (outside.as_str(), "local network"),
+        ] {
+            let err = with(JP, embedding)
+                .check(&ModeName::CUSTOMER_JP)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(why), "{err}");
+        }
+        with(POC, &virginia).check(&ModeName::POC).unwrap();
+        let err = with(POC, claude)
+            .check(&ModeName::POC)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Claude API"), "{err}");
+        // A run configuration takes the section too.
+        assert!(
+            ModeConfig::from_toml(POC)
+                .unwrap()
+                .memory
+                .embedding
+                .is_none()
+        );
     }
 
     /// #266: customer repos get the impact note too, with the same server

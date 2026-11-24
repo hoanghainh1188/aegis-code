@@ -5,24 +5,118 @@
 //!   before triage, diagnosis, and fix execution.
 
 use aegis_ledger::{AnswerChange, IssueId, IssueRecord, LedgerStore};
-use aegis_lifecycle::Modes;
 use aegis_lifecycle::{
-    IssueInput, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
-    fallback_extract_from_merged_pr,
+    IssueInput, MemoryLesson, MemorySection, MergedPrFacts, Modes, extract_from_merged_pr,
+    fallback_extract_from_merged_pr, redact_for_embedding,
 };
-use aegis_provider::Provider;
+use aegis_provider::{EmbedPurpose, Embedder, ModelPolicy, Provider};
 use aegis_secrets::Secrets;
-use aegis_store::{Actor, MemoryKind, NewRepoMemory, Repo, RepoId, RepoMemory, Store, StoreError};
+use aegis_store::{
+    Actor, EmbeddingSpace, MemoryKind, NearQuery, NewRepoMemory, Repo, RepoId, RepoMemory, Store,
+    StoreError,
+};
 
 /// Maximum number of relevant repository memories recalled into `BP3` per job.
 pub const DEFAULT_RECALL_LIMIT: usize = 5;
+/// Memories without an embedding embedded before one recall (#655): those
+/// written before the model was set, or after it changed, catch up a few
+/// at a time.
+pub const EMBED_BACKLOG_PER_RECALL: i64 = 16;
+
+/// The embedding model of `memory`, refusing what `policy` refuses; `None`
+/// (said in the log) keeps recall lexical (#655).
+pub async fn embedder_of(
+    memory: &MemorySection,
+    policy: ModelPolicy,
+    secrets: &Secrets,
+) -> Option<Embedder> {
+    let config = memory.embedding.as_ref()?;
+    match Embedder::from_config_with_secrets(config, secrets).await {
+        Ok(embedder) => Some(embedder.with_policy(policy)),
+        Err(e) => {
+            tracing::warn!(error = %e, "no embedding model for the memory; recall stays lexical");
+            None
+        }
+    }
+}
+
+/// The issue's embedding to search with, once the repo's memories without
+/// one are embedded; `None` (said in the log) keeps recall lexical.
+async fn near_vector(
+    store: &Store,
+    repo_id: RepoId,
+    issue: &IssueInput,
+    embedder: &Embedder,
+) -> Option<Vec<f32>> {
+    let space = EmbeddingSpace {
+        model: embedder.model(),
+        dimensions: embedder.dimensions(),
+    };
+    if !store.vector_search_ready(space.dimensions).await {
+        return None;
+    }
+    let fail = |what: &str, e: &dyn std::fmt::Display| {
+        tracing::warn!(repo_id = repo_id.0, issue = %issue.id, error = %e, "{what}; recall stays lexical");
+    };
+    match store
+        .memories_to_embed(repo_id, space, EMBED_BACKLOG_PER_RECALL)
+        .await
+    {
+        Ok(todo) if !todo.is_empty() => {
+            let texts: Vec<String> = todo.iter().map(|m| redact_for_embedding(&m.text)).collect();
+            match embedder.embed(&texts, EmbedPurpose::Document).await {
+                Ok(vectors) => {
+                    let pairs: Vec<_> = todo.iter().map(|m| m.id).zip(vectors).collect();
+                    if let Err(e) = store.save_memory_embeddings(space, &pairs).await {
+                        fail("storing memory embeddings failed", &e);
+                    }
+                }
+                Err(e) => fail("embedding memories failed", &e),
+            }
+        }
+        Ok(_) => {}
+        Err(e) => fail("reading memories to embed failed", &e),
+    }
+    let query = redact_for_embedding(&format!("{}\n{}", issue.title, issue.body));
+    match embedder.embed(&[query], EmbedPurpose::Query).await {
+        Ok(mut vectors) => vectors.pop(),
+        Err(e) => {
+            fail("embedding the issue failed", &e);
+            None
+        }
+    }
+}
 
 /// Recalls relevant historical lessons (`merged_pr`, `review_lesson`,
 /// `runbook`, `business_rule`) for `repo_id` and attaches them to `issue`
-/// (`BP3` and triage inputs) while leaving `BP2` untouched (#456).
-pub async fn enrich_with_memory(store: &Store, repo_id: RepoId, issue: &mut IssueInput) {
+/// (`BP3` and triage inputs) while leaving `BP2` untouched (#456). With
+/// `embedder`, the memories nearest the issue's meaning count too (#655).
+pub async fn enrich_with_memory(
+    store: &Store,
+    repo_id: RepoId,
+    issue: &mut IssueInput,
+    embedder: Option<&Embedder>,
+) {
+    let vector = match embedder {
+        Some(embedder) => near_vector(store, repo_id, issue, embedder).await,
+        None => None,
+    };
+    let near = embedder.zip(vector.as_deref()).map(|(e, v)| NearQuery {
+        space: EmbeddingSpace {
+            model: e.model(),
+            dimensions: e.dimensions(),
+        },
+        vector: v,
+        min_similarity: e.min_similarity(),
+    });
     let recalled = match store
-        .recall_repo_memories(repo_id, &issue.title, &issue.body, DEFAULT_RECALL_LIMIT)
+        .recall_repo_memories_near(
+            repo_id,
+            &issue.title,
+            &issue.body,
+            DEFAULT_RECALL_LIMIT,
+            near,
+        )
         .await
     {
         Ok(items) => items,

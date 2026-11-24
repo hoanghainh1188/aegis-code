@@ -63,7 +63,7 @@ fn decode_response(body: &[u8], plan: CachePlan) -> Result<Response, ProviderErr
     Ok(response)
 }
 
-fn error_from(error: SdkError<InvokeModelError, HttpResponse>) -> ProviderError {
+pub(crate) fn error_from(error: SdkError<InvokeModelError, HttpResponse>) -> ProviderError {
     let SdkError::ServiceError(context) = error else {
         return match error {
             // Request could not be built: retrying the same input won't help.

@@ -187,6 +187,9 @@ networkPolicy:
 # its URL in AEGIS_DATABASE_URL.
 postgresql:
   enabled: false
+  # `pgvector/pgvector` with tag `pg17` adds pgvector, for the semantic
+  # recall of a mode's `[memory.embedding]` (#655); your own PostgreSQL
+  # needs the `vector` extension for it. Without it recall stays lexical.
   image:
     repository: postgres
     tag: 17-alpine
