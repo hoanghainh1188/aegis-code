@@ -10,6 +10,13 @@
 //   coverage step needs no plugin in the build script.
 // - `aegisFetch` resolves every resolvable configuration, so the gate's
 //   steps then run with `--offline`.
+// - A build given `--tests` (the gate's repro_test) prints
+//   `aegis-gradle RAN <Class>#<test>` for each test it runs, and a test
+//   task whose filter matches nothing passes (#648): in a multi-project
+//   build `test --tests <id>` runs every project's test task, and each one
+//   without that class would fail the build. The profile's `repro_ran`
+//   reads the RAN lines, so an id that selects no test is still caught
+//   (#235).
 //
 // The listener needs the configuration cache off: the profile's commands
 // pass `--no-configuration-cache`.
@@ -19,6 +26,13 @@ import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestResult
 
 class AegisFailures implements TestListener {
+    // Whether to name each test that runs, not only the failing ones.
+    private final boolean namesRuns
+
+    AegisFailures(boolean namesRuns) {
+        this.namesRuns = namesRuns
+    }
+
     void beforeSuite(TestDescriptor suite) {}
 
     void afterSuite(TestDescriptor suite, TestResult result) {
@@ -32,15 +46,24 @@ class AegisFailures implements TestListener {
     void beforeTest(TestDescriptor test) {}
 
     void afterTest(TestDescriptor test, TestResult result) {
+        if (namesRuns) {
+            println "aegis-gradle RAN ${test.className}#${test.name}"
+        }
         if (result.resultType == TestResult.ResultType.FAILURE) {
             println "aegis-gradle FAILED ${test.className}#${test.name}"
         }
     }
 }
 
+// `--tests` given on the command line, to any task.
+def aegisFiltered = gradle.startParameter.taskRequests.any { it.args.contains('--tests') }
+
 allprojects {
     tasks.withType(Test).configureEach {
-        addTestListener(new AegisFailures())
+        addTestListener(new AegisFailures(aegisFiltered))
+        if (aegisFiltered) {
+            filter.failOnNoMatchingTests = false
+        }
     }
     plugins.withId('java') {
         apply plugin: 'jacoco'

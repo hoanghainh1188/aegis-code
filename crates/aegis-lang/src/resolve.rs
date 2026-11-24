@@ -36,6 +36,9 @@ pub struct GateOverrides {
     pub lint: Option<StepOverride>,
     pub typecheck: Option<StepOverride>,
     pub repro_test: Option<StepOverride>,
+    /// What the output of an overridden `repro_test` matches when it ran a
+    /// test (#235): without it, a repo's own command has no such check.
+    pub repro_ran: Option<String>,
     pub test: Option<StepOverride>,
     pub coverage: Option<StepOverride>,
     /// Output format of an overridden `test` command.
@@ -190,8 +193,9 @@ impl Profile {
             typecheck: step(&self.gate.typecheck, &o.typecheck).map_err(invalid)?,
             repro_test: step(&self.gate.repro_test, &o.repro_test).map_err(invalid)?,
             repro_ran: match &o.repro_test {
-                Some(StepOverride::Run(_)) => None,
-                _ => self.gate.repro_ran.clone(),
+                // The repo's own command, or none: only its own pattern.
+                Some(StepOverride::Run(_) | StepOverride::Enabled(false)) => o.repro_ran.clone(),
+                _ => o.repro_ran.clone().or_else(|| self.gate.repro_ran.clone()),
             },
             test: match step(&Some(self.gate.test.clone()), &o.test).map_err(invalid)? {
                 Step::Run(c) => c,
@@ -227,7 +231,7 @@ impl Profile {
             lint: gate.lint.command().cloned(),
             typecheck: gate.typecheck.command().cloned(),
             repro_test: gate.repro_test.command().cloned(),
-            repro_ran: None,
+            repro_ran: gate.repro_ran.clone(),
             test: gate.test.clone(),
             coverage: gate.coverage.command().cloned(),
             coverage_skip: Vec::new(),
@@ -790,6 +794,19 @@ mod tests {
             .unwrap()
             .clone();
         assert!(go.resolve(&own).unwrap().gate.repro_ran.is_none());
+        // ... unless the repo says how it reads (#648).
+        let own = overrides(
+            "[gate]\nrepro_test = [\"make\", \"test\", \"T={test}\"]\nrepro_ran = 'PASS '\n",
+        );
+        let gate = go.resolve(&own).unwrap().gate;
+        assert!(gate.repro_ran_nothing("nothing\n"));
+        assert!(!gate.repro_ran_nothing("PASS one\n"));
+        let bad = overrides("[gate]\nrepro_test = [\"make\", \"T={test}\"]\nrepro_ran = '('\n");
+        assert!(go.resolve(&bad).is_err());
+        let skipped = overrides("[gate]\nrepro_test = false\nrepro_ran = 'PASS '\n");
+        assert!(go.resolve(&skipped).is_err());
+        let off = overrides("[gate]\nrepro_test = false\n");
+        assert!(go.resolve(&off).unwrap().gate.repro_ran.is_none());
     }
 
     #[test]

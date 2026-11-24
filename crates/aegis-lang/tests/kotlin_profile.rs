@@ -123,6 +123,50 @@ fn gate_steps_pass_offline_after_fetch() {
     assert!(xml.contains("<report"), "JaCoCo XML expected");
 }
 
+/// #648: in a multi-project build `repro_test` runs every project's test
+/// task with the filter. The projects without the class pass, and an id
+/// that selects no test still passes the runner but is seen as running
+/// nothing (#235).
+#[test]
+fn repro_test_runs_one_class_of_a_multi_project_build() {
+    if !tools() {
+        return;
+    }
+    let profile = kotlin();
+    let ws = Workspace::new("kotlin-multi");
+    ws.run_ok("fetch", &plain(profile.fetch.command().unwrap()));
+    let repro = |id: &str| {
+        let argv = profile
+            .gate
+            .repro_test
+            .command()
+            .unwrap()
+            .render(&[(Placeholder::Test, id)])
+            .unwrap();
+        in_image(argv)
+    };
+
+    let out = ws.run_ok("repro_test", &repro("example.cart.CartTest"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("aegis-gradle RAN example.cart.CartTest#addsUpPrices()"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("TaxTest"), "{stdout}");
+    assert!(!profile.gate.repro_ran_nothing(&stdout), "{stdout}");
+
+    let out = ws.run_ok("repro_test", &repro("example.cart.NoSuchTest"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(profile.gate.repro_ran_nothing(&stdout), "{stdout}");
+
+    // Without `--tests` the full suite names no test that passes.
+    let out = ws.run_ok("test", &plain(&profile.gate.test));
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("aegis-gradle RAN"),
+        "only a filtered build names its tests"
+    );
+}
+
 /// The init script names a failing test with its package, the line the
 /// gate's `gradle` test output reads, even under `-q`.
 #[test]
