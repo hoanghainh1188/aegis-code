@@ -45,6 +45,16 @@ impl Actor {
         }
     }
 
+    /// The sync of a repo's runbooks and business rules from its main
+    /// branch (#660).
+    pub fn memory_sync() -> Self {
+        Self {
+            kind: ActorKind::System,
+            user: None,
+            name: "memory-sync".into(),
+        }
+    }
+
     pub fn webhook(source: &str) -> Self {
         Self {
             kind: ActorKind::Webhook,

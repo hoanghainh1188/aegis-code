@@ -3,9 +3,11 @@
 //! business rules. Recall is in [`recall`] (#596).
 
 mod recall;
+mod sync;
 mod vector;
 
 pub use recall::{RecallScores, fuse};
+pub use sync::{GIT_SOURCE_PREFIX, GitSync};
 pub(crate) use vector::VectorIndexes;
 pub use vector::{EmbeddingSpace, MemoryToEmbed, NearQuery};
 
@@ -193,6 +195,102 @@ fn validate_non_empty(
     Ok(trimmed.to_owned())
 }
 
+/// Writes `entry` on `conn`, a transaction's, as `actor`: the write of
+/// [`Store::upsert_repo_memory_by`], with its audit entry.
+pub(crate) async fn upsert_in(
+    conn: &mut sqlx::PgConnection,
+    entry: &NewRepoMemory,
+    actor: &Actor,
+) -> Result<RepoMemory, StoreError> {
+    let source_ref = validate_non_empty("source_ref", &entry.source_ref, MAX_SOURCE_REF_CHARS)?;
+    let title = validate_non_empty("title", &entry.title, MAX_TITLE_CHARS)?;
+    let summary = validate_non_empty("summary", &entry.summary, MAX_SUMMARY_CHARS)?;
+    let keywords: String = entry
+        .keywords
+        .trim()
+        .chars()
+        .take(MAX_KEYWORDS_CHARS)
+        .collect();
+    let paths: Vec<String> = entry
+        .paths
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+
+    // A memory names only a job of its own repo (#525: never another
+    // tenant's).
+    if let Some(job) = entry.job_id {
+        let owner = sqlx::query_scalar!("SELECT repo_id FROM jobs WHERE id = $1", job.0)
+            .fetch_optional(&mut *conn)
+            .await?;
+        if owner != Some(entry.repo_id.0) {
+            return Err(StoreError::Invalid {
+                field: "job_id",
+                message: format!("job {} is not a job of repo {}", job.0, entry.repo_id.0),
+            });
+        }
+    }
+    let saved: RepoMemory = sqlx::query_as!(
+        MemoryRow,
+        "INSERT INTO repo_memories (
+                 repo_id, kind, source_ref, title, summary, paths, keywords, job_id,
+                 scope
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'repo'))
+             ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET
+                 scope = coalesce($9, repo_memories.scope),
+                 title = EXCLUDED.title,
+                 summary = EXCLUDED.summary,
+                 paths = EXCLUDED.paths,
+                 keywords = EXCLUDED.keywords,
+                 job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),
+                 updated_at = now()
+             RETURNING id, repo_id, kind, source_ref, title, summary, paths,
+                       keywords, job_id, scope, created_at, updated_at",
+        entry.repo_id.0,
+        entry.kind.as_str(),
+        source_ref,
+        title,
+        summary,
+        &paths,
+        keywords,
+        entry.job_id.map(|j| j.0),
+        entry.scope.map(MemoryScope::as_str) as Option<&str>,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(StoreError::from_db)?
+    .try_into()?;
+    // Its text may have changed: embedded again before its next
+    // recall (#655).
+    sqlx::query!(
+        "DELETE FROM repo_memory_embeddings WHERE memory_id = $1",
+        saved.id.0
+    )
+    .execute(&mut *conn)
+    .await?;
+    audit::record(
+        conn,
+        actor,
+        "memory.upsert",
+        Target {
+            repo: Some(entry.repo_id),
+            job: entry.job_id,
+        },
+        json!({
+            "memory_id": saved.id.0,
+            "kind": saved.kind.as_str(),
+            "source_ref": saved.source_ref,
+            "title": saved.title,
+            "scope": saved.scope.as_str(),
+        }),
+    )
+    .await?;
+    Ok::<_, StoreError>(saved)
+}
+
 impl Store {
     /// Creates or updates a repository memory entry as [`Actor::system`].
     pub async fn upsert_repo_memory(
@@ -209,97 +307,8 @@ impl Store {
         entry: &NewRepoMemory,
         actor: &Actor,
     ) -> Result<RepoMemory, StoreError> {
-        let source_ref = validate_non_empty("source_ref", &entry.source_ref, MAX_SOURCE_REF_CHARS)?;
-        let title = validate_non_empty("title", &entry.title, MAX_TITLE_CHARS)?;
-        let summary = validate_non_empty("summary", &entry.summary, MAX_SUMMARY_CHARS)?;
-        let keywords: String = entry
-            .keywords
-            .trim()
-            .chars()
-            .take(MAX_KEYWORDS_CHARS)
-            .collect();
-        let paths: Vec<String> = entry
-            .paths
-            .iter()
-            .map(|p| p.trim())
-            .filter(|p| !p.is_empty())
-            .map(ToOwned::to_owned)
-            .collect();
-
         let mut tx = self.pool.begin().await?;
-        let work = async {
-            // A memory names only a job of its own repo (#525: never another
-            // tenant's).
-            if let Some(job) = entry.job_id {
-                let owner = sqlx::query_scalar!("SELECT repo_id FROM jobs WHERE id = $1", job.0)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-                if owner != Some(entry.repo_id.0) {
-                    return Err(StoreError::Invalid {
-                        field: "job_id",
-                        message: format!("job {} is not a job of repo {}", job.0, entry.repo_id.0),
-                    });
-                }
-            }
-            let saved: RepoMemory = sqlx::query_as!(
-                MemoryRow,
-                "INSERT INTO repo_memories (
-                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id,
-                     scope
-                 )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'repo'))
-                 ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET
-                     scope = coalesce($9, repo_memories.scope),
-                     title = EXCLUDED.title,
-                     summary = EXCLUDED.summary,
-                     paths = EXCLUDED.paths,
-                     keywords = EXCLUDED.keywords,
-                     job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),
-                     updated_at = now()
-                 RETURNING id, repo_id, kind, source_ref, title, summary, paths,
-                           keywords, job_id, scope, created_at, updated_at",
-                entry.repo_id.0,
-                entry.kind.as_str(),
-                source_ref,
-                title,
-                summary,
-                &paths,
-                keywords,
-                entry.job_id.map(|j| j.0),
-                entry.scope.map(MemoryScope::as_str) as Option<&str>,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(StoreError::from_db)?
-            .try_into()?;
-            // Its text may have changed: embedded again before its next
-            // recall (#655).
-            sqlx::query!(
-                "DELETE FROM repo_memory_embeddings WHERE memory_id = $1",
-                saved.id.0
-            )
-            .execute(&mut *tx)
-            .await?;
-            audit::record(
-                &mut tx,
-                actor,
-                "memory.upsert",
-                Target {
-                    repo: Some(entry.repo_id),
-                    job: entry.job_id,
-                },
-                json!({
-                    "memory_id": saved.id.0,
-                    "kind": saved.kind.as_str(),
-                    "source_ref": saved.source_ref,
-                    "title": saved.title,
-                    "scope": saved.scope.as_str(),
-                }),
-            )
-            .await?;
-            Ok::<_, StoreError>(saved)
-        }
-        .await;
+        let work = upsert_in(&mut tx, entry, actor).await;
         tx::commit(tx, work).await
     }
 

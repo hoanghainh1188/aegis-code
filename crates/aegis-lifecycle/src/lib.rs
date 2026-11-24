@@ -29,6 +29,7 @@ mod language;
 pub use language::resolve_locale;
 mod light;
 pub mod memory;
+pub mod memory_sources;
 mod preflight;
 mod publish;
 mod registry;
@@ -54,6 +55,7 @@ pub use memory::{
     ExtractedMemory, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
     fallback_extract_from_merged_pr, format_for_bp3, redact_for_embedding,
 };
+pub use memory_sources::{MemorySources, SyncedMemory};
 pub use preflight::{CheckItem, CheckStatus, PreflightOptions, PreflightReport, run_preflight};
 pub use publish::{fork_forge_of, fork_token, fork_token_source};
 pub use registry::{

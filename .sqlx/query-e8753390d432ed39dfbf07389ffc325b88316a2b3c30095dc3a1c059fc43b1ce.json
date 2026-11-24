@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO repo_memories (\n                     repo_id, kind, source_ref, title, summary, paths, keywords, job_id,\n                     scope\n                 )\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'repo'))\n                 ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET\n                     scope = coalesce($9, repo_memories.scope),\n                     title = EXCLUDED.title,\n                     summary = EXCLUDED.summary,\n                     paths = EXCLUDED.paths,\n                     keywords = EXCLUDED.keywords,\n                     job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),\n                     updated_at = now()\n                 RETURNING id, repo_id, kind, source_ref, title, summary, paths,\n                           keywords, job_id, scope, created_at, updated_at",
+  "query": "INSERT INTO repo_memories (\n                 repo_id, kind, source_ref, title, summary, paths, keywords, job_id,\n                 scope\n             )\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'repo'))\n             ON CONFLICT (repo_id, kind, source_ref) DO UPDATE SET\n                 scope = coalesce($9, repo_memories.scope),\n                 title = EXCLUDED.title,\n                 summary = EXCLUDED.summary,\n                 paths = EXCLUDED.paths,\n                 keywords = EXCLUDED.keywords,\n                 job_id = COALESCE(EXCLUDED.job_id, repo_memories.job_id),\n                 updated_at = now()\n             RETURNING id, repo_id, kind, source_ref, title, summary, paths,\n                       keywords, job_id, scope, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -164,5 +164,5 @@
       false
     ]
   },
-  "hash": "54265dc9a4e0039477052e51f8b2992122abb527ad5fc4dbea3e8b27747e34f2"
+  "hash": "e8753390d432ed39dfbf07389ffc325b88316a2b3c30095dc3a1c059fc43b1ce"
 }

@@ -58,8 +58,8 @@ pub use instance_pause::{INSTANCE_PAUSED, InstancePause, InstancePaused, PauseLe
 pub use kpi::{KpiJob, KpiRecord};
 pub use ledger::PgLedger;
 pub use memory::{
-    EmbeddingSpace, MemoryId, MemoryKind, MemoryScope, MemoryToEmbed, NearQuery, NewRepoMemory,
-    RecallScores, RepoMemory, fuse,
+    EmbeddingSpace, GIT_SOURCE_PREFIX, GitSync, MemoryId, MemoryKind, MemoryScope, MemoryToEmbed,
+    NearQuery, NewRepoMemory, RecallScores, RepoMemory, fuse,
 };
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};

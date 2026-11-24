@@ -24,9 +24,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use aegis_ledger::IssueId;
 use aegis_lifecycle::CveTarget;
 use aegis_store::{
-    Job, JobFilter, JobId, JobSource, JobStatus, MemoryId, MemoryKind, MemoryScope, NewJob,
-    NewRepoMemory, Page, PageOf, RepoBudget, RepoId, RepoMemory, RepoRole, Run, SlaPriority, Store,
-    StoreError,
+    GIT_SOURCE_PREFIX, Job, JobFilter, JobId, JobSource, JobStatus, MemoryId, MemoryKind,
+    MemoryScope, NewJob, NewRepoMemory, Page, PageOf, RepoBudget, RepoId, RepoMemory, RepoRole,
+    Run, SlaPriority, Store, StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -57,6 +57,8 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
     let github_app = repo_admin
         .as_ref()
         .and_then(crate::web::RepoAdmin::github_app);
+    // A repo's runbooks and business rules synced on request (#660).
+    let memory_sync = repo_admin.as_ref().map(crate::web::RepoAdmin::memory_sync);
     let api = Router::new()
         .route("/api/v1/jobs", post(create_job).get(list_jobs))
         .route("/api/v1/repos/{id}/cve-jobs", post(create_cve_job))
@@ -84,6 +86,8 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
             "/api/v1/repos/{id}/memories/{memory_id}",
             delete(delete_repo_memory),
         )
+        .route("/api/v1/repos/{id}/memories/sync", post(sync_repo_memories))
+        .layer(Extension(memory_sync))
         .route_layer(middleware::from_fn_with_state(
             auth.clone(),
             crate::auth::api::guard,
@@ -870,6 +874,14 @@ async fn upsert_repo_memory(
         })?),
         None => None,
     };
+    // Synced from the repo's main branch only (#660).
+    if body.source_ref.trim().starts_with(GIT_SOURCE_PREFIX) {
+        return Err(ApiError::invalid(format!(
+            "source_ref: `{GIT_SOURCE_PREFIX}` memories come from the repo's `[memory_sources]` \
+             on its main branch; change the file there, or sync with POST \
+             /api/v1/repos/{id}/memories/sync"
+        )));
+    }
     let existing = store
         .repo_memory_scope_of(repo, kind, &body.source_ref)
         .await?;
@@ -893,6 +905,57 @@ async fn upsert_repo_memory(
         )
         .await?;
     Ok(ok(StatusCode::CREATED, MemoryView::from(saved)))
+}
+
+#[derive(Debug, Serialize)]
+struct SyncView {
+    added: usize,
+    updated: usize,
+    unchanged: usize,
+    removed: usize,
+}
+
+/// Syncs the repo's runbooks and business rules with its main branch now
+/// (#660): its maintainers, who could write those memories anyway.
+async fn sync_repo_memories(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Extension(sync): Extension<Option<crate::memory_sync::MemorySync>>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let repo_id = repo_for(&access, id, RepoRole::Maintainer)?;
+    let Some(sync) = sync else {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "unavailable",
+            "this server reads no modes, so it cannot read the repo",
+        ));
+    };
+    let repo = store
+        .repo(repo_id)
+        .await?
+        .ok_or_else(|| repo_not_found(id))?;
+    let done = sync
+        .sync(&store, &repo, &access.actor)
+        .await
+        .map_err(|why| {
+            tracing::warn!(repo = %repo.slug, error = %why, "memory sync failed");
+            ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "sync_failed",
+                format!("the repo's main branch could not be read: {why}"),
+            )
+        })?;
+    Ok(ok(
+        StatusCode::OK,
+        SyncView {
+            added: done.added,
+            updated: done.updated,
+            unchanged: done.unchanged,
+            removed: done.removed,
+        },
+    ))
 }
 
 async fn delete_repo_memory(

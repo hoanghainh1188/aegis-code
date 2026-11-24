@@ -332,7 +332,7 @@ fn sanitize_field(raw: &str, max_chars: usize) -> String {
     defang_memory_text(&capped)
 }
 
-fn cap_chars(text: &str, max_chars: usize) -> String {
+pub(crate) fn cap_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 

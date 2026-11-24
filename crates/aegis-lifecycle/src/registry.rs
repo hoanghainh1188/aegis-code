@@ -232,6 +232,10 @@ pub struct RepoSettings {
     /// The app path: the instance's GitHub App, no secret here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<crate::AppConnection>,
+    /// Runbooks and business rules kept in the repo (#660): Markdown
+    /// files of its main branch, by glob, synced into its memory.
+    #[serde(default, skip_serializing_if = "crate::MemorySources::is_empty")]
+    pub memory_sources: crate::MemorySources,
 }
 
 impl RepoSettings {
@@ -594,6 +598,7 @@ impl Modes {
             }
             poll.check().map_err(|e| in_repo(e.to_string()))?;
         }
+        settings.memory_sources.check().map_err(in_repo)?;
         let (fork, app) = settings.connection(url).map_err(in_repo)?;
         let mut overrides = settings.overrides;
         if let Some(image) = settings.image {
