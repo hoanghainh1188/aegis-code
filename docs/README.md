@@ -70,6 +70,7 @@ For contributors, architects, and benchmark maintainers.
 - [ADR 0016: Platform Bias Scope and Measurement](adr/0016-platform-bias-scope-and-measurement.md)
 - [ADR 0017: GitHub App Integration](adr/0017-github-app.md)
 - [ADR 0018: Multi-Provider and Residency Failover](adr/0018-multi-provider-and-residency-failover.md)
+- [ADR 0019: Spec-Driven Hierarchical Feature Lane](adr/0019-feature-lane.md)
 
 ### Benchmarks, Measurements & Pilot (English / Vietnamese)
 - [Measurement Reports Index](measurements/README.md) — Current KPIs per language and chronological experiment reports (Vietnamese).

@@ -371,6 +371,7 @@ The scope and the measurement milestone of each phase are in [Proposal §9](docs
 * [ADR 0016: Platform Bias Scope and Measurement](docs/adr/0016-platform-bias-scope-and-measurement.md)
 * [ADR 0017: GitHub App Integration](docs/adr/0017-github-app.md)
 * [ADR 0018: Multi-Provider and Residency Failover](docs/adr/0018-multi-provider-and-residency-failover.md)
+* [ADR 0019: Spec-Driven Hierarchical Feature Lane](docs/adr/0019-feature-lane.md)
 
 ### Detailed Guides & Runbooks
 * [Documentation Hub](docs/README.md) – Full role-based index separating customer/operator docs from internal engineering docs
