@@ -31,6 +31,9 @@ toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+aegis-docker-proxy = { path = "../aegis-docker-proxy" }
+aegis-mtls = { path = "../aegis-mtls" }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 aws-lc-rs.workspace = true
 base64.workspace = true
 aegis-store = { path = "../aegis-store", features = ["testing"] }

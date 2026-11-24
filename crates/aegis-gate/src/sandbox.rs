@@ -314,6 +314,43 @@ impl Sandbox {
         })
     }
 
+    /// The text of `file` (a path under `dir`) as a container of this
+    /// sandbox on its daemon reads it with `dir` mounted: what a remote
+    /// execution host sees of this host's tree (#664). The container is
+    /// removed after.
+    pub fn read_mounted(&self, dir: &Path, file: &str) -> Result<String, GateError> {
+        let name = container_name();
+        let argv = self.wrap(
+            &name,
+            &["cat".into(), format!("{WORKDIR}/{file}")],
+            dir,
+            &[],
+        );
+        let out = Command::new(&argv[0])
+            .args(&argv[1..])
+            .env_clear()
+            .envs(
+                CLIENT_ENV
+                    .iter()
+                    .filter_map(|k| Some((*k, std::env::var_os(k)?))),
+            )
+            .stdin(Stdio::null())
+            .output();
+        let _ = self.remove(&name);
+        let out = out.map_err(|e| GateError::Spawn {
+            program: self.docker.clone(),
+            message: e.to_string(),
+        })?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        } else {
+            Err(GateError::Spawn {
+                program: self.docker.clone(),
+                message: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            })
+        }
+    }
+
     /// Whether the kernel killed a process of the container for going over
     /// its memory: the step's own exit code does not say so when the
     /// process killed is a child (`rustc` under `cargo` exits 101). False

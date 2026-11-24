@@ -130,9 +130,11 @@ name = "aegis-lifecycle"
 version = "0.19.0"
 dependencies = [
  "aegis-aci",
+ "aegis-docker-proxy",
  "aegis-gate",
  "aegis-lang",
  "aegis-ledger",
+ "aegis-mtls",
  "aegis-orchestrator",
  "aegis-pr",
  "aegis-provider",
@@ -144,6 +146,7 @@ dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
  "futures",
+ "rcgen",
  "regex",
  "reqwest",
  "serde",

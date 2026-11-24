@@ -60,7 +60,7 @@ mod review;
 mod tools;
 
 use drive::*;
-use env::{ExecutionEnv, LocalExecutionEnv};
+use env::{ExecutionEnv, JobEnv};
 pub(crate) use gating::*;
 pub(crate) use prepare::*;
 use review::*;

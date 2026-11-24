@@ -5,8 +5,10 @@
 //! gate, and the tree's changes for checkpoints (#662). Today the one
 //! environment is [`LocalExecutionEnv`], a worktree of the platform's
 //! clone on this host with its MCP servers over stdio and the gate on the
-//! local Docker daemon, as before; a remote one (#664) runs them on
-//! another host.
+//! local Docker daemon, as before; [`RemoteExecutionEnv`] (#664) keeps
+//! the tree here and runs the repo's containers (the gate's steps,
+//! `run_tests`, the formatter, sidecars) on a remote execution host's
+//! Docker, through its `aegis-docker-proxy --listen-tls` with mutual TLS.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -179,6 +181,268 @@ impl ExecutionEnv for LocalExecutionEnv {
     }
 }
 
+/// The Docker client of a remote execution host (#664): a script in the
+/// job's directory that runs `docker` against the host's proxy with this
+/// worker's certificate. The gate and the ACI take it as their `docker`
+/// program, so every container of the job runs there.
+fn remote_docker(
+    job_dir: &Path,
+    docker: &str,
+    remote: &crate::config::RemoteExecution,
+) -> Result<PathBuf, LifecycleError> {
+    remote.check().map_err(LifecycleError::Config)?;
+    if docker.contains(['\'', '\n', '\0']) {
+        return Err(LifecycleError::Config(format!(
+            "run.docker `{docker}` cannot be quoted for the remote execution host"
+        )));
+    }
+    let quote = |p: &Path| format!("'{}'", p.display());
+    let script = format!(
+        "#!/bin/sh\n# The remote execution host's Docker (#664).\nexec '{docker}' --host '{}' \\\n  --tlsverify --tlscacert {} --tlscert {} --tlskey {} \"$@\"\n",
+        remote.docker_host,
+        quote(&remote.tls_ca),
+        quote(&remote.tls_cert),
+        quote(&remote.tls_key),
+    );
+    std::fs::create_dir_all(job_dir).map_err(|e| LifecycleError::io(job_dir, &e))?;
+    let path = job_dir.join("docker-remote");
+    std::fs::write(&path, script).map_err(|e| LifecycleError::io(&path, &e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| LifecycleError::io(&path, &e))?;
+    }
+    Ok(path)
+}
+
+/// The job's tree on this host, its containers on a remote execution
+/// host (#664). The host sees the tree by the same path (the run's
+/// `state_dir` shared with it); [`ExecutionEnv::prepare_parts`] checks
+/// that it does before anything runs there.
+#[derive(Debug)]
+pub(crate) struct RemoteExecutionEnv {
+    local: LocalExecutionEnv,
+    docker: String,
+}
+
+/// What [`RemoteExecutionEnv`] writes for the host to read back.
+const PROBE: &str = "remote-probe";
+
+impl RemoteExecutionEnv {
+    pub(crate) fn create(
+        clone: &Path,
+        start: &str,
+        job_dir: &Path,
+        docker: &str,
+        remote: &crate::config::RemoteExecution,
+    ) -> Result<Self, LifecycleError> {
+        let local = LocalExecutionEnv::create(clone, start, job_dir)?;
+        let docker = remote_docker(job_dir, docker, remote)?
+            .display()
+            .to_string();
+        Ok(Self { local, docker })
+    }
+
+    /// `cfg` with the host's Docker in place of this host's.
+    fn remote(&self, cfg: &RunConfig) -> RunConfig {
+        let mut cfg = cfg.clone();
+        cfg.run.docker = self.docker.clone();
+        cfg
+    }
+
+    /// Whether the host reads back, by this job's path, what this worker
+    /// wrote there: a container of the root part's image on the host's
+    /// Docker reads a fresh nonce from the job's directory.
+    async fn check_shared(&self, cfg: &RunConfig, profiles: &RepoProfiles) -> Result<(), String> {
+        let Some(sandbox) = super::sandbox(cfg, &profiles.parts()[0]).map_err(|e| e.to_string())?
+        else {
+            return Err("remote execution needs the sandbox".into());
+        };
+        let nonce = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        );
+        let job_dir = self.job_dir().to_owned();
+        std::fs::write(job_dir.join(PROBE), &nonce).map_err(|e| e.to_string())?;
+        let read = blocking("checking the execution host", move || {
+            sandbox
+                .read_mounted(&job_dir, PROBE)
+                .map_err(|e| LifecycleError::Config(e.to_string()))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        if read.trim() == nonce {
+            Ok(())
+        } else {
+            Err(format!(
+                "it reads `{}` where this worker wrote `{nonce}`",
+                read.trim()
+            ))
+        }
+    }
+}
+
+impl ExecutionEnv for RemoteExecutionEnv {
+    fn root(&self) -> &Path {
+        self.local.root()
+    }
+
+    fn job_dir(&self) -> &Path {
+        self.local.job_dir()
+    }
+
+    fn tool_servers(
+        &self,
+        cfg: &RunConfig,
+        profiles: &RepoProfiles,
+    ) -> Result<Vec<McpServerSpec>, LifecycleError> {
+        self.local.tool_servers(&self.remote(cfg), profiles)
+    }
+
+    async fn prepare_parts(
+        &self,
+        cfg: &RunConfig,
+        profiles: &RepoProfiles,
+        cancel: &CancellationToken,
+    ) -> Result<Option<String>, LifecycleError> {
+        let cfg = self.remote(cfg);
+        if let Err(why) = self.check_shared(&cfg, profiles).await {
+            return Ok(Some(format!(
+                "the remote execution host does not see this job's files ({why}): it must mount \
+                 run.state_dir at the same path"
+            )));
+        }
+        self.local.prepare_parts(&cfg, profiles, cancel).await
+    }
+
+    async fn run_gate(
+        &self,
+        cfg: &RunConfig,
+        profiles: &RepoProfiles,
+        base: &str,
+        answer: &FinalAnswer,
+        policy: &DependencyPolicy,
+        cancel: &CancellationToken,
+    ) -> Result<GateReport, LifecycleError> {
+        self.local
+            .run_gate(&self.remote(cfg), profiles, base, answer, policy, cancel)
+            .await
+    }
+
+    async fn export_diff(&self, start: &str) -> Result<String, LifecycleError> {
+        self.local.export_diff(start).await
+    }
+
+    async fn apply_diff(&self, diff: &str) -> Result<(), LifecycleError> {
+        self.local.apply_diff(diff).await
+    }
+}
+
+/// The job's environment, as its run's configuration picks it.
+#[derive(Debug)]
+pub(crate) enum JobEnv {
+    Local(LocalExecutionEnv),
+    Remote(RemoteExecutionEnv),
+}
+
+impl JobEnv {
+    /// A remote one when the run names `[run.remote_execution]`.
+    pub(crate) fn create(
+        cfg: &RunConfig,
+        start: &str,
+        job_dir: &Path,
+    ) -> Result<Self, LifecycleError> {
+        Ok(match &cfg.run.remote_execution {
+            Some(remote) => Self::Remote(RemoteExecutionEnv::create(
+                &cfg.repo.path,
+                start,
+                job_dir,
+                &cfg.run.docker,
+                remote,
+            )?),
+            None => Self::Local(LocalExecutionEnv::create(&cfg.repo.path, start, job_dir)?),
+        })
+    }
+}
+
+impl ExecutionEnv for JobEnv {
+    fn root(&self) -> &Path {
+        match self {
+            Self::Local(e) => e.root(),
+            Self::Remote(e) => e.root(),
+        }
+    }
+
+    fn job_dir(&self) -> &Path {
+        match self {
+            Self::Local(e) => e.job_dir(),
+            Self::Remote(e) => e.job_dir(),
+        }
+    }
+
+    fn tool_servers(
+        &self,
+        cfg: &RunConfig,
+        profiles: &RepoProfiles,
+    ) -> Result<Vec<McpServerSpec>, LifecycleError> {
+        match self {
+            Self::Local(e) => e.tool_servers(cfg, profiles),
+            Self::Remote(e) => e.tool_servers(cfg, profiles),
+        }
+    }
+
+    async fn prepare_parts(
+        &self,
+        cfg: &RunConfig,
+        profiles: &RepoProfiles,
+        cancel: &CancellationToken,
+    ) -> Result<Option<String>, LifecycleError> {
+        match self {
+            Self::Local(e) => e.prepare_parts(cfg, profiles, cancel).await,
+            Self::Remote(e) => e.prepare_parts(cfg, profiles, cancel).await,
+        }
+    }
+
+    async fn run_gate(
+        &self,
+        cfg: &RunConfig,
+        profiles: &RepoProfiles,
+        base: &str,
+        answer: &FinalAnswer,
+        policy: &DependencyPolicy,
+        cancel: &CancellationToken,
+    ) -> Result<GateReport, LifecycleError> {
+        match self {
+            Self::Local(e) => {
+                e.run_gate(cfg, profiles, base, answer, policy, cancel)
+                    .await
+            }
+            Self::Remote(e) => {
+                e.run_gate(cfg, profiles, base, answer, policy, cancel)
+                    .await
+            }
+        }
+    }
+
+    async fn export_diff(&self, start: &str) -> Result<String, LifecycleError> {
+        match self {
+            Self::Local(e) => e.export_diff(start).await,
+            Self::Remote(e) => e.export_diff(start).await,
+        }
+    }
+
+    async fn apply_diff(&self, diff: &str) -> Result<(), LifecycleError> {
+        match self {
+            Self::Local(e) => e.apply_diff(diff).await,
+            Self::Remote(e) => e.apply_diff(diff).await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +526,85 @@ mod tests {
         );
         drop(second);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #664: the remote host's `docker` passes every argument through,
+    /// after the host and the worker's certificate.
+    #[test]
+    fn the_remote_docker_adds_the_host_and_the_certificate() {
+        let dir = std::env::temp_dir().join(format!("aegis-remote-docker-{}", std::process::id()));
+        let echo = dir.join("echo-docker");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&echo, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&echo, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let remote = crate::config::RemoteExecution {
+            docker_host: "tcp://exec.internal:2376".into(),
+            tls_cert: "/etc/aegis/worker.crt".into(),
+            tls_key: "/etc/aegis/worker key.pem".into(),
+            tls_ca: "/etc/aegis/exec-ca.crt".into(),
+        };
+        let script = remote_docker(&dir, &echo.display().to_string(), &remote).unwrap();
+        let mode = std::fs::metadata(&script).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let out = Command::new(&script)
+            .args(["run", "--rm", "an arg with spaces"])
+            .output()
+            .unwrap();
+        let args: Vec<String> = String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--host",
+                "tcp://exec.internal:2376",
+                "--tlsverify",
+                "--tlscacert",
+                "/etc/aegis/exec-ca.crt",
+                "--tlscert",
+                "/etc/aegis/worker.crt",
+                "--tlskey",
+                "/etc/aegis/worker key.pem",
+                "run",
+                "--rm",
+                "an arg with spaces",
+            ]
+        );
+        assert!(remote_docker(&dir, "dock'er", &remote).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_remote_host_is_a_tcp_port_and_its_files_absolute_paths() {
+        let ok = crate::config::RemoteExecution {
+            docker_host: "tcp://exec.internal:2376".into(),
+            tls_cert: "/c.pem".into(),
+            tls_key: "/k.pem".into(),
+            tls_ca: "/ca.pem".into(),
+        };
+        assert!(ok.check().is_ok());
+        for host in [
+            "exec.internal:2376",
+            "tcp://exec.internal",
+            "tcp://",
+            "tcp://a b:1",
+            "unix:///s",
+        ] {
+            let bad = crate::config::RemoteExecution {
+                docker_host: host.into(),
+                ..ok.clone()
+            };
+            assert!(bad.check().is_err(), "{host}");
+        }
+        for path in ["relative.pem", "/it's.pem"] {
+            let bad = crate::config::RemoteExecution {
+                tls_key: path.into(),
+                ..ok.clone()
+            };
+            assert!(bad.check().is_err(), "{path}");
+        }
     }
 }
