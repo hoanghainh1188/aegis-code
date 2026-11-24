@@ -200,6 +200,33 @@ Enforces data residency both at startup (fail-fast) and before every model reque
 | `identity.name` / `identity.email` | `string` | *(required)* | Git commit author name and email for agent commits. |
 | `codebase_memory.program` / `args` / `env` / `tools` | table | `None` | Optional Codebase-Memory MCP server (`{index_dir}` expands to `<state_dir>/index`). |
 
+### `[memory.embedding]` (Optional, #655)
+
+Enables semantic recall of repository and tenant memories via `pgvector`. Without `[memory.embedding]` (or on PostgreSQL without `pgvector`), recall uses the three lexical channels (paths, full-text, substring) only.
+
+| Key | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `provider` | `ProviderConfig` | *(required)* | Embedding endpoint (`kind`: `"local"`, `"open_ai_compat"`, `"vertex_ai"`, or `"bedrock"`; `"claude_api"` and `"failover"` are rejected). |
+| `model` | `string` | *(required)* | Embedding model ID or Azure deployment (e.g., `"nomic-embed-text"`, `"text-multilingual-embedding-002"`, `"amazon.titan-embed-text-v2:0"`). |
+| `dimensions` | `u32` | *(required)* | Vector length (`1..=2000`, matching pgvector's HNSW limit). |
+| `min_similarity` | `f32` | `0.5` | Minimum cosine similarity (`0.0..=1.0`) for a memory to be included. |
+
+```toml
+[memory.embedding]
+model = "nomic-embed-text"
+dimensions = 768
+min_similarity = 0.5
+
+[memory.embedding.provider]
+kind = "local"
+base_url = "http://ollama:11434/v1"
+```
+
+**Embedding Residency Rules:**
+- The embedding endpoint is checked against `[residency]` (`allowed_regions` or `local_only`) just like the chat provider.
+- A `customer-jp` mode (or `require_jp_profile = true`) only accepts Bedrock in `ap-northeast-1` or a `local` endpoint on the deployment's network.
+- If `[residency]` only sets `allowed_model_prefixes` (without `allowed_regions`), cloud embedding endpoints are rejected; add `allowed_regions` for the endpoint's region or use a `local` endpoint.
+
 ### Example: EU Residency Mode (`customer-eu.toml`)
 
 ```toml

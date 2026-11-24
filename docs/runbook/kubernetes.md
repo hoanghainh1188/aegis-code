@@ -32,6 +32,8 @@ Clusters that cannot allow `privileged` need Sysbox or Kata through `worker.runt
 
 Needs: Kubernetes 1.29 or later (native sidecars; checked on 1.37), Helm (checked with 4.3), a default StorageClass or the `storageClass` values, and PostgreSQL 17 unless you use the chart's.
 
+**PostgreSQL Extensions (#596, #655):** The database user must be the database owner so migrations can run `CREATE EXTENSION IF NOT EXISTS pg_trgm` (standard on PostgreSQL 13+, RDS, Cloud SQL, and Azure). For semantic memory recall (`[memory.embedding]`), the `vector` extension (`pgvector`) is optional: on your own PostgreSQL, a superuser or `rds_superuser` must install `vector` beforehand; with the chart's trial PostgreSQL, see the `postgresql.image` comment in [`values.yaml`](../../deploy/helm/aegis/values.yaml) to switch to `pgvector/pgvector:pg17`. An extension installed after the server has started takes effect on the next restart; without `pgvector` or `[memory.embedding]`, recall stays lexical.
+
 Each worker needs room for the sandbox images (about 7 GB for all six profiles, more with build caches): see `worker.persistence`. These sizes cannot be changed after install.
 
 1. **Namespaces.** The worker namespace must allow the sidecar:

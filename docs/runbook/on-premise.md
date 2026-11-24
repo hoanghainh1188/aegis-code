@@ -89,6 +89,10 @@ Execute from a clean repository checkout pinned to your target release tag (`git
 
    The deployment script pulls server and sandbox images (or verifies pre-loaded offline images), tags sandboxes with bare names expected by profiles, updates `AEGIS_VERSION` in `.env`, triggers `docker compose up`, and polls healthcheck endpoints until healthy. Database migrations run automatically during startup.
 
+   **PostgreSQL Extensions for Memory Recall (#596, #655):**
+   - `pg_trgm`: Migrations run `CREATE EXTENSION IF NOT EXISTS pg_trgm`, which requires the database user to be the database owner (true by default on PostgreSQL 13+, including RDS, Cloud SQL, and Azure).
+   - `pgvector` *(optional, for semantic recall with `[memory.embedding]`)*: Set `AEGIS_POSTGRES_IMAGE=pgvector/pgvector:pg17` in `.env` before deploying. When switching an existing volume from `postgres:17-alpine`, run `REINDEX DATABASE aegis;` afterward (Debian's collation differs from Alpine's). For an external PostgreSQL instance, a superuser (or `rds_superuser` on RDS) must install the `vector` extension beforehand. If an extension is installed after the server has started, it takes effect on the next server restart. Without `pgvector` or `[memory.embedding]`, memory recall stays lexical.
+
    The version is written without `v` (`0.1.0`, not `v0.1.0`): it is the image tag, while the git tag is `v0.1.0`.
 
    #### Images Built from Source
