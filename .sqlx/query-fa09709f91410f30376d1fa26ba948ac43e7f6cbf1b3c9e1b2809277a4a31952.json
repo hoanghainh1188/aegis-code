@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM job_checkpoints WHERE ledger_key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fa09709f91410f30376d1fa26ba948ac43e7f6cbf1b3c9e1b2809277a4a31952"
+}

@@ -77,10 +77,76 @@ pub(super) struct DriveContext<'a> {
     pub(super) job: JobTree<'a>,
     pub(super) finish: &'a Finish,
     pub(super) policy: &'a DependencyPolicy,
+    /// Where the job's checkpoints go (#662); `None`: none are kept.
+    pub(super) saving: Option<checkpoint::Saving<'a>>,
+}
+
+/// Each model call of a loop, as it ends: recorded in the ledger, then
+/// the job's checkpoint written (#662), so a crash loses at most the call
+/// in flight.
+struct Progress<'p, 'l, 's, S> {
+    ledger: &'l mut IssueLedger<'s, S>,
+    store: &'p S,
+    saving: Option<checkpoint::Saving<'p>>,
+    tier: Tier,
+    /// The router as the loop started, and the calls before it.
+    router: Router,
+    prior_calls: u32,
+    /// The loop's state but for the session and the router, as it started.
+    base: checkpoint::DriveState,
+    dearest_call_usd: f64,
+    /// The first ledger write that failed: the job stops on it after the
+    /// loop, as it did when the calls were written after it.
+    error: Option<LifecycleError>,
+}
+
+impl<S> aegis_orchestrator::TurnObserver for Progress<'_, '_, '_, S>
+where
+    S: LedgerStore + Send + Sync,
+{
+    async fn turn_done(&mut self, session: &Session, turns: &[TurnRecord]) {
+        let Some(turn) = turns.last() else { return };
+        if self.error.is_some() {
+            return;
+        }
+        let recorded = async {
+            let cost = self
+                .ledger
+                .model_call(self.tier, &turn.model, &turn.usage)
+                .await?;
+            self.dearest_call_usd = self.dearest_call_usd.max(cost);
+            self.ledger.tool_calls(self.tier, tool_calls(turn)).await?;
+            Ok::<_, LifecycleError>(())
+        }
+        .await;
+        if let Err(e) = recorded {
+            self.error = Some(e);
+            return;
+        }
+        let Some(saving) = self.saving else { return };
+        let (router, decision) = fold_tools(self.router, self.prior_calls, turns);
+        let pending_escalation = match decision {
+            Decision::Escalate(reason) if router.tier() != self.router.tier() => {
+                Some(reason.to_string())
+            }
+            _ => None,
+        };
+        let state = checkpoint::DriveState {
+            session: session.clone(),
+            router: router.state(),
+            dearest_call_usd: self.dearest_call_usd,
+            first_expert_call: self.base.first_expert_call || pending_escalation.is_some(),
+            pending_escalation,
+            ..self.base.clone()
+        };
+        let turn_no = self.ledger.record().model_calls;
+        checkpoint::save(self.store, saving, turn_no, &state).await;
+    }
 }
 
 /// The Core/Expert loop with gate runs between attempts. `prepared` is an
 /// answer to check before any agent turn: a CVE job's upgrade (#501).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn drive<P, S, T>(
     platform: &Platform<P, S>,
     ledger: &mut IssueLedger<'_, S>,
@@ -88,6 +154,7 @@ pub(super) async fn drive<P, S, T>(
     session: Session,
     context: DriveContext<'_>,
     prepared: Option<FinalAnswer>,
+    resume: Option<checkpoint::DriveState>,
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>
 where
@@ -101,6 +168,7 @@ where
         job,
         finish,
         policy,
+        saving,
     } = context;
     let JobTree {
         tree,
@@ -110,14 +178,35 @@ where
     let mut prepared = prepared;
     let cfg = &platform.config;
     let regional = matches!(cfg.provider, ProviderConfig::Bedrock { .. });
-    let mut router = Router::new(cfg.budget.rules());
     let limits = cfg.budget_limits(&platform.profiles)?;
+    let mut router = Router::new(cfg.budget.rules());
     let mut session = session;
     let mut answer_retries = 0;
     let mut dearest_call_usd: f64 = 0.0;
     let mut first_expert_call = false;
     let mut impact_checks: usize = 0;
     let mut known_functions: BTreeSet<String> = BTreeSet::new();
+    // A resumed job (#662): where its checkpoint left it. When the model
+    // had given its answer, it is read again instead of asked for.
+    let mut reread = false;
+    if let Some(state) = resume {
+        if let Some(reason) = &state.pending_escalation {
+            let calls = ledger.record().model_calls;
+            ledger.escalated(reason.clone(), calls).await?;
+        }
+        router = Router::resumed(cfg.budget.rules(), state.router);
+        reread = state
+            .session
+            .messages()
+            .last()
+            .is_some_and(|m| m.role == Role::Assistant);
+        session = state.session;
+        answer_retries = state.answer_retries;
+        dearest_call_usd = state.dearest_call_usd;
+        first_expert_call = state.first_expert_call;
+        impact_checks = state.impact_checks;
+        known_functions = state.known_functions;
+    }
     'turns: loop {
         let answer = 'answer: {
             if let Some(answer) = prepared.take() {
@@ -126,123 +215,149 @@ where
                 ledger.answered(summary).await?;
                 break 'answer answer;
             }
-            let tier = router.tier();
-            let mut budget = BudgetCheck::new(
-                Arc::new(platform.prices.clone()),
-                regional,
-                limits,
-                tier,
-                Spent::from_record(ledger.record()),
-            );
-            if std::mem::take(&mut first_expert_call) && dearest_call_usd > 0.0 {
-                // New model, cold cache: the first Expert call costs more.
-                budget = budget.with_first_call_estimate(dearest_call_usd * 3.0);
-            }
-            let check =
-                JobCheck::new(budget, router, cancel.clone()).with_impact_checks(impact_checks);
-            let seen = session.messages().len();
-            let model = model_spec(cfg, tier);
-            let outcome = run_loop(
-                &platform.provider,
-                tools,
-                &check,
-                &model,
-                session,
-                &LoopConfig::default(),
-            )
-            .await;
-            for turn in &outcome.turns {
-                let cost = ledger.model_call(tier, &turn.model, &turn.usage).await?;
-                dearest_call_usd = dearest_call_usd.max(cost);
-                ledger.tool_calls(tier, tool_calls(turn)).await?;
-            }
-            let prior_calls = check.budget.model_calls(&[]);
-            let (after_edits, decision) = fold_tools(router, prior_calls, &outcome.turns);
-            if after_edits.tier() != router.tier() {
-                // Escalated on the loop's last turn: Expert takes over from here.
-                first_expert_call = true;
-                if let Decision::Escalate(reason) = decision {
-                    let calls = ledger.record().model_calls;
-                    ledger.escalated(reason.to_string(), calls).await?;
+            let reply = if std::mem::take(&mut reread) {
+                last_reply(&session)
+            } else {
+                let tier = router.tier();
+                let mut budget = BudgetCheck::new(
+                    Arc::new(platform.prices.clone()),
+                    regional,
+                    limits,
+                    tier,
+                    Spent::from_record(ledger.record()),
+                );
+                if std::mem::take(&mut first_expert_call) && dearest_call_usd > 0.0 {
+                    // New model, cold cache: the first Expert call costs more.
+                    budget = budget.with_first_call_estimate(dearest_call_usd * 3.0);
                 }
-            }
-            router = after_edits;
-            session = outcome.session;
-            ledger
-                .secrets_redacted(hidden_in_tool_results(&session.messages()[seen..]))
-                .await?;
+                let check =
+                    JobCheck::new(budget, router, cancel.clone()).with_impact_checks(impact_checks);
+                let seen = session.messages().len();
+                let model = model_spec(cfg, tier);
+                let prior_calls = check.budget.model_calls(&[]);
+                let mut progress = Progress {
+                    ledger: &mut *ledger,
+                    store: &platform.store,
+                    saving,
+                    tier,
+                    router,
+                    prior_calls,
+                    base: checkpoint::DriveState {
+                        session: Session::default(),
+                        router: router.state(),
+                        answer_retries,
+                        dearest_call_usd,
+                        first_expert_call,
+                        impact_checks,
+                        known_functions: known_functions.clone(),
+                        pending_escalation: None,
+                    },
+                    dearest_call_usd,
+                    error: None,
+                };
+                let outcome = run_loop_observed(
+                    &platform.provider,
+                    tools,
+                    &check,
+                    &model,
+                    session,
+                    &LoopConfig::default(),
+                    &mut progress,
+                )
+                .await;
+                dearest_call_usd = progress.dearest_call_usd;
+                if let Some(e) = progress.error {
+                    return Err(e);
+                }
+                let (after_edits, decision) = fold_tools(router, prior_calls, &outcome.turns);
+                if after_edits.tier() != router.tier() {
+                    // Escalated on the loop's last turn: Expert takes over from here.
+                    first_expert_call = true;
+                    if let Decision::Escalate(reason) = decision {
+                        let calls = ledger.record().model_calls;
+                        ledger.escalated(reason.to_string(), calls).await?;
+                    }
+                }
+                router = after_edits;
+                session = outcome.session;
+                ledger
+                    .secrets_redacted(hidden_in_tool_results(&session.messages()[seen..]))
+                    .await?;
 
-            let reply = match outcome.end {
-                LoopEnd::ProviderFailed(e) => {
-                    return Ok(Ending::stop(
-                        Outcome::StoppedSteps,
-                        format!("model provider failed: {e}"),
-                    ));
-                }
-                LoopEnd::Stopped { reason } => match check.halt() {
-                    Some(Halt::Cancelled) => {
-                        return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
+                match outcome.end {
+                    LoopEnd::ProviderFailed(e) => {
+                        return Ok(Ending::stop(
+                            Outcome::StoppedSteps,
+                            format!("model provider failed: {e}"),
+                        ));
                     }
-                    Some(Halt::Budget(stop)) => {
-                        return Ok(Ending::stop(stop.outcome(), stop.to_string()));
-                    }
-                    Some(Halt::RemindTest { calls, last_test }) => {
-                        // The router counts the reminder, so the next one comes
-                        // only after more calls without a test run (#144, #156).
-                        let (next, decision) = router.observe(Signal::ModelCalls { calls });
-                        debug_assert_eq!(decision, Decision::RemindTest { calls, last_test });
-                        router = next;
-                        ledger.test_reminded(tier, calls).await?;
-                        session = session.with_user_text(test_reminder(calls, last_test));
-                        continue 'turns;
-                    }
-                    Some(Halt::Escalate(reason)) => {
-                        if router.tier() == Tier::Core {
-                            // Not an edit rule, which `fold_tools` already applied:
-                            // Core used its calls without a patch.
-                            let calls = ledger.record().model_calls;
-                            let (next, decision) = router.observe(Signal::ModelCalls { calls });
-                            debug_assert_eq!(decision, Decision::Escalate(reason));
-                            router = next;
-                            ledger.escalated(reason.to_string(), calls).await?;
+                    LoopEnd::Stopped { reason } => match check.halt() {
+                        Some(Halt::Cancelled) => {
+                            return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
                         }
-                        first_expert_call = true;
-                        continue 'turns;
-                    }
-                    Some(Halt::CheckImpact) => {
-                        let record = ledger.record();
-                        let calls_left = limits.max_model_calls.saturating_sub(record.model_calls);
-                        let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
-                        let room = calls_left >= IMPACT_CALLS
-                            && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
-                        if !room {
-                            // Not enough budget room to act on impact notes; stop checking.
-                            impact_checks = 2;
+                        Some(Halt::Budget(stop)) => {
+                            return Ok(Ending::stop(stop.outcome(), stop.to_string()));
+                        }
+                        Some(Halt::RemindTest { calls, last_test }) => {
+                            // The router counts the reminder, so the next one comes
+                            // only after more calls without a test run (#144, #156).
+                            let (next, decision) = router.observe(Signal::ModelCalls { calls });
+                            debug_assert_eq!(decision, Decision::RemindTest { calls, last_test });
+                            router = next;
+                            ledger.test_reminded(tier, calls).await?;
+                            session = session.with_user_text(test_reminder(calls, last_test));
                             continue 'turns;
                         }
-                        let current_functions = changed_functions(tree, base);
-                        if impact_checks == 0 || !current_functions.is_subset(&known_functions) {
-                            known_functions = current_functions;
-                            impact_checks += 1;
-                            if let Some(impact) = tools.impact(base).await {
-                                match impact {
-                                    Ok(impact) => {
-                                        ledger.impact_checked(impact.files(), None).await?;
-                                        if let Some(note) = impact.note() {
-                                            session = session.with_user_text(note);
+                        Some(Halt::Escalate(reason)) => {
+                            if router.tier() == Tier::Core {
+                                // Not an edit rule, which `fold_tools` already applied:
+                                // Core used its calls without a patch.
+                                let calls = ledger.record().model_calls;
+                                let (next, decision) = router.observe(Signal::ModelCalls { calls });
+                                debug_assert_eq!(decision, Decision::Escalate(reason));
+                                router = next;
+                                ledger.escalated(reason.to_string(), calls).await?;
+                            }
+                            first_expert_call = true;
+                            continue 'turns;
+                        }
+                        Some(Halt::CheckImpact) => {
+                            let record = ledger.record();
+                            let calls_left =
+                                limits.max_model_calls.saturating_sub(record.model_calls);
+                            let usd_left = cfg.budget.max_cost_usd - record.cost_usd;
+                            let room = calls_left >= IMPACT_CALLS
+                                && usd_left >= dearest_call_usd * f64::from(IMPACT_CALLS);
+                            if !room {
+                                // Not enough budget room to act on impact notes; stop checking.
+                                impact_checks = 2;
+                                continue 'turns;
+                            }
+                            let current_functions = changed_functions(tree, base);
+                            if impact_checks == 0 || !current_functions.is_subset(&known_functions)
+                            {
+                                known_functions = current_functions;
+                                impact_checks += 1;
+                                if let Some(impact) = tools.impact(base).await {
+                                    match impact {
+                                        Ok(impact) => {
+                                            ledger.impact_checked(impact.files(), None).await?;
+                                            if let Some(note) = impact.note() {
+                                                session = session.with_user_text(note);
+                                            }
                                         }
-                                    }
-                                    Err(why) => {
-                                        ledger.impact_checked(Vec::new(), Some(why)).await?
+                                        Err(why) => {
+                                            ledger.impact_checked(Vec::new(), Some(why)).await?
+                                        }
                                     }
                                 }
                             }
+                            continue 'turns;
                         }
-                        continue 'turns;
-                    }
-                    None => return Ok(Ending::stop(Outcome::StoppedSteps, reason)),
-                },
-                LoopEnd::Finished { .. } => last_reply(&session),
+                        None => return Ok(Ending::stop(Outcome::StoppedSteps, reason)),
+                    },
+                    LoopEnd::Finished { .. } => last_reply(&session),
+                }
             };
 
             match parse_answer(&reply) {
@@ -459,5 +574,21 @@ where
             "The checks failed on your patch:\n\n{summary}\n\nFix the problem with the tools, \
              then reply with the final JSON answer again."
         )));
+        // The gate's verdict is kept: a crash before the next call does
+        // not run it again (#662).
+        if let Some(saving) = saving {
+            let state = checkpoint::DriveState {
+                session: session.clone(),
+                router: router.state(),
+                answer_retries,
+                dearest_call_usd,
+                first_expert_call,
+                impact_checks,
+                known_functions: known_functions.clone(),
+                pending_escalation: None,
+            };
+            let turn = ledger.record().model_calls;
+            checkpoint::save(&platform.store, saving, turn, &state).await;
+        }
     }
 }

@@ -112,7 +112,7 @@ pub enum Effort {
 
 /// Lifetime of the cache entries written at BP1–BP3 (design §4.2).
 /// BP4 always uses five minutes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum CacheTtl {
     #[default]
     #[serde(rename = "5m")]

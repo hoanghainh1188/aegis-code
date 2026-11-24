@@ -1,7 +1,9 @@
 //! The ledger in Postgres: one `ledger_events` row per event, holding the
 //! event as the same JSON as a line of `<key>.events.jsonl`.
 
-use aegis_ledger::{IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Review};
+use aegis_ledger::{
+    Checkpoint, IssueId, IssueRecord, LedgerError, LedgerEvent, LedgerStore, Review,
+};
 use sqlx::PgPool;
 
 use crate::audit::{self, Target};
@@ -139,6 +141,69 @@ impl LedgerStore for PgLedger {
                 return Ok(ids);
             }
         }
+    }
+
+    async fn save_checkpoint(
+        &self,
+        issue: &IssueId,
+        checkpoint: &Checkpoint,
+    ) -> Result<(), LedgerError> {
+        let turn = i32::try_from(checkpoint.turn).unwrap_or(i32::MAX);
+        let version = i32::try_from(checkpoint.version).unwrap_or(i32::MAX);
+        sqlx::query!(
+            "INSERT INTO job_checkpoints
+                 (ledger_key, version, turn, base_sha, start_sha, diff_patch, state)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (ledger_key) DO UPDATE SET
+                 version = EXCLUDED.version,
+                 turn = EXCLUDED.turn,
+                 base_sha = EXCLUDED.base_sha,
+                 start_sha = EXCLUDED.start_sha,
+                 diff_patch = EXCLUDED.diff_patch,
+                 state = EXCLUDED.state,
+                 updated_at = now()",
+            issue.as_str(),
+            version,
+            turn,
+            checkpoint.base,
+            checkpoint.start,
+            checkpoint.diff,
+            checkpoint.state,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    async fn checkpoint(&self, issue: &IssueId) -> Result<Option<Checkpoint>, LedgerError> {
+        let row = sqlx::query!(
+            "SELECT version, turn, base_sha, start_sha, diff_patch, state
+               FROM job_checkpoints WHERE ledger_key = $1",
+            issue.as_str(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(row.map(|r| Checkpoint {
+            version: u32::try_from(r.version).unwrap_or(0),
+            turn: u32::try_from(r.turn).unwrap_or(0),
+            base: r.base_sha,
+            start: r.start_sha,
+            diff: r.diff_patch,
+            state: r.state,
+        }))
+    }
+
+    async fn clear_checkpoint(&self, issue: &IssueId) -> Result<(), LedgerError> {
+        sqlx::query!(
+            "DELETE FROM job_checkpoints WHERE ledger_key = $1",
+            issue.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
     }
 }
 

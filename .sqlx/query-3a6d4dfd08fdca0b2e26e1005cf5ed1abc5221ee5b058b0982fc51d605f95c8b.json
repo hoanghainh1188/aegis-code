@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_checkpoints\n                 (ledger_key, version, turn, base_sha, start_sha, diff_patch, state)\n             VALUES ($1, $2, $3, $4, $5, $6, $7)\n             ON CONFLICT (ledger_key) DO UPDATE SET\n                 version = EXCLUDED.version,\n                 turn = EXCLUDED.turn,\n                 base_sha = EXCLUDED.base_sha,\n                 start_sha = EXCLUDED.start_sha,\n                 diff_patch = EXCLUDED.diff_patch,\n                 state = EXCLUDED.state,\n                 updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3a6d4dfd08fdca0b2e26e1005cf5ed1abc5221ee5b058b0982fc51d605f95c8b"
+}

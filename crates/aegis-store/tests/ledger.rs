@@ -241,3 +241,36 @@ async fn json_to_pg_and_back_keeps_every_byte_and_kpi() {
     }
     db.drop().await;
 }
+
+/// #662: a job's checkpoint in Postgres: kept, replaced, read back with
+/// its state as written, cleared.
+#[tokio::test]
+async fn a_checkpoint_is_kept_replaced_and_cleared_in_postgres() {
+    let Some(db) = test_db().await else { return };
+    let ledger = db.store.ledger();
+    let issue = id("pg-checkpoint-1");
+    let checkpoint = |turn| aegis_ledger::Checkpoint {
+        version: aegis_ledger::CHECKPOINT_VERSION,
+        turn,
+        base: "a".repeat(40),
+        start: "b".repeat(40),
+        diff: "diff --git a/src/lib.rs b/src/lib.rs\n+fixed\n".into(),
+        state: serde_json::json!({"session": {"messages": [{"role": "user"}]}, "turn": turn}),
+    };
+    assert_eq!(ledger.checkpoint(&issue).await.unwrap(), None);
+    ledger
+        .save_checkpoint(&issue, &checkpoint(3))
+        .await
+        .unwrap();
+    ledger
+        .save_checkpoint(&issue, &checkpoint(5))
+        .await
+        .unwrap();
+    assert_eq!(
+        ledger.checkpoint(&issue).await.unwrap(),
+        Some(checkpoint(5))
+    );
+    ledger.clear_checkpoint(&issue).await.unwrap();
+    ledger.clear_checkpoint(&issue).await.unwrap();
+    assert_eq!(ledger.checkpoint(&issue).await.unwrap(), None);
+}

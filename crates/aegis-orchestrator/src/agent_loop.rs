@@ -157,6 +157,25 @@ pub struct LoopOutcome {
     pub end: LoopEnd,
 }
 
+/// Told of each model call the loop made, once its tools ran and their
+/// results are in the session: a job records it and keeps a checkpoint
+/// there (#662), so a crash loses at most the call in flight.
+pub trait TurnObserver {
+    fn turn_done(
+        &mut self,
+        session: &Session,
+        turns: &[TurnRecord],
+    ) -> impl std::future::Future<Output = ()> + Send;
+}
+
+/// Observes nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoObserver;
+
+impl TurnObserver for NoObserver {
+    async fn turn_done(&mut self, _session: &Session, _turns: &[TurnRecord]) {}
+}
+
 pub async fn run_loop<P, T, S>(
     provider: &P,
     tools: &T,
@@ -170,6 +189,34 @@ where
     T: ToolExecutor + Sync,
     S: StopCheck,
 {
+    run_loop_observed(
+        provider,
+        tools,
+        stop,
+        model,
+        session,
+        config,
+        &mut NoObserver,
+    )
+    .await
+}
+
+/// [`run_loop`], telling `observer` of each call.
+pub async fn run_loop_observed<P, T, S, O>(
+    provider: &P,
+    tools: &T,
+    stop: &S,
+    model: &ModelSpec,
+    session: Session,
+    config: &LoopConfig,
+    observer: &mut O,
+) -> LoopOutcome
+where
+    P: ModelProvider + Sync,
+    T: ToolExecutor + Sync,
+    S: StopCheck,
+    O: TurnObserver + Send,
+{
     let mut state = LoopState::new(session.prepared_for(&model.id));
     let end = loop {
         if let Some(reason) = stop.check(&state.turns) {
@@ -182,7 +229,9 @@ where
         };
         state.check_cache(&response.usage);
         let prompt_tokens = prompt_tokens(&response.usage);
-        if let Some(end) = state.absorb(response, attempts, model, tools).await {
+        let end = state.absorb(response, attempts, model, tools).await;
+        observer.turn_done(&state.session, &state.turns).await;
+        if let Some(end) = end {
             break end;
         }
         state.maybe_collapse(prompt_tokens, model, config);

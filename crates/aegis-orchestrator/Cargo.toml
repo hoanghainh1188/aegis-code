@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 aegis-provider = { path = "../aegis-provider" }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "process"] }

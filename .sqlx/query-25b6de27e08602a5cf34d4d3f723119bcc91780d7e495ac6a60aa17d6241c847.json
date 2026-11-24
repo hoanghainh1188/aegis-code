@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT version, turn, base_sha, start_sha, diff_patch, state\n               FROM job_checkpoints WHERE ledger_key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job_checkpoints",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "turn",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job_checkpoints",
+            "name": "turn"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "base_sha",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_checkpoints",
+            "name": "base_sha"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "start_sha",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_checkpoints",
+            "name": "start_sha"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "diff_patch",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_checkpoints",
+            "name": "diff_patch"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "job_checkpoints",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "25b6de27e08602a5cf34d4d3f723119bcc91780d7e495ac6a60aa17d6241c847"
+}

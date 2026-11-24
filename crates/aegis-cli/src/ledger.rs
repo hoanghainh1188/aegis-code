@@ -50,6 +50,34 @@ impl LedgerStore for Ledger {
             Self::Postgres(store) => store.issues().await,
         }
     }
+
+    async fn save_checkpoint(
+        &self,
+        issue: &IssueId,
+        checkpoint: &aegis_ledger::Checkpoint,
+    ) -> Result<(), LedgerError> {
+        match self {
+            Self::Json(store) => store.save_checkpoint(issue, checkpoint).await,
+            Self::Postgres(store) => store.save_checkpoint(issue, checkpoint).await,
+        }
+    }
+
+    async fn checkpoint(
+        &self,
+        issue: &IssueId,
+    ) -> Result<Option<aegis_ledger::Checkpoint>, LedgerError> {
+        match self {
+            Self::Json(store) => store.checkpoint(issue).await,
+            Self::Postgres(store) => store.checkpoint(issue).await,
+        }
+    }
+
+    async fn clear_checkpoint(&self, issue: &IssueId) -> Result<(), LedgerError> {
+        match self {
+            Self::Json(store) => store.clear_checkpoint(issue).await,
+            Self::Postgres(store) => store.clear_checkpoint(issue).await,
+        }
+    }
 }
 
 /// The JSON ledger of the configuration, whichever backend it picks.

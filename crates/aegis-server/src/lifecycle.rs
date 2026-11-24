@@ -112,6 +112,25 @@ impl LedgerStore for RunLedger {
     async fn issues(&self) -> Result<Vec<IssueId>, LedgerError> {
         self.pg.issues().await
     }
+
+    async fn save_checkpoint(
+        &self,
+        issue: &IssueId,
+        checkpoint: &aegis_ledger::Checkpoint,
+    ) -> Result<(), LedgerError> {
+        self.pg.save_checkpoint(issue, checkpoint).await
+    }
+
+    async fn checkpoint(
+        &self,
+        issue: &IssueId,
+    ) -> Result<Option<aegis_ledger::Checkpoint>, LedgerError> {
+        self.pg.checkpoint(issue).await
+    }
+
+    async fn clear_checkpoint(&self, issue: &IssueId) -> Result<(), LedgerError> {
+        self.pg.clear_checkpoint(issue).await
+    }
 }
 
 /// Aborts the task when dropped: a dropped attempt (lease lost, drain

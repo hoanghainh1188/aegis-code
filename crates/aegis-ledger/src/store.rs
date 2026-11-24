@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use tokio::io::AsyncWriteExt;
 
-use crate::{IssueId, IssueRecord, LedgerError, LedgerEvent};
+use crate::{Checkpoint, IssueId, IssueRecord, LedgerError, LedgerEvent};
 
 pub trait LedgerStore {
     /// Durably appends one event. Called after every model call and gate run.
@@ -35,6 +35,32 @@ pub trait LedgerStore {
 
     /// Every issue with at least one event, in id order (KPI reports).
     fn issues(&self) -> impl Future<Output = Result<Vec<IssueId>, LedgerError>> + Send;
+
+    /// Keeps `checkpoint` as the issue's progress, replacing any (#662). A
+    /// store that keeps none drops it: the job then starts over.
+    fn save_checkpoint(
+        &self,
+        _issue: &IssueId,
+        _checkpoint: &Checkpoint,
+    ) -> impl Future<Output = Result<(), LedgerError>> + Send {
+        async { Ok(()) }
+    }
+
+    /// The issue's last checkpoint, if any.
+    fn checkpoint(
+        &self,
+        _issue: &IssueId,
+    ) -> impl Future<Output = Result<Option<Checkpoint>, LedgerError>> + Send {
+        async { Ok(None) }
+    }
+
+    /// Forgets the issue's checkpoint: the job ended.
+    fn clear_checkpoint(
+        &self,
+        _issue: &IssueId,
+    ) -> impl Future<Output = Result<(), LedgerError>> + Send {
+        async { Ok(()) }
+    }
 }
 
 /// `<root>/<issue>.events.jsonl` (one event per line) and
@@ -51,6 +77,10 @@ impl JsonFileLedger {
 
     pub fn events_path(&self, issue: &IssueId) -> PathBuf {
         self.root.join(format!("{issue}.events.jsonl"))
+    }
+
+    pub fn checkpoint_path(&self, issue: &IssueId) -> PathBuf {
+        self.root.join(format!("{issue}.checkpoint"))
     }
 
     pub fn record_path(&self, issue: &IssueId) -> PathBuf {
@@ -135,6 +165,47 @@ impl LedgerStore for JsonFileLedger {
         }
         ids.sort();
         Ok(ids)
+    }
+
+    async fn save_checkpoint(
+        &self,
+        issue: &IssueId,
+        checkpoint: &Checkpoint,
+    ) -> Result<(), LedgerError> {
+        let json =
+            serde_json::to_vec(checkpoint).map_err(|e| LedgerError::Encode(e.to_string()))?;
+        self.create_root().await?;
+        let path = self.checkpoint_path(issue);
+        let tmp = path.with_extension("checkpoint.tmp");
+        let mut file = tokio::fs::File::create(&tmp)
+            .await
+            .map_err(LedgerError::io(&tmp))?;
+        file.write_all(&json).await.map_err(LedgerError::io(&tmp))?;
+        file.sync_all().await.map_err(LedgerError::io(&tmp))?;
+        tokio::fs::rename(&tmp, &path)
+            .await
+            .map_err(LedgerError::io(&path))?;
+        sync_dir(&self.root).await
+    }
+
+    async fn checkpoint(&self, issue: &IssueId) -> Result<Option<Checkpoint>, LedgerError> {
+        let path = self.checkpoint_path(issue);
+        match tokio::fs::read(&path).await {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| LedgerError::Store(format!("{}: {e}", path.display()))),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(LedgerError::io(&path)(e)),
+        }
+    }
+
+    async fn clear_checkpoint(&self, issue: &IssueId) -> Result<(), LedgerError> {
+        let path = self.checkpoint_path(issue);
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(LedgerError::io(&path)(e)),
+        }
     }
 }
 
@@ -248,6 +319,7 @@ where
 pub struct MemoryLedger {
     events: Mutex<BTreeMap<IssueId, Vec<LedgerEvent>>>,
     records: Mutex<BTreeMap<IssueId, IssueRecord>>,
+    checkpoints: Mutex<BTreeMap<IssueId, Checkpoint>>,
 }
 
 impl MemoryLedger {
@@ -281,6 +353,24 @@ impl LedgerStore for MemoryLedger {
 
     async fn issues(&self) -> Result<Vec<IssueId>, LedgerError> {
         Ok(lock(&self.events).keys().cloned().collect())
+    }
+
+    async fn save_checkpoint(
+        &self,
+        issue: &IssueId,
+        checkpoint: &Checkpoint,
+    ) -> Result<(), LedgerError> {
+        lock(&self.checkpoints).insert(issue.clone(), checkpoint.clone());
+        Ok(())
+    }
+
+    async fn checkpoint(&self, issue: &IssueId) -> Result<Option<Checkpoint>, LedgerError> {
+        Ok(lock(&self.checkpoints).get(issue).cloned())
+    }
+
+    async fn clear_checkpoint(&self, issue: &IssueId) -> Result<(), LedgerError> {
+        lock(&self.checkpoints).remove(issue);
+        Ok(())
     }
 }
 
@@ -321,6 +411,82 @@ mod tests {
         LedgerEvent::Finished {
             outcome: Outcome::StoppedSteps,
             wall_time_s: 1.0,
+        }
+    }
+
+    fn checkpoint(turn: u32) -> Checkpoint {
+        Checkpoint {
+            version: crate::CHECKPOINT_VERSION,
+            turn,
+            base: "a".repeat(40),
+            start: "b".repeat(40),
+            diff: "diff --git a/x b/x\n".into(),
+            state: serde_json::json!({"session": {"messages": []}}),
+        }
+    }
+
+    /// #662: a checkpoint is kept, replaced, read back and cleared, and is
+    /// not taken for an issue.
+    #[tokio::test]
+    async fn checkpoints_are_kept_replaced_and_cleared() {
+        let root = temp_root();
+        let file = JsonFileLedger::new(&root);
+        let memory = MemoryLedger::new();
+        for (name, store) in [("file", &file as &dyn Probe), ("memory", &memory)] {
+            assert_eq!(store.get(&issue()).await, None, "{name}");
+            store.put(&issue(), &checkpoint(3)).await;
+            store.put(&issue(), &checkpoint(5)).await;
+            assert_eq!(store.get(&issue()).await.map(|c| c.turn), Some(5), "{name}");
+            store.clear(&issue()).await;
+            store.clear(&issue()).await;
+            assert_eq!(store.get(&issue()).await, None, "{name}");
+        }
+        file.save_checkpoint(&issue(), &checkpoint(1))
+            .await
+            .unwrap();
+        assert!(
+            file.issues().await.unwrap().is_empty(),
+            "a checkpoint is not an issue"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The two stores behind one face, for the test above.
+    trait Probe {
+        fn get<'a>(
+            &'a self,
+            issue: &'a IssueId,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Option<Checkpoint>> + 'a>>;
+        fn put<'a>(
+            &'a self,
+            issue: &'a IssueId,
+            c: &'a Checkpoint,
+        ) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>>;
+        fn clear<'a>(
+            &'a self,
+            issue: &'a IssueId,
+        ) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>>;
+    }
+
+    impl<T: LedgerStore> Probe for T {
+        fn get<'a>(
+            &'a self,
+            issue: &'a IssueId,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Option<Checkpoint>> + 'a>> {
+            Box::pin(async move { self.checkpoint(issue).await.unwrap() })
+        }
+        fn put<'a>(
+            &'a self,
+            issue: &'a IssueId,
+            c: &'a Checkpoint,
+        ) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>> {
+            Box::pin(async move { self.save_checkpoint(issue, c).await.unwrap() })
+        }
+        fn clear<'a>(
+            &'a self,
+            issue: &'a IssueId,
+        ) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>> {
+            Box::pin(async move { self.clear_checkpoint(issue).await.unwrap() })
         }
     }
 
