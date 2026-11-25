@@ -41,21 +41,41 @@ pub enum Kind {
     /// A push to `branch` (#660): the repo's runbooks and business rules
     /// are synced if it is its default branch.
     Push { branch: String },
+    /// `/aegis approve` in a comment on an open issue by `sender` (#675):
+    /// the issue's plan waiting for approval is queued again if `sender`
+    /// can write to the repo.
+    Approve { sender: String },
 }
 
 /// The command that asks for a review round in a comment on a PR.
 pub const FIX_COMMAND: &str = "/aegis fix";
 
+/// The command that approves a feature's plan in a comment on its issue
+/// (#675, ADR 0019). What follows it on its line (`mode=…`) is for the
+/// delivery of the feature (#678) and read by no one yet.
+pub const APPROVE_COMMAND: &str = "/aegis approve";
+
+/// Whether a line of `body` is `command`, alone or followed by a space.
+fn has_command(body: &str, command: &str) -> bool {
+    body.lines().any(|line| {
+        let line = line.trim();
+        line == command
+            || line
+                .strip_prefix(command)
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    })
+}
+
 /// Whether a line of `body` is [`FIX_COMMAND`], alone or followed by a
 /// space.
 fn asks_for_fix(body: &str) -> bool {
-    body.lines().any(|line| {
-        let line = line.trim();
-        line == FIX_COMMAND
-            || line
-                .strip_prefix(FIX_COMMAND)
-                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
-    })
+    has_command(body, FIX_COMMAND)
+}
+
+/// Whether a line of `body` is [`APPROVE_COMMAND`], alone or followed by a
+/// space.
+fn asks_to_approve(body: &str) -> bool {
+    has_command(body, APPROVE_COMMAND)
 }
 
 /// Why a delivery asks for nothing, or cannot be read.
@@ -266,6 +286,24 @@ fn review_round(
     })
 }
 
+/// `/aegis approve` on open issue `e.issue`, by a person (#675).
+fn approve(e: GithubIssueComment) -> Result<Wanted, Skip> {
+    if e.sender.kind == "Bot" {
+        return Err(ignored("sent by a bot"));
+    }
+    if e.issue.state != "open" {
+        return Err(ignored("the issue is not open"));
+    }
+    let path = checked_path(&e.repository.full_name, 2)?;
+    Ok(Wanted {
+        issue_ref: checked_ref(format!("{path}#{}", e.issue.number))?,
+        repo_url: e.repository.html_url,
+        kind: Kind::Approve {
+            sender: e.sender.login,
+        },
+    })
+}
+
 /// An open PR from an `agent/*` branch.
 fn agent_pull(pull: &GithubPull) -> Result<(), Skip> {
     if pull.state != "open" {
@@ -341,7 +379,11 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         }
         "issue_comment" => {
             let e: GithubIssueComment = parse(body)?;
-            if e.action != "created" || !asks_for_fix(e.comment.body.as_deref().unwrap_or("")) {
+            let text = e.comment.body.as_deref().unwrap_or("");
+            if e.action == "created" && e.issue.pull_request.is_none() && asks_to_approve(text) {
+                return approve(e);
+            }
+            if e.action != "created" || !asks_for_fix(text) {
                 return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
             }
             if e.issue.pull_request.is_none() {
@@ -543,6 +585,15 @@ struct GitlabNoteHook {
     object_attributes: GitlabNote,
     #[serde(default)]
     merge_request: Option<GitlabMergeRequest>,
+    #[serde(default)]
+    issue: Option<GitlabNotedIssue>,
+}
+
+/// The issue a note is on.
+#[derive(Debug, Deserialize)]
+struct GitlabNotedIssue {
+    iid: u64,
+    state: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -575,6 +626,29 @@ struct GitlabMergeRequestHook {
     object_attributes: GitlabMergeRequest,
 }
 
+/// `/aegis approve` in a note on an open GitLab issue, by a person (#675);
+/// the sender is GitLab's user id, whose access level is checked before
+/// the plan is approved.
+fn gitlab_approve(e: GitlabNoteHook) -> Result<Wanted, Skip> {
+    let issue = e
+        .issue
+        .ok_or_else(|| Skip::Malformed("an issue note without its issue".into()))?;
+    if issue.state != "opened" {
+        return Err(ignored("the issue is not open"));
+    }
+    if e.user.bot {
+        return Err(ignored("sent by a bot"));
+    }
+    let path = checked_path(&e.project.path_with_namespace, MAX_GITLAB_PARTS)?;
+    Ok(Wanted {
+        issue_ref: checked_ref(format!("{path}#{}", issue.iid))?,
+        repo_url: e.project.web_url,
+        kind: Kind::Approve {
+            sender: e.user.id.to_string(),
+        },
+    })
+}
+
 /// A delivery of GitLab event `event` (`X-Gitlab-Event`).
 pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
     match event {
@@ -592,6 +666,11 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         // user id, whose access level is checked before a job is made.
         "Note Hook" => {
             let e: GitlabNoteHook = parse(body)?;
+            if e.object_attributes.noteable_type == "Issue"
+                && asks_to_approve(&e.object_attributes.note)
+            {
+                return gitlab_approve(e);
+            }
             if e.object_attributes.noteable_type != "MergeRequest"
                 || !asks_for_fix(&e.object_attributes.note)
             {
@@ -1438,6 +1517,85 @@ mod tests {
             ),
             Err(Skip::Ignored(_))
         ));
+    }
+
+    #[test]
+    fn an_approve_comment_on_an_open_issue_approves_its_plan() {
+        let comment = |body: &str, state: &str, on_pr: bool, kind: &str| {
+            let mut issue = json!({ "number": 3, "state": state,
+                                    "html_url": "https://github.com/bot/demo/issues/3" });
+            if on_pr {
+                issue["pull_request"] = json!({});
+            }
+            json!({ "action": "created", "comment": { "body": body }, "issue": issue,
+                    "repository": repo(), "sender": { "login": "lan", "type": kind } })
+            .to_string()
+            .into_bytes()
+        };
+        for body in [
+            "/aegis approve",
+            "Fine by me.\n/aegis approve mode=stacked_prs",
+        ] {
+            let wanted =
+                github("issue_comment", &comment(body, "open", false, "User"), "x").unwrap();
+            assert_eq!(wanted.issue_ref, "bot/demo#3");
+            assert_eq!(
+                wanted.kind,
+                Kind::Approve {
+                    sender: "lan".into()
+                }
+            );
+        }
+        for (body, state, on_pr, kind) in [
+            ("/aegis approved", "open", false, "User"),
+            ("please /aegis approve", "open", false, "User"),
+            ("/aegis approve", "closed", false, "User"),
+            ("/aegis approve", "open", false, "Bot"),
+        ] {
+            assert!(
+                matches!(
+                    github("issue_comment", &comment(body, state, on_pr, kind), "x"),
+                    Err(Skip::Ignored(_))
+                ),
+                "{body:?} {state} {kind}"
+            );
+        }
+        // On a pull request it is not a plan's approval, nor a review round.
+        assert!(matches!(
+            github(
+                "issue_comment",
+                &comment("/aegis approve", "open", true, "User"),
+                "x"
+            ),
+            Err(Skip::Ignored(_))
+        ));
+
+        let note = |body: &str, state: &str, bot: bool| {
+            json!({
+                "object_kind": "note",
+                "project": { "path_with_namespace": "acme/platform/app",
+                             "web_url": "https://gitlab.com/acme/platform/app" },
+                "user": { "id": 42, "username": "lan", "bot": bot },
+                "object_attributes": { "note": body, "noteable_type": "Issue" },
+                "issue": { "iid": 8, "state": state }
+            })
+            .to_string()
+            .into_bytes()
+        };
+        let wanted = gitlab("Note Hook", &note("/aegis approve", "opened", false), "x").unwrap();
+        assert_eq!(wanted.issue_ref, "acme/platform/app#8");
+        assert_eq!(
+            wanted.kind,
+            Kind::Approve {
+                sender: "42".into()
+            }
+        );
+        for (state, bot) in [("closed", false), ("opened", true)] {
+            assert!(matches!(
+                gitlab("Note Hook", &note("/aegis approve", state, bot), "x"),
+                Err(Skip::Ignored(_))
+            ));
+        }
     }
 
     #[test]

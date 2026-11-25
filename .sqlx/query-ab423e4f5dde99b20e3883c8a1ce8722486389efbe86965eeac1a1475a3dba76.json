@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET reason = $2\n             WHERE parent_job_id = $1 AND status = 'queued' AND reason IS DISTINCT FROM $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab423e4f5dde99b20e3883c8a1ce8722486389efbe86965eeac1a1475a3dba76"
+}

@@ -210,6 +210,8 @@ impl Store {
             held.extend(crate::tenants::hold_spent(&mut tx, &self.budget).await?);
             // A paused repo's reason is written last: it is the one to act on.
             held.extend(crate::pause::hold_paused(&mut tx).await?);
+            // Sub-jobs of features whose own budget is spent (#675).
+            let epics = crate::epic::hold_spent(&mut tx, &self.budget).await?;
             let row = sqlx::query_as!(
                 JobRow,
                 "WITH busy AS (
@@ -242,6 +244,7 @@ impl Store {
                            JOIN jobs p ON p.id = d.depends_on
                            WHERE d.job_id = j.id
                              AND (p.status, p.outcome) IS DISTINCT FROM ('done', 'pr_opened'))
+                       AND (j.parent_job_id IS NULL OR j.parent_job_id <> ALL($7))
                        AND (SELECT count(*) FROM jobs
                             WHERE status = 'running' AND locked_by = $1) < $3
                      -- By SLA (#524): P1, P2, P3, then jobs with no level;
@@ -276,6 +279,7 @@ impl Store {
                 &held,
                 budget::waiting_prefix(),
                 self.sla_aging.as_secs_f64().max(1.0),
+                &epics,
             )
             .fetch_optional(&mut *tx)
             .await?;
@@ -547,6 +551,9 @@ impl Store {
                 )));
             }
             budget::check(&mut tx, &self.budget, crate::RepoId(old.repo_id)).await?;
+            if let Some(parent) = old.parent_job_id {
+                crate::epic::check(&mut tx, &self.budget, JobId(parent)).await?;
+            }
             let base = retry_base(&old.ledger_key);
             let taken = sqlx::query_scalar!(
                 "SELECT ledger_key FROM jobs WHERE starts_with(ledger_key, $1)",

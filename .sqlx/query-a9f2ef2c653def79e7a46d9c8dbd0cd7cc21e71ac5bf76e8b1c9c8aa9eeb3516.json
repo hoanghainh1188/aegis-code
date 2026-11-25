@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id, p.epic_budget_usd, epic_spent(p.id) AS \"spent!\"\n           FROM jobs p\n           WHERE p.epic_budget_usd IS NOT NULL\n             AND EXISTS (SELECT 1 FROM jobs s\n                         WHERE s.parent_job_id = p.id AND s.status = 'queued')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "epic_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "epic_budget_usd"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "spent!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "a9f2ef2c653def79e7a46d9c8dbd0cd7cc21e71ac5bf76e8b1c9c8aa9eeb3516"
+}

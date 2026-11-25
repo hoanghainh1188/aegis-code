@@ -21,6 +21,12 @@
     {%- if let Some(url) = head.pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ crate::t("Open PR") }}</a>{% endif %}
     {%- if head.can_review %} <a class="button" href="/jobs/{{ head.id }}/review">{{ crate::t("Review PR") }}</a>{% endif -%}
   </p>
+  {% if head.can_approve %}
+  <form method="post" action="/jobs/{{ head.id }}/approve" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">{{ crate::t("Approve the plan") }}</button>
+  </form>
+  {% endif %}
   {% if head.can_retry %}
   <form method="post" action="/jobs/{{ head.id }}/retry" class="inline">
     {% include "form_guard.html" %}

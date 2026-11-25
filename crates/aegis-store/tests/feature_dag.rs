@@ -4,11 +4,11 @@
 
 use std::time::Duration;
 
-use aegis_ledger::{IssueId, Outcome};
+use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Outcome, Tier, TokenCounts};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, AttemptEnd, Delivered, Job, JobId, JobSource, JobStatus, ModeName, NewDelivery, NewJob,
-    NewRepo, RepoId, Store, StoreError, WebhookSource,
+    Actor, AttemptEnd, AuditFilter, Delivered, EPIC_BUDGET_SPENT, Job, JobId, JobSource, JobStatus,
+    ModeName, NewDelivery, NewJob, NewRepo, Page, RepoId, Store, StoreError, WebhookSource,
 };
 
 async fn repo(s: &Store, slug: &str) -> RepoId {
@@ -281,5 +281,90 @@ async fn sub_jobs_are_checked_when_made() {
     let err = make(JobId(9999), vec![], job(shop, 1, "shop-1-d")).await;
     assert!(matches!(err, StoreError::NotFound(_)), "{err}");
     assert_eq!(s.sub_jobs(root.id).await.unwrap().len(), 1);
+    db.drop().await;
+}
+
+async fn spend(s: &Store, job: &Job, usd: f64) {
+    let call = LedgerEvent::ModelCall {
+        tier: Tier::Core,
+        model: "m".into(),
+        tokens: TokenCounts::default(),
+        cost_usd: usd,
+    };
+    s.ledger().append(&job.ledger_key, &call).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_feature_stops_at_its_own_budget() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = repo(s, "shop").await;
+    let root = s.create_job(&job(shop, 1, "shop-1")).await.unwrap();
+    let budget = s
+        .set_epic_budget_by(root.id, Some(10.0), &Actor::system())
+        .await
+        .unwrap();
+    assert_eq!((budget.ceiling_usd, budget.spent_usd), (Some(10.0), 0.0));
+    let planning = claim(s).await.unwrap();
+    spend(s, &root, 2.0).await;
+    let a = sub(s, root.id, &[], job(shop, 1, "shop-1-a")).await;
+    let b = sub(s, root.id, &[], job(shop, 1, "shop-1-b")).await;
+    s.finish_attempt(&planning.run, "w", &done(Outcome::PrOpened))
+        .await
+        .unwrap();
+
+    // The plan and `a` spent $7 of $10: less than a job's cap is left.
+    let a_run = claim(s).await.unwrap();
+    assert_eq!(a_run.job.id, a.id);
+    spend(s, &a, 5.0).await;
+    s.finish_attempt(&a_run.run, "w", &done(Outcome::PrOpened))
+        .await
+        .unwrap();
+    assert_eq!(s.epic_budget(root.id).await.unwrap().spent_usd, 7.0);
+
+    // `b` waits and says why; an unrelated job of the repo still runs.
+    let other = s.create_job(&job(shop, 2, "shop-2")).await.unwrap();
+    assert_eq!(claim_id(s).await, Some(other.id));
+    let waiting = s.job(b.id).await.unwrap().unwrap();
+    assert_eq!(waiting.status, JobStatus::Queued);
+    let reason = waiting.reason.unwrap_or_default();
+    assert!(reason.contains(EPIC_BUDGET_SPENT), "{reason}");
+    let err = s
+        .create_sub_job_by(root.id, &[], &job(shop, 1, "shop-1-c"), &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::BudgetSpent(_)), "{err}");
+
+    // A higher ceiling lets `b` go, and its reason is cleared.
+    s.set_epic_budget_by(root.id, Some(20.0), &Actor::system())
+        .await
+        .unwrap();
+    let b_run = claim(s).await.unwrap();
+    assert_eq!(b_run.job.id, b.id);
+    assert_eq!(b_run.job.reason, None);
+    let audit = s
+        .audit_log_where(&AuditFilter::default(), Page::first(50))
+        .await
+        .unwrap();
+    assert_eq!(
+        audit
+            .items
+            .iter()
+            .filter(|e| e.action == "job.epic_budget")
+            .count(),
+        2
+    );
+
+    // A sub-job has no budget of its own; a ceiling is 0 or above.
+    let err = s
+        .set_epic_budget_by(a.id, Some(5.0), &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
+    let err = s
+        .set_epic_budget_by(root.id, Some(-1.0), &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
     db.drop().await;
 }

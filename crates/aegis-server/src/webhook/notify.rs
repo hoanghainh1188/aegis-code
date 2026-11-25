@@ -336,6 +336,21 @@ impl GitLabNotifier {
             tracing::warn!(error = %e, "commenting on the merge request");
         }
     }
+
+    /// Posts `text` on issue `iid` of `project`, if the store has the
+    /// comment token; failures are logged.
+    pub async fn comment_on_issue(&self, project: &str, iid: u64, text: &str) {
+        let Some(token) = self.secrets.get(GITLAB_COMMENT_TOKEN_ENV) else {
+            return;
+        };
+        let posted = match GitLab::new(&self.api, project, token.expose()) {
+            Ok(gitlab) => gitlab.comment_on_issue(iid, text).await.map(drop),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = posted {
+            tracing::warn!(error = %e, "commenting on the issue");
+        }
+    }
 }
 
 impl JobNotifier for GitLabNotifier {
