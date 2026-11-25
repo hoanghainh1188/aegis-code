@@ -445,6 +445,7 @@ fn work_dir_inside_the_repo_is_refused() {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap_err();
     assert!(
@@ -636,6 +637,7 @@ fn repro_files_must_be_regular_files_in_the_repo() {
             parts: vec![],
             sidecars: None,
             dependency_policy: Default::default(),
+            test_mode: Default::default(),
         })
     };
     #[cfg(unix)]
@@ -1160,6 +1162,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1200,6 +1203,7 @@ fn scope_enforcement_blocks_deleted_test_files_when_configured() {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1256,6 +1260,7 @@ fn scope_enforcement_blocks_added_test_skips_when_configured() {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1309,6 +1314,7 @@ fn scope_enforcement_blocks_excessive_file_count() {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap();
     let scope_step = report.step(StepName::Scope).unwrap();
@@ -1493,6 +1499,7 @@ fn a_patch_adding_a_secret_fails_unless_the_repo_allows_it() {
             parts: vec![],
             sidecars: None,
             dependency_policy: Default::default(),
+            test_mode: Default::default(),
         })
         .unwrap()
     };
@@ -1527,4 +1534,157 @@ fn a_patch_adding_a_secret_fails_unless_the_repo_allows_it() {
     assert_eq!(step.status, StepStatus::Passed, "{report}");
     assert!(step.detail.contains("1 let through"), "{}", step.detail);
     assert_eq!(report.secrets_found, 0);
+}
+
+/// A feature on the fixture (#676): the cart says how many items it holds.
+const FEATURE: (&str, &str, &str) = (
+    "src/lib.rs",
+    "impl Cart {\n",
+    "impl Cart {\n    pub fn count(&self) -> usize {\n        self.items.len()\n    }\n\n",
+);
+
+const ACCEPTANCE_TEST: &str = "use fixture_rust::cart;
+
+#[test]
+fn a_cart_counts_its_items() {
+    assert_eq!(cart![1, 2].count(), 2);
+}
+";
+
+fn acceptance(files: &[&str]) -> Repro {
+    Repro {
+        test: "a_cart_counts_its_items".into(),
+        files: files.iter().map(|f| (*f).to_owned()).collect(),
+    }
+}
+
+#[test]
+fn a_feature_s_acceptance_tests_pass_without_failing_on_the_base() {
+    use aegis_gate::DependencyPolicy;
+    if !ready() {
+        return;
+    }
+    let rust = profile(Language::Rust, FAKE_COVERAGE);
+    let feature = || DependencyPolicy::AllowProposed(vec![]);
+    let repo = Repo::new("rust", &[]);
+    repo.replace(FEATURE.0, FEATURE.1, FEATURE.2);
+    repo.write("tests/count.rs", ACCEPTANCE_TEST);
+
+    // The test cannot fail on the base, which has no `count`: a bug-fix's
+    // gate refuses it, a feature's takes it.
+    let tests = acceptance(&["tests/count.rs"]);
+    let report = repo.gate_feature(&rust, Some(&tests), feature());
+    assert!(report.passed(), "{report}");
+    assert_eq!(
+        report.step(StepName::ReproTest).unwrap().status,
+        StepStatus::Passed
+    );
+    let as_a_fix = repo.gate(&rust, Some(&tests));
+    assert_eq!(
+        as_a_fix.step(StepName::ReproTest).unwrap().status,
+        StepStatus::Failed,
+        "{as_a_fix}"
+    );
+
+    let refused = |repro: Option<&Repro>| {
+        let report = repo.gate_feature(&rust, repro, feature());
+        let step = report.step(StepName::ReproTest).unwrap().clone();
+        assert_eq!(step.status, StepStatus::Failed, "{report}");
+        step.detail
+    };
+    let none = refused(None);
+    assert!(none.contains("must come with acceptance tests"), "{none}");
+    let old = refused(Some(&acceptance(&["tests/count.rs", "Cargo.toml"])));
+    assert!(
+        old.contains("must be written by the patch") && old.contains("`Cargo.toml`"),
+        "{old}"
+    );
+    let unnamed = refused(Some(&acceptance(&[])));
+    assert!(unnamed.contains("name no file"), "{unnamed}");
+    let wrong = Repro {
+        test: "no_such_test".into(),
+        files: vec!["tests/count.rs".into()],
+    };
+    let ran_nothing = refused(Some(&wrong));
+    assert!(ran_nothing.contains("ran no test"), "{ran_nothing}");
+
+    // Tests alone accept nothing.
+    let only_tests = Repo::new("rust", &[]);
+    only_tests.write(
+        "tests/count.rs",
+        &REPRO_TEST.replace("fourth_item_is_refused", "a_cart_counts_its_items"),
+    );
+    let report = only_tests.gate_feature(&rust, Some(&tests), feature());
+    let step = report.step(StepName::ReproTest).unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{report}");
+    assert!(
+        step.detail.contains("implements nothing"),
+        "{}",
+        step.detail
+    );
+}
+
+/// A crates.io package `name` as `Cargo.lock` locks it.
+fn locked(name: &str, version: &str) -> String {
+    left_pad(version).replace("\"left-pad\"", &format!("\"{name}\""))
+}
+
+#[test]
+fn a_feature_adds_only_the_packages_its_plan_proposed() {
+    use aegis_gate::{DependencyPolicy, ProposedDependency};
+    let rust = rust_without_audit();
+    let (repo, lock) = with_locked_left_pad();
+    let proposed = |list: &[(&str, &str)]| {
+        DependencyPolicy::AllowProposed(
+            list.iter()
+                .map(|(package, version)| ProposedDependency {
+                    package: (*package).into(),
+                    version: (*version).into(),
+                })
+                .collect(),
+        )
+    };
+    // Cargo rewrites a lockfile `Cargo.toml` does not back: each check
+    // writes the patch's again.
+    let deps = |lockfile: &str, policy: DependencyPolicy| {
+        repo.write("Cargo.lock", lockfile);
+        let report = repo.gate_feature(&rust, None, policy);
+        report.step(StepName::Dependencies).unwrap().clone()
+    };
+    let base = format!("{lock}{}", left_pad("1.0.0"));
+    let added = format!("{base}{}", locked("right-pad", "2.0.0"));
+
+    // Proposed and approved at that version, named as the registry does.
+    let ok = deps(&added, proposed(&[("right_pad", "2.0.0")]));
+    assert_ne!(ok.status, StepStatus::Failed, "{}", ok.detail);
+    let other_version = deps(&added, proposed(&[("right-pad", "1.0.0")]));
+    assert_eq!(other_version.status, StepStatus::Failed);
+    assert!(
+        other_version
+            .detail
+            .contains("`right-pad@2.0.0`: the approved plan proposed it at 1.0.0"),
+        "{}",
+        other_version.detail
+    );
+    let unproposed = deps(&added, proposed(&[]));
+    assert!(
+        unproposed
+            .detail
+            .contains("neither in the allow-list nor proposed"),
+        "{}",
+        unproposed.detail
+    );
+    // Proposing a package does not let a feature bump one already locked.
+    let bumped = deps(
+        &format!("{lock}{}", left_pad("1.0.1")),
+        proposed(&[("left-pad", "1.0.1")]),
+    );
+    assert_eq!(bumped.status, StepStatus::Failed);
+    assert!(
+        bumped
+            .detail
+            .contains("`left-pad` 1.0.0 → 1.0.1: a feature keeps the locked versions"),
+        "{}",
+        bumped.detail
+    );
 }

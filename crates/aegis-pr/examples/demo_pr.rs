@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })?;
     println!("{report}");
     if !report.passed() {

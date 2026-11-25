@@ -16,11 +16,15 @@ use aegis_lang::{
 };
 
 use crate::GateError;
-use crate::dependency_policy::{DependencyPolicy, Upgrade, same_package};
+use crate::dependency_policy::{DependencyPolicy, ProposedDependency, Upgrade, same_package};
 use crate::git::{self, Change};
 
 /// Why a bug-fix cannot change a locked version, after each such change.
 const LOCKED: &str = "a bug-fix keeps the locked versions; upgrades go through a CVE job (#455)";
+
+/// Why a feature cannot change a locked version (#676).
+const FEATURE_LOCKED: &str = "a feature keeps the locked versions and adds only what its plan proposed; upgrades go \
+     through a CVE job (#455)";
 
 /// What `policy` rejects in one lockfile, `before` to `after`.
 pub(crate) fn lock_problems(
@@ -42,6 +46,9 @@ pub(crate) fn lock_problems(
                 )
                 .collect()
         }
+        DependencyPolicy::AllowProposed(proposed) => {
+            proposed_problems(proposed, before, after, allowed, official_source)
+        }
         // What the upgrade pulls in comes with it; only its source is
         // checked here, its licenses and advisories by the audit (#159).
         DependencyPolicy::Upgrade(_) => {
@@ -53,6 +60,51 @@ pub(crate) fn lock_problems(
                 .collect()
         }
     }
+}
+
+/// What a feature's patch does wrong in one lockfile (#676): a new package
+/// from another source, a new package neither in the allow-list nor
+/// proposed at the version it is locked at, or a locked version changed.
+/// Licenses and advisories are the audit's (#159), as for every policy.
+fn proposed_problems(
+    proposed: &[ProposedDependency],
+    before: &[LockedDependency],
+    after: &[LockedDependency],
+    allowed: &BTreeSet<String>,
+    official_source: &str,
+) -> Vec<String> {
+    let new = new_dependency_violations(before, after, allowed, official_source);
+    let added = new.into_iter().filter_map(|v| {
+        if v.kind == ViolationKind::UnofficialSource {
+            return Some(v.to_string());
+        }
+        let d = &v.dependency;
+        let named: Vec<&ProposedDependency> = proposed
+            .iter()
+            .filter(|p| same_package(&p.package, &d.name))
+            .collect();
+        if named.iter().any(|p| p.version == d.version) {
+            return None;
+        }
+        Some(match named.first() {
+            Some(p) => format!(
+                "new dependency `{}@{}`: the approved plan proposed it at {}",
+                d.name, d.version, p.version
+            ),
+            None => format!(
+                "new dependency `{}@{}` is neither in the allow-list nor proposed in the \
+                 approved plan",
+                d.name, d.version
+            ),
+        })
+    });
+    added
+        .chain(
+            version_changes(before, after)
+                .into_iter()
+                .map(|c| format!("{c}: {FEATURE_LOCKED}")),
+        )
+        .collect()
 }
 
 /// The CVE job's files in this part (paths from the repo root) are as the
@@ -236,7 +288,7 @@ pub(crate) fn check(check: &DependencyCheck<'_>) -> Result<Option<Result<(), Str
     // changes no lockfile, and must fail all the same.
     let upgrade = match policy {
         DependencyPolicy::Upgrade(u) => upgrade_problems(u, profile, repo, dir, changed),
-        DependencyPolicy::Locked => vec![],
+        DependencyPolicy::Locked | DependencyPolicy::AllowProposed(_) => vec![],
     };
     if !upgrade.is_empty() {
         return Ok(Some(Err(upgrade.join("\n"))));

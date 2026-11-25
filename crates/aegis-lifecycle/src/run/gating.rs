@@ -305,6 +305,9 @@ pub(crate) async fn gate(
             parts,
             sidecars,
             dependency_policy,
+            // Feature jobs gate their acceptance tests once the feature
+            // lane runs them (#677, #678).
+            test_mode: aegis_gate::TestMode::Reproduce,
         })
     })
     .await
