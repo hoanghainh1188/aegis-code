@@ -859,8 +859,14 @@ impl IssueRecord {
                 outcome,
                 wall_time_s,
             } => {
+                // A plan waiting for approval may be revised (#677): the
+                // run goes on, and its time adds up.
+                let before = match self.outcome {
+                    Some(Outcome::AwaitingApproval) => self.wall_time_s.unwrap_or(0.0),
+                    _ => 0.0,
+                };
                 self.outcome = Some(*outcome);
-                self.wall_time_s = Some(*wall_time_s);
+                self.wall_time_s = Some(before + *wall_time_s);
             }
             LedgerEvent::Reviewed(review) => self.review = Some(*review),
             LedgerEvent::IssueRead { title, url } => {
@@ -1203,5 +1209,33 @@ mod tests {
         });
         let decoded: IssueRecord = serde_json::from_value(legacy).unwrap();
         assert!(decoded.ticket_meta.is_empty());
+    }
+
+    #[test]
+    fn a_plan_revised_after_waiting_adds_up_its_time() {
+        let finished = |outcome, wall_time_s| LedgerEvent::Finished {
+            outcome,
+            wall_time_s,
+        };
+        let record = IssueRecord::from_events(
+            id("GH-9"),
+            &[
+                finished(Outcome::AwaitingApproval, 2.0),
+                finished(Outcome::AwaitingApproval, 3.0),
+            ],
+        );
+        assert_eq!(
+            (record.outcome, record.wall_time_s),
+            (Some(Outcome::AwaitingApproval), Some(5.0))
+        );
+        // An ended run that is finished again keeps only the last time.
+        let ended = IssueRecord::from_events(
+            id("GH-9"),
+            &[
+                finished(Outcome::StoppedSteps, 2.0),
+                finished(Outcome::PrOpened, 3.0),
+            ],
+        );
+        assert_eq!(ended.wall_time_s, Some(3.0));
     }
 }

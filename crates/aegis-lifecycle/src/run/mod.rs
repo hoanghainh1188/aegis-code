@@ -173,7 +173,30 @@ where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
 {
-    run(platform, issue, None, cancel).await
+    run(platform, issue, Stage::Issue, cancel).await
+}
+
+/// Plans `issue`'s feature again (#677), as `revision` asks: the Architect
+/// phase goes on under the same ledger from the plan a person sent back
+/// with feedback, and the job waits for approval again.
+pub async fn run_feature_revision<P, S>(
+    platform: Arc<Platform<P, S>>,
+    issue: IssueInput,
+    revision: crate::FeatureRevision,
+    cancel: CancellationToken,
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    run(platform, issue, Stage::Revision(Box::new(revision)), cancel).await
+}
+
+/// What a run does.
+enum Stage {
+    Issue,
+    Review(ReviewRound),
+    Revision(Box<crate::FeatureRevision>),
 }
 
 /// Runs a review round (#243) of `issue`'s PR under `issue.id`, its own
@@ -189,13 +212,13 @@ where
     P: ModelProvider + Send + Sync + 'static,
     S: LedgerStore + Send + Sync + 'static,
 {
-    run(platform, issue, Some(round), cancel).await
+    run(platform, issue, Stage::Review(round), cancel).await
 }
 
 async fn run<P, S>(
     platform: Arc<Platform<P, S>>,
     issue: IssueInput,
-    round: Option<ReviewRound>,
+    stage: Stage,
     cancel: CancellationToken,
 ) -> Result<IssueReport, LifecycleError>
 where
@@ -213,16 +236,33 @@ where
     };
     let mut ledger =
         IssueLedger::open(&platform.store, &platform.prices, regional, issue_id).await?;
-    if let Some(outcome) = ledger.record().outcome {
+    // A plan waiting for approval goes on when it is revised (#677).
+    let revising = matches!(stage, Stage::Revision(_));
+    match ledger.record().outcome {
+        None => {}
+        Some(Outcome::AwaitingApproval) if revising => {}
+        Some(outcome) => {
+            return Err(LifecycleError::Config(format!(
+                "issue `{}` already ended ({outcome:?}); run it under a new id",
+                issue.id
+            )));
+        }
+    }
+    if revising && ledger.record().outcome.is_none() {
         return Err(LifecycleError::Config(format!(
-            "issue `{}` already ended ({outcome:?}); run it under a new id",
+            "issue `{}` has no plan waiting to be revised",
             issue.id
         )));
     }
 
-    let prepared = match round {
-        Some(round) => review_and_work(&platform, &mut ledger, &issue, round, &cancel).await,
-        None => prepare_and_work(&platform, &mut ledger, &issue, &cancel).await,
+    let prepared = match stage {
+        Stage::Review(round) => {
+            review_and_work(&platform, &mut ledger, &issue, round, &cancel).await
+        }
+        Stage::Revision(revision) => {
+            crate::feature::revise(&platform, &mut ledger, &issue, &revision).await
+        }
+        Stage::Issue => prepare_and_work(&platform, &mut ledger, &issue, &cancel).await,
     };
     let ending = match prepared {
         Ok(ending) => ending,

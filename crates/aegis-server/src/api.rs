@@ -71,6 +71,7 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .route("/api/v1/jobs/{id}/review", post(review_job))
         .route("/api/v1/jobs/{id}/approve", post(approve_job))
+        .route("/api/v1/jobs/{id}/revise", post(revise_job))
         .route(
             "/api/v1/jobs/{id}/epic-budget",
             get(epic_budget).put(set_epic_budget),
@@ -669,17 +670,66 @@ async fn review_job(
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }
 
-/// Approves the plan job `id` waits with (#675, ADR 0019): the job is
-/// queued again to go on with it. A maintainer's call, as it spends the
-/// repo's budget; 409 when the job does not wait for approval.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApproveQuery {
+    /// `integration_pr` or `stacked_prs`; the plan's recommendation when
+    /// absent.
+    mode: Option<String>,
+}
+
+/// Approves the plan job `id` waits with (#675, #677, ADR 0019), to be
+/// delivered as `?mode=` or as the plan recommends; the job keeps waiting,
+/// approved, for its sub-jobs (#678). A maintainer's call, as it will
+/// spend the repo's budget; 409 when the job does not wait for approval or
+/// is approved already, 422 for an unknown mode.
 async fn approve_job(
     State(store): State<Store>,
     Extension(access): Extension<Access>,
     id: Result<Path<i64>, PathRejection>,
+    query: Result<Query<ApproveQuery>, QueryRejection>,
 ) -> ApiResult {
     let Path(id) = id?;
+    let Query(query) = query?;
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
-    let job = store.approve_job_by(JobId(id), &access.actor).await?;
+    let mode = query
+        .mode
+        .as_deref()
+        .map(crate::feature_gate::parse_mode)
+        .transpose()
+        .map_err(ApiError::invalid)?;
+    let job = store.approve_job_by(JobId(id), mode, &access.actor).await?;
+    Ok(ok(StatusCode::OK, JobView::from(job)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviseJob {
+    feedback: String,
+}
+
+/// Sends the plan job `id` waits with back for a revision (#677), with
+/// `feedback`: the job is queued again to plan anew, up to the repo's
+/// `[feature_lane] max_revisions`. For maintainers; 409 when the job does
+/// not wait for approval, is approved or reached the cap, 422 for empty
+/// feedback.
+async fn revise_job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+    body: Result<Json<ReviseJob>, JsonRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let Json(body) = body?;
+    let job = job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let repo = store
+        .repo(job.repo_id)
+        .await?
+        .ok_or_else(|| ApiError::invalid("the job's repo is gone"))?;
+    let cap = crate::feature_gate::max_revisions(&repo.config);
+    let (job, _) = store
+        .revise_job_by(job.id, &body.feedback, cap, &access.actor)
+        .await?;
     Ok(ok(StatusCode::OK, JobView::from(job)))
 }
 

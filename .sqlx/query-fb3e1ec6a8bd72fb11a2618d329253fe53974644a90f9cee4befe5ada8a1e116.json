@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT approved_by, approved_at FROM job_approvals WHERE job_id = $1",
+  "query": "SELECT approved_by, approved_at, delivery_mode FROM job_approvals WHERE job_id = $1",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,17 @@
             "name": "approved_at"
           }
         }
+      },
+      {
+        "ordinal": 2,
+        "name": "delivery_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_approvals",
+            "name": "delivery_mode"
+          }
+        }
       }
     ],
     "parameters": {
@@ -33,8 +44,9 @@
     },
     "nullable": [
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "2f18bf62f3c1561b9be263d44feae75e30d3a1da00b8ec33a673e8f0b7df86ed"
+  "hash": "fb3e1ec6a8bd72fb11a2618d329253fe53974644a90f9cee4befe5ada8a1e116"
 }

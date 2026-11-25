@@ -108,6 +108,9 @@ pub struct PrStrings {
     /// A plan's approval is not taken (#675); the argument is already
     /// inert.
     pub approve_refused: fn(&str) -> String,
+    /// A plan's revision is not taken (#677); the argument is already
+    /// inert.
+    pub revise_refused: fn(&str) -> String,
     pub line: &'static str,
     pub review: &'static str,
     pub comment: &'static str,
@@ -128,6 +131,8 @@ pub struct PrStrings {
     pub rfc_sub_jobs: &'static str,
     /// Its argument: the ids of the sub-jobs one waits for.
     pub rfc_after: fn(&str) -> String,
+    /// A revised plan: its revision, from 2.
+    pub rfc_revision: fn(u32) -> String,
     /// How a person approves the plan, or asks for changes.
     pub rfc_how: &'static str,
     // The comment on the issue when its job ends (#589); each follows
@@ -234,6 +239,26 @@ fn rfc_after_vi(ids: &str) -> String {
     format!("sau {ids}")
 }
 
+fn rfc_revision_en(revision: u32) -> String {
+    format!("Revision {revision} of the plan, after the feedback it was sent back with.")
+}
+fn rfc_revision_ja(revision: u32) -> String {
+    format!("差し戻しのフィードバックを受けた計画の改訂 {revision} です。")
+}
+fn rfc_revision_vi(revision: u32) -> String {
+    format!("Bản sửa {revision} của kế hoạch, theo góp ý khi bị trả lại.")
+}
+
+fn revise_refused_en(why: &str) -> String {
+    format!("**aegis-code** will not revise this plan: {why}.")
+}
+fn revise_refused_ja(why: &str) -> String {
+    format!("**aegis-code** はこの計画を改訂しません: {why}。")
+}
+fn revise_refused_vi(why: &str) -> String {
+    format!("**aegis-code** sẽ không sửa kế hoạch này: {why}.")
+}
+
 fn approve_refused_en(why: &str) -> String {
     format!("**aegis-code** cannot start this plan yet: {why}.")
 }
@@ -335,6 +360,7 @@ static EN: PrStrings = PrStrings {
     pushed_nothing: pushed_nothing_en,
     review_refused: review_refused_en,
     approve_refused: approve_refused_en,
+    revise_refused: revise_refused_en,
     line: "line",
     review: "review",
     comment: "comment",
@@ -351,6 +377,7 @@ static EN: PrStrings = PrStrings {
     rfc_dependencies: "New dependencies it proposes:",
     rfc_sub_jobs: "Sub-jobs, in order:",
     rfc_after: rfc_after_en,
+    rfc_revision: rfc_revision_en,
     rfc_how: "Nothing is changed until someone who can write to the repository comments \
               `/aegis approve` (or `/aegis approve mode=integration_pr|stacked_prs`) on this \
               issue, or approves the job on the dashboard.",
@@ -401,6 +428,7 @@ static JA: PrStrings = PrStrings {
     pushed_nothing: pushed_nothing_ja,
     review_refused: review_refused_ja,
     approve_refused: approve_refused_ja,
+    revise_refused: revise_refused_ja,
     line: "行",
     review: "レビュー",
     comment: "コメント",
@@ -417,6 +445,7 @@ static JA: PrStrings = PrStrings {
     rfc_dependencies: "提案する新しい依存関係:",
     rfc_sub_jobs: "サブジョブ (順番):",
     rfc_after: rfc_after_ja,
+    rfc_revision: rfc_revision_ja,
     rfc_how: "リポジトリへの書き込み権限を持つ人がこの issue に `/aegis approve` \
               (または `/aegis approve mode=integration_pr|stacked_prs`) とコメントするか、\
               ダッシュボードでジョブを承認するまで、何も変更されません。",
@@ -468,6 +497,7 @@ static VI: PrStrings = PrStrings {
     pushed_nothing: pushed_nothing_vi,
     review_refused: review_refused_vi,
     approve_refused: approve_refused_vi,
+    revise_refused: revise_refused_vi,
     line: "dòng",
     review: "review",
     comment: "bình luận",
@@ -484,6 +514,7 @@ static VI: PrStrings = PrStrings {
     rfc_dependencies: "Phụ thuộc mới đề xuất:",
     rfc_sub_jobs: "Các sub-job, theo thứ tự:",
     rfc_after: rfc_after_vi,
+    rfc_revision: rfc_revision_vi,
     rfc_how: "Chưa có gì bị thay đổi cho tới khi người có quyền ghi vào repo comment \
               `/aegis approve` (hoặc `/aegis approve mode=integration_pr|stacked_prs`) trên \
               issue này, hoặc duyệt job trên dashboard.",
@@ -538,14 +569,16 @@ mod tests {
         for l in [Locale::En, Locale::Ja] {
             let s = l.strings();
             let all = format!(
-                "{s:?}{}{}{}{}{}{}{}{}{}{}{}",
+                "{s:?}{}{}{}{}{}{}{}{}{}{}{}{}{}",
                 (s.rfc)(2, "stacked_prs"),
                 (s.rfc_after)("a"),
+                (s.rfc_revision)(2),
                 (s.more)(2),
                 (s.pushed)("abc"),
                 (s.pushed_nothing)("x"),
                 (s.review_refused)("x"),
                 (s.approve_refused)("x"),
+                (s.revise_refused)("x"),
                 (s.opened)("pull request", Some("https://x")),
                 (s.looked_into)("pull request"),
                 (s.stopped)("pull request", "x"),

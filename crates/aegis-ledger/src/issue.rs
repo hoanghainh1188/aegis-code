@@ -295,7 +295,9 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         outcome: Outcome,
         wall_time_s: f64,
     ) -> Result<(), LedgerError> {
-        if self.record.outcome.is_none() {
+        // A run ends once; a plan waiting for approval ends again when it
+        // is revised (#677).
+        if matches!(self.record.outcome, None | Some(Outcome::AwaitingApproval)) {
             self.push(LedgerEvent::Finished {
                 outcome,
                 wall_time_s,

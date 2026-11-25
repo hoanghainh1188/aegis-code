@@ -53,8 +53,8 @@ pub use diagnose::TriageLane;
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use feature::{
-    Criterion, FeatureDeliveryMode, FeatureLane, FeaturePlan, MAX_PLANNED_SUB_JOBS, PlannedSubJob,
-    ProposedPackage, render as render_feature_plan,
+    Criterion, FeatureDeliveryMode, FeatureLane, FeaturePlan, FeatureRevision,
+    MAX_PLANNED_SUB_JOBS, PlannedSubJob, ProposedPackage, render as render_feature_plan,
 };
 pub use issue::{HiddenTests, IssueInput, IssueSummary, open_github_issues};
 pub use memory::{
@@ -74,7 +74,7 @@ pub use registry::{
 };
 pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;
-pub use run::{IssueReport, Platform, job_dir, run_issue, run_review};
+pub use run::{IssueReport, Platform, job_dir, run_feature_revision, run_issue, run_review};
 
 /// The start of a stop reason when the platform, not the agent, ended a
 /// run on an error (#557): its tools did not start, the store failed. The

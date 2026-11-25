@@ -7,8 +7,9 @@ use std::time::Duration;
 use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Outcome, Tier, TokenCounts};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    Actor, AttemptEnd, AuditFilter, Delivered, EPIC_BUDGET_SPENT, Job, JobId, JobSource, JobStatus,
-    ModeName, NewDelivery, NewJob, NewRepo, Page, RepoId, Store, StoreError, WebhookSource,
+    Actor, AttemptEnd, AuditFilter, Delivered, DeliveryMode, EPIC_BUDGET_SPENT, Job, JobId,
+    JobSource, JobStatus, ModeName, NewDelivery, NewJob, NewRepo, Page, RepoId, Store, StoreError,
+    WebhookSource,
 };
 
 async fn repo(s: &Store, slug: &str) -> RepoId {
@@ -85,17 +86,15 @@ async fn sub_jobs_run_in_dependency_order_without_holding_back_other_jobs() {
     assert_eq!(claim_id(s).await, None);
     assert_eq!(s.approval(root.id).await.unwrap(), None);
 
-    let approved = s.approve_job_by(root.id, &Actor::system()).await.unwrap();
-    assert_eq!(
-        (approved.status, approved.outcome),
-        (JobStatus::Queued, None)
-    );
-    assert_eq!(s.approval(root.id).await.unwrap().unwrap().by, "aegis");
-    let err = s
-        .approve_job_by(root.id, &Actor::system())
+    // A revision asked for (#677): queued to plan again.
+    let (queued, asked) = s
+        .revise_job_by(root.id, "split the export out", 3, &Actor::system())
         .await
-        .unwrap_err();
-    assert!(matches!(err, StoreError::Conflict(_)), "{err}");
+        .unwrap();
+    assert_eq!(
+        (queued.status, queued.outcome, asked.revision),
+        (JobStatus::Queued, None, 1)
+    );
 
     // While the plan runs, its sub-jobs share its ticket.
     let planning = claim(s).await.unwrap();
@@ -220,18 +219,20 @@ async fn a_plan_waiting_for_approval_keeps_its_ticket() {
     );
 
     // A job made for the ticket by other means wins: the plan cannot be
-    // queued next to it.
+    // queued next to it to plan again.
     let other = s.create_job(&job(shop, 1, "shop-1-cli")).await.unwrap();
     let err = s
-        .approve_job_by(root.id, &Actor::system())
+        .revise_job_by(root.id, "again", 3, &Actor::system())
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::Conflict(_)), "{err}");
     run(s, other.id, Outcome::PrOpened).await;
-    s.approve_job_by(root.id, &Actor::system()).await.unwrap();
+    s.revise_job_by(root.id, "again", 3, &Actor::system())
+        .await
+        .unwrap();
 
     let err = s
-        .approve_job_by(JobId(9999), &Actor::system())
+        .approve_job_by(JobId(9999), None, &Actor::system())
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::NotFound(_)), "{err}");
@@ -366,5 +367,95 @@ async fn a_feature_stops_at_its_own_budget() {
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
+    db.drop().await;
+}
+
+/// #677: an approval is final and records how the feature is delivered;
+/// the plan keeps waiting, and its ticket, for its sub-jobs (#678).
+/// Revisions are capped, and need feedback.
+#[tokio::test]
+async fn the_design_gate_approves_once_and_caps_revisions() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = repo(s, "shop").await;
+    let root = s.create_job(&job(shop, 1, "shop-1")).await.unwrap();
+    run(s, root.id, Outcome::AwaitingApproval).await;
+
+    let err = s
+        .revise_job_by(root.id, "  ", 1, &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            StoreError::Invalid {
+                field: "feedback",
+                ..
+            }
+        ),
+        "{err}"
+    );
+    s.revise_job_by(root.id, "fewer sub-jobs", 1, &Actor::system())
+        .await
+        .unwrap();
+    run(s, root.id, Outcome::AwaitingApproval).await;
+    let err = s
+        .revise_job_by(root.id, "once more", 1, &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("revised 1 times"), "{err}");
+    let asked = s.revision_request(root.id).await.unwrap().unwrap();
+    assert_eq!(
+        (asked.revision, asked.feedback.as_str()),
+        (1, "fewer sub-jobs")
+    );
+
+    let approved = s
+        .approve_job_by(root.id, Some(DeliveryMode::StackedPrs), &Actor::system())
+        .await
+        .unwrap();
+    assert_eq!(
+        (approved.status, approved.outcome),
+        (JobStatus::Done, Some(Outcome::AwaitingApproval))
+    );
+    assert_eq!(claim_id(s).await, None, "it waits for #678");
+    let approval = s.approval(root.id).await.unwrap().unwrap();
+    assert_eq!(
+        (approval.by.as_str(), approval.delivery_mode),
+        ("aegis", Some(DeliveryMode::StackedPrs))
+    );
+    let again = s
+        .approve_job_by(root.id, None, &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(again.to_string().contains("approved already"), "{again}");
+    let late = s
+        .revise_job_by(root.id, "too late", 3, &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(late.to_string().contains("approved already"), "{late}");
+
+    // The approved plan keeps its ticket.
+    let delivery = NewDelivery {
+        source: WebhookSource::Github,
+        delivery_id: "d1".into(),
+        event: "issues".into(),
+    };
+    assert_eq!(
+        s.deliver_job(&delivery, &job(shop, 1, "shop-1-again"))
+            .await
+            .unwrap(),
+        Delivered::AlreadyLive(root.id)
+    );
+    let log: Vec<String> = s
+        .audit_log_where(&AuditFilter::default(), Page::first(50))
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|e| e.action)
+        .filter(|a| a == "job.revise" || a == "job.approve")
+        .collect();
+    assert_eq!(log, ["job.approve", "job.revise"], "newest first");
     db.drop().await;
 }

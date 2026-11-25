@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT revision, feedback, requested_by, requested_at FROM job_revisions\n             WHERE job_id = $1 ORDER BY revision DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job_revisions",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "feedback",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_revisions",
+            "name": "feedback"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "requested_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_revisions",
+            "name": "requested_by"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "requested_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "job_revisions",
+            "name": "requested_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4c5243f6c742ab4e4ae30fff0930d94eb38372f932b17d75f9aa4388d1b6df02"
+}
