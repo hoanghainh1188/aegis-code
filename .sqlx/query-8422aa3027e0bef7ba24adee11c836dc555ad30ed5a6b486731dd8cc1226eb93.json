@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE job_dependencies SET depends_on = $1 WHERE depends_on = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8422aa3027e0bef7ba24adee11c836dc555ad30ed5a6b486731dd8cc1226eb93"
+}

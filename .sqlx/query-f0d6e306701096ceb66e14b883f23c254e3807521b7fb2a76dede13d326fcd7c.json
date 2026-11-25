@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO job_dependencies (job_id, depends_on)\n                 SELECT $1, depends_on FROM job_dependencies WHERE job_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f0d6e306701096ceb66e14b883f23c254e3807521b7fb2a76dede13d326fcd7c"
+}

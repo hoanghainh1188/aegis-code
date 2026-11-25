@@ -129,15 +129,18 @@ pub(crate) async fn queue_in(
     };
     // The live job of the issue wins over a new one, as in
     // `jobs_one_live_per_issue`, also over a refused one, which is not
-    // live and so not under that index.
+    // live and so not under that index, and over a plan waiting for
+    // approval (#675).
     let created = sqlx::query_as!(
         JobRow,
         "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline, status, reason)
              SELECT $1, $2, $3, $4, $5, $6,
                     CASE WHEN $7::text IS NULL THEN 'queued' ELSE 'cancelled' END, $7
              WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2
-                               AND status IN ('queued', 'running'))
-             ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING
+                               AND (status IN ('queued', 'running')
+                                    OR outcome = 'awaiting_approval'))
+             ON CONFLICT (repo_id, issue_ref)
+                 WHERE status IN ('queued', 'running') AND parent_job_id IS NULL DO NOTHING
              RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                        status, outcome, attempts, locked_by, locked_until, created_at,
                        updated_at, run_after, retries, cancel_requested, reason, pr_url,
@@ -170,7 +173,9 @@ pub(crate) async fn queue_in(
         None => {
             let live = sqlx::query_scalar!(
                 "SELECT id FROM jobs
-                     WHERE repo_id = $1 AND issue_ref = $2 AND status IN ('queued', 'running')",
+                     WHERE repo_id = $1 AND issue_ref = $2
+                       AND (status IN ('queued', 'running') OR outcome = 'awaiting_approval')
+                     ORDER BY parent_job_id NULLS FIRST, id LIMIT 1",
                 job.repo_id.0,
                 job.issue_ref,
             )

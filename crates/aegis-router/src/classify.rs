@@ -89,6 +89,13 @@ pub fn parse_classification(reply: &str) -> Result<Classification, ClassifyError
     }
     let reply: Reply = serde_json::from_str(&reply[start..=end])
         .map_err(|e| ClassifyError::Schema(e.to_string()))?;
+    // A feature is planned by the feature lane (#675), never named by
+    // Light from what a ticket says.
+    if reply.kind == IssueKind::Feature {
+        return Err(ClassifyError::Schema(
+            "`feature` is not a kind Light may name".into(),
+        ));
+    }
     if reply.summary.trim().is_empty() {
         return Err(ClassifyError::EmptySummary);
     }

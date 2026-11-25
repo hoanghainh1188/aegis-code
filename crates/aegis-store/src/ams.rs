@@ -98,6 +98,9 @@ impl Store {
                  LEFT JOIN ended e ON e.job_id = j.id
                  WHERE j.created_at >= (SELECT start FROM month)
                    AND ($2::bigint[] IS NULL OR j.repo_id = ANY($2))
+                   -- A plan waiting for approval (#675) is neither done nor
+                   -- worked on: it waits for a person.
+                   AND j.outcome IS DISTINCT FROM 'awaiting_approval'
                )
                SELECT tenant AS "tenant!",
                       coalesce(priority, 'none') AS "priority!",

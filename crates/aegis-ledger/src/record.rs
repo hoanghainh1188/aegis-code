@@ -74,6 +74,10 @@ pub enum IssueKind {
     Bug,
     CiFailure,
     Sonar,
+    /// New behavior asked for (#675, ADR 0019): planned as an RFC and a
+    /// DAG of sub-jobs a person approves before any code is written. Set
+    /// by the feature lane, never by Light's classification.
+    Feature,
 }
 
 /// What a ticket needs, as Light reads it (#497, ADR 0012): a code fix,
@@ -86,14 +90,18 @@ pub enum TriageCategory {
     OpsOrConfig,
     DataIssue,
     NeedsInfo,
+    /// New behavior rather than a defect (#675, ADR 0019): for the feature
+    /// lane. Recorded only until that lane takes it.
+    FeatureRequest,
 }
 
 impl TriageCategory {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::CodeBug,
         Self::OpsOrConfig,
         Self::DataIssue,
         Self::NeedsInfo,
+        Self::FeatureRequest,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -102,6 +110,7 @@ impl TriageCategory {
             Self::OpsOrConfig => "ops_or_config",
             Self::DataIssue => "data_issue",
             Self::NeedsInfo => "needs_info",
+            Self::FeatureRequest => "feature_request",
         }
     }
 
@@ -409,6 +418,10 @@ pub enum Outcome {
     /// Triaged as no code change (#451): a read-only diagnosis was written
     /// back to the ticket, and no worktree, patch or PR was made.
     Diagnosed,
+    /// A plan waits for a person's sign-off (#675, ADR 0019): the job holds
+    /// no lease and has not failed; a write-authorized approval queues it
+    /// again.
+    AwaitingApproval,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -235,6 +235,13 @@ impl Store {
                        AND (t.max_concurrent_jobs IS NULL
                             OR coalesce(tb.n, 0) < t.max_concurrent_jobs)
                        AND j.repo_id <> ALL($4)
+                       -- A sub-job waits for the jobs it depends on to open
+                       -- their PR (#675); it holds back no other job.
+                       AND NOT EXISTS (
+                           SELECT 1 FROM job_dependencies d
+                           JOIN jobs p ON p.id = d.depends_on
+                           WHERE d.job_id = j.id
+                             AND (p.status, p.outcome) IS DISTINCT FROM ('done', 'pr_opened'))
                        AND (SELECT count(*) FROM jobs
                             WHERE status = 'running' AND locked_by = $1) < $3
                      -- By SLA (#524): P1, P2, P3, then jobs with no level;
@@ -524,7 +531,7 @@ impl Store {
         let work = async {
             let old = sqlx::query!(
                 "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                        status, review_of, review_round
+                        status, review_of, review_round, parent_job_id
                  FROM jobs WHERE id = $1 FOR UPDATE",
                 job.0,
             )
@@ -551,8 +558,8 @@ impl Store {
             let row = sqlx::query_as!(
                 JobRow,
                 "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                                   retry_of, review_of, review_round)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                   retry_of, review_of, review_round, parent_job_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
@@ -567,11 +574,31 @@ impl Store {
                 // A review round run again is the same round of the same PR.
                 old.review_of,
                 old.review_round,
+                // A sub-job run again stays under its parent (#675).
+                old.parent_job_id,
             )
             .fetch_one(&mut *tx)
             .await
             .map_err(StoreError::from_db)?;
             let retried: Job = row.try_into()?;
+            // A sub-job run again keeps its place in its feature's DAG
+            // (#675): what it depends on, and the jobs that waited for it
+            // now wait for the new one.
+            sqlx::query!(
+                "INSERT INTO job_dependencies (job_id, depends_on)
+                 SELECT $1, depends_on FROM job_dependencies WHERE job_id = $2",
+                retried.id.0,
+                job.0,
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query!(
+                "UPDATE job_dependencies SET depends_on = $1 WHERE depends_on = $2",
+                retried.id.0,
+                job.0,
+            )
+            .execute(&mut *tx)
+            .await?;
             let detail = serde_json::json!({ "retry_of": job.0 });
             audit::record(
                 &mut tx,
