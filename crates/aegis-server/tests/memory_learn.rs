@@ -498,3 +498,230 @@ async fn a_rejected_verdict_with_a_reason_keeps_a_pitfall() {
     assert_eq!(kept[0].job_id, Some(root.id));
     db.drop().await;
 }
+
+const HOOK_SECRET: &str = "github-secret";
+
+/// The webhook router, GitHub's API played by `github_api`.
+fn hooks(s: &Store, github_api: &str) -> Router {
+    use aegis_server::webhook::{
+        COMMENT_TOKEN_ENV, DEFAULT_MAX_BODY_BYTES, GITHUB_SECRET_ENV, GitHubNotifier, WebhookConfig,
+    };
+    let secrets = aegis_secrets::Secrets::fixed([
+        (GITHUB_SECRET_ENV, HOOK_SECRET),
+        (COMMENT_TOKEN_ENV, "comment-token"),
+    ]);
+    aegis_server::webhook::router(
+        s.clone(),
+        WebhookConfig {
+            notifier: Some(GitHubNotifier::new(github_api, secrets.clone())),
+            secrets,
+            label: "aegis".into(),
+            burst: 100,
+            per_minute: 600,
+            gitlab_notifier: None,
+            bitbucket_notifier: None,
+            bitbucket_dc_notifier: None,
+            azure_devops_notifier: None,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            modes: None,
+            app: None,
+        },
+    )
+}
+
+/// GitHub delivers `body` as `event`; the answer's `data`.
+async fn deliver(app: &Router, event: &str, delivery: &str, body: &Value) -> (StatusCode, Value) {
+    use hmac::{Hmac, KeyInit, Mac};
+    let body = body.to_string();
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(HOOK_SECRET.as_bytes()).unwrap();
+    mac.update(body.as_bytes());
+    let hex: String = mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let request = Request::builder()
+        .method("POST")
+        .uri("/github")
+        .header("x-github-event", event)
+        .header("x-github-delivery", delivery)
+        .header("x-hub-signature-256", format!("sha256={hex}"))
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let answer: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, answer["data"].clone())
+}
+
+fn acme_pay() -> Value {
+    serde_json::json!({ "full_name": "acme/pay", "html_url": "https://github.com/acme/pay" })
+}
+
+fn pr_closed(merged: bool) -> Value {
+    serde_json::json!({
+        "action": "closed",
+        "pull_request": { "number": 7, "html_url": PR, "state": "closed", "merged": merged,
+                          "head": { "ref": "agent/pay-3" } },
+        "repository": acme_pay()
+    })
+}
+
+/// #657: an agent PR closed unmerged on GitHub keeps what its review
+/// rounds said as a pitfall; a reviewer's reason given on the dashboard
+/// is not overwritten by a later close.
+#[tokio::test]
+async fn an_agent_pr_closed_unmerged_on_its_forge_keeps_a_pitfall() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let repo = repo(s).await;
+    let app = hooks(s, "http://127.0.0.1:9");
+
+    let (status, data) = deliver(&app, "pull_request", "c0", &pr_closed(false)).await;
+    assert_eq!(
+        (status, &data["status"]),
+        (StatusCode::OK, &serde_json::json!("ignored")),
+        "no job opened it yet: {data}"
+    );
+
+    rejected_pr(s, repo).await;
+    let (status, data) = deliver(&app, "pull_request", "c1", &pr_closed(false)).await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    assert_eq!(data["status"], "memory_recorded", "{data}");
+    assert_eq!(data["kind"], "rejected_pattern", "{data}");
+    let kept = s
+        .list_repo_memories(repo, Some(MemoryKind::RejectedPattern), Page::first(10))
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].source_ref, rejected_ref(PR));
+    assert!(
+        kept[0].summary.contains("sum assertion"),
+        "{}",
+        kept[0].summary
+    );
+
+    // A reviewer's reason, then the PR closed again: the reason stays.
+    learn_rejected_pr(
+        s,
+        PR,
+        Some("Rounding up breaks the ledger's sum invariant."),
+        None,
+        &Actor::system(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (_, data) = deliver(&app, "pull_request", "c2", &pr_closed(false)).await;
+    assert_eq!(data["status"], "ignored", "{data}");
+    let kept = s
+        .list_repo_memories(repo, Some(MemoryKind::RejectedPattern), Page::first(10))
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(kept.len(), 1);
+    assert!(
+        kept[0].summary.contains("sum invariant"),
+        "{}",
+        kept[0].summary
+    );
+    db.drop().await;
+}
+
+fn issue_closed(number: u64, reason: &str, closer: &str) -> Value {
+    serde_json::json!({
+        "action": "closed",
+        "issue": { "number": number, "state_reason": reason },
+        "repository": acme_pay(),
+        "sender": { "login": closer, "type": "User" }
+    })
+}
+
+fn number_of(job: &Job) -> u64 {
+    job.issue_ref.rsplit_once('#').unwrap().1.parse().unwrap()
+}
+
+/// #657: a diagnosed ticket closed as done by someone who can write to
+/// the repo, with no code job after the diagnosis, confirms it.
+#[tokio::test]
+async fn a_diagnosed_issue_closed_by_a_writer_confirms_its_diagnosis() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let repo = repo(s).await;
+    let github_api = MockServer::start().await;
+    for (login, permission) in [("lan", "write"), ("eve", "read")] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/acme/pay/collaborators/{login}/permission"
+            )))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "permission": permission })),
+            )
+            .mount(&github_api)
+            .await;
+    }
+    let app = hooks(s, &github_api.uri());
+
+    let job = diagnosed(s, repo, "pay-9").await;
+    let n = number_of(&job);
+    let (_, data) = deliver(&app, "issues", "i0", &issue_closed(n, "completed", "eve")).await;
+    assert_eq!(
+        data["status"], "ignored",
+        "a reader confirms nothing: {data}"
+    );
+    let (_, data) = deliver(&app, "issues", "i1", &issue_closed(n, "not_planned", "lan")).await;
+    assert_eq!(data["status"], "ignored", "{data}");
+    let (_, data) = deliver(&app, "issues", "i2", &issue_closed(99, "completed", "lan")).await;
+    assert_eq!(data["status"], "ignored", "no job for it: {data}");
+    assert!(
+        !aegis_server::memory_learn::diagnosis_confirmed(s, &job)
+            .await
+            .unwrap()
+    );
+
+    let (status, data) = deliver(&app, "issues", "i3", &issue_closed(n, "completed", "lan")).await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    assert_eq!(data["status"], "memory_recorded", "{data}");
+    assert_eq!(data["kind"], "confirmed_diagnosis", "{data}");
+    assert!(
+        aegis_server::memory_learn::diagnosis_confirmed(s, &job)
+            .await
+            .unwrap()
+    );
+    let (_, data) = deliver(&app, "issues", "i4", &issue_closed(n, "completed", "lan")).await;
+    assert_eq!(data["status"], "ignored", "kept already: {data}");
+
+    // A diagnosis followed by a job that changes code is not confirmed.
+    let other = diagnosed(s, repo, "pay-100").await;
+    s.create_job(&NewJob {
+        repo_id: repo,
+        issue_ref: other.issue_ref.clone(),
+        ledger_key: IssueId::parse("pay-100-code").unwrap(),
+        source: JobSource::Github,
+        priority: None,
+        sla_deadline: None,
+    })
+    .await
+    .unwrap();
+    let closed = issue_closed(number_of(&other), "completed", "lan");
+    let (_, data) = deliver(&app, "issues", "i5", &closed).await;
+    assert_eq!(data["status"], "ignored", "{data}");
+    assert!(
+        !aegis_server::memory_learn::diagnosis_confirmed(s, &other)
+            .await
+            .unwrap()
+    );
+    let kept = s
+        .list_repo_memories(repo, Some(MemoryKind::ConfirmedDiagnosis), Page::first(10))
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(kept.len(), 1);
+    db.drop().await;
+}

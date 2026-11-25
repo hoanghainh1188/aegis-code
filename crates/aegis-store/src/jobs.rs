@@ -167,6 +167,29 @@ impl Store {
         .transpose()
     }
 
+    /// The last job made for the ticket `issue_ref` of `repo`, whatever its
+    /// state, review rounds aside (#657): what was last done about it.
+    pub async fn latest_job_for_issue(
+        &self,
+        repo: RepoId,
+        issue_ref: &str,
+    ) -> Result<Option<Job>, StoreError> {
+        sqlx::query_as!(
+            JobRow,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
+             FROM jobs WHERE repo_id = $1 AND issue_ref = $2 AND review_of IS NULL
+             ORDER BY id DESC LIMIT 1",
+            repo.0,
+            issue_ref,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(Job::try_from)
+        .transpose()
+    }
+
     /// Newest first.
     pub async fn list_jobs(
         &self,

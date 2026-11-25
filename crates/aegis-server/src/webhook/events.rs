@@ -31,6 +31,13 @@ pub enum Kind {
     /// An agent PR (`agent/*`) was merged (#456): extract `merged_pr` and
     /// `review_lesson` memories for its repository.
     PrMerged { pr_url: String },
+    /// An agent PR (`agent/*`) was closed without being merged (#657): what
+    /// its reviewers said becomes a `rejected_pattern` memory.
+    PrClosed { pr_url: String },
+    /// An issue was closed as done by `closer` (#657): a diagnosis the
+    /// diagnosis lane wrote back to it, not followed by a code fix, is kept
+    /// as a `confirmed_diagnosis` memory if `closer` can write to the repo.
+    IssueClosed { closer: String },
     /// A push to `branch` (#660): the repo's runbooks and business rules
     /// are synced if it is its default branch.
     Push { branch: String },
@@ -60,6 +67,18 @@ pub enum Skip {
 
 fn ignored(why: impl Into<String>) -> Skip {
     Skip::Ignored(why.into())
+}
+
+/// The `action` of a GitHub delivery, read alone to pick how to read the
+/// rest.
+fn body_action(body: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Action {
+        action: String,
+    }
+    serde_json::from_slice::<Action>(body)
+        .ok()
+        .map(|a| a.action)
 }
 
 fn parse<'a, T: Deserialize<'a>>(body: &'a [u8]) -> Result<T, Skip> {
@@ -112,6 +131,8 @@ struct GithubIssues {
     label: Option<Named>,
     issue: GithubIssue,
     repository: GithubRepo,
+    #[serde(default)]
+    sender: Option<Sender>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +142,9 @@ struct GithubIssue {
     pull_request: Option<serde_json::Value>,
     #[serde(default)]
     user: Option<Sender>,
+    /// Why it was closed: `completed`, `not_planned` or `duplicate`.
+    #[serde(default)]
+    state_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,6 +354,30 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
             // opened the PR is what makes it the agent's.
             review_round(e.repository, e.issue.number, e.issue.html_url, e.sender)
         }
+        "issues" if body_action(body).as_deref() == Some("closed") => {
+            let e: GithubIssues = parse(body)?;
+            if e.issue.pull_request.is_some() {
+                return Err(ignored("a pull request, not an issue"));
+            }
+            // Closed as not planned or as a duplicate confirms nothing.
+            if e.issue
+                .state_reason
+                .as_deref()
+                .is_some_and(|r| r != "completed")
+            {
+                return Err(ignored("an issue closed as not done"));
+            }
+            let closer = match e.sender {
+                Some(s) if s.kind != "Bot" && !s.login.is_empty() => s.login,
+                _ => return Err(ignored("not closed by a person")),
+            };
+            let path = checked_path(&e.repository.full_name, 2)?;
+            Ok(Wanted {
+                issue_ref: checked_ref(format!("{path}#{}", e.issue.number))?,
+                repo_url: e.repository.html_url,
+                kind: Kind::IssueClosed { closer },
+            })
+        }
         "issues" => {
             let e: GithubIssues = parse(body)?;
             if e.action != "labeled" || e.label.is_none_or(|l| l.name != label) {
@@ -372,18 +420,21 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         }
         "pull_request" => {
             let e: GithubPullEvent = parse(body)?;
-            if e.action != "closed" || !e.pull_request.merged {
-                return Err(ignored("not a merged pull request"));
+            if e.action != "closed" {
+                return Err(ignored("not a closed pull request"));
             }
             if !e.pull_request.head.name.starts_with("agent/") {
                 return Err(ignored("not a pull request of the agent"));
             }
             let path = checked_path(&e.repository.full_name, 2)?;
+            let pr_url = e.pull_request.html_url;
             Ok(Wanted {
                 issue_ref: checked_ref(format!("{path}#{}", e.pull_request.number))?,
                 repo_url: e.repository.html_url,
-                kind: Kind::PrMerged {
-                    pr_url: e.pull_request.html_url,
+                kind: if e.pull_request.merged {
+                    Kind::PrMerged { pr_url }
+                } else {
+                    Kind::PrClosed { pr_url }
                 },
             })
         }
@@ -438,6 +489,8 @@ struct GitlabIssueHook {
     object_attributes: GitlabIssue,
     #[serde(default)]
     changes: GitlabChanges,
+    #[serde(default)]
+    user: Option<GitlabUser>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -445,6 +498,8 @@ struct GitlabIssue {
     iid: u64,
     #[serde(default)]
     author_id: Option<u64>,
+    #[serde(default)]
+    action: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -568,6 +623,18 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         }
         "Issue Hook" => {
             let e: GitlabIssueHook = parse(body)?;
+            if e.object_attributes.action.as_deref() == Some("close") {
+                let closer = match e.user {
+                    Some(u) if !u.bot => u.id.to_string(),
+                    _ => return Err(ignored("not closed by a person")),
+                };
+                let path = checked_path(&e.project.path_with_namespace, MAX_GITLAB_PARTS)?;
+                return Ok(Wanted {
+                    issue_ref: checked_ref(format!("{path}#{}", e.object_attributes.iid))?,
+                    repo_url: e.project.web_url,
+                    kind: Kind::IssueClosed { closer },
+                });
+            }
             let has = |list: &[Titled]| list.iter().any(|l| l.title == label);
             let added = e
                 .changes
@@ -603,8 +670,10 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         "Merge Request Hook" => {
             let e: GitlabMergeRequestHook = parse(body)?;
             let mr = e.object_attributes;
-            if mr.state != "merged" && mr.action.as_deref() != Some("merge") {
-                return Err(ignored("not a merged merge request"));
+            let merged = mr.state == "merged" || mr.action.as_deref() == Some("merge");
+            let closed = mr.action.as_deref() == Some("close");
+            if !merged && !closed {
+                return Err(ignored("not a merged or closed merge request"));
             }
             if !mr.source_branch.starts_with("agent/") {
                 return Err(ignored("not a merge request of the agent"));
@@ -613,7 +682,11 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
             Ok(Wanted {
                 issue_ref: checked_ref(format!("{path}!{}", mr.iid))?,
                 repo_url: e.project.web_url,
-                kind: Kind::PrMerged { pr_url: mr.url },
+                kind: if merged {
+                    Kind::PrMerged { pr_url: mr.url }
+                } else {
+                    Kind::PrClosed { pr_url: mr.url }
+                },
             })
         }
         other => Err(ignored(format!("event `{other}`"))),
@@ -693,7 +766,7 @@ pub fn bitbucket(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
     let round = match event {
         "pullrequest:comment_created" => true,
         "pullrequest:changes_request_created" => true,
-        "pullrequest:fulfilled" => false,
+        "pullrequest:fulfilled" | "pullrequest:rejected" => false,
         other => return Err(ignored(format!("event `{other}`"))),
     };
     let e: BitbucketPullEvent = parse(body)?;
@@ -719,6 +792,8 @@ pub fn bitbucket(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
             pr_url,
             sender: e.actor.uuid,
         }
+    } else if event == "pullrequest:rejected" {
+        Kind::PrClosed { pr_url }
     } else {
         Kind::PrMerged { pr_url }
     };
@@ -799,7 +874,7 @@ struct DcPullEvent {
 pub fn bitbucket_dc(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
     let round = match event {
         "pr:comment:added" | "pr:reviewer:needs_work" => true,
-        "pr:merged" => false,
+        "pr:merged" | "pr:declined" => false,
         other => return Err(ignored(format!("event `{other}`"))),
     };
     let e: DcPullEvent = parse(body)?;
@@ -842,6 +917,8 @@ pub fn bitbucket_dc(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
             pr_url,
             sender: e.actor.slug,
         }
+    } else if event == "pr:declined" {
+        Kind::PrClosed { pr_url }
     } else {
         Kind::PrMerged { pr_url }
     };
@@ -958,7 +1035,8 @@ pub fn azure_devops(event: &str, body: &[u8]) -> Result<Wanted, Skip> {
             Kind::ReviewRound { pr_url, sender }
         }
         None if pull.status == "completed" => Kind::PrMerged { pr_url },
-        None => return Err(ignored("the pull request is not completed")),
+        None if pull.status == "abandoned" => Kind::PrClosed { pr_url },
+        None => return Err(ignored("the pull request is not completed or abandoned")),
     };
     Ok(Wanted {
         issue_ref,
@@ -1652,10 +1730,12 @@ mod tests {
         })
         .to_string()
         .into_bytes();
-        assert!(matches!(
-            github("pull_request", &gh_unmerged, "aegis"),
-            Err(Skip::Ignored(_))
-        ));
+        assert_eq!(
+            github("pull_request", &gh_unmerged, "aegis").unwrap().kind,
+            Kind::PrClosed {
+                pr_url: "https://github.com/bot/demo/pull/42".into()
+            }
+        );
 
         let gl_merged = json!({
             "project": {
@@ -1679,5 +1759,139 @@ mod tests {
                 pr_url: "https://gitlab.com/group/app/-/merge_requests/9".into()
             }
         );
+    }
+
+    #[test]
+    fn an_agent_pr_closed_unmerged_on_any_forge_is_a_rejection() {
+        let gl_closed = json!({
+            "project": {
+                "path_with_namespace": "group/app",
+                "web_url": "https://gitlab.com/group/app"
+            },
+            "object_attributes": {
+                "iid": 9,
+                "url": "https://gitlab.com/group/app/-/merge_requests/9",
+                "state": "closed",
+                "action": "close",
+                "source_branch": "agent/app-9"
+            }
+        });
+        let wanted = gitlab("Merge Request Hook", gl_closed.to_string().as_bytes(), "x").unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::PrClosed {
+                pr_url: "https://gitlab.com/group/app/-/merge_requests/9".into()
+            }
+        );
+        let mut reopened = gl_closed.clone();
+        reopened["object_attributes"]["action"] = json!("reopen");
+        reopened["object_attributes"]["state"] = json!("opened");
+        assert!(matches!(
+            gitlab("Merge Request Hook", reopened.to_string().as_bytes(), "x"),
+            Err(Skip::Ignored(_))
+        ));
+
+        let declined = bitbucket(
+            "pullrequest:rejected",
+            &bitbucket_event(None, "DECLINED", "agent/web-1", "user"),
+        )
+        .unwrap();
+        assert!(matches!(declined.kind, Kind::PrClosed { .. }));
+
+        let declined = bitbucket_dc(
+            "pr:declined",
+            &dc_event(None, "DECLINED", "agent/web-1", "NORMAL"),
+        )
+        .unwrap();
+        assert!(matches!(declined.kind, Kind::PrClosed { .. }));
+        // Not the agent's branch: nothing.
+        assert!(matches!(
+            bitbucket_dc(
+                "pr:declined",
+                &dc_event(None, "DECLINED", "fix/x", "NORMAL")
+            ),
+            Err(Skip::Ignored(_))
+        ));
+
+        let abandoned = json!({ "resource": az_pull("abandoned", "agent/cart-1") });
+        let wanted = azure_devops(AZURE_UPDATED, abandoned.to_string().as_bytes()).unwrap();
+        assert!(matches!(wanted.kind, Kind::PrClosed { .. }));
+        let active = json!({ "resource": az_pull("active", "agent/cart-1") });
+        assert!(matches!(
+            azure_devops(AZURE_UPDATED, active.to_string().as_bytes()),
+            Err(Skip::Ignored(_))
+        ));
+    }
+
+    fn gh_issue_closed(reason: Option<&str>, sender_kind: &str) -> Vec<u8> {
+        json!({
+            "action": "closed",
+            "issue": { "number": 7, "state_reason": reason },
+            "repository": repo(),
+            "sender": { "login": "maintainer", "type": sender_kind }
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn an_issue_closed_as_done_by_a_person_may_confirm_a_diagnosis() {
+        let wanted = github(
+            "issues",
+            &gh_issue_closed(Some("completed"), "User"),
+            "aegis",
+        )
+        .unwrap();
+        assert_eq!(wanted.issue_ref, "bot/demo#7");
+        assert_eq!(
+            wanted.kind,
+            Kind::IssueClosed {
+                closer: "maintainer".into()
+            }
+        );
+        // An older delivery with no reason reads as done.
+        let wanted = github("issues", &gh_issue_closed(None, "User"), "aegis").unwrap();
+        assert!(matches!(wanted.kind, Kind::IssueClosed { .. }));
+        for (reason, kind) in [
+            (Some("not_planned"), "User"),
+            (Some("duplicate"), "User"),
+            (Some("completed"), "Bot"),
+        ] {
+            assert!(
+                matches!(
+                    github("issues", &gh_issue_closed(reason, kind), "aegis"),
+                    Err(Skip::Ignored(_))
+                ),
+                "{reason:?} {kind}"
+            );
+        }
+        // A labeled issue still asks for a job.
+        let labeled_issue = github("issues", &labeled("aegis", "bot/demo"), "aegis").unwrap();
+        assert!(matches!(labeled_issue.kind, Kind::Issue { .. }));
+
+        let gl_closed = |bot: bool| {
+            json!({
+                "project": {
+                    "path_with_namespace": "group/app",
+                    "web_url": "https://gitlab.com/group/app"
+                },
+                "object_attributes": { "iid": 4, "action": "close" },
+                "user": { "id": 31, "bot": bot }
+            })
+            .to_string()
+            .into_bytes()
+        };
+        let wanted = gitlab("Issue Hook", &gl_closed(false), "aegis").unwrap();
+        assert_eq!(wanted.issue_ref, "group/app#4");
+        assert_eq!(
+            wanted.kind,
+            Kind::IssueClosed {
+                closer: "31".into()
+            }
+        );
+        assert!(matches!(
+            gitlab("Issue Hook", &gl_closed(true), "aegis"),
+            Err(Skip::Ignored(_))
+        ));
     }
 }
