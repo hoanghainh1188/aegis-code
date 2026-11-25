@@ -17,6 +17,17 @@ use crate::GateError;
 /// (#593). Only the cache has it, never a tree started from the cache.
 pub const LAST_USED: &str = ".aegis-cache-last-used";
 
+/// A file in a cache directory whose time is when upstream code last
+/// changed it: the base copy's build, or the base's fetched dependencies.
+/// The worker's remote cache (#665) sends a cache up only after it.
+pub const REFRESHED: &str = ".aegis-cache-refreshed";
+
+/// Writes `dir`'s [`REFRESHED`] marker.
+pub fn mark_refreshed(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join(REFRESHED), b"")
+}
+
 /// Writes `dir`'s [`LAST_USED`] marker, if `dir` exists.
 pub fn mark_used(dir: &Path) -> std::io::Result<()> {
     if !dir.is_dir() {
@@ -98,6 +109,7 @@ impl BuildCache {
             std::fs::rename(&fresh, &current).map_err(|e| GateError::io(&current, &e))?;
         }
         try_mark_used(&self.dir);
+        let _ = mark_refreshed(&self.dir);
         Ok(())
     }
 }
@@ -120,6 +132,7 @@ mod tests {
         cache.refresh_from(&base).unwrap();
         let marker = cache.dir.join(LAST_USED);
         assert!(marker.is_file(), "refresh marks the cache used");
+        assert!(cache.dir.join(REFRESHED).is_file(), "and refreshed");
         let long_ago = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
         std::fs::File::options()
             .write(true)
