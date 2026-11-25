@@ -48,6 +48,27 @@ pub(crate) struct Resume {
     pub diff: String,
     pub turn: u32,
     pub state: DriveState,
+    /// The execution pod the job had (#665), for its next worker to ask
+    /// the pool for again.
+    pub pod: Option<String>,
+}
+
+/// A checkpoint's state as it is kept: the loop's, and the job's pod.
+#[derive(Serialize)]
+struct Kept<'a> {
+    #[serde(flatten)]
+    state: &'a DriveState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pod: Option<&'a str>,
+}
+
+/// [`Kept`], read back.
+#[derive(Deserialize)]
+struct Read {
+    #[serde(flatten)]
+    state: DriveState,
+    #[serde(default)]
+    pod: Option<String>,
 }
 
 fn git(
@@ -170,7 +191,11 @@ pub(crate) async fn save<S: LedgerStore, E: ExecutionEnv>(
     turn: u32,
     state: &DriveState,
 ) {
-    let state = match serde_json::to_value(state) {
+    let kept = Kept {
+        state,
+        pod: env.pod(),
+    };
+    let state = match serde_json::to_value(&kept) {
         Ok(state) => state,
         Err(e) => {
             tracing::warn!(issue = %at.issue, error = %e, "encoding the checkpoint");
@@ -235,8 +260,8 @@ pub(crate) async fn load<S: LedgerStore>(
             return refuse(format!("commit {commit} is not in the clone"));
         }
     }
-    let state: DriveState = match serde_json::from_value(checkpoint.state) {
-        Ok(state) => state,
+    let Read { state, pod } = match serde_json::from_value(checkpoint.state) {
+        Ok(read) => read,
         Err(e) => return refuse(format!("its state does not read: {e}")),
     };
     Some(Resume {
@@ -245,6 +270,7 @@ pub(crate) async fn load<S: LedgerStore>(
         diff: checkpoint.diff,
         turn: checkpoint.turn,
         state,
+        pod,
     })
 }
 
@@ -362,7 +388,25 @@ mod tests {
                 .await
                 .unwrap();
             let resume = load(&store, &issue, &a, 9).await.expect("resumable");
-            assert_eq!((resume.turn, resume.state), (3, state.clone()));
+            assert_eq!(
+                (resume.turn, resume.state, resume.pod),
+                (3, state.clone(), None)
+            );
+            // The job's execution pod is kept beside the loop's state.
+            let kept = Kept {
+                state: &state,
+                pod: Some("pod-7"),
+            };
+            let with_pod = Checkpoint {
+                state: serde_json::to_value(&kept).unwrap(),
+                ..keep(start, CHECKPOINT_VERSION, 3)
+            };
+            store.save_checkpoint(&issue, &with_pod).await.unwrap();
+            let resume = load(&store, &issue, &a, 9).await.expect("resumable");
+            assert_eq!(
+                (resume.state, resume.pod.as_deref()),
+                (state.clone(), Some("pod-7"))
+            );
         });
         let _ = std::fs::remove_dir_all(&root);
     }
