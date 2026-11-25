@@ -204,6 +204,7 @@ fn execute_gate(
         parts: vec![],
         sidecars,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap();
     (report, started.elapsed())

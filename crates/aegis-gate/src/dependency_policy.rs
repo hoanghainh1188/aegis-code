@@ -3,7 +3,9 @@
 //! allow-list and the official source, as before, and no package bumped,
 //! downgraded or removed. Dependency upgrades go through a CVE job, where
 //! the platform itself raises one package (#501) and the patch must keep
-//! the files it wrote.
+//! the files it wrote. A feature (#676, ADR 0019) may add the packages its
+//! plan proposed and a person approved, at their exact versions, and
+//! nothing else; it too keeps every locked version.
 
 use std::collections::BTreeMap;
 
@@ -14,6 +16,16 @@ pub enum DependencyPolicy {
     Locked,
     /// A CVE job.
     Upgrade(Upgrade),
+    /// A feature job: the packages its approved plan proposed.
+    AllowProposed(Vec<ProposedDependency>),
+}
+
+/// A package a feature's plan proposed, approved at the design gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposedDependency {
+    pub package: String,
+    /// Exactly as the lockfile locks it.
+    pub version: String,
 }
 
 /// The platform's upgrade of one package for a CVE job.

@@ -105,6 +105,7 @@ pub(super) async fn run_baseline_gate(
             parts: vec![],
             sidecars,
             dependency_policy: aegis_gate::DependencyPolicy::Locked,
+            test_mode: aegis_gate::TestMode::Reproduce,
         };
         run_gate(&gate_request)
     })

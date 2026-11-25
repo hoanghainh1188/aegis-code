@@ -116,6 +116,7 @@ fn gate(repo: &Repo, allowed: &[&str]) -> GateReport {
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap()
 }

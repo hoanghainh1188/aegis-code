@@ -199,6 +199,44 @@ impl Repo {
         )
     }
 
+    /// The gate of a feature (#676): `repro` as its acceptance tests,
+    /// under `policy`.
+    pub fn gate_feature(
+        &self,
+        profile: &ResolvedProfile,
+        repro: Option<&Repro>,
+        policy: aegis_gate::DependencyPolicy,
+    ) -> GateReport {
+        self.gate_full(
+            profile,
+            GateOptions {
+                repro,
+                dependency_policy: policy,
+                test_mode: aegis_gate::TestMode::Acceptance,
+                ..GateOptions::default()
+            },
+        )
+    }
+
+    /// [`Repo::gate_feature`] in `sandbox`, under the locked policy.
+    pub fn gate_feature_in(
+        &self,
+        profile: &ResolvedProfile,
+        repro: Option<&Repro>,
+        sandbox: Sandbox,
+    ) -> GateReport {
+        self.gate_full(
+            profile,
+            GateOptions {
+                repro,
+                sandbox: Some(sandbox),
+                dependency_policy: aegis_gate::DependencyPolicy::AllowProposed(vec![]),
+                test_mode: aegis_gate::TestMode::Acceptance,
+                ..GateOptions::default()
+            },
+        )
+    }
+
     pub fn commit_base(&self, message: &str) {
         git(&self.dir(), &["add", "-A"]);
         git(
@@ -226,6 +264,7 @@ impl Repo {
             reference_groups,
             audit,
             dependency_policy,
+            test_mode,
         } = options;
         let allowed = BTreeSet::new();
         let dir = self.dir();
@@ -252,6 +291,7 @@ impl Repo {
             parts: vec![],
             sidecars: None,
             dependency_policy,
+            test_mode,
         })
         .unwrap()
     }
@@ -269,6 +309,7 @@ struct GateOptions<'a> {
     reference_groups: &'a [ReferenceGroup],
     audit: AuditPolicy,
     dependency_policy: aegis_gate::DependencyPolicy,
+    test_mode: aegis_gate::TestMode,
 }
 
 impl Default for GateOptions<'_> {
@@ -283,6 +324,7 @@ impl Default for GateOptions<'_> {
             reference_groups: &[],
             audit: AuditPolicy::default(),
             dependency_policy: Default::default(),
+            test_mode: Default::default(),
         }
     }
 }

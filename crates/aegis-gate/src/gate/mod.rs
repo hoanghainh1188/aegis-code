@@ -64,6 +64,22 @@ pub struct Repro {
     pub files: Vec<String>,
 }
 
+/// What the `repro_test` step proves of [`GateRequest::repro`] (#676,
+/// ADR 0019). The step keeps its id either way, so reports, measures and
+/// ledgers read the same.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TestMode {
+    /// A bug-fix: the test passes with the patch and fails on the base
+    /// revision, so it reproduces the issue.
+    #[default]
+    Reproduce,
+    /// A feature: there is no bug to reproduce. The acceptance tests the
+    /// patch writes for the plan's criteria pass with it; they are
+    /// required, every file of theirs is one the patch adds or changes,
+    /// and the patch changes more than them.
+    Acceptance,
+}
+
 #[derive(Debug, Clone)]
 pub struct GateRequest<'a> {
     /// Git checkout of the patched repo; the gate runs commands in it.
@@ -112,8 +128,12 @@ pub struct GateRequest<'a> {
     /// Services the test steps reach (#490, ADR 0013). Needs `sandbox`.
     pub sidecars: Option<Sidecars>,
     /// What the patch may change in the dependencies (#500): `Locked`
-    /// for bug-fixes and review rounds, `Upgrade` for a CVE job.
+    /// for bug-fixes and review rounds, `Upgrade` for a CVE job,
+    /// `AllowProposed` for a feature (#676).
     pub dependency_policy: DependencyPolicy,
+    /// How `repro` is judged: a bug's reproduction, or a feature's
+    /// acceptance tests (#676).
+    pub test_mode: TestMode,
 }
 
 /// A repo's licenses and ignored advisories, on top of `policies/`.

@@ -1,5 +1,6 @@
 //! The reproduction test step: it passes with the patch and fails on the
-//! base revision.
+//! base revision. For a feature (#676), the acceptance tests the patch
+//! writes pass with it, with no base run.
 
 use super::*;
 
@@ -12,9 +13,18 @@ impl<'a> Run<'a> {
             Step::Skipped(reason) => return Ok(StepReport::skipped(name, skip_of(*reason))),
             Step::Run(c) => c.clone(),
         };
+        let acceptance = self.req.test_mode == TestMode::Acceptance;
         let Some(repro) = self.part.repro.clone() else {
+            if acceptance {
+                let why = "a feature's patch must come with acceptance tests for its plan's \
+                           criteria; none were given";
+                return Ok(report(name, StepStatus::Failed, &[], why.into()));
+            }
             return Ok(StepReport::skipped(name, Skip::NoReproTest));
         };
+        if acceptance && let Some(why) = self.not_acceptance_tests(&repro) {
+            return Ok(report(name, StepStatus::Failed, &[], why));
+        }
         let argv = command.render(&[(Placeholder::Test, &repro.test)])?;
         let patched = self.run_in(&argv, false, "repro_test")?;
         match patched.exit {
@@ -44,6 +54,26 @@ impl<'a> Run<'a> {
                 repro.test
             );
             return Ok(report(name, StepStatus::Failed, &[&patched], detail));
+        }
+        // A feature adds behavior: there is no base on which it must fail.
+        // With no base run to catch an id that selects nothing, the tests
+        // the runner reports must include it.
+        if acceptance {
+            let ran = self
+                .part
+                .profile
+                .gate
+                .test_output
+                .and_then(|format| ran_tests(format, &read_log(&patched.log)));
+            if ran.is_some_and(|ids| !ids.iter().any(|id| is_in(id, &repro.test))) {
+                let detail = format!(
+                    "`{}` ran no test with the patch: no test has that id. Give the id in the \
+                     form this language's test command takes, as its conventions say.",
+                    repro.test
+                );
+                return Ok(report(name, StepStatus::Failed, &[&patched], detail));
+            }
+            return Ok(report(name, StepStatus::Passed, &[&patched], String::new()));
         }
         let repo = self
             .part
@@ -137,5 +167,41 @@ impl<'a> Run<'a> {
             )
         };
         Ok(report(name, StepStatus::Failed, &ran, why))
+    }
+
+    /// Why `repro` cannot be a feature's acceptance tests, if it cannot:
+    /// each of its files is one the patch adds or changes (tests written
+    /// for the plan, not old ones pointed at), and the patch changes more
+    /// than them (the feature itself).
+    fn not_acceptance_tests(&self, repro: &Repro) -> Option<String> {
+        if repro.files.is_empty() {
+            return Some(format!(
+                "`{}`: the acceptance tests name no file; list the files that hold them",
+                repro.test
+            ));
+        }
+        let changed = |f: &String| {
+            self.part.changes.iter().any(|c| &c.path == f) && self.part.repo.join(f).is_file()
+        };
+        let old: Vec<&String> = repro.files.iter().filter(|f| !changed(f)).collect();
+        if !old.is_empty() {
+            return Some(format!(
+                "the acceptance tests must be written by the patch, but it does not add or \
+                 change {}",
+                quoted(&old)
+            ));
+        }
+        let beyond = self
+            .part
+            .changes
+            .iter()
+            .any(|c| !repro.files.contains(&c.path));
+        (!beyond).then(|| {
+            format!(
+                "the patch changes only its acceptance tests ({}): it implements nothing for \
+                 them to accept",
+                quoted(&repro.files)
+            )
+        })
     }
 }

@@ -8,7 +8,7 @@ mod common;
 use std::process::Command;
 use std::time::Duration;
 
-use aegis_gate::{CancelToken, Hardening, Limits, Sandbox, Skip, StepName, StepStatus};
+use aegis_gate::{CancelToken, Hardening, Limits, Repro, Sandbox, Skip, StepName, StepStatus};
 use aegis_lang::Language;
 use common::{Repo, profile};
 
@@ -92,6 +92,47 @@ fn the_rust_gate_passes_inside_the_container() {
         .map(|(name, status)| (name, Some(status)))
         .collect();
     assert_eq!(got, expected, "{report}");
+}
+
+/// #676: a feature's acceptance tests run in the container, and pass
+/// there with no base run; the other steps stay as for a bug-fix.
+#[test]
+fn a_feature_s_acceptance_tests_pass_inside_the_container() {
+    if !docker_ready() {
+        return;
+    }
+    let repo = Repo::new("rust", &[]);
+    repo.replace(
+        "src/lib.rs",
+        "impl Cart {\n",
+        "impl Cart {\n    pub fn count(&self) -> usize {\n        self.items.len()\n    }\n\n",
+    );
+    repo.write(
+        "tests/count.rs",
+        "use fixture_rust::cart;\n\n#[test]\nfn a_cart_counts_its_items() {\n    \
+         assert_eq!(cart![1, 2].count(), 2);\n}\n",
+    );
+    let tests = Repro {
+        test: "a_cart_counts_its_items".into(),
+        files: vec!["tests/count.rs".into()],
+    };
+    let sandbox = sandbox(&repo);
+    let rust = profile(Language::Rust, FAKE_COVERAGE);
+    let report = repo.gate_feature_in(&rust, Some(&tests), sandbox.clone());
+    assert!(report.passed(), "{report}");
+    assert_eq!(
+        report.step(StepName::ReproTest).unwrap().status,
+        StepStatus::Passed
+    );
+    // An id that selects nothing is caught without a base to run on.
+    let nothing = Repro {
+        test: "no_such_test".into(),
+        ..tests
+    };
+    let report = repo.gate_feature_in(&rust, Some(&nothing), sandbox);
+    let step = report.step(StepName::ReproTest).unwrap();
+    assert_eq!(step.status, StepStatus::Failed, "{report}");
+    assert!(step.detail.contains("ran no test"), "{}", step.detail);
 }
 
 #[test]

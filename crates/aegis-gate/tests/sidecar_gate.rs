@@ -107,6 +107,7 @@ fn only_the_test_steps_reach_fresh_sidecars() {
             specs: vec![postgres()],
         }),
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     };
     let report = run_gate(&request).unwrap();
     let sidecars = report.sidecars.expect("sidecar timing report");
@@ -185,6 +186,7 @@ fn sidecars_without_the_sandbox_are_refused() {
             specs: vec![postgres()],
         }),
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap_err();
     assert!(
@@ -278,6 +280,7 @@ fn db_gate(root: &Path, sidecars: Option<Vec<SidecarSpec>>) -> aegis_gate::StepS
             specs,
         }),
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap();
     let test = report.step(aegis_gate::StepName::Test).unwrap();

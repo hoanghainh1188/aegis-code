@@ -168,6 +168,7 @@ impl Repo {
             }],
             sidecars: None,
             dependency_policy: Default::default(),
+            test_mode: Default::default(),
         })
         .unwrap()
     }

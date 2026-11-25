@@ -29,11 +29,11 @@ mod sonar;
 
 pub use build_cache::{BuildCache, LAST_USED, REFRESHED, mark_refreshed, mark_used};
 pub use command::{CancelToken, Exit, INHERITED_ENV, Ran, Runner, out_of_memory};
-pub use dependency_policy::{DependencyPolicy, Upgrade, same_package};
+pub use dependency_policy::{DependencyPolicy, ProposedDependency, Upgrade, same_package};
 pub use egress::{Egress, EgressSession};
 pub use error::GateError;
 pub use failures::{DID_NOT_FINISH, failing_tests, failing_tests_with};
-pub use gate::{AuditPolicy, FetchStep, GateRequest, ReferenceGroup, Repro, run_gate};
+pub use gate::{AuditPolicy, FetchStep, GateRequest, ReferenceGroup, Repro, TestMode, run_gate};
 pub use parts::GatePart;
 pub use report::{
     GateReport, SidecarReport, Skip, StepName, StepReport, StepStatus, UpdatedReferences, tail,

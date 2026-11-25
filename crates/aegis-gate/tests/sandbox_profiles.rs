@@ -161,6 +161,7 @@ fn gate_in_container(
         parts: vec![],
         sidecars: None,
         dependency_policy: Default::default(),
+        test_mode: Default::default(),
     })
     .unwrap()
 }
