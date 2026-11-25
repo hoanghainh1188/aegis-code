@@ -12,6 +12,7 @@ mod ams;
 mod audit;
 mod budget;
 mod clones;
+mod dag;
 mod deliveries;
 mod error;
 mod installations;
@@ -50,6 +51,7 @@ pub use ams::{AmsReport, AmsRow};
 pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};
+pub use dag::{Approval, JobLinks, MAX_SUB_JOBS};
 pub use error::StoreError;
 pub use installations::{
     AppOnRepo, Installation, InstallationSeen, RepoSelection, binding_refusal,

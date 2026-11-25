@@ -135,6 +135,8 @@ pub struct PrStrings {
     pub stop_steps: &'static str,
     pub stop_expert: &'static str,
     pub stop_diagnosed: &'static str,
+    /// A plan waits for a person's approval (#675).
+    pub stop_awaiting_approval: &'static str,
 }
 
 impl PrStrings {
@@ -304,6 +306,7 @@ static EN: PrStrings = PrStrings {
     stop_steps: "it reached its step limit",
     stop_expert: "even the strongest model could not fix it",
     stop_diagnosed: "it was diagnosed as needing no code change",
+    stop_awaiting_approval: "its plan waits for a person's approval",
 };
 
 static JA: PrStrings = PrStrings {
@@ -360,6 +363,7 @@ static JA: PrStrings = PrStrings {
     stop_steps: "ステップ上限に達した",
     stop_expert: "最上位のモデルでも修正できなかった",
     stop_diagnosed: "コード変更は不要と診断された",
+    stop_awaiting_approval: "計画が承認待ちである",
 };
 
 static VI: PrStrings = PrStrings {
@@ -416,6 +420,7 @@ static VI: PrStrings = PrStrings {
     stop_steps: "đã chạm giới hạn số bước",
     stop_expert: "ngay cả model mạnh nhất cũng không sửa được",
     stop_diagnosed: "được chẩn đoán là không cần sửa code",
+    stop_awaiting_approval: "kế hoạch đang chờ người duyệt",
 };
 
 /// Non-ASCII letters only Vietnamese uses; tests check English and

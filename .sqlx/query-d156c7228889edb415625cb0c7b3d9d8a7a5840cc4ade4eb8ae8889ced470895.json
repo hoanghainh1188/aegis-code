@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline, status, reason)\n             SELECT $1, $2, $3, $4, $5, $6,\n                    CASE WHEN $7::text IS NULL THEN 'queued' ELSE 'cancelled' END, $7\n             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2\n                               AND status IN ('queued', 'running'))\n             ON CONFLICT (repo_id, issue_ref) WHERE status IN ('queued', 'running') DO NOTHING\n             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                       status, outcome, attempts, locked_by, locked_until, created_at,\n                       updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                       retry_of, review_of, review_round",
+  "query": "UPDATE jobs SET status = 'queued', outcome = NULL, reason = NULL,\n                                 cancel_requested = false, run_after = now(), updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round",
   "describe": {
     "columns": [
       {
@@ -248,13 +248,7 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -282,5 +276,5 @@
       false
     ]
   },
-  "hash": "eeb7b1427d6d69ccd1fb4688d7dbe834c2d8a0a96769c726d7163c5bf9edec68"
+  "hash": "d156c7228889edb415625cb0c7b3d9d8a7a5840cc4ade4eb8ae8889ced470895"
 }

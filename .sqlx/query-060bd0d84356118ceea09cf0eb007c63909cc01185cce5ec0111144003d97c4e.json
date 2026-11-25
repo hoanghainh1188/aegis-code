@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id FROM jobs\n                     WHERE repo_id = $1 AND issue_ref = $2 AND status IN ('queued', 'running')",
+  "query": "SELECT id FROM jobs\n                     WHERE repo_id = $1 AND issue_ref = $2\n                       AND (status IN ('queued', 'running') OR outcome = 'awaiting_approval')\n                     ORDER BY parent_job_id NULLS FIRST, id LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -25,5 +25,5 @@
       false
     ]
   },
-  "hash": "a56b68af1b95292db8f5511d048aaaccc74c7213891503db16226f31508f2f55"
+  "hash": "060bd0d84356118ceea09cf0eb007c63909cc01185cce5ec0111144003d97c4e"
 }

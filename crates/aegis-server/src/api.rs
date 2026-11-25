@@ -67,6 +67,7 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
         .route("/api/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .route("/api/v1/jobs/{id}/review", post(review_job))
+        .route("/api/v1/jobs/{id}/approve", post(approve_job))
         .route(
             "/api/v1/jobs/{id}/diagnosis/confirm",
             post(confirm_diagnosis),
@@ -659,6 +660,20 @@ async fn review_job(
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
     let job = store.review_job_by(JobId(id), &access.actor).await?;
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
+}
+
+/// Approves the plan job `id` waits with (#675, ADR 0019): the job is
+/// queued again to go on with it. A maintainer's call, as it spends the
+/// repo's budget; 409 when the job does not wait for approval.
+async fn approve_job(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.approve_job_by(JobId(id), &access.actor).await?;
+    Ok(ok(StatusCode::OK, JobView::from(job)))
 }
 
 /// Confirms the diagnosis job `id` wrote back to its ticket (#657): kept

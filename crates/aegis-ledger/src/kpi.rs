@@ -60,9 +60,10 @@ pub fn accepted(record: &IssueRecord) -> bool {
 
 impl Kpi {
     pub fn from_records<'a>(records: impl IntoIterator<Item = &'a IssueRecord>) -> Self {
+        // A plan waiting for approval (#675) has not finished.
         let finished: Vec<&IssueRecord> = records
             .into_iter()
-            .filter(|r| r.outcome.is_some())
+            .filter(|r| r.outcome.is_some_and(|o| o != Outcome::AwaitingApproval))
             .collect();
         let prs: Vec<&&IssueRecord> = finished
             .iter()
@@ -365,6 +366,17 @@ mod tests {
         );
         assert!(text.contains("| Cost per issue, failures included | $2.40 | ≤ $4 | ✔ |"));
         assert!(text.contains("| Hidden tests pass (eval runs) | — | tracked | — |"));
+    }
+
+    #[test]
+    fn a_plan_waiting_for_approval_is_not_a_finished_run() {
+        let records = [
+            record("pr", Outcome::PrOpened, 1.0, None, false),
+            record("plan", Outcome::AwaitingApproval, 0.5, None, false),
+        ];
+        let kpi = Kpi::from_records(&records);
+        assert_eq!((kpi.runs, kpi.prs_opened, kpi.stopped()), (1, 1, 0));
+        assert_eq!(kpi.mean_cost_usd, Some(1.0));
     }
 
     #[test]

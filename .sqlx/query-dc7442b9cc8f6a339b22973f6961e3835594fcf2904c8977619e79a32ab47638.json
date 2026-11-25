@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT depends_on FROM job_dependencies WHERE job_id = $1 ORDER BY depends_on",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "depends_on",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "job_dependencies",
+            "name": "depends_on"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dc7442b9cc8f6a339b22973f6961e3835594fcf2904c8977619e79a32ab47638"
+}
