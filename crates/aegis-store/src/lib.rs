@@ -14,6 +14,7 @@ mod budget;
 mod clones;
 mod dag;
 mod deliveries;
+mod epic;
 mod error;
 mod installations;
 mod instance_pause;
@@ -52,6 +53,7 @@ pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};
 pub use dag::{Approval, JobLinks, MAX_SUB_JOBS};
+pub use epic::{EPIC_BUDGET_SPENT, EpicBudget};
 pub use error::StoreError;
 pub use installations::{
     AppOnRepo, Installation, InstallationSeen, RepoSelection, binding_refusal,

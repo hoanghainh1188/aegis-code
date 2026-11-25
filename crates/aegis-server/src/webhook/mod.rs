@@ -9,12 +9,16 @@
 //!   and for review rounds of the agent's PRs (#244)
 //!   `pull_request_review` (changes requested), `pull_request_review_comment`
 //!   and `issue_comment` (a line `/aegis fix`), from people who can write
-//!   to the repo (asked of GitHub with the comment token).
+//!   to the repo (asked of GitHub with the comment token). A line
+//!   `/aegis approve` in an `issue_comment` on an open issue approves its
+//!   plan waiting for approval (#675), from the same people.
 //! - `POST /webhooks/gitlab`: `X-Gitlab-Token` equal to the secret
 //!   `AEGIS_GITLAB_WEBHOOK_TOKEN`; events `Issue Hook` and `Pipeline Hook`,
 //!   and `Note Hook` with a line `/aegis fix` on the agent's MR (#254), from
 //!   a Developer or above of the repo's project (asked of GitLab with
-//!   `AEGIS_GITLAB_COMMENT_TOKEN`).
+//!   `AEGIS_GITLAB_COMMENT_TOKEN`); a `Note Hook` with a line
+//!   `/aegis approve` on an open issue approves its plan (#675), from the
+//!   same people.
 //! - `POST /webhooks/bitbucket` (#634): `X-Hub-Signature` with the secret
 //!   `AEGIS_BITBUCKET_WEBHOOK_SECRET` (HMAC-SHA256, as GitHub's); events
 //!   `pullrequest:comment_created` (a line `/aegis fix`) and
@@ -869,6 +873,15 @@ async fn deliver(
         };
         return issue_closed(hooks, closed, &repo).await;
     }
+    if let Kind::Approve { sender } = &wanted.kind {
+        let at = DeliveryMeta {
+            source,
+            via,
+            delivery,
+            event,
+        };
+        return approve(hooks, at, &repo, &wanted.issue_ref, sender).await;
+    }
     let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     if let Kind::Issue { author } = &wanted.kind {
         let policy = issue_trust_policy(&repo.config);
@@ -973,7 +986,8 @@ async fn deliver(
             | Kind::PrMerged { .. }
             | Kind::PrClosed { .. }
             | Kind::Push { .. }
-            | Kind::IssueClosed { .. },
+            | Kind::IssueClosed { .. }
+            | Kind::Approve { .. },
             _,
         ) => {
             unreachable!("handled above")
@@ -1432,6 +1446,103 @@ async fn issue_closed(hooks: &Hooks, closed: ClosedIssue<'_>, repo: &Repo) -> Ha
         Err(StoreError::Invalid { field, message }) => malformed(format!("{field}: {message}")),
         Err(e) => internal(delivery, &e),
     }
+}
+
+/// `/aegis approve` on an issue of `repo` (#675, ADR 0019): the issue's
+/// plan waiting for approval is queued again, as approved by the sender,
+/// who must be able to write to the repo. An approval the store refuses
+/// (another live job of the ticket, a spent budget) is told on the issue.
+async fn approve(
+    hooks: &Hooks,
+    at: DeliveryMeta<'_>,
+    repo: &Repo,
+    issue_ref: &str,
+    sender: &str,
+) -> Handled {
+    let DeliveryMeta {
+        source,
+        via,
+        delivery,
+        ..
+    } = at;
+    let ignored = |why: &str| ignored_in(delivery, why, Some(repo.id));
+    let plan = match hooks
+        .store
+        .awaiting_approval_for_issue(repo.id, issue_ref)
+        .await
+    {
+        Ok(Some(job)) => job,
+        Ok(None) => return ignored("no plan of this issue waits for approval"),
+        Err(e) => return internal(delivery, &e),
+    };
+    let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
+    match sender_can_write(hooks, source, repo, sender, on_app).await {
+        Ok(Ok(true)) => {}
+        Ok(Ok(false)) => {
+            tracing::info!(delivery, sender, repo = %repo.slug, "plan approved by someone who cannot write");
+            return ignored("the sender cannot write to the repository");
+        }
+        Ok(Err(why)) => {
+            tracing::warn!(delivery, why, "checking the sender's rights");
+            return ignored("the sender's rights could not be checked");
+        }
+        Err(why) => return ignored(why),
+    }
+    let actor = aegis_store::Actor::forge_user(source.as_str(), sender);
+    let why = match hooks.store.approve_job_by(plan.id, &actor).await {
+        Ok(job) => {
+            tracing::info!(delivery, job = job.id.0, repo = %repo.slug, "plan approved from a webhook");
+            return Handled::new(
+                answer(
+                    StatusCode::ACCEPTED,
+                    json!({ "status": "approved", "job_id": job.id.0 }),
+                ),
+                WebhookOutcome::Queued,
+                Some(format!("plan of job {} approved", job.id.0)),
+                Some(repo.id),
+            )
+            .with_job(job.id);
+        }
+        Err(StoreError::Conflict(why) | StoreError::BudgetSpent(why)) => why,
+        Err(e) => return internal(delivery, &e),
+    };
+    tracing::info!(delivery, why, "plan approval refused");
+    let locale = hooks.locales.of(repo.id).await;
+    let text = format!(
+        "{}\n{}",
+        aegis_pr::REPLY_MARKER,
+        (locale.strings().approve_refused)(&aegis_pr::inert(&why))
+    );
+    match source {
+        WebhookSource::Gitlab => {
+            if let (Some(n), Some((project, Ok(iid)))) = (
+                &hooks.config.gitlab_notifier,
+                issue_ref.rsplit_once('#').map(|(p, i)| (p, i.parse())),
+            ) {
+                n.comment_on_issue(project, iid, &text).await;
+            }
+        }
+        // Only GitHub and GitLab issues carry `/aegis approve`.
+        WebhookSource::Github => {
+            if let (Some(n), Ok((owner, name, number))) = (
+                &hooks.config.notifier,
+                crate::lifecycle::parse_issue_ref(issue_ref),
+            ) {
+                n.comment(&owner, &name, number, &text, on_app).await;
+            }
+        }
+        _ => {}
+    }
+    Handled::new(
+        answer(
+            StatusCode::OK,
+            json!({ "status": "refused", "job_id": plan.id.0, "reason": why }),
+        ),
+        WebhookOutcome::Refused,
+        Some(why),
+        Some(repo.id),
+    )
+    .with_job(plan.id)
 }
 
 /// Where a delivery came from: the forge, the way it reached the server

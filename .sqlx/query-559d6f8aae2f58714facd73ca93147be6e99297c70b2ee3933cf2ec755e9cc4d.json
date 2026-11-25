@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT repo_id, parent_job_id, epic_budget_usd FROM jobs WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "repo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "parent_job_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "parent_job_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "epic_budget_usd",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "epic_budget_usd"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "559d6f8aae2f58714facd73ca93147be6e99297c70b2ee3933cf2ec755e9cc4d"
+}

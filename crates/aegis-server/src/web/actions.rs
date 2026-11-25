@@ -48,6 +48,8 @@ pub enum Done {
     MemoryObsolete,
     /// The job's diagnosis was confirmed and kept as a memory (#657).
     DiagnosisConfirmed,
+    /// The job's plan was approved and queued again (#675).
+    Approved,
 }
 
 impl Done {
@@ -69,10 +71,11 @@ impl Done {
             Self::DiagnosisConfirmed => {
                 "Diagnosis confirmed: the repo's next jobs are given it as a memory."
             }
+            Self::Approved => "Plan approved; the job is queued again to carry it out.",
         }
     }
 
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Created,
         Self::Cancelled,
         Self::CancelRequested,
@@ -80,6 +83,7 @@ impl Done {
         Self::Reviewed,
         Self::MemoryObsolete,
         Self::DiagnosisConfirmed,
+        Self::Approved,
     ];
 
     fn word(self) -> &'static str {
@@ -91,6 +95,7 @@ impl Done {
             Self::Reviewed => "reviewed",
             Self::MemoryObsolete => "memory_obsolete",
             Self::DiagnosisConfirmed => "diagnosis_confirmed",
+            Self::Approved => "approved",
         }
     }
 
@@ -252,6 +257,18 @@ pub async fn confirm_diagnosis(
             format!("job {id} wrote no diagnosis back to its ticket: there is nothing to confirm"),
         )),
     }
+}
+
+/// Approves the plan job `id` waits with (#675): it is queued again. As
+/// retry, for the repo's maintainers, since it spends the repo's budget.
+pub async fn approve(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path(id): Path<i64>,
+) -> WebResult {
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.approve_job_by(JobId(id), &access.actor).await?;
+    Ok(to_job(job.id, Done::Approved))
 }
 
 pub async fn retry(

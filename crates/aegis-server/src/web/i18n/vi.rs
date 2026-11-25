@@ -130,6 +130,7 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "An admin may do everything in every repo, these pages included. A person may be named before they sign in for the first time; a name without" => {
             "Admin làm được mọi việc trong mọi repo, kể cả các trang này. Có thể chỉ định một người trước lần đăng nhập đầu tiên; tên không có"
         }
+        "Approve the plan" => "Duyệt kế hoạch",
         "As a repo file: what" => "Dạng file repo: những gì",
         "As an admin they may do everything in every repo, whatever their roles." => {
             "Là admin nên họ làm được mọi việc trong mọi repo, bất kể role."

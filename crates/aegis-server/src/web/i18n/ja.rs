@@ -132,6 +132,7 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "An admin may do everything in every repo, these pages included. A person may be named before they sign in for the first time; a name without" => {
             "管理者は、これらのページを含め、すべてのリポジトリであらゆる操作ができます。初回サインイン前の人も指定できます。"
         }
+        "Approve the plan" => "計画を承認",
         "As a repo file: what" => "リポジトリファイルとして:",
         "As an admin they may do everything in every repo, whatever their roles." => {
             "管理者なので、ロールにかかわらず、すべてのリポジトリであらゆる操作ができます。"

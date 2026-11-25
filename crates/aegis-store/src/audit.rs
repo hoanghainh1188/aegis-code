@@ -55,6 +55,16 @@ impl Actor {
         }
     }
 
+    /// A person on a forge, by a command in a comment there (#675):
+    /// `github:octocat`, `gitlab:42` (GitLab's user id).
+    pub fn forge_user(source: &str, sender: &str) -> Self {
+        Self {
+            kind: ActorKind::Webhook,
+            user: None,
+            name: format!("{source}:{sender}"),
+        }
+    }
+
     pub fn webhook(source: &str) -> Self {
         Self {
             kind: ActorKind::Webhook,

@@ -434,6 +434,8 @@ struct JobHead {
     /// stop, and run a failed or cancelled one again.
     can_cancel: bool,
     can_retry: bool,
+    /// A maintainer may approve a plan that waits for it (#675).
+    can_approve: bool,
     /// Queued or running: the head asks for itself again.
     live: bool,
 }
@@ -480,6 +482,7 @@ async fn head_of(
         retry_of: job.retry_of.map(|r| r.0),
         can_cancel: maintains && is_live(job) && !job.cancel_requested,
         can_retry: maintains && matches!(job.status, JobStatus::Failed | JobStatus::Cancelled),
+        can_approve: maintains && job.outcome == Some(Outcome::AwaitingApproval),
         live: is_live(job),
     })
 }

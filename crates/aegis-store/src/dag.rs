@@ -11,7 +11,7 @@ use crate::audit::{self, Target};
 use crate::budget;
 use crate::jobs::JobRow;
 use crate::tx;
-use crate::{Actor, Job, JobId, NewJob, SlaPriority, Store, StoreError};
+use crate::{Actor, Job, JobId, NewJob, RepoId, SlaPriority, Store, StoreError};
 
 /// The most sub-jobs one job plans, and the most jobs one depends on.
 pub const MAX_SUB_JOBS: usize = 50;
@@ -38,7 +38,7 @@ impl Store {
     /// `depends_on` opened its PR. `parent` is a job with no parent of its
     /// own, in the same repo; `depends_on` are sub-jobs of `parent` already
     /// made, so no cycle can be formed. `BudgetSpent` when the repo's
-    /// monthly budget is spent (#31).
+    /// monthly budget (#31) or the feature's own budget is spent.
     pub async fn create_sub_job_by(
         &self,
         parent: JobId,
@@ -95,6 +95,7 @@ impl Store {
                 ));
             }
             budget::check(&mut tx, &self.budget, job.repo_id).await?;
+            crate::epic::check(&mut tx, &self.budget, parent).await?;
             let created: Job = sqlx::query_as!(
                 JobRow,
                 "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
@@ -198,7 +199,7 @@ impl Store {
                     job.0
                 )));
             }
-            budget::check(&mut tx, &self.budget, crate::RepoId(held.repo_id)).await?;
+            budget::check(&mut tx, &self.budget, RepoId(held.repo_id)).await?;
             let approved: Job = sqlx::query_as!(
                 JobRow,
                 "UPDATE jobs SET status = 'queued', outcome = NULL, reason = NULL,
@@ -241,6 +242,32 @@ impl Store {
         }
         .await;
         tx::commit(tx, work).await
+    }
+
+    /// The newest plan of ticket `issue_ref` of `repo` that waits for
+    /// approval, if any: what `/aegis approve` on the ticket approves.
+    pub async fn awaiting_approval_for_issue(
+        &self,
+        repo: RepoId,
+        issue_ref: &str,
+    ) -> Result<Option<Job>, StoreError> {
+        sqlx::query_as!(
+            JobRow,
+            "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,
+                    review_round
+             FROM jobs
+             WHERE repo_id = $1 AND issue_ref = $2 AND parent_job_id IS NULL
+               AND status = 'done' AND outcome = 'awaiting_approval'
+             ORDER BY id DESC LIMIT 1",
+            repo.0,
+            issue_ref,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(Job::try_from)
+        .transpose()
     }
 
     /// The last approval of `job`'s plan, if it had one.

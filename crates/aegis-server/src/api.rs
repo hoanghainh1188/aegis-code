@@ -18,15 +18,18 @@
 //! A repo's monthly budget (#31) is read at `GET /api/v1/repos/{id}/budget`
 //! and its cap set with `PUT` (maintainer); a job asked for when it is
 //! spent is refused with `409 budget_spent` and the reason.
+//! A feature's own budget (#675) is read at
+//! `GET /api/v1/jobs/{id}/epic-budget` and its ceiling set with `PUT`
+//! (maintainer); its sub-jobs then wait while it is spent.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aegis_ledger::IssueId;
 use aegis_lifecycle::CveTarget;
 use aegis_store::{
-    GIT_SOURCE_PREFIX, Job, JobFilter, JobId, JobSource, JobStatus, MemoryId, MemoryKind,
-    MemoryScope, NewJob, NewRepoMemory, Page, PageOf, RepoBudget, RepoId, RepoMemory, RepoRole,
-    Run, SlaPriority, Store, StoreError,
+    EpicBudget, GIT_SOURCE_PREFIX, Job, JobFilter, JobId, JobSource, JobStatus, MemoryId,
+    MemoryKind, MemoryScope, NewJob, NewRepoMemory, Page, PageOf, RepoBudget, RepoId, RepoMemory,
+    RepoRole, Run, SlaPriority, Store, StoreError,
 };
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -68,6 +71,10 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .route("/api/v1/jobs/{id}/review", post(review_job))
         .route("/api/v1/jobs/{id}/approve", post(approve_job))
+        .route(
+            "/api/v1/jobs/{id}/epic-budget",
+            get(epic_budget).put(set_epic_budget),
+        )
         .route(
             "/api/v1/jobs/{id}/diagnosis/confirm",
             post(confirm_diagnosis),
@@ -795,6 +802,74 @@ async fn set_repo_budget(
         .set_monthly_budget_by(repo, monthly_usd, &access.actor)
         .await?;
     Ok(ok(StatusCode::OK, BudgetView::new(&store, budget)))
+}
+
+/// A feature's own budget (#675): the ceiling over what the job that
+/// planned it and its sub-jobs spend.
+#[derive(Debug, Serialize)]
+struct EpicBudgetView {
+    job_id: i64,
+    /// `null`: no ceiling of its own.
+    ceiling_usd: Option<f64>,
+    spent_usd: f64,
+    left_usd: Option<f64>,
+    /// `unlimited`, `ok`, `warn` or `spent`: no more sub-job runs.
+    state: &'static str,
+    /// A feature with less than this left is spent: one job's cap.
+    job_reserve_usd: f64,
+}
+
+impl EpicBudgetView {
+    fn new(store: &Store, b: EpicBudget) -> Self {
+        let rules = store.budget_rules();
+        Self {
+            job_id: b.parent.0,
+            state: b.state(rules).as_str(),
+            left_usd: b.left_usd(),
+            ceiling_usd: b.ceiling_usd,
+            spent_usd: b.spent_usd,
+            job_reserve_usd: rules.job_reserve_usd,
+        }
+    }
+}
+
+async fn epic_budget(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    job_for(&store, &access, id, RepoRole::Viewer).await?;
+    let budget = store.epic_budget(JobId(id)).await?;
+    Ok(ok(StatusCode::OK, EpicBudgetView::new(&store, budget)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetEpicBudget {
+    /// Required; `null` removes the ceiling.
+    #[serde(default, deserialize_with = "present")]
+    ceiling_usd: Option<Option<f64>>,
+}
+
+/// Sets the ceiling of the feature job `id` planned, for the repo's
+/// maintainers; 400 for a sub-job.
+async fn set_epic_budget(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    id: Result<Path<i64>, PathRejection>,
+    body: Result<Json<SetEpicBudget>, JsonRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let Json(body) = body?;
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let ceiling_usd = body
+        .ceiling_usd
+        .ok_or_else(|| ApiError::invalid("ceiling_usd: required, `null` for no ceiling"))?;
+    let budget = store
+        .set_epic_budget_by(JobId(id), ceiling_usd, &access.actor)
+        .await?;
+    Ok(ok(StatusCode::OK, EpicBudgetView::new(&store, budget)))
 }
 
 #[derive(Debug, Serialize)]

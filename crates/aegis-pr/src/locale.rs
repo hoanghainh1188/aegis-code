@@ -105,6 +105,9 @@ pub struct PrStrings {
     pub pushed_nothing: fn(&str) -> String,
     /// The review is not taken (#589); the argument is already inert.
     pub review_refused: fn(&str) -> String,
+    /// A plan's approval is not taken (#675); the argument is already
+    /// inert.
+    pub approve_refused: fn(&str) -> String,
     pub line: &'static str,
     pub review: &'static str,
     pub comment: &'static str,
@@ -189,6 +192,16 @@ fn review_refused_ja(why: &str) -> String {
 }
 fn review_refused_vi(why: &str) -> String {
     format!("**aegis-code** sẽ không nhận lần review này: {why}.")
+}
+
+fn approve_refused_en(why: &str) -> String {
+    format!("**aegis-code** cannot start this plan yet: {why}.")
+}
+fn approve_refused_ja(why: &str) -> String {
+    format!("**aegis-code** はこの計画をまだ開始できません: {why}。")
+}
+fn approve_refused_vi(why: &str) -> String {
+    format!("**aegis-code** chưa thể bắt đầu kế hoạch này: {why}.")
 }
 
 fn diagnosis_en(category: &str, confidence: f64) -> String {
@@ -281,6 +294,7 @@ static EN: PrStrings = PrStrings {
     pushed: pushed_en,
     pushed_nothing: pushed_nothing_en,
     review_refused: review_refused_en,
+    approve_refused: approve_refused_en,
     line: "line",
     review: "review",
     comment: "comment",
@@ -337,6 +351,7 @@ static JA: PrStrings = PrStrings {
     pushed: pushed_ja,
     pushed_nothing: pushed_nothing_ja,
     review_refused: review_refused_ja,
+    approve_refused: approve_refused_ja,
     line: "行",
     review: "レビュー",
     comment: "コメント",
@@ -394,6 +409,7 @@ static VI: PrStrings = PrStrings {
     pushed: pushed_vi,
     pushed_nothing: pushed_nothing_vi,
     review_refused: review_refused_vi,
+    approve_refused: approve_refused_vi,
     line: "dòng",
     review: "review",
     comment: "bình luận",
@@ -455,11 +471,12 @@ mod tests {
         for l in [Locale::En, Locale::Ja] {
             let s = l.strings();
             let all = format!(
-                "{s:?}{}{}{}{}{}{}{}{}",
+                "{s:?}{}{}{}{}{}{}{}{}{}",
                 (s.more)(2),
                 (s.pushed)("abc"),
                 (s.pushed_nothing)("x"),
                 (s.review_refused)("x"),
+                (s.approve_refused)("x"),
                 (s.opened)("pull request", Some("https://x")),
                 (s.looked_into)("pull request"),
                 (s.stopped)("pull request", "x"),
