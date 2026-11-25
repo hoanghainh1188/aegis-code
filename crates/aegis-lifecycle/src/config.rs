@@ -151,6 +151,54 @@ pub struct RunSection {
     /// worker or execution host starts from them instead of cold.
     #[serde(default)]
     pub remote_cache: Option<RemoteCache>,
+    /// Get each job a pod of its own from an execution pool (#665) and give
+    /// it back when the job ends: [`RemoteExecution`] per job, from the
+    /// pool's commands rather than this file.
+    #[serde(default)]
+    pub execution_pool: Option<ExecutionPool>,
+}
+
+/// `[run.execution_pool]` (#665): two commands of the deployment's own
+/// (a script over Kubernetes, Firecracker, Nomad, a fixed set of hosts:
+/// the platform does not know which) that hand a job an execution pod
+/// and take it back.
+///
+/// Both run on the worker with `AEGIS_JOB_ID`, `AEGIS_JOB_DIR` and
+/// `AEGIS_STATE_DIR` set, no stdin, and at most `timeout_s` each.
+/// - `provision` prints one JSON object on stdout: `pod` (the pod's name
+///   for `release`), `docker_host`, `tls_cert`, `tls_key` and `tls_ca`, as
+///   in `[run.remote_execution]`. A job that goes on from its checkpoint
+///   after a worker failed has `AEGIS_POD` set to the pod it had: the
+///   command hands that one back while it still runs, or a new one.
+/// - `release` has `AEGIS_POD` set, when the job ends however it ends. A
+///   worker that crashes does not release its pod: the job's next worker
+///   gets it back, and the pool reaps any pod no job came back for.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionPool {
+    /// The command and its arguments.
+    pub provision: Vec<String>,
+    pub release: Vec<String>,
+    #[serde(default = "default_pool_timeout_s")]
+    pub timeout_s: u64,
+}
+
+fn default_pool_timeout_s() -> u64 {
+    600
+}
+
+impl ExecutionPool {
+    pub fn check(&self) -> Result<(), String> {
+        for (name, argv) in [("provision", &self.provision), ("release", &self.release)] {
+            if argv.first().is_none_or(|p| p.trim().is_empty()) {
+                return Err(format!("run.execution_pool.{name} names no command"));
+            }
+        }
+        if self.timeout_s == 0 {
+            return Err("run.execution_pool.timeout_s is 0".into());
+        }
+        Ok(())
+    }
 }
 
 /// `[run.remote_cache]` (#665): an S3 bucket (AWS, MinIO, any S3 API)
@@ -857,6 +905,22 @@ impl RunConfig {
             if !self.run.sandbox {
                 return Err(LifecycleError::Config(
                     "run.remote_execution needs run.sandbox: without it the gate runs on this host"
+                        .into(),
+                ));
+            }
+        }
+        if let Some(pool) = &self.run.execution_pool {
+            pool.check().map_err(LifecycleError::Config)?;
+            if self.run.remote_execution.is_some() {
+                return Err(LifecycleError::Config(
+                    "run.execution_pool and run.remote_execution both name the execution host: \
+                     keep one"
+                        .into(),
+                ));
+            }
+            if !self.run.sandbox {
+                return Err(LifecycleError::Config(
+                    "run.execution_pool needs run.sandbox: without it the gate runs on this host"
                         .into(),
                 ));
             }

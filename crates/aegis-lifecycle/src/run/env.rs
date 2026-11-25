@@ -18,6 +18,7 @@ use aegis_lang::RepoProfiles;
 use aegis_orchestrator::McpServerSpec;
 use tokio_util::sync::CancellationToken;
 
+use super::pool::{self, PodJob};
 use super::{JobTree, build_cache, fetch_base, gate, tool_specs};
 use crate::answer::FinalAnswer;
 use crate::job::Worktree;
@@ -70,6 +71,12 @@ pub(crate) trait ExecutionEnv: Send + Sync {
     /// Applies an [`ExecutionEnv::export_diff`] to the workspace at its
     /// start.
     fn apply_diff(&self, diff: &str) -> impl Future<Output = Result<(), LifecycleError>> + Send;
+
+    /// The execution pod the job has from the pool (#665), kept in its
+    /// checkpoint so that the job's next worker asks for it again.
+    fn pod(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// A worktree of the platform's clone on this host (ADR 0003 §6), its
@@ -224,6 +231,8 @@ fn remote_docker(
 pub(crate) struct RemoteExecutionEnv {
     local: LocalExecutionEnv,
     docker: String,
+    /// The pool's pod this host is (#665), if it is one.
+    pod: Option<String>,
 }
 
 /// What [`RemoteExecutionEnv`] writes for the host to read back.
@@ -241,7 +250,11 @@ impl RemoteExecutionEnv {
         let docker = remote_docker(job_dir, docker, remote)?
             .display()
             .to_string();
-        Ok(Self { local, docker })
+        Ok(Self {
+            local,
+            docker,
+            pod: None,
+        })
     }
 
     /// `cfg` with the host's Docker in place of this host's.
@@ -340,6 +353,10 @@ impl ExecutionEnv for RemoteExecutionEnv {
     async fn apply_diff(&self, diff: &str) -> Result<(), LifecycleError> {
         self.local.apply_diff(diff).await
     }
+
+    fn pod(&self) -> Option<&str> {
+        self.pod.as_deref()
+    }
 }
 
 /// The job's environment, as its run's configuration picks it.
@@ -350,12 +367,45 @@ pub(crate) enum JobEnv {
 }
 
 impl JobEnv {
-    /// A remote one when the run names `[run.remote_execution]`.
-    pub(crate) fn create(
+    /// A remote one when the run names `[run.remote_execution]`, or a pod
+    /// of the job's own from `[run.execution_pool]` (#665): `previous`,
+    /// the pod the job had before its worker failed.
+    pub(crate) async fn create(
         cfg: &RunConfig,
         start: &str,
         job_dir: &Path,
+        job_id: &str,
+        previous: Option<&str>,
     ) -> Result<Self, LifecycleError> {
+        if let Some(pool) = &cfg.run.execution_pool {
+            std::fs::create_dir_all(job_dir).map_err(|e| LifecycleError::io(job_dir, &e))?;
+            let job = PodJob {
+                id: job_id,
+                dir: job_dir,
+                state_dir: &cfg.run.state_dir,
+            };
+            let pod = pool::provision(pool, job, previous)
+                .await
+                .map_err(LifecycleError::Config)?;
+            tracing::info!(job = job_id, pod = %pod.name, host = %pod.remote.docker_host, "the job has its execution pod");
+            let created = RemoteExecutionEnv::create(
+                &cfg.repo.path,
+                start,
+                job_dir,
+                &cfg.run.docker,
+                &pod.remote,
+            );
+            return match created {
+                Ok(env) => Ok(Self::Remote(RemoteExecutionEnv {
+                    pod: Some(pod.name),
+                    ..env
+                })),
+                Err(e) => {
+                    pool::release(pool, job, &pod.name).await;
+                    Err(e)
+                }
+            };
+        }
         Ok(match &cfg.run.remote_execution {
             Some(remote) => Self::Remote(RemoteExecutionEnv::create(
                 &cfg.repo.path,
@@ -366,6 +416,22 @@ impl JobEnv {
             )?),
             None => Self::Local(LocalExecutionEnv::create(&cfg.repo.path, start, job_dir)?),
         })
+    }
+
+    /// Ends the job's environment: its worktree goes, and its pod, if it
+    /// has one, goes back to the pool.
+    pub(crate) async fn release(self, cfg: &RunConfig, job_id: &str) {
+        let pod = self.pod().map(str::to_owned);
+        let job_dir = self.job_dir().to_owned();
+        drop(self);
+        if let (Some(pool), Some(pod)) = (&cfg.run.execution_pool, pod) {
+            let job = PodJob {
+                id: job_id,
+                dir: &job_dir,
+                state_dir: &cfg.run.state_dir,
+            };
+            pool::release(pool, job, &pod).await;
+        }
     }
 }
 
@@ -439,6 +505,13 @@ impl ExecutionEnv for JobEnv {
         match self {
             Self::Local(e) => e.apply_diff(diff).await,
             Self::Remote(e) => e.apply_diff(diff).await,
+        }
+    }
+
+    fn pod(&self) -> Option<&str> {
+        match self {
+            Self::Local(e) => e.pod(),
+            Self::Remote(e) => e.pod(),
         }
     }
 }

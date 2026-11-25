@@ -42,9 +42,9 @@ mod untrusted;
 pub use answer::{FinalAnswer, ReviewReply, Status, SuspiciousInput, parse_answer};
 pub use checks::{Halt, JobCheck, fold_tools, test_reminder};
 pub use config::{
-    AppConnection, BudgetSection, DirConfig, EntraConfig, ExtraServer, ForkConfig, ForkPlatform,
-    IdentityConfig, LedgerBackend, MemorySection, RemoteCache, RemoteExecution, RepoConfig,
-    RunConfig, RunSection, SonarConfig, upstream_of,
+    AppConnection, BudgetSection, DirConfig, EntraConfig, ExecutionPool, ExtraServer, ForkConfig,
+    ForkPlatform, IdentityConfig, LedgerBackend, MemorySection, RemoteCache, RemoteExecution,
+    RepoConfig, RunConfig, RunSection, SonarConfig, upstream_of,
 };
 pub use cve::CveTarget;
 pub use diagnose::TriageLane;

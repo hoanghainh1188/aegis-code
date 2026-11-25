@@ -179,8 +179,58 @@ where
     };
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     // The job's workspace (#663): everything below reaches it through
-    // `env`.
-    let env = JobEnv::create(cfg, &start, &job_dir)?;
+    // `env`. A job that goes on after its worker failed asks the pool for
+    // the pod it had (#665).
+    let previous = resume.as_ref().and_then(|r| r.pod.clone());
+    let env = JobEnv::create(cfg, &start, &job_dir, &issue.id, previous.as_deref()).await?;
+    let job = JobStart {
+        profiles,
+        issue,
+        first_message,
+        finish,
+        resume,
+        base: &base,
+        start: &start,
+    };
+    let result = work_in(platform, ledger, &env, job, cancel).await;
+    // However the job ended: its pod goes back to the pool.
+    env.release(cfg, &issue.id).await;
+    result
+}
+
+/// What [`work_in`] starts the job from.
+struct JobStart<'a> {
+    profiles: &'a RepoProfiles,
+    issue: &'a IssueInput,
+    first_message: String,
+    finish: &'a Finish,
+    resume: Option<checkpoint::Resume>,
+    base: &'a str,
+    start: &'a str,
+}
+
+/// [`work_from`] in the job's environment `env`.
+async fn work_in<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    env: &JobEnv,
+    job: JobStart<'_>,
+    cancel: &CancellationToken,
+) -> Result<Ending, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    let cfg = &platform.config;
+    let JobStart {
+        profiles,
+        issue,
+        first_message,
+        finish,
+        resume,
+        base,
+        start,
+    } = job;
     let (resumed, system) = match resume {
         Some(r) => {
             env.apply_diff(&r.diff).await?;
@@ -189,7 +239,7 @@ where
             (Some(r.state), Vec::new())
         }
         None => {
-            let map = module_map(cfg, profiles, env.root(), &base)?;
+            let map = module_map(cfg, profiles, env.root(), base)?;
             let conventions = language_conventions(profiles);
             let system = system_blocks(&RepoPrompt {
                 language_conventions: conventions.as_deref(),
@@ -244,16 +294,16 @@ where
     let issue_id = ledger.record().issue_id.clone();
     // Checkpoints only where a job can go on from one (see `checkpoint`).
     let saving =
-        (matches!(finish, Finish::Publish) && issue.cve.is_none()).then(|| checkpoint::Saving {
+        (matches!(finish, Finish::Publish) && issue.cve.is_none()).then_some(checkpoint::Saving {
             issue: &issue_id,
-            base: &base,
-            start: &start,
+            base,
+            start,
         });
     let context = DriveContext {
         profiles,
         issue,
-        env: &env,
-        base: &base,
+        env,
+        base,
         finish,
         policy: &policy,
         saving,
@@ -268,7 +318,6 @@ where
     if let Some(store) = &remote {
         store.push_parts(cfg, profiles, env.job_dir()).await;
     }
-    drop(env);
     result
 }
 
