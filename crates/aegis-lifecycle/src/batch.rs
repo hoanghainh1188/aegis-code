@@ -460,6 +460,7 @@ where
             kept: None,
             patch: None,
             diagnosis: None,
+            plan: None,
         });
     }
     // `agent/integration-<issue-id>` on the fork, like the local branch.
@@ -487,6 +488,7 @@ where
         kept: None,
         patch: Some(patch),
         diagnosis: None,
+        plan: None,
     })
 }
 

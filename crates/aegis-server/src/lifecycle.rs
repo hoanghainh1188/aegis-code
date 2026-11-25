@@ -504,6 +504,7 @@ impl LifecycleRunner {
         let _tag = self.ledger.tag(job.ledger_key.clone(), claim.run.id);
         let fork = platform.config.repo.fork.clone();
         let locale = platform.config.repo.locale;
+        let epic_budget = platform.config.repo.feature_lane.epic_budget_usd;
         let token = platform.github.clone();
         type Run = std::pin::Pin<
             Box<dyn Future<Output = Result<aegis_lifecycle::IssueReport, LifecycleError>> + Send>,
@@ -543,6 +544,9 @@ impl LifecycleRunner {
                 Err(e) => tracing::warn!(error = %e, "replying on the PR"),
             }
         }
+        if let Some(plan) = &report.plan {
+            self.keep_plan(job, plan, epic_budget).await;
+        }
         Ok(Attempt::Ended {
             outcome: report.outcome,
             reason: report.reason,
@@ -570,6 +574,37 @@ async fn use_token(source: &TokenSource, use_: TokenUse) -> Result<String, Attem
 }
 
 impl LifecycleRunner {
+    /// Keeps a feature's plan (#677) for its approval, with the repo's
+    /// ceiling on what the feature may spend (#675). The RFC is posted with
+    /// the job's end either way; a plan the store could not keep is logged,
+    /// and its approval finds none.
+    async fn keep_plan(&self, job: &Job, plan: &aegis_lifecycle::FeaturePlan, budget: Option<f64>) {
+        let kept = match serde_json::to_value(plan) {
+            Ok(value) => self.store.save_feature_plan(job.id, &value).await,
+            Err(e) => {
+                tracing::error!(job = job.id.0, error = %e, "the feature's plan is not JSON");
+                return;
+            }
+        };
+        match kept {
+            Ok(kept) => tracing::info!(
+                job = job.id.0,
+                revision = kept.revision,
+                "feature plan kept"
+            ),
+            Err(e) => {
+                tracing::error!(job = job.id.0, error = %e, "keeping the feature's plan");
+                return;
+            }
+        }
+        if budget.is_some() {
+            let actor = aegis_store::Actor::system();
+            if let Err(e) = self.store.set_epic_budget_by(job.id, budget, &actor).await {
+                tracing::warn!(job = job.id.0, error = %e, "setting the feature's budget");
+            }
+        }
+    }
+
     /// A review round's PR (#243): the job that opened it, and the PR as
     /// it is now with its notes. Only a PR of the repo's fork, from an
     /// open `agent/*` branch of it; GitHub issues for now.

@@ -119,6 +119,17 @@ pub struct PrStrings {
     pub findings: &'static str,
     pub steps: &'static str,
     pub questions: &'static str,
+    // A feature's plan for review (#677).
+    /// The heading: the number of sub-jobs and the delivery mode.
+    pub rfc: fn(usize, &str) -> String,
+    pub rfc_criteria: &'static str,
+    pub rfc_contracts: &'static str,
+    pub rfc_dependencies: &'static str,
+    pub rfc_sub_jobs: &'static str,
+    /// Its argument: the ids of the sub-jobs one waits for.
+    pub rfc_after: fn(&str) -> String,
+    /// How a person approves the plan, or asks for changes.
+    pub rfc_how: &'static str,
     // The comment on the issue when its job ends (#589); each follows
     // `**aegis-code** ` or `aegis-code `.
     pub pull_request: &'static str,
@@ -192,6 +203,35 @@ fn review_refused_ja(why: &str) -> String {
 }
 fn review_refused_vi(why: &str) -> String {
     format!("**aegis-code** sẽ không nhận lần review này: {why}.")
+}
+
+fn rfc_en(sub_jobs: usize, delivery: &str) -> String {
+    format!(
+        "**aegis-code** planned this feature in {sub_jobs} sub-job(s), delivered as \
+         `{delivery}`. Its plan waits for approval."
+    )
+}
+fn rfc_ja(sub_jobs: usize, delivery: &str) -> String {
+    format!(
+        "**aegis-code** はこの機能を {sub_jobs} 個のサブジョブで計画しました (`{delivery}` で\
+         提供)。計画は承認待ちです。"
+    )
+}
+fn rfc_vi(sub_jobs: usize, delivery: &str) -> String {
+    format!(
+        "**aegis-code** đã lập kế hoạch cho tính năng này gồm {sub_jobs} sub-job, giao theo \
+         kiểu `{delivery}`. Kế hoạch đang chờ duyệt."
+    )
+}
+
+fn rfc_after_en(ids: &str) -> String {
+    format!("after {ids}")
+}
+fn rfc_after_ja(ids: &str) -> String {
+    format!("{ids} の後")
+}
+fn rfc_after_vi(ids: &str) -> String {
+    format!("sau {ids}")
 }
 
 fn approve_refused_en(why: &str) -> String {
@@ -305,6 +345,15 @@ static EN: PrStrings = PrStrings {
     findings: "Findings, each with the sources it was checked against:",
     steps: "Suggested steps for an operator (not applied):",
     questions: "Questions for the reporter:",
+    rfc: rfc_en,
+    rfc_criteria: "Acceptance criteria:",
+    rfc_contracts: "Interfaces and contracts:",
+    rfc_dependencies: "New dependencies it proposes:",
+    rfc_sub_jobs: "Sub-jobs, in order:",
+    rfc_after: rfc_after_en,
+    rfc_how: "Nothing is changed until someone who can write to the repository comments \
+              `/aegis approve` (or `/aegis approve mode=integration_pr|stacked_prs`) on this \
+              issue, or approves the job on the dashboard.",
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_en,
@@ -362,6 +411,15 @@ static JA: PrStrings = PrStrings {
     findings: "所見 (それぞれ照合したソース付き):",
     steps: "運用担当者向けの推奨手順 (未適用):",
     questions: "報告者への質問:",
+    rfc: rfc_ja,
+    rfc_criteria: "受け入れ基準:",
+    rfc_contracts: "インターフェースと契約:",
+    rfc_dependencies: "提案する新しい依存関係:",
+    rfc_sub_jobs: "サブジョブ (順番):",
+    rfc_after: rfc_after_ja,
+    rfc_how: "リポジトリへの書き込み権限を持つ人がこの issue に `/aegis approve` \
+              (または `/aegis approve mode=integration_pr|stacked_prs`) とコメントするか、\
+              ダッシュボードでジョブを承認するまで、何も変更されません。",
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_ja,
@@ -420,6 +478,15 @@ static VI: PrStrings = PrStrings {
     findings: "Các phát hiện, mỗi mục kèm nguồn đã đối chiếu:",
     steps: "Các bước gợi ý cho người vận hành (chưa áp dụng):",
     questions: "Câu hỏi cho người báo lỗi:",
+    rfc: rfc_vi,
+    rfc_criteria: "Tiêu chí nghiệm thu:",
+    rfc_contracts: "Giao diện và hợp đồng:",
+    rfc_dependencies: "Phụ thuộc mới đề xuất:",
+    rfc_sub_jobs: "Các sub-job, theo thứ tự:",
+    rfc_after: rfc_after_vi,
+    rfc_how: "Chưa có gì bị thay đổi cho tới khi người có quyền ghi vào repo comment \
+              `/aegis approve` (hoặc `/aegis approve mode=integration_pr|stacked_prs`) trên \
+              issue này, hoặc duyệt job trên dashboard.",
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_vi,
@@ -471,7 +538,9 @@ mod tests {
         for l in [Locale::En, Locale::Ja] {
             let s = l.strings();
             let all = format!(
-                "{s:?}{}{}{}{}{}{}{}{}{}",
+                "{s:?}{}{}{}{}{}{}{}{}{}{}{}",
+                (s.rfc)(2, "stacked_prs"),
+                (s.rfc_after)("a"),
                 (s.more)(2),
                 (s.pushed)("abc"),
                 (s.pushed_nothing)("x"),

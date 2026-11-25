@@ -216,6 +216,11 @@ pub struct RepoSettings {
     /// `min_confidence`; off by default.
     #[serde(default, skip_serializing_if = "crate::TriageLane::is_off")]
     pub triage_lane: crate::TriageLane,
+    /// Which tickets asking for a feature get a plan to approve (#677):
+    /// `[feature_lane]` with `enabled`, `min_confidence`, `max_revisions`
+    /// and `epic_budget_usd`; off by default.
+    #[serde(default, skip_serializing_if = "crate::FeatureLane::is_off")]
+    pub feature_lane: crate::FeatureLane,
     /// Services the test steps reach (#490): `[[sidecars]]`, as
     /// `[[repo.sidecars]]` of a run configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -634,6 +639,7 @@ impl Modes {
                 patch_scope: Some(settings.patch_scope),
                 secrets: settings.secrets,
                 triage_lane: settings.triage_lane,
+                feature_lane: settings.feature_lane,
                 sidecars: settings.sidecars,
                 locale: crate::resolve_locale(settings.locale, tenant_locale, self.default_locale)
                     .map_err(in_repo)?,

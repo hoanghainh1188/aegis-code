@@ -108,8 +108,12 @@ pub struct IssueReport {
     /// What the PR holds, when one was opened or updated (#312).
     pub patch: Option<aegis_store::Patch>,
     /// The report the diagnosis lane wrote for the ticket (#451), for a job
-    /// that ended [`Outcome::Diagnosed`].
+    /// that ended [`Outcome::Diagnosed`]; a feature's RFC (#677), for a job
+    /// that ended [`Outcome::AwaitingApproval`].
     pub diagnosis: Option<String>,
+    /// The feature's plan (#677), for a job that ended
+    /// [`Outcome::AwaitingApproval`]: the store keeps it for the approval.
+    pub plan: Option<crate::FeaturePlan>,
 }
 
 /// How the work on an issue ended, before the ledger closes it.
@@ -121,8 +125,10 @@ pub(crate) struct Ending {
     pub kept: Option<Kept>,
     /// The patch of the PR opened or updated.
     pub patch: Option<aegis_store::Patch>,
-    /// The diagnosis lane's report (#451).
+    /// The diagnosis lane's report (#451), or a feature's RFC (#677).
     pub diagnosis: Option<String>,
+    /// A feature's plan (#677).
+    pub plan: Option<crate::FeaturePlan>,
 }
 
 impl Ending {
@@ -134,6 +140,7 @@ impl Ending {
             kept: None,
             patch: None,
             diagnosis: None,
+            plan: None,
         }
     }
 }
@@ -245,6 +252,7 @@ where
         pr_url: ending.pr_url,
         patch: ending.patch,
         diagnosis: ending.diagnosis,
+        plan: ending.plan,
         cost_usd: record.cost_usd,
         model_calls: record.model_calls,
         hidden_tests_passed: record.hidden_tests_passed,

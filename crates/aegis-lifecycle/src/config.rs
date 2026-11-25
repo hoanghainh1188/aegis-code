@@ -477,6 +477,10 @@ pub struct RepoConfig {
     /// loop (#451): `[repo.triage_lane]`; off by default.
     #[serde(default)]
     pub triage_lane: crate::TriageLane,
+    /// Which tickets asking for a feature get a plan to approve instead of
+    /// the fix loop (#677): `[repo.feature_lane]`; off by default.
+    #[serde(default)]
+    pub feature_lane: crate::FeatureLane,
     /// Services the test steps reach, such as PostgreSQL (#490, ADR
     /// 0013): `[[repo.sidecars]]`. They run only with `run.sandbox`.
     #[serde(default)]
@@ -997,6 +1001,10 @@ impl RunConfig {
         self.repo.secrets.check().map_err(LifecycleError::Config)?;
         self.repo
             .triage_lane
+            .check()
+            .map_err(LifecycleError::Config)?;
+        self.repo
+            .feature_lane
             .check()
             .map_err(LifecycleError::Config)?;
         if let Some(runtime) = &self.run.sandbox_runtime {
