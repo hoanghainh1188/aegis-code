@@ -12,6 +12,17 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Source" => "Nguồn",
         "(shared with the tenant)" => "(dùng chung trong tenant)",
         "Obsolete:" => "Lỗi thời:",
+        "Confirmed: the repo's next jobs are given this diagnosis as a memory." => {
+            "Đã xác nhận: các job tiếp theo của repo được đưa chẩn đoán này làm memory."
+        }
+        "Confirm diagnosis" => "Xác nhận chẩn đoán",
+        "It was right: keep it as a memory, for the next tickets like it." => {
+            "Chẩn đoán đúng: giữ làm memory cho các ticket tương tự sau này."
+        }
+        "Why rejected (optional)" => "Lý do từ chối (không bắt buộc)",
+        "With a rejected verdict, what the agent tried and your reason are kept as a pitfall: the repo's next jobs are told not to repeat it." => {
+            "Khi chọn Từ chối, cách agent đã thử và lý do của bạn được giữ làm bài học cần tránh: các job tiếp theo của repo được dặn không lặp lại."
+        }
         "Mark obsolete" => "Đánh dấu lỗi thời",
         "Pre-flight check" => "Kiểm tra trước khi bật",
         "Check" => "Mục kiểm tra",

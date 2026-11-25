@@ -119,6 +119,10 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
             post(actions::mark_memory_obsolete),
         )
         .route("/jobs/{id}/review", get(review::form).post(review::submit))
+        .route(
+            "/jobs/{id}/diagnosis/confirm",
+            post(actions::confirm_diagnosis),
+        )
         .route("/admin/ai", get(ai::show))
         .route("/admin/ai/{mode}/check", post(ai::check))
         .route("/admin/audit", get(audit::list))

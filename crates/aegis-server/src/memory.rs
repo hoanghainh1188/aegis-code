@@ -58,8 +58,16 @@ pub struct RecallFor<'a> {
     pub tree: Option<&'a BTreeSet<String>>,
 }
 
+/// What happened on the repo, as opposed to the guidance it keeps
+/// (runbooks, business rules): checked for staleness and repeats (#658).
 fn historical(kind: MemoryKind) -> bool {
-    matches!(kind, MemoryKind::MergedPr | MemoryKind::ReviewLesson)
+    matches!(
+        kind,
+        MemoryKind::MergedPr
+            | MemoryKind::ReviewLesson
+            | MemoryKind::RejectedPattern
+            | MemoryKind::ConfirmedDiagnosis
+    )
 }
 
 /// Whether `path` (a file, maybe with `:line`, or a directory) is still
@@ -286,7 +294,7 @@ pub async fn enrich_with_memory_for(
 /// tracked job).
 /// The Light model of `repo`'s mode and its id, when the modes are known
 /// and the provider can be made; `None` keeps the ledger's summary.
-async fn light_of(
+pub(crate) async fn light_of(
     modes: Option<&Modes>,
     secrets: &Secrets,
     repo: &Repo,
@@ -413,7 +421,10 @@ pub async fn extract_and_store(
     Ok(saved)
 }
 
-async fn read_record(store: &Store, key: &IssueId) -> Result<Option<IssueRecord>, StoreError> {
+pub(crate) async fn read_record(
+    store: &Store,
+    key: &IssueId,
+) -> Result<Option<IssueRecord>, StoreError> {
     let events = store.ledger().events(key).await?;
     if events.is_empty() {
         return Ok(None);
@@ -421,7 +432,7 @@ async fn read_record(store: &Store, key: &IssueId) -> Result<Option<IssueRecord>
     Ok(Some(IssueRecord::from_events(key.clone(), &events)))
 }
 
-fn summarize_root_record(
+pub(crate) fn summarize_root_record(
     issue_ref: &str,
     record: Option<&IssueRecord>,
 ) -> (String, Option<String>, Option<String>, Vec<String>) {
@@ -443,7 +454,7 @@ fn summarize_root_record(
     (title, cause, changes_text, paths)
 }
 
-fn summarize_review_rounds(rounds: &[IssueRecord]) -> (Vec<String>, Vec<String>) {
+pub(crate) fn summarize_review_rounds(rounds: &[IssueRecord]) -> (Vec<String>, Vec<String>) {
     let mut notes = Vec::new();
     let mut paths = Vec::new();
     for rec in rounds {

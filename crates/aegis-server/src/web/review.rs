@@ -214,6 +214,9 @@ pub struct ReviewForm {
     opened_at: String,
     #[serde(default)]
     opened_sig: String,
+    /// Why a rejected PR was rejected (#657), in the reviewer's words.
+    #[serde(default)]
+    rejection_note: String,
 }
 
 fn parse(form: &ReviewForm, now: i64) -> Result<Review, String> {
@@ -235,12 +238,31 @@ fn parse(form: &ReviewForm, now: i64) -> Result<Review, String> {
     })
 }
 
+/// The page's CSP nonce and the signed-in person, in one extractor.
+pub struct Drawn {
+    nonce: Nonce,
+    me: Me,
+}
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for Drawn {
+    type Rejection = axum::extract::rejection::ExtensionRejection;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let Extension(nonce) = Extension::<Nonce>::from_request_parts(parts, state).await?;
+        let Extension(me) = Extension::<Me>::from_request_parts(parts, state).await?;
+        Ok(Self { nonce, me })
+    }
+}
+
 pub async fn submit(
     State(store): State<Store>,
     Extension(auth): Extension<Auth>,
-    Extension(nonce): Extension<Nonce>,
+    Drawn { nonce, me }: Drawn,
     Extension(access): Extension<Access>,
-    Extension(me): Extension<Me>,
+    Extension(admin): super::repo_admin::RepoAdminExt,
     Path(id): Path<i64>,
     Form(form): Form<ReviewForm>,
 ) -> WebResult {
@@ -273,13 +295,49 @@ pub async fn submit(
     {
         // An accepted review is not a merge: the memory of a merged PR is
         // recorded when the forge says it was merged (#456).
-        Ok(_) => Ok(Redirect::to(&format!("/jobs/{id}?done=reviewed")).into_response()),
+        Ok(_) => {
+            if review.verdict == ReviewVerdict::Rejected {
+                let sync = admin.as_ref().map(super::RepoAdmin::memory_sync);
+                learn_rejection(&store, &job, &form.rejection_note, sync.as_ref(), &access).await;
+            }
+            Ok(Redirect::to(&format!("/jobs/{id}?done=reviewed")).into_response())
+        }
         Err(StoreError::Conflict(_)) => {
             let why = "this PR already has a review; check \"replace existing review\" to update"
                 .to_owned();
             page(&store, &viewer, &job, opened_at, Some(why)).await
         }
         Err(e) => Err(e.into()),
+    }
+}
+
+/// Keeps what a rejected PR teaches (#657): the reviewer's reason and its
+/// review rounds' notes. The review is recorded either way: a failure is
+/// said in the log.
+async fn learn_rejection(
+    store: &Store,
+    job: &Job,
+    note: &str,
+    sync: Option<&crate::memory_sync::MemorySync>,
+    access: &Access,
+) {
+    let Some(pr_url) = job.pr_url.as_deref() else {
+        return;
+    };
+    let learned =
+        crate::memory_learn::rejected_pr_with(store, pr_url, Some(note), sync, &access.actor).await;
+    match learned {
+        Ok(Some(memory)) => {
+            tracing::info!(
+                job = job.id.0,
+                memory = memory.id.0,
+                "kept the rejected PR as a pitfall"
+            )
+        }
+        Ok(None) => tracing::info!(job = job.id.0, "rejected without a reason: no pitfall kept"),
+        Err(e) => {
+            tracing::warn!(job = job.id.0, error = %e, "keeping the rejected PR as a pitfall")
+        }
     }
 }
 
@@ -314,6 +372,7 @@ mod tests {
             replace: None,
             opened_at: "0".into(),
             opened_sig: String::new(),
+            rejection_note: String::new(),
         };
         let review = parse(&form("accepted_with_edits", " 3 "), 120_000).unwrap();
         assert_eq!(

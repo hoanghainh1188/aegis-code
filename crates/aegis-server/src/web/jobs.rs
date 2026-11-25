@@ -505,6 +505,10 @@ struct JobPage<'a> {
     patch: Option<PatchView>,
     /// The report the diagnosis lane wrote back to the ticket (#451).
     diagnosis: Option<String>,
+    /// Its diagnosis is kept as a memory (#657).
+    diagnosis_confirmed: bool,
+    /// Who looks may confirm it: a reviewer of the repo.
+    can_confirm: bool,
     /// The repo memories it was given (#658).
     memories: Vec<RecalledView>,
 }
@@ -590,6 +594,8 @@ pub async fn detail(
         input_flags: record.input_flags.clone(),
         patch: super::patch::of(&store, job.id).await?,
         diagnosis: store.diagnosis(job.id).await?,
+        diagnosis_confirmed: crate::memory_learn::diagnosis_confirmed(&store, &job).await?,
+        can_confirm: access.can(job.repo_id, RepoRole::Reviewer),
         memories: store
             .recalled_memories(job.id)
             .await?

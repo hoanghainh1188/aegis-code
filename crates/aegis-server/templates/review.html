@@ -24,6 +24,10 @@
       <input type="number" name="lines_edited" min="0" step="1" value="0" required inputmode="numeric">
     </label>
     <label class="choice"><input type="checkbox" name="broke_tests" value="on"> {{ crate::t("PR broke existing tests") }}</label>
+    <label>{{ crate::t("Why rejected (optional)") }}
+      <textarea name="rejection_note" rows="3" maxlength="2000"></textarea>
+    </label>
+    <p class="note">{{ crate::t("With a rejected verdict, what the agent tried and your reason are kept as a pitfall: the repo's next jobs are told not to repeat it.") }}</p>
     {% if existing.is_some() %}<label class="choice"><input type="checkbox" name="replace" value="on"> {{ crate::t("Replace existing review") }}</label>{% endif %}
     <button type="submit">{{ crate::t("Submit review") }}</button>
   </form>

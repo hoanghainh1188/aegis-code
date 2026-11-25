@@ -1,6 +1,7 @@
 //! Per-repository Incident & Domain Memory (#456): merged PR summaries,
-//! review lessons from `/aegis fix` rounds, operational runbooks, and
-//! business rules. Recall is in [`recall`] (#596).
+//! review lessons from `/aegis fix` rounds, operational runbooks, business
+//! rules, and (#657) rejected approaches and confirmed diagnoses. Recall is
+//! in [`recall`] (#596).
 
 mod curation;
 mod recall;
@@ -40,15 +41,38 @@ pub enum MemoryKind {
     Runbook,
     /// Repository or domain business rule / invariant.
     BusinessRule,
+    /// An approach a reviewer rejected on an agent PR (#657): shown to the
+    /// agent as a pitfall to avoid, never as a fix to copy.
+    RejectedPattern,
+    /// A read-only diagnosis (#451) an operator confirmed (#657): the
+    /// symptom, its operational root cause and the remediation.
+    ConfirmedDiagnosis,
 }
 
 impl MemoryKind {
+    /// Every kind, in the order the API names them.
+    pub const ALL: [Self; 6] = [
+        Self::MergedPr,
+        Self::ReviewLesson,
+        Self::Runbook,
+        Self::BusinessRule,
+        Self::RejectedPattern,
+        Self::ConfirmedDiagnosis,
+    ];
+
+    /// The kinds' names, for a message that lists them.
+    pub fn names() -> String {
+        Self::ALL.map(Self::as_str).join(", ")
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::MergedPr => "merged_pr",
             Self::ReviewLesson => "review_lesson",
             Self::Runbook => "runbook",
             Self::BusinessRule => "business_rule",
+            Self::RejectedPattern => "rejected_pattern",
+            Self::ConfirmedDiagnosis => "confirmed_diagnosis",
         }
     }
 
@@ -58,6 +82,8 @@ impl MemoryKind {
             "review_lesson" => Some(Self::ReviewLesson),
             "runbook" => Some(Self::Runbook),
             "business_rule" => Some(Self::BusinessRule),
+            "rejected_pattern" => Some(Self::RejectedPattern),
+            "confirmed_diagnosis" => Some(Self::ConfirmedDiagnosis),
             _ => None,
         }
     }
@@ -443,5 +469,23 @@ impl Store {
         scope
             .map(|s| MemoryScope::decode("repo_memories.scope", &s))
             .transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_kind_reads_back_from_its_name() {
+        for kind in MemoryKind::ALL {
+            assert_eq!(MemoryKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(
+            MemoryKind::names(),
+            "merged_pr, review_lesson, runbook, business_rule, rejected_pattern, \
+             confirmed_diagnosis"
+        );
+        assert_eq!(MemoryKind::parse("pitfall"), None);
     }
 }

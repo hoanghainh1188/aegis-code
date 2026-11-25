@@ -12,6 +12,17 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Source" => "出典",
         "(shared with the tenant)" => "（テナントで共有）",
         "Obsolete:" => "廃止:",
+        "Confirmed: the repo's next jobs are given this diagnosis as a memory." => {
+            "確認済み: このリポジトリの次のジョブにこの診断がメモリとして渡されます。"
+        }
+        "Confirm diagnosis" => "診断を確認する",
+        "It was right: keep it as a memory, for the next tickets like it." => {
+            "正しい診断でした。同様のチケットのためにメモリとして残します。"
+        }
+        "Why rejected (optional)" => "却下の理由（任意）",
+        "With a rejected verdict, what the agent tried and your reason are kept as a pitfall: the repo's next jobs are told not to repeat it." => {
+            "却下の場合、エージェントが試した方法とその理由が避けるべき落とし穴として残り、このリポジトリの次のジョブに繰り返さないよう伝えられます。"
+        }
         "Mark obsolete" => "廃止にする",
         "Pre-flight check" => "事前チェック",
         "Check" => "チェック",
