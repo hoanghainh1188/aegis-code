@@ -46,6 +46,8 @@ pub enum Done {
     Reviewed,
     /// A recalled memory was marked obsolete from the job's page (#658).
     MemoryObsolete,
+    /// The job's diagnosis was confirmed and kept as a memory (#657).
+    DiagnosisConfirmed,
 }
 
 impl Done {
@@ -64,16 +66,20 @@ impl Done {
             Self::MemoryObsolete => {
                 "Memory marked obsolete: no job is given it again until its text changes."
             }
+            Self::DiagnosisConfirmed => {
+                "Diagnosis confirmed: the repo's next jobs are given it as a memory."
+            }
         }
     }
 
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Created,
         Self::Cancelled,
         Self::CancelRequested,
         Self::Retried,
         Self::Reviewed,
         Self::MemoryObsolete,
+        Self::DiagnosisConfirmed,
     ];
 
     fn word(self) -> &'static str {
@@ -84,6 +90,7 @@ impl Done {
             Self::Retried => "retried",
             Self::Reviewed => "reviewed",
             Self::MemoryObsolete => "memory_obsolete",
+            Self::DiagnosisConfirmed => "diagnosis_confirmed",
         }
     }
 
@@ -223,6 +230,28 @@ pub async fn mark_memory_obsolete(
         )
         .await?;
     Ok(to_job(job.id, Done::MemoryObsolete))
+}
+
+/// Confirms the diagnosis job `id` wrote back to its ticket (#657): what
+/// it found is kept as a `confirmed_diagnosis` memory of its repo, for
+/// the next tickets like it. Takes the reviewer role, as a PR's review.
+pub async fn confirm_diagnosis(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Extension(admin): super::repo_admin::RepoAdminExt,
+    Path(id): Path<i64>,
+) -> WebResult {
+    let job = job_for(&store, &access, id, RepoRole::Reviewer).await?;
+    let sync = admin.as_ref().map(super::RepoAdmin::memory_sync);
+    match crate::memory_learn::confirmed_diagnosis_with(&store, &job, sync.as_ref(), &access.actor)
+        .await?
+    {
+        Some(_) => Ok(to_job(job.id, Done::DiagnosisConfirmed)),
+        None => Err(WebError::new(
+            StatusCode::CONFLICT,
+            format!("job {id} wrote no diagnosis back to its ticket: there is nothing to confirm"),
+        )),
+    }
 }
 
 pub async fn retry(

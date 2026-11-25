@@ -29,6 +29,7 @@ mod language;
 pub use language::resolve_locale;
 mod light;
 pub mod memory;
+pub mod memory_learn;
 pub mod memory_sources;
 mod preflight;
 mod publish;
@@ -52,8 +53,12 @@ pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
 pub use issue::{HiddenTests, IssueInput, IssueSummary, open_github_issues};
 pub use memory::{
-    ExtractedMemory, MemoryLesson, MergedPrFacts, extract_from_merged_pr,
+    ExtractedMemory, MemoryLesson, MergedPrFacts, PITFALL_KIND, extract_from_merged_pr,
     fallback_extract_from_merged_pr, format_for_bp3, redact_for_embedding,
+};
+pub use memory_learn::{
+    DiagnosisFacts, LearnedMemory, RejectedPrFacts, extract_confirmed_diagnosis,
+    extract_rejected_pattern, fallback_confirmed_diagnosis, fallback_rejected_pattern,
 };
 pub use memory_sources::{MemorySources, SyncedMemory};
 pub use preflight::{CheckItem, CheckStatus, PreflightOptions, PreflightReport, run_preflight};

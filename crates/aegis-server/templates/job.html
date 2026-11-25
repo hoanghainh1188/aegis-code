@@ -64,6 +64,14 @@
   <h2 id="diagnosis-heading">{{ crate::t("Diagnosis") }}</h2>
   <p class="note">{{ crate::t("Written back to the ticket instead of a pull request (#451). Read-only: aegis changed nothing; each finding was checked against the source it cites.") }}</p>
   <pre class="diagnosis">{{ d }}</pre>
+  {% if diagnosis_confirmed %}<p class="notice">{{ crate::t("Confirmed: the repo's next jobs are given this diagnosis as a memory.") }}</p>
+  {% else if can_confirm %}
+  <form method="post" action="/jobs/{{ head.id }}/diagnosis/confirm" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">{{ crate::t("Confirm diagnosis") }}</button>
+    <span class="note">{{ crate::t("It was right: keep it as a memory, for the next tickets like it.") }}</span>
+  </form>
+  {% endif %}
 </section>
 {% endif %}
 {% include "patch.html" %}

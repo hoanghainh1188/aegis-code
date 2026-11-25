@@ -331,7 +331,10 @@ fn score(memory: &RepoMemory, scores: RecallScores, repo: RepoId, now: OffsetDat
     };
     let kind = match memory.kind {
         MemoryKind::Runbook | MemoryKind::BusinessRule => GUIDANCE_WEIGHT,
-        MemoryKind::MergedPr | MemoryKind::ReviewLesson => 1.0,
+        MemoryKind::MergedPr
+        | MemoryKind::ReviewLesson
+        | MemoryKind::RejectedPattern
+        | MemoryKind::ConfirmedDiagnosis => 1.0,
     };
     let age_days = ((now - memory.updated_at).whole_seconds().max(0) as f64) / 86_400.0;
     let decay = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);

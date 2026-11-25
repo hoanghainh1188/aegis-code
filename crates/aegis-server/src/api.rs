@@ -68,6 +68,10 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
         .route("/api/v1/jobs/{id}/retry", post(retry_job))
         .route("/api/v1/jobs/{id}/review", post(review_job))
         .route(
+            "/api/v1/jobs/{id}/diagnosis/confirm",
+            post(confirm_diagnosis),
+        )
+        .route(
             "/api/v1/admin/pause",
             get(crate::pause_all::show).post(crate::pause_all::pause),
         )
@@ -657,6 +661,29 @@ async fn review_job(
     Ok(ok(StatusCode::CREATED, JobView::from(job)))
 }
 
+/// Confirms the diagnosis job `id` wrote back to its ticket (#657): kept
+/// as a `confirmed_diagnosis` memory of its repo. 201 with the memory; 409
+/// when the job wrote no diagnosis.
+async fn confirm_diagnosis(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Extension(sync): Extension<Option<crate::memory_sync::MemorySync>>,
+    id: Result<Path<i64>, PathRejection>,
+) -> ApiResult {
+    let Path(id) = id?;
+    let job = job_for(&store, &access, id, RepoRole::Reviewer).await?;
+    match crate::memory_learn::confirmed_diagnosis_with(&store, &job, sync.as_ref(), &access.actor)
+        .await?
+    {
+        Some(memory) => Ok(ok(StatusCode::CREATED, MemoryView::from(memory))),
+        None => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "conflict",
+            format!("job {id} wrote no diagnosis back to its ticket: there is nothing to confirm"),
+        )),
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct BudgetView {
     repo_id: i64,
@@ -810,7 +837,8 @@ async fn list_repo_memories(
     let kind = match q.kind.as_deref() {
         Some(raw) => Some(MemoryKind::parse(raw).ok_or_else(|| {
             ApiError::invalid(format!(
-                "kind: unknown `{raw}`, expected merged_pr, review_lesson, runbook or business_rule"
+                "kind: unknown `{raw}`, expected one of {}",
+                MemoryKind::names()
             ))
         })?),
         None => None,
@@ -864,8 +892,9 @@ async fn upsert_repo_memory(
     let repo = repo_for(&access, id, RepoRole::Maintainer)?;
     let kind = MemoryKind::parse(body.kind.trim()).ok_or_else(|| {
         ApiError::invalid(format!(
-            "kind: unknown `{}`, expected merged_pr, review_lesson, runbook or business_rule",
-            body.kind
+            "kind: unknown `{}`, expected one of {}",
+            body.kind,
+            MemoryKind::names()
         ))
     })?;
     let scope = match body.scope.as_deref().map(str::trim) {
