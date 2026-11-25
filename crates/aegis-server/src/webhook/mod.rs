@@ -841,6 +841,9 @@ async fn deliver(
     if let Kind::PrMerged { pr_url } = &wanted.kind {
         return pr_merged(hooks, source, via, delivery, pr_url).await;
     }
+    if let Kind::PrClosed { pr_url } = &wanted.kind {
+        return pr_closed(hooks, source, via, delivery, pr_url).await;
+    }
     let repo = match hooks.store.repo_by_remote(&wanted.repo_url).await {
         Ok(Some(repo)) => repo,
         Ok(None) => return ignored(delivery, "repository not registered"),
@@ -855,6 +858,16 @@ async fn deliver(
     }
     if let Kind::Push { branch } = &wanted.kind {
         return pushed(hooks, delivery, &repo, branch);
+    }
+    if let Kind::IssueClosed { closer } = &wanted.kind {
+        let closed = ClosedIssue {
+            source,
+            via,
+            delivery,
+            issue_ref: &wanted.issue_ref,
+            closer,
+        };
+        return issue_closed(hooks, closed, &repo).await;
     }
     let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     if let Kind::Issue { author } = &wanted.kind {
@@ -955,7 +968,14 @@ async fn deliver(
                 Some(repo.id),
             );
         }
-        (Kind::ReviewRound { .. } | Kind::PrMerged { .. } | Kind::Push { .. }, _) => {
+        (
+            Kind::ReviewRound { .. }
+            | Kind::PrMerged { .. }
+            | Kind::PrClosed { .. }
+            | Kind::Push { .. }
+            | Kind::IssueClosed { .. },
+            _,
+        ) => {
             unreachable!("handled above")
         }
     };
@@ -1158,26 +1178,8 @@ async fn pr_merged(
     delivery: &str,
     pr_url: &str,
 ) -> Handled {
-    // Counted from the webhook of the path its repo is on only, so a repo
-    // with both webhooks does not record a PR twice.
-    if via.is_some() {
-        let repo = match hooks.store.job_by_pr_url(pr_url).await {
-            Ok(Some(job)) => hooks.store.repo(job.repo_id).await,
-            Ok(None) => Ok(None),
-            Err(e) => Err(e),
-        };
-        match repo {
-            Ok(Some(repo)) => {
-                if let Some(skip) = off_path(hooks, via, &repo).await {
-                    return match skip {
-                        Ok(why) => ignored_in(delivery, &why, Some(repo.id)),
-                        Err(e) => internal(delivery, &e),
-                    };
-                }
-            }
-            Ok(None) => {}
-            Err(e) => return internal(delivery, &e),
-        }
+    if let Some(skip) = pr_off_path(hooks, via, delivery, pr_url).await {
+        return skip;
     }
     let actor = aegis_store::Actor::webhook(source.as_str());
     let modes = hooks.config.modes.as_deref();
@@ -1217,6 +1219,216 @@ async fn pr_merged(
             }
             handled
         }
+        Err(StoreError::Invalid { field, message }) => malformed(format!("{field}: {message}")),
+        Err(e) => internal(delivery, &e),
+    }
+}
+
+/// Whether `sender` may write to `repo`, asked of the forge of `source`
+/// (#244). `Err`: why it could not be asked, or `Ok(Err)` when the forge
+/// failed to answer.
+async fn sender_can_write(
+    hooks: &Hooks,
+    source: WebhookSource,
+    repo: &Repo,
+    sender: &str,
+    on_app: Option<aegis_store::TenantId>,
+) -> Result<Result<bool, String>, &'static str> {
+    Ok(match source {
+        WebhookSource::Gitlab => {
+            let Some(notifier) = hooks.config.gitlab_notifier.as_ref() else {
+                return Err("no GitLab client to check the sender's rights");
+            };
+            let (Some(project), Ok(user_id)) = (project_path(&repo.url), sender.parse::<u64>())
+            else {
+                return Err("the repository's URL names no project");
+            };
+            notifier.can_develop(project, user_id).await
+        }
+        WebhookSource::Bitbucket => {
+            let Some(notifier) = hooks.config.bitbucket_notifier.as_ref() else {
+                return Err("no Bitbucket client to check the sender's rights");
+            };
+            let Some((workspace, name)) = owner_and_name(&repo.url) else {
+                return Err("the repository's URL names no workspace and name");
+            };
+            notifier.can_write(workspace, name, sender).await
+        }
+        WebhookSource::BitbucketDc => {
+            let Some(notifier) = hooks.config.bitbucket_dc_notifier.as_ref() else {
+                return Err("no Bitbucket Data Center client to check the sender's rights");
+            };
+            // `https://<host>/scm/<key>/<slug>.git`.
+            let Some((project, name)) = owner_and_name(&repo.url) else {
+                return Err("the repository's URL names no project and slug");
+            };
+            notifier.can_write(project, name, sender).await
+        }
+        WebhookSource::AzureDevops => {
+            let Some(notifier) = hooks.config.azure_devops_notifier.as_ref() else {
+                return Err("no Azure DevOps client to check the sender's rights");
+            };
+            // `https://dev.azure.com/<org>/<project>/_git/<repo>`.
+            let Some((project, name)) = azure_project_and_repo(&repo.url) else {
+                return Err("the repository's URL names no project and repository");
+            };
+            notifier.can_write(&project, &name, sender).await
+        }
+        WebhookSource::Github
+        | WebhookSource::Jira
+        | WebhookSource::Backlog
+        | WebhookSource::Jsm
+        | WebhookSource::Servicenow => {
+            let Some(notifier) = hooks.config.notifier.as_ref() else {
+                return Err("no GitHub client to check the sender's rights");
+            };
+            let Some((owner, name)) = owner_and_name(&repo.url) else {
+                return Err("the repository's URL names no owner and name");
+            };
+            notifier.can_write(owner, name, sender, on_app).await
+        }
+    })
+}
+
+/// The answer to a delivery about the PR `pr_url` that came by the path
+/// its repo is not on (#244): counted from the webhook of the path its
+/// repo is on only, so a repo with both webhooks does not record a PR
+/// twice.
+async fn pr_off_path(
+    hooks: &Hooks,
+    via: Option<Via>,
+    delivery: &str,
+    pr_url: &str,
+) -> Option<Handled> {
+    via?;
+    let repo = match hooks.store.job_by_pr_url(pr_url).await {
+        Ok(Some(job)) => hooks.store.repo(job.repo_id).await,
+        Ok(None) => Ok(None),
+        Err(e) => Err(e),
+    };
+    match repo {
+        Ok(Some(repo)) => match off_path(hooks, via, &repo).await? {
+            Ok(why) => Some(ignored_in(delivery, &why, Some(repo.id))),
+            Err(e) => Some(internal(delivery, &e)),
+        },
+        Ok(None) => None,
+        Err(e) => Some(internal(delivery, &e)),
+    }
+}
+
+/// The answer for a memory learned from a delivery (#657).
+fn learned(memory: &aegis_store::RepoMemory, reason: String) -> Handled {
+    let handled = Handled::new(
+        answer(
+            StatusCode::OK,
+            json!({
+                "status": "memory_recorded",
+                "memories": 1,
+                "kind": memory.kind.as_str(),
+            }),
+        ),
+        WebhookOutcome::Recorded,
+        Some(reason),
+        Some(memory.repo_id),
+    );
+    match memory.job_id {
+        Some(job) => handled.with_job(job),
+        None => handled,
+    }
+}
+
+/// An agent PR closed without being merged (#657): what its reviewers
+/// said, in its review rounds, is kept as a `rejected_pattern`. A PR
+/// closed without a word teaches nothing, and a reason a reviewer gave
+/// on the dashboard is not overwritten.
+async fn pr_closed(
+    hooks: &Hooks,
+    source: WebhookSource,
+    via: Option<Via>,
+    delivery: &str,
+    pr_url: &str,
+) -> Handled {
+    if let Some(skip) = pr_off_path(hooks, via, delivery, pr_url).await {
+        return skip;
+    }
+    let actor = aegis_store::Actor::webhook(source.as_str());
+    let sync = hooks.config.memory_sync();
+    let learnt =
+        crate::memory_learn::rejected_pr_with(&hooks.store, pr_url, None, sync.as_ref(), &actor);
+    match learnt.await {
+        Ok(Some(memory)) => learned(
+            &memory,
+            format!("recorded a rejected pattern from {pr_url}"),
+        ),
+        Ok(None) => ignored(
+            delivery,
+            "no job opened this pull request, no review said why it was closed, \
+             or a reviewer's reason is kept already",
+        ),
+        Err(StoreError::Invalid { field, message }) => malformed(format!("{field}: {message}")),
+        Err(e) => internal(delivery, &e),
+    }
+}
+
+/// An issue closed as done, and where its delivery came from.
+#[derive(Clone, Copy)]
+struct ClosedIssue<'a> {
+    source: WebhookSource,
+    via: Option<Via>,
+    delivery: &'a str,
+    issue_ref: &'a str,
+    closer: &'a str,
+}
+
+/// An issue of `repo` closed as done (#657): when its last job was a
+/// diagnosis (#451), not followed by a job that changes code, and the
+/// person who closed it can write to the repo, the diagnosis is kept as a
+/// `confirmed_diagnosis`.
+async fn issue_closed(hooks: &Hooks, closed: ClosedIssue<'_>, repo: &Repo) -> Handled {
+    let ClosedIssue {
+        source,
+        via,
+        delivery,
+        issue_ref,
+        closer,
+    } = closed;
+    let ignored = |why: &str| ignored_in(delivery, why, Some(repo.id));
+    let job = match hooks.store.latest_job_for_issue(repo.id, issue_ref).await {
+        Ok(Some(job)) => job,
+        Ok(None) => return ignored("no job was made for this issue"),
+        Err(e) => return internal(delivery, &e),
+    };
+    if job.outcome != Some(aegis_ledger::Outcome::Diagnosed) {
+        return ignored("the issue's last job was not a diagnosis");
+    }
+    match crate::memory_learn::diagnosis_confirmed(&hooks.store, &job).await {
+        Ok(true) => return ignored("the diagnosis is kept already"),
+        Ok(false) => {}
+        Err(e) => return internal(delivery, &e),
+    }
+    let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
+    match sender_can_write(hooks, source, repo, closer, on_app).await {
+        Ok(Ok(true)) => {}
+        Ok(Ok(false)) => {
+            tracing::info!(delivery, closer, repo = %repo.slug, "issue closed by someone who cannot write");
+            return ignored("the issue was closed by someone who cannot write to the repository");
+        }
+        Ok(Err(why)) => {
+            tracing::warn!(delivery, why, "checking the closer's rights");
+            return ignored("the closer's rights could not be checked");
+        }
+        Err(why) => return ignored(why),
+    }
+    let actor = aegis_store::Actor::webhook(source.as_str());
+    let sync = hooks.config.memory_sync();
+    let learnt =
+        crate::memory_learn::confirmed_diagnosis_with(&hooks.store, &job, sync.as_ref(), &actor);
+    match learnt.await {
+        Ok(Some(memory)) => learned(
+            &memory,
+            format!("recorded the diagnosis of job {} as confirmed", job.id.0),
+        ),
+        Ok(None) => ignored("the diagnosis kept no report"),
         Err(StoreError::Invalid { field, message }) => malformed(format!("{field}: {message}")),
         Err(e) => internal(delivery, &e),
     }
@@ -1267,68 +1479,9 @@ async fn review_round(
     }
     let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     let ignored = |delivery: &str, why: &str| ignored_in(delivery, why, Some(repo.id));
-    let allowed = match source {
-        WebhookSource::Gitlab => {
-            let Some(notifier) = hooks.config.gitlab_notifier.as_ref() else {
-                return ignored(delivery, "no GitLab client to check the sender's rights");
-            };
-            let (Some(project), Ok(user_id)) = (project_path(&repo.url), sender.parse::<u64>())
-            else {
-                return ignored(delivery, "the repository's URL names no project");
-            };
-            notifier.can_develop(project, user_id).await
-        }
-        WebhookSource::Bitbucket => {
-            let Some(notifier) = hooks.config.bitbucket_notifier.as_ref() else {
-                return ignored(delivery, "no Bitbucket client to check the sender's rights");
-            };
-            let Some((workspace, name)) = owner_and_name(&repo.url) else {
-                return ignored(delivery, "the repository's URL names no workspace and name");
-            };
-            notifier.can_write(workspace, name, sender).await
-        }
-        WebhookSource::BitbucketDc => {
-            let Some(notifier) = hooks.config.bitbucket_dc_notifier.as_ref() else {
-                return ignored(
-                    delivery,
-                    "no Bitbucket Data Center client to check the sender's rights",
-                );
-            };
-            // `https://<host>/scm/<key>/<slug>.git`.
-            let Some((project, name)) = owner_and_name(&repo.url) else {
-                return ignored(delivery, "the repository's URL names no project and slug");
-            };
-            notifier.can_write(project, name, sender).await
-        }
-        WebhookSource::AzureDevops => {
-            let Some(notifier) = hooks.config.azure_devops_notifier.as_ref() else {
-                return ignored(
-                    delivery,
-                    "no Azure DevOps client to check the sender's rights",
-                );
-            };
-            // `https://dev.azure.com/<org>/<project>/_git/<repo>`.
-            let Some((project, name)) = azure_project_and_repo(&repo.url) else {
-                return ignored(
-                    delivery,
-                    "the repository's URL names no project and repository",
-                );
-            };
-            notifier.can_write(&project, &name, sender).await
-        }
-        WebhookSource::Github
-        | WebhookSource::Jira
-        | WebhookSource::Backlog
-        | WebhookSource::Jsm
-        | WebhookSource::Servicenow => {
-            let Some(notifier) = hooks.config.notifier.as_ref() else {
-                return ignored(delivery, "no GitHub client to check the sender's rights");
-            };
-            let Some((owner, name)) = owner_and_name(&repo.url) else {
-                return ignored(delivery, "the repository's URL names no owner and name");
-            };
-            notifier.can_write(owner, name, sender, on_app).await
-        }
+    let allowed = match sender_can_write(hooks, source, &repo, sender, on_app).await {
+        Ok(allowed) => allowed,
+        Err(why) => return ignored(delivery, why),
     };
     match allowed {
         Ok(true) => {}

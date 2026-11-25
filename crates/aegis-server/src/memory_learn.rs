@@ -68,7 +68,8 @@ pub async fn extract_and_store_rejected_pr(
 /// and why reviewers turned it down, from `note` (the reviewer's reason)
 /// and the PR's review rounds, which only people who can write to the
 /// repo can ask for (#244). `None` when no job opened the PR, or when no
-/// one said why: a PR closed without a word teaches nothing.
+/// one said why: a PR closed without a word teaches nothing. Without a
+/// `note`, a pitfall already kept for the PR is left as it is.
 pub async fn learn_rejected_pr(
     store: &Store,
     pr_url: &str,
@@ -82,6 +83,20 @@ pub async fn learn_rejected_pr(
     let note: Option<String> = note
         .map(|n| n.trim().chars().take(MAX_REJECTION_NOTE_CHARS).collect())
         .filter(|n: &String| !n.is_empty());
+    // A PR closed on its forge says nothing of why: what a reviewer wrote
+    // when they rejected it on the dashboard is kept.
+    if note.is_none()
+        && store
+            .repo_memory_scope_of(
+                root.repo_id,
+                MemoryKind::RejectedPattern,
+                &rejected_ref(pr_url),
+            )
+            .await?
+            .is_some()
+    {
+        return Ok(None);
+    }
     let mut round_records = Vec::new();
     for round in store.review_rounds_of(root.id).await? {
         if let Some(rec) = read_record(store, &round.ledger_key).await? {
