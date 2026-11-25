@@ -19,7 +19,7 @@ aegis-secrets = { path = "../aegis-secrets" }
 aegis-sonar-batch = { path = "../aegis-sonar-batch" }
 aegis-store = { path = "../aegis-store" }
 aegis-tracker = { path = "../aegis-tracker" }
-aws-config = { workspace = true, default-features = false, features = ["rustls", "default-https-client", "rt-tokio", "credentials-process", "sso"] }
+aws-config.workspace = true
 aws-sdk-s3 = { version = "1.161.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 futures = "0.3.34"
 regex.workspace = true
