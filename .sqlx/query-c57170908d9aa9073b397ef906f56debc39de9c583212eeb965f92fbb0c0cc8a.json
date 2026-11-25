@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT repo_id, status, outcome FROM jobs WHERE id = $1 FOR UPDATE",
+  "query": "SELECT j.repo_id, j.status, j.outcome,\n                  EXISTS (SELECT 1 FROM job_approvals a WHERE a.job_id = j.id) AS \"approved!\"\n           FROM jobs j WHERE j.id = $1 FOR UPDATE OF j",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,12 @@
             "name": "outcome"
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "approved!",
+        "type_info": "Bool",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -45,8 +51,9 @@
     "nullable": [
       false,
       false,
-      true
+      true,
+      null
     ]
   },
-  "hash": "ad380ca40d1cf126e401204935416080253f298773a2f590ba50f6f6a0d6f87b"
+  "hash": "c57170908d9aa9073b397ef906f56debc39de9c583212eeb965f92fbb0c0cc8a"
 }

@@ -28,7 +28,7 @@ use aegis_ledger::{
 };
 use aegis_lifecycle::{
     CveTarget, ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun,
-    ReviewRound, run_issue, run_review,
+    ReviewRound, run_feature_revision, run_issue, run_review,
 };
 use aegis_pr::{PrError, REPLY_MARKER, TokenSource, TokenUse};
 use aegis_provider::{Observed, Provider};
@@ -509,7 +509,18 @@ impl LifecycleRunner {
         type Run = std::pin::Pin<
             Box<dyn Future<Output = Result<aegis_lifecycle::IssueReport, LifecycleError>> + Send>,
         >;
+        let revision = match round {
+            Some(_) => None,
+            None => self.pending_revision(job).await?,
+        };
         let (future, pull): (Run, _) = match round {
+            None if revision.is_some() => {
+                let revision = revision.expect("just matched");
+                (
+                    Box::pin(run_feature_revision(platform, issue, revision, cancel)),
+                    None,
+                )
+            }
             Some((_, round)) => {
                 let pull = round.pull.clone();
                 (
@@ -574,6 +585,39 @@ async fn use_token(source: &TokenSource, use_: TokenUse) -> Result<String, Attem
 }
 
 impl LifecycleRunner {
+    /// The revision `job`'s plan was sent back for (#677), if one is asked
+    /// for and not written yet: the plan it replaces and the feedback.
+    async fn pending_revision(
+        &self,
+        job: &Job,
+    ) -> Result<Option<aegis_lifecycle::FeatureRevision>, Attempt> {
+        let infra = |e: aegis_store::StoreError| Attempt::Infra(e.to_string());
+        let Some(asked) = self.store.revision_request(job.id).await.map_err(infra)? else {
+            return Ok(None);
+        };
+        let Some(kept) = self.store.feature_plan(job.id).await.map_err(infra)? else {
+            return Err(Attempt::Rejected(format!(
+                "job {} was sent back for revision but keeps no plan",
+                job.id.0
+            )));
+        };
+        let next = asked.revision + 1;
+        if next <= kept.revision {
+            return Ok(None);
+        }
+        let previous = serde_json::from_value(kept.plan).map_err(|e| {
+            Attempt::Rejected(format!(
+                "the kept plan of job {} cannot be read: {e}",
+                job.id.0
+            ))
+        })?;
+        Ok(Some(aegis_lifecycle::FeatureRevision {
+            previous,
+            feedback: asked.feedback,
+            revision: u32::try_from(next).unwrap_or(u32::MAX),
+        }))
+    }
+
     /// Keeps a feature's plan (#677) for its approval, with the repo's
     /// ceiling on what the feature may spend (#675). The RFC is posted with
     /// the job's end either way; a plan the store could not keep is logged,

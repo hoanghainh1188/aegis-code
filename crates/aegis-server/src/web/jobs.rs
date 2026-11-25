@@ -434,7 +434,8 @@ struct JobHead {
     /// stop, and run a failed or cancelled one again.
     can_cancel: bool,
     can_retry: bool,
-    /// A maintainer may approve a plan that waits for it (#675).
+    /// A maintainer may approve a plan that waits for it and is not
+    /// approved yet (#675, #677).
     can_approve: bool,
     /// Queued or running: the head asks for itself again.
     live: bool,
@@ -462,6 +463,9 @@ async fn head_of(
 ) -> Result<JobHead, WebError> {
     let repo = store.repo(job.repo_id).await?;
     let maintains = access.can(job.repo_id, RepoRole::Maintainer);
+    // A plan waits for approval until it is approved (#677).
+    let waits =
+        job.outcome == Some(Outcome::AwaitingApproval) && store.approval(job.id).await?.is_none();
     Ok(JobHead {
         id: job.id.0,
         repo: repo.map_or(format!("repo {}", job.repo_id.0), |r| r.slug),
@@ -482,7 +486,7 @@ async fn head_of(
         retry_of: job.retry_of.map(|r| r.0),
         can_cancel: maintains && is_live(job) && !job.cancel_requested,
         can_retry: maintains && matches!(job.status, JobStatus::Failed | JobStatus::Cancelled),
-        can_approve: maintains && job.outcome == Some(Outcome::AwaitingApproval),
+        can_approve: maintains && waits,
         live: is_live(job),
     })
 }

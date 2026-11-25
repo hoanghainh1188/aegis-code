@@ -71,7 +71,10 @@ impl Done {
             Self::DiagnosisConfirmed => {
                 "Diagnosis confirmed: the repo's next jobs are given it as a memory."
             }
-            Self::Approved => "Plan approved; the job is queued again to carry it out.",
+            Self::Approved => {
+                "Plan approved, to be delivered as it recommends. Its sub-jobs are not run yet: \
+                 running them comes with a later release (#678)."
+            }
         }
     }
 
@@ -259,15 +262,17 @@ pub async fn confirm_diagnosis(
     }
 }
 
-/// Approves the plan job `id` waits with (#675): it is queued again. As
-/// retry, for the repo's maintainers, since it spends the repo's budget.
+/// Approves the plan job `id` waits with (#675, #677), as it recommends
+/// delivering it; the job keeps waiting, approved, for its sub-jobs (#678).
+/// As retry, for the repo's maintainers, since it will spend the repo's
+/// budget.
 pub async fn approve(
     State(store): State<Store>,
     Extension(access): Extension<Access>,
     Path(id): Path<i64>,
 ) -> WebResult {
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
-    let job = store.approve_job_by(JobId(id), &access.actor).await?;
+    let job = store.approve_job_by(JobId(id), None, &access.actor).await?;
     Ok(to_job(job.id, Done::Approved))
 }
 

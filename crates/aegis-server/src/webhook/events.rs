@@ -41,19 +41,30 @@ pub enum Kind {
     /// A push to `branch` (#660): the repo's runbooks and business rules
     /// are synced if it is its default branch.
     Push { branch: String },
-    /// `/aegis approve` in a comment on an open issue by `sender` (#675):
-    /// the issue's plan waiting for approval is queued again if `sender`
-    /// can write to the repo.
-    Approve { sender: String },
+    /// `/aegis approve [mode=…]` in a comment on an open issue by `sender`
+    /// (#675, #677): the issue's plan waiting for approval is approved if
+    /// `sender` can write to the repo, to be delivered as `mode` says or as
+    /// the plan recommends.
+    Approve {
+        sender: String,
+        mode: Option<String>,
+    },
+    /// `/aegis revise <feedback>` in a comment on an open issue by `sender`
+    /// (#677): the issue's plan is sent back with `feedback`, everything
+    /// after the command, if `sender` can write to the repo.
+    Revise { sender: String, feedback: String },
 }
 
 /// The command that asks for a review round in a comment on a PR.
 pub const FIX_COMMAND: &str = "/aegis fix";
 
 /// The command that approves a feature's plan in a comment on its issue
-/// (#675, ADR 0019). What follows it on its line (`mode=…`) is for the
-/// delivery of the feature (#678) and read by no one yet.
+/// (#675, ADR 0019), with `mode=integration_pr|stacked_prs` after it on
+/// its line to choose the delivery (#677).
 pub const APPROVE_COMMAND: &str = "/aegis approve";
+
+/// The command that sends a feature's plan back with feedback (#677).
+pub const REVISE_COMMAND: &str = "/aegis revise";
 
 /// Whether a line of `body` is `command`, alone or followed by a space.
 fn has_command(body: &str, command: &str) -> bool {
@@ -76,6 +87,40 @@ fn asks_for_fix(body: &str) -> bool {
 /// space.
 fn asks_to_approve(body: &str) -> bool {
     has_command(body, APPROVE_COMMAND)
+}
+
+/// What follows `command` in `body`: the rest of its line, then the lines
+/// after it, trimmed. `None` when no line starts with it.
+fn after_command<'a>(body: &'a str, command: &str) -> Option<&'a str> {
+    let mut offset = 0;
+    for line in body.split_inclusive('\n') {
+        let start = line.len() - line.trim_start().len();
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(command)
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            let from = offset + start + command.len();
+            return Some(body[from..].trim());
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// The `mode=` an approval names on its line, if any.
+fn approve_mode(body: &str) -> Option<String> {
+    let rest = after_command(body, APPROVE_COMMAND)?;
+    let line = rest.lines().next().unwrap_or("");
+    line.split_whitespace()
+        .find_map(|w| w.strip_prefix("mode="))
+        .map(|m| m.chars().take(40).collect())
+}
+
+/// The feedback of a `/aegis revise` comment; `None` when it has none.
+fn revise_feedback(body: &str) -> Option<String> {
+    after_command(body, REVISE_COMMAND)
+        .filter(|f| !f.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 /// Why a delivery asks for nothing, or cannot be read.
@@ -286,8 +331,9 @@ fn review_round(
     })
 }
 
-/// `/aegis approve` on open issue `e.issue`, by a person (#675).
-fn approve(e: GithubIssueComment) -> Result<Wanted, Skip> {
+/// A design-gate command on open issue `e.issue`, by a person (#675,
+/// #677): `kind` of its sender.
+fn design_gate(e: GithubIssueComment, kind: impl FnOnce(String) -> Kind) -> Result<Wanted, Skip> {
     if e.sender.kind == "Bot" {
         return Err(ignored("sent by a bot"));
     }
@@ -298,9 +344,7 @@ fn approve(e: GithubIssueComment) -> Result<Wanted, Skip> {
     Ok(Wanted {
         issue_ref: checked_ref(format!("{path}#{}", e.issue.number))?,
         repo_url: e.repository.html_url,
-        kind: Kind::Approve {
-            sender: e.sender.login,
-        },
+        kind: kind(e.sender.login),
     })
 }
 
@@ -380,8 +424,17 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         "issue_comment" => {
             let e: GithubIssueComment = parse(body)?;
             let text = e.comment.body.as_deref().unwrap_or("");
-            if e.action == "created" && e.issue.pull_request.is_none() && asks_to_approve(text) {
-                return approve(e);
+            if e.action == "created" && e.issue.pull_request.is_none() {
+                if asks_to_approve(text) {
+                    let mode = approve_mode(text);
+                    return design_gate(e, |sender| Kind::Approve { sender, mode });
+                }
+                if has_command(text, REVISE_COMMAND) {
+                    let Some(feedback) = revise_feedback(text) else {
+                        return Err(ignored(format!("`{REVISE_COMMAND}` with no feedback")));
+                    };
+                    return design_gate(e, |sender| Kind::Revise { sender, feedback });
+                }
             }
             if e.action != "created" || !asks_for_fix(text) {
                 return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
@@ -626,10 +679,13 @@ struct GitlabMergeRequestHook {
     object_attributes: GitlabMergeRequest,
 }
 
-/// `/aegis approve` in a note on an open GitLab issue, by a person (#675);
-/// the sender is GitLab's user id, whose access level is checked before
-/// the plan is approved.
-fn gitlab_approve(e: GitlabNoteHook) -> Result<Wanted, Skip> {
+/// A design-gate command in a note on an open GitLab issue, by a person
+/// (#675, #677); the sender is GitLab's user id, whose access level is
+/// checked before the plan is approved or sent back.
+fn gitlab_design_gate(
+    e: GitlabNoteHook,
+    kind: impl FnOnce(String) -> Kind,
+) -> Result<Wanted, Skip> {
     let issue = e
         .issue
         .ok_or_else(|| Skip::Malformed("an issue note without its issue".into()))?;
@@ -643,9 +699,7 @@ fn gitlab_approve(e: GitlabNoteHook) -> Result<Wanted, Skip> {
     Ok(Wanted {
         issue_ref: checked_ref(format!("{path}#{}", issue.iid))?,
         repo_url: e.project.web_url,
-        kind: Kind::Approve {
-            sender: e.user.id.to_string(),
-        },
+        kind: kind(e.user.id.to_string()),
     })
 }
 
@@ -666,10 +720,18 @@ pub fn gitlab(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
         // user id, whose access level is checked before a job is made.
         "Note Hook" => {
             let e: GitlabNoteHook = parse(body)?;
-            if e.object_attributes.noteable_type == "Issue"
-                && asks_to_approve(&e.object_attributes.note)
-            {
-                return gitlab_approve(e);
+            if e.object_attributes.noteable_type == "Issue" {
+                let note = e.object_attributes.note.clone();
+                if asks_to_approve(&note) {
+                    let mode = approve_mode(&note);
+                    return gitlab_design_gate(e, |sender| Kind::Approve { sender, mode });
+                }
+                if has_command(&note, REVISE_COMMAND) {
+                    let Some(feedback) = revise_feedback(&note) else {
+                        return Err(ignored(format!("`{REVISE_COMMAND}` with no feedback")));
+                    };
+                    return gitlab_design_gate(e, |sender| Kind::Revise { sender, feedback });
+                }
             }
             if e.object_attributes.noteable_type != "MergeRequest"
                 || !asks_for_fix(&e.object_attributes.note)
@@ -1520,6 +1582,41 @@ mod tests {
     }
 
     #[test]
+    fn design_gate_commands_carry_their_mode_and_feedback() {
+        assert_eq!(approve_mode("/aegis approve"), None);
+        assert_eq!(
+            approve_mode("ok\n  /aegis approve mode=stacked_prs please\nmode=integration_pr"),
+            Some("stacked_prs".into())
+        );
+        assert_eq!(
+            revise_feedback("Thanks.\n/aegis revise Split the export.\nKeep the API."),
+            Some("Split the export.\nKeep the API.".into())
+        );
+        assert_eq!(revise_feedback("/aegis revise   \n"), None);
+        assert_eq!(revise_feedback("/aegis revised it"), None);
+        let comment = |body: &str| {
+            json!({ "action": "created", "comment": { "body": body },
+                    "issue": { "number": 3, "state": "open",
+                               "html_url": "https://github.com/bot/demo/issues/3" },
+                    "repository": repo(), "sender": { "login": "lan", "type": "User" } })
+            .to_string()
+            .into_bytes()
+        };
+        let wanted = github("issue_comment", &comment("/aegis revise One sub-job."), "x").unwrap();
+        assert_eq!(
+            wanted.kind,
+            Kind::Revise {
+                sender: "lan".into(),
+                feedback: "One sub-job.".into()
+            }
+        );
+        assert!(matches!(
+            github("issue_comment", &comment("/aegis revise"), "x"),
+            Err(Skip::Ignored(_))
+        ));
+    }
+
+    #[test]
     fn an_approve_comment_on_an_open_issue_approves_its_plan() {
         let comment = |body: &str, state: &str, on_pr: bool, kind: &str| {
             let mut issue = json!({ "number": 3, "state": state,
@@ -1539,11 +1636,9 @@ mod tests {
             let wanted =
                 github("issue_comment", &comment(body, "open", false, "User"), "x").unwrap();
             assert_eq!(wanted.issue_ref, "bot/demo#3");
-            assert_eq!(
-                wanted.kind,
-                Kind::Approve {
-                    sender: "lan".into()
-                }
+            assert!(
+                matches!(&wanted.kind, Kind::Approve { sender, .. } if sender == "lan"),
+                "{wanted:?}"
             );
         }
         for (body, state, on_pr, kind) in [
@@ -1587,7 +1682,8 @@ mod tests {
         assert_eq!(
             wanted.kind,
             Kind::Approve {
-                sender: "42".into()
+                sender: "42".into(),
+                mode: None
             }
         );
         for (state, bot) in [("closed", false), ("opened", true)] {

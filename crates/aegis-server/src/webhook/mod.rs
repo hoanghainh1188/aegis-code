@@ -873,14 +873,19 @@ async fn deliver(
         };
         return issue_closed(hooks, closed, &repo).await;
     }
-    if let Kind::Approve { sender } = &wanted.kind {
+    let gate = match &wanted.kind {
+        Kind::Approve { sender, mode } => Some((sender, GateCommand::Approve(mode.as_deref()))),
+        Kind::Revise { sender, feedback } => Some((sender, GateCommand::Revise(feedback))),
+        _ => None,
+    };
+    if let Some((sender, command)) = gate {
         let at = DeliveryMeta {
             source,
             via,
             delivery,
             event,
         };
-        return approve(hooks, at, &repo, &wanted.issue_ref, sender).await;
+        return design_gate(hooks, at, &repo, &wanted.issue_ref, sender, command).await;
     }
     let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
     if let Kind::Issue { author } = &wanted.kind {
@@ -987,7 +992,8 @@ async fn deliver(
             | Kind::PrClosed { .. }
             | Kind::Push { .. }
             | Kind::IssueClosed { .. }
-            | Kind::Approve { .. },
+            | Kind::Approve { .. }
+            | Kind::Revise { .. },
             _,
         ) => {
             unreachable!("handled above")
@@ -1448,16 +1454,28 @@ async fn issue_closed(hooks: &Hooks, closed: ClosedIssue<'_>, repo: &Repo) -> Ha
     }
 }
 
-/// `/aegis approve` on an issue of `repo` (#675, ADR 0019): the issue's
-/// plan waiting for approval is queued again, as approved by the sender,
-/// who must be able to write to the repo. An approval the store refuses
-/// (another live job of the ticket, a spent budget) is told on the issue.
-async fn approve(
+/// A design-gate command on an issue (#675, #677).
+#[derive(Clone, Copy)]
+enum GateCommand<'a> {
+    /// `/aegis approve`, with the `mode=` it named.
+    Approve(Option<&'a str>),
+    /// `/aegis revise`, with its feedback.
+    Revise(&'a str),
+}
+
+/// `/aegis approve` or `/aegis revise` on an issue of `repo` (#675, #677,
+/// ADR 0019): the issue's plan waiting for approval is approved, or sent
+/// back with the feedback to plan anew within the repo's cap, by the
+/// sender, who must be able to write to the repo. What the store refuses
+/// (an unknown mode, approved already, the cap reached, another live job of
+/// the ticket, a spent budget) is told on the issue.
+async fn design_gate(
     hooks: &Hooks,
     at: DeliveryMeta<'_>,
     repo: &Repo,
     issue_ref: &str,
     sender: &str,
+    command: GateCommand<'_>,
 ) -> Handled {
     let DeliveryMeta {
         source,
@@ -1479,7 +1497,7 @@ async fn approve(
     match sender_can_write(hooks, source, repo, sender, on_app).await {
         Ok(Ok(true)) => {}
         Ok(Ok(false)) => {
-            tracing::info!(delivery, sender, repo = %repo.slug, "plan approved by someone who cannot write");
+            tracing::info!(delivery, sender, repo = %repo.slug, "design gate used by someone who cannot write");
             return ignored("the sender cannot write to the repository");
         }
         Ok(Err(why)) => {
@@ -1489,29 +1507,67 @@ async fn approve(
         Err(why) => return ignored(why),
     }
     let actor = aegis_store::Actor::forge_user(source.as_str(), sender);
-    let why = match hooks.store.approve_job_by(plan.id, &actor).await {
-        Ok(job) => {
-            tracing::info!(delivery, job = job.id.0, repo = %repo.slug, "plan approved from a webhook");
+    let done = match command {
+        GateCommand::Approve(mode) => match mode.map(crate::feature_gate::parse_mode).transpose() {
+            Ok(mode) => hooks
+                .store
+                .approve_job_by(plan.id, mode, &actor)
+                .await
+                .map(|job| {
+                    (
+                        job,
+                        "approved",
+                        format!("plan of job {} approved", plan.id.0),
+                    )
+                }),
+            Err(why) => Err(StoreError::Invalid {
+                field: "mode",
+                message: why,
+            }),
+        },
+        GateCommand::Revise(feedback) => {
+            let cap = crate::feature_gate::max_revisions(&repo.config);
+            hooks
+                .store
+                .revise_job_by(plan.id, feedback, cap, &actor)
+                .await
+                .map(|(job, asked)| {
+                    let why = format!(
+                        "plan of job {} sent back for revision {}",
+                        job.id.0,
+                        asked.revision + 1
+                    );
+                    (job, "revising", why)
+                })
+        }
+    };
+    let why = match done {
+        Ok((job, status, reason)) => {
+            tracing::info!(delivery, job = job.id.0, repo = %repo.slug, status, "design gate from a webhook");
             return Handled::new(
                 answer(
                     StatusCode::ACCEPTED,
-                    json!({ "status": "approved", "job_id": job.id.0 }),
+                    json!({ "status": status, "job_id": job.id.0 }),
                 ),
                 WebhookOutcome::Queued,
-                Some(format!("plan of job {} approved", job.id.0)),
+                Some(reason),
                 Some(repo.id),
             )
             .with_job(job.id);
         }
         Err(StoreError::Conflict(why) | StoreError::BudgetSpent(why)) => why,
+        Err(StoreError::Invalid { message, .. }) => message,
         Err(e) => return internal(delivery, &e),
     };
-    tracing::info!(delivery, why, "plan approval refused");
+    tracing::info!(delivery, why, "design gate refused");
     let locale = hooks.locales.of(repo.id).await;
     let text = format!(
         "{}\n{}",
         aegis_pr::REPLY_MARKER,
-        (locale.strings().approve_refused)(&aegis_pr::inert(&why))
+        (match command {
+            GateCommand::Approve(_) => locale.strings().approve_refused,
+            GateCommand::Revise(_) => locale.strings().revise_refused,
+        })(&aegis_pr::inert(&why))
     );
     match source {
         WebhookSource::Gitlab => {

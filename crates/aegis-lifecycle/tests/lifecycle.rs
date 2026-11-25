@@ -96,10 +96,11 @@ impl ModelProvider for Scripted {
                 )]
             }
             "core" if system.contains("You are the architect") => {
-                vec![ContentBlock::text(if asked.contains("BAD PLAN") {
-                    r#"{"summary": "x", "criteria": [], "sub_jobs": []}"#
-                } else {
-                    r#"Here is the plan: {"summary": "Carts say how many items they hold.",
+                vec![ContentBlock::text(
+                    if asked.contains("BAD PLAN") || asked.contains("BREAK IT") {
+                        r#"{"summary": "x", "criteria": [], "sub_jobs": []}"#
+                    } else {
+                        r#"Here is the plan: {"summary": "Carts say how many items they hold.",
                       "criteria": [{"given": "a cart of 2 items", "when": "it is counted", "then": "the count is 2"}],
                       "contracts": ["Cart::count(&self) -> usize"],
                       "dependencies": [],
@@ -108,7 +109,8 @@ impl ModelProvider for Scripted {
                         {"id": "docs", "title": "Document counting", "scope": ["README.md"], "depends_on": ["count"]}
                       ],
                       "delivery": "auto"}"#
-                })]
+                    },
+                )]
             }
             "light" if system.contains("You triage") => vec![ContentBlock::text(
                 r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item.", "triage": "ops_or_config", "triage_confidence": 0.6, "triage_reason": "Reads like a limit set in configuration."}"#,
@@ -2658,5 +2660,83 @@ async fn a_feature_plan_that_cannot_be_checked_is_not_posted() {
     assert!(
         p.provider.requests_for("light").is_empty(),
         "its source knew"
+    );
+}
+
+/// #677: a plan sent back is planned again under the same ledger, with the
+/// previous plan and the feedback shown to Core; the job waits again. A
+/// revision that cannot be used leaves the plan waiting as it was.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_sent_back_is_planned_again_with_its_feedback() {
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let p = platform(
+        with_feature_lane(&scratch, &server.uri()),
+        Scripted::new(vec![], vec![]),
+    );
+    let ticket = feature_issue("NEW FEATURE: count a cart's items");
+    let first = run_issue(Arc::clone(&p), ticket.clone(), CancellationToken::new())
+        .await
+        .unwrap();
+    let previous = first.plan.unwrap();
+    let revision = aegis_lifecycle::FeatureRevision {
+        previous: previous.clone(),
+        feedback: "Drop the docs sub-job.".into(),
+        revision: 2,
+    };
+    let second = aegis_lifecycle::run_feature_revision(
+        Arc::clone(&p),
+        ticket.clone(),
+        revision.clone(),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.outcome, Outcome::AwaitingApproval, "{second:?}");
+    let rfc = second.diagnosis.unwrap();
+    assert!(rfc.contains("Revision 2 of the plan"), "{rfc}");
+    let core = p.provider.requests_for("core");
+    assert_eq!(core.len(), 2, "one call per plan");
+    let shown = serde_json::to_string(&core[1].messages).unwrap();
+    assert!(
+        shown.contains("Drop the docs sub-job."),
+        "the feedback is shown"
+    );
+    assert!(
+        shown.contains("previous-plan"),
+        "the previous plan is shown"
+    );
+    let id = IssueId::parse("fixture-7").unwrap();
+    let finished = p
+        .store
+        .events(&id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e, LedgerEvent::Finished { .. }))
+        .count();
+    assert_eq!(finished, 2, "the run went on under its ledger");
+
+    // A revision that cannot be used: the plan still waits, nothing posted.
+    let broken = aegis_lifecycle::FeatureRevision {
+        feedback: "BREAK IT".into(),
+        revision: 3,
+        ..revision
+    };
+    let third = aegis_lifecycle::run_feature_revision(
+        Arc::clone(&p),
+        ticket,
+        broken,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(third.outcome, Outcome::AwaitingApproval, "{third:?}");
+    assert_eq!((third.diagnosis, third.plan), (None, None));
+    assert!(
+        third
+            .reason
+            .unwrap_or_default()
+            .contains("revision 2 still waits for approval"),
     );
 }

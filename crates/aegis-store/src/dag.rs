@@ -1,11 +1,9 @@
 //! The feature lane's job model (#675, ADR 0019): a job that planned a
 //! feature has sub-jobs, each claimed only once the jobs it depends on
-//! opened their PR; a plan that waits for a person ends
-//! `awaiting_approval` and an approval queues it again.
+//! opened their PR. A plan that waits for a person ends
+//! `awaiting_approval`; its approval and revisions are in `design_gate`.
 
 use std::collections::BTreeSet;
-
-use time::OffsetDateTime;
 
 use crate::audit::{self, Target};
 use crate::budget;
@@ -23,14 +21,6 @@ pub struct JobLinks {
     pub parent: Option<JobId>,
     /// The jobs that must open their PR before it is claimed, in order.
     pub depends_on: Vec<JobId>,
-}
-
-/// The last approval of a job's plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Approval {
-    /// The actor's name as it was then: an e-mail, a forge login.
-    pub by: String,
-    pub at: OffsetDateTime,
 }
 
 impl Store {
@@ -177,73 +167,6 @@ impl Store {
         .collect()
     }
 
-    /// Queues again the job whose plan waited for approval, as approved by
-    /// `actor`; who may approve is the caller's to check. `Conflict` when
-    /// the job does not wait for approval, or its ticket has another live
-    /// job; `BudgetSpent` when the repo's monthly budget is spent.
-    pub async fn approve_job_by(&self, job: JobId, actor: &Actor) -> Result<Job, StoreError> {
-        let mut tx = self.pool.begin().await?;
-        let work = async {
-            let held = sqlx::query!(
-                "SELECT repo_id, status, outcome FROM jobs WHERE id = $1 FOR UPDATE",
-                job.0,
-            )
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
-            if (held.status.as_str(), held.outcome.as_deref())
-                != ("done", Some("awaiting_approval"))
-            {
-                return Err(StoreError::Conflict(format!(
-                    "job {} does not wait for approval",
-                    job.0
-                )));
-            }
-            budget::check(&mut tx, &self.budget, RepoId(held.repo_id)).await?;
-            let approved: Job = sqlx::query_as!(
-                JobRow,
-                "UPDATE jobs SET status = 'queued', outcome = NULL, reason = NULL,
-                                 cancel_requested = false, run_after = now(), updated_at = now()
-                 WHERE id = $1
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                           status, outcome, attempts, locked_by, locked_until, created_at,
-                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
-                job.0,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| match StoreError::from_db(e) {
-                StoreError::Conflict(_) => StoreError::Conflict(format!(
-                    "the ticket of job {} has another live job",
-                    job.0
-                )),
-                other => other,
-            })?
-            .try_into()?;
-            sqlx::query!(
-                "INSERT INTO job_approvals (job_id, approved_by) VALUES ($1, $2)
-                 ON CONFLICT (job_id) DO UPDATE
-                 SET approved_by = EXCLUDED.approved_by, approved_at = now()",
-                job.0,
-                actor.name,
-            )
-            .execute(&mut *tx)
-            .await?;
-            audit::record(
-                &mut tx,
-                actor,
-                "job.approve",
-                Target::of_job(&approved),
-                serde_json::json!({}),
-            )
-            .await?;
-            Ok::<_, StoreError>(approved)
-        }
-        .await;
-        tx::commit(tx, work).await
-    }
-
     /// The newest plan of ticket `issue_ref` of `repo` that waits for
     /// approval, if any: what `/aegis approve` on the ticket approves.
     pub async fn awaiting_approval_for_issue(
@@ -268,20 +191,6 @@ impl Store {
         .await?
         .map(Job::try_from)
         .transpose()
-    }
-
-    /// The last approval of `job`'s plan, if it had one.
-    pub async fn approval(&self, job: JobId) -> Result<Option<Approval>, StoreError> {
-        Ok(sqlx::query!(
-            "SELECT approved_by, approved_at FROM job_approvals WHERE job_id = $1",
-            job.0,
-        )
-        .fetch_optional(&self.pool)
-        .await?
-        .map(|r| Approval {
-            by: r.approved_by,
-            at: r.approved_at,
-        }))
     }
 }
 
