@@ -100,6 +100,9 @@ pub(super) async fn fetch_base(
     .map_err(|e| LifecycleError::Config(format!("the fetch did not finish: {e}")))??;
     let (ran, proxy) = outcome;
     if ran.exit.success() {
+        // The base's dependencies, upstream's only: the remote cache may
+        // send them up (#665). Without the marker it waits for a build.
+        let _ = aegis_gate::mark_refreshed(&part_cache(cfg, part));
         return Ok(None);
     }
     let log = std::fs::read_to_string(&ran.log).unwrap_or_default();

@@ -200,6 +200,12 @@ where
         }
     };
 
+    // A fresh worker or execution host starts from the store's caches
+    // (#665), before the fetch and the build cache seed the tree.
+    let remote = super::remote_cache::for_run(cfg).await;
+    if let Some(store) = &remote {
+        store.pull_parts(cfg, profiles, env.job_dir()).await;
+    }
     if let Some(why) = env.prepare_parts(cfg, profiles, cancel).await? {
         return Ok(Ending::stop(Outcome::StoppedSteps, why));
     }
@@ -258,6 +264,10 @@ where
     .await;
     graph.close().await;
     tools.shutdown().await;
+    // What the gate's base copy refreshed goes up for the next host.
+    if let Some(store) = &remote {
+        store.push_parts(cfg, profiles, env.job_dir()).await;
+    }
     drop(env);
     result
 }

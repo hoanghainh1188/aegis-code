@@ -147,6 +147,101 @@ pub struct RunSection {
     /// its `aegis-docker-proxy --listen-tls` (#664); unset, on this host's.
     #[serde(default)]
     pub remote_execution: Option<RemoteExecution>,
+    /// Keep the repo's caches in an object store too (#665), so a fresh
+    /// worker or execution host starts from them instead of cold.
+    #[serde(default)]
+    pub remote_cache: Option<RemoteCache>,
+}
+
+/// `[run.remote_cache]` (#665): an S3 bucket (AWS, MinIO, any S3 API)
+/// that holds one archive per repo part of the caches under
+/// `state_dir/cache/<repo>/`. The worker moves them, before the job and
+/// after it, never a container: the gate's steps keep `--network none`.
+/// Credentials come from the AWS chain (`AWS_ACCESS_KEY_ID`, a profile, a
+/// role), never from this file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteCache {
+    /// `s3://<bucket>[/<prefix>]`.
+    pub url: String,
+    /// The S3 API's root for MinIO or another store (`https://minio:9000`);
+    /// unset, AWS's own for `region`.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default = "default_cache_region")]
+    pub region: String,
+    /// The language profiles whose caches go to the store; empty, every
+    /// one. A profile whose cache is cheap to rebuild can stay local.
+    #[serde(default)]
+    pub languages: Vec<aegis_lang::Language>,
+    /// A repo part's caches go up at most this often: a job's gate
+    /// refreshes them every time, and an archive can be gigabytes.
+    #[serde(default = "default_push_interval")]
+    pub push_interval_s: u64,
+}
+
+fn default_cache_region() -> String {
+    "us-east-1".into()
+}
+
+fn default_push_interval() -> u64 {
+    3600
+}
+
+impl RemoteCache {
+    /// The bucket and the key prefix (without a trailing `/`) of `url`.
+    pub fn bucket_and_prefix(&self) -> Result<(&str, &str), String> {
+        let rest = self
+            .url
+            .strip_prefix("s3://")
+            .ok_or_else(|| format!("run.remote_cache.url `{}` is not s3://<bucket>", self.url))?;
+        let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
+        let prefix = prefix.trim_end_matches('/');
+        let bucket_ok = (3..=63).contains(&bucket.len())
+            && bucket
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || ".-".contains(c));
+        if !bucket_ok {
+            return Err(format!(
+                "run.remote_cache.url `{}`: `{bucket}` is not an S3 bucket name",
+                self.url
+            ));
+        }
+        let prefix_ok = prefix.split('/').all(|s| {
+            !s.is_empty()
+                && s != "."
+                && s != ".."
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+        });
+        if !prefix.is_empty() && !prefix_ok {
+            return Err(format!(
+                "run.remote_cache.url `{}`: the prefix `{prefix}` must be plain path segments",
+                self.url
+            ));
+        }
+        Ok((bucket, prefix))
+    }
+
+    pub fn check(&self) -> Result<(), String> {
+        self.bucket_and_prefix()?;
+        if let Some(endpoint) = &self.endpoint
+            && !(endpoint.starts_with("https://") || endpoint.starts_with("http://"))
+        {
+            return Err(format!(
+                "run.remote_cache.endpoint `{endpoint}` is not an http(s) URL"
+            ));
+        }
+        if self.region.is_empty() {
+            return Err("run.remote_cache.region is empty".into());
+        }
+        Ok(())
+    }
+
+    /// Whether `language`'s caches go to the store.
+    pub fn covers(&self, language: aegis_lang::Language) -> bool {
+        self.languages.is_empty() || self.languages.contains(&language)
+    }
 }
 
 /// `[run.remote_execution]` (#664): the execution host's Docker proxy and
@@ -763,6 +858,14 @@ impl RunConfig {
                 return Err(LifecycleError::Config(
                     "run.remote_execution needs run.sandbox: without it the gate runs on this host"
                         .into(),
+                ));
+            }
+        }
+        if let Some(cache) = &self.run.remote_cache {
+            cache.check().map_err(LifecycleError::Config)?;
+            if !self.run.sandbox {
+                return Err(LifecycleError::Config(
+                    "run.remote_cache needs run.sandbox: the caches are the sandbox's".into(),
                 ));
             }
         }
