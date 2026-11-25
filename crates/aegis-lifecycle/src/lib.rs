@@ -62,8 +62,9 @@ pub use memory::{
     fallback_extract_from_merged_pr, format_for_bp3, redact_for_embedding,
 };
 pub use memory_learn::{
-    DiagnosisFacts, LearnedMemory, RejectedPrFacts, extract_confirmed_diagnosis,
-    extract_rejected_pattern, fallback_confirmed_diagnosis, fallback_rejected_pattern,
+    DiagnosisFacts, FeatureDesignFacts, LearnedMemory, RejectedPrFacts,
+    extract_confirmed_diagnosis, extract_feature_design, extract_rejected_pattern,
+    fallback_confirmed_diagnosis, fallback_feature_design, fallback_rejected_pattern,
 };
 pub use memory_sources::{MemorySources, SyncedMemory};
 pub use preflight::{CheckItem, CheckStatus, PreflightOptions, PreflightReport, run_preflight};

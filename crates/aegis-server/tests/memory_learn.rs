@@ -725,3 +725,130 @@ async fn a_diagnosed_issue_closed_by_a_writer_confirms_its_diagnosis() {
     assert_eq!(kept.len(), 1);
     db.drop().await;
 }
+
+/// A run of the job of `job`: claimed, then ended as `end`.
+async fn run_once(s: &Store, job: &Job, end: AttemptEnd) {
+    let claim = s
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.job.id, job.id);
+    s.finish_attempt(&claim.run, "w", &end).await.unwrap();
+}
+
+/// #677: once code of a feature a person approved is merged, its design
+/// is kept as a business rule: the contracts of its plan and what its
+/// revision asked for. A PR of no feature teaches no design.
+#[tokio::test]
+async fn a_merged_feature_keeps_its_approved_design() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let repo = repo(s).await;
+    let app = hooks(s, "http://127.0.0.1:9");
+    let read = LedgerEvent::IssueRead {
+        title: "Refunds can be split across cards".into(),
+        url: "https://github.com/acme/pay/issues/42".into(),
+    };
+    let root = finished(
+        s,
+        repo,
+        "pay-42",
+        &[read],
+        done(Outcome::AwaitingApproval, None, None),
+    )
+    .await;
+    let plan = |contract: &str| {
+        serde_json::json!({
+            "summary": "A refund may go back to more than one card.",
+            "criteria": [{ "given": "a payment split over two cards", "when": "it is refunded",
+                           "then": "each card gets its share back" }],
+            "contracts": [contract],
+            "dependencies": [],
+            "sub_jobs": [{ "id": "split", "title": "Split refunds", "scope": ["src/pay/refund.rs"],
+                           "depends_on": [] }],
+            "delivery": "integration_pr"
+        })
+    };
+    s.save_feature_plan(root.id, &plan("refund::split(&Payment) -> Vec<Refund>"))
+        .await
+        .unwrap();
+    s.revise_job_by(
+        root.id,
+        "Refunds must never exceed the original charge.",
+        3,
+        &Actor::system(),
+    )
+    .await
+    .unwrap();
+    run_once(s, &root, done(Outcome::AwaitingApproval, None, None)).await;
+    s.save_feature_plan(
+        root.id,
+        &plan("refund::split(&Payment) -> Result<Vec<Refund>, RefundError>"),
+    )
+    .await
+    .unwrap();
+
+    // Not approved yet: its sub-job's merged PR keeps no design.
+    let sub = s
+        .create_sub_job_by(
+            root.id,
+            &[],
+            &NewJob {
+                repo_id: repo,
+                issue_ref: root.issue_ref.clone(),
+                ledger_key: IssueId::parse("pay-42-split").unwrap(),
+                source: JobSource::Github,
+                priority: None,
+                sla_deadline: None,
+            },
+            &Actor::system(),
+        )
+        .await
+        .unwrap();
+    run_once(s, &sub, done(Outcome::PrOpened, Some(PR), None)).await;
+    let (_, data) = deliver(&app, "pull_request", "m0", &pr_closed(true)).await;
+    assert_eq!(data["status"], "memory_recorded", "{data}");
+    assert!(
+        business_rules(s, repo).await.is_empty(),
+        "no approval, no design"
+    );
+
+    s.approve_job_by(root.id, None, &Actor::system())
+        .await
+        .unwrap();
+    let (_, data) = deliver(&app, "pull_request", "m1", &pr_closed(true)).await;
+    assert_eq!(data["status"], "memory_recorded", "{data}");
+    let kept = business_rules(s, repo).await;
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    let rule = &kept[0];
+    assert_eq!(
+        rule.source_ref,
+        aegis_server::memory_learn::design_ref(&root)
+    );
+    assert_eq!(rule.title, "Design: Refunds can be split across cards");
+    assert!(
+        rule.summary.contains("Result<Vec<Refund>, RefundError>"),
+        "the last revision: {}",
+        rule.summary
+    );
+    assert!(
+        rule.summary.contains("never exceed the original charge"),
+        "{}",
+        rule.summary
+    );
+    assert_eq!(rule.paths, ["src/pay/refund.rs"]);
+    assert_eq!(rule.job_id, Some(root.id));
+
+    // Learned again on another merge: updated, not doubled.
+    let (_, _) = deliver(&app, "pull_request", "m2", &pr_closed(true)).await;
+    assert_eq!(business_rules(s, repo).await.len(), 1);
+    db.drop().await;
+}
+
+async fn business_rules(s: &Store, repo: RepoId) -> Vec<aegis_store::RepoMemory> {
+    s.list_repo_memories(repo, Some(MemoryKind::BusinessRule), Page::first(10))
+        .await
+        .unwrap()
+        .items
+}

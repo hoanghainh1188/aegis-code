@@ -272,6 +272,25 @@ impl Store {
         }))
     }
 
+    /// Every revision asked for of `job`'s plan, the first first.
+    pub async fn revision_requests(&self, job: JobId) -> Result<Vec<RevisionRequest>, StoreError> {
+        Ok(sqlx::query!(
+            "SELECT revision, feedback, requested_by, requested_at FROM job_revisions
+             WHERE job_id = $1 ORDER BY revision",
+            job.0,
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|r| RevisionRequest {
+            revision: r.revision,
+            feedback: r.feedback,
+            by: r.requested_by,
+            at: r.requested_at,
+        })
+        .collect())
+    }
+
     async fn job_in(&self, conn: &mut sqlx::PgConnection, job: JobId) -> Result<Job, StoreError> {
         sqlx::query_as!(
             JobRow,
