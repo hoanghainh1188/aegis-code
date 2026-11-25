@@ -3,7 +3,10 @@
 //!   `rejected_pattern`: a pitfall the agent is shown apart from the fixes
 //!   it may follow;
 //! - a read-only diagnosis (#451) an operator confirmed becomes a
-//!   `confirmed_diagnosis`.
+//!   `confirmed_diagnosis`;
+//! - the design of a feature a person approved (#677) becomes a
+//!   `business_rule` once its code is merged: the contracts it set and the
+//!   corrections people asked of its plan.
 //!
 //! Both are extracted by the repo's mode's Light model when it has one
 //! (with its residency, ADR 0018), else from the ledger alone, and are
@@ -11,8 +14,9 @@
 
 use aegis_ledger::{IssueRecord, LedgerEvent, LedgerStore, Outcome};
 use aegis_lifecycle::{
-    DiagnosisFacts, LearnedMemory, Modes, RejectedPrFacts, extract_confirmed_diagnosis,
-    extract_rejected_pattern, fallback_confirmed_diagnosis, fallback_rejected_pattern,
+    DiagnosisFacts, FeatureDesignFacts, FeaturePlan, LearnedMemory, Modes, RejectedPrFacts,
+    extract_confirmed_diagnosis, extract_feature_design, extract_rejected_pattern,
+    fallback_confirmed_diagnosis, fallback_feature_design, fallback_rejected_pattern,
 };
 use aegis_provider::Provider;
 use aegis_secrets::Secrets;
@@ -32,6 +36,12 @@ pub fn rejected_ref(pr_url: &str) -> String {
 /// The source of the memory learned from the diagnosis of `job`.
 pub fn diagnosis_ref(job: &Job) -> String {
     format!("diagnosis:job/{}", job.id.0)
+}
+
+/// The source of the business rule learned from the design of the feature
+/// `root` planned.
+pub fn design_ref(root: &Job) -> String {
+    format!("feature:job/{}#design", root.id.0)
 }
 
 /// The Light model of `job`'s repo's mode, when the modes have one.
@@ -281,4 +291,93 @@ pub async fn diagnosis_confirmed(store: &Store, job: &Job) -> Result<bool, Store
         )
         .await?
         .is_some())
+}
+
+/// [`learn_feature_design`] for the merged PR `pr_url`, with the Light
+/// model of its repo's mode. `None` when no job opened it or it is not a
+/// feature's.
+pub async fn extract_and_store_feature_design(
+    store: &Store,
+    pr_url: &str,
+    modes: Option<&Modes>,
+    secrets: &Secrets,
+    actor: &Actor,
+) -> Result<Option<RepoMemory>, StoreError> {
+    let Some(job) = store.job_by_pr_url(pr_url).await? else {
+        return Ok(None);
+    };
+    let light = light_for(store, &job, modes, secrets).await?;
+    let light = light.as_ref().map(|(p, m)| (p, m.as_str()));
+    learn_feature_design(store, &job, light, actor).await
+}
+
+/// Stores what the design of the feature `job` belongs to teaches, once
+/// code of it is merged (#677): the job that planned it, or one of its
+/// sub-jobs. Its approved plan's contracts and criteria, and the feedback
+/// its revisions were asked with, become one `business_rule`, updated if
+/// learned again. `None` when `job` is no approved feature's.
+pub async fn learn_feature_design(
+    store: &Store,
+    job: &Job,
+    light: Option<(&Provider, &str)>,
+    actor: &Actor,
+) -> Result<Option<RepoMemory>, StoreError> {
+    let root = match store.job_links(job.id).await?.parent {
+        Some(parent) => match store.job(parent).await? {
+            Some(root) => root,
+            None => return Ok(None),
+        },
+        None => job.clone(),
+    };
+    if store.approval(root.id).await?.is_none() {
+        return Ok(None);
+    }
+    let Some(kept) = store.feature_plan(root.id).await? else {
+        return Ok(None);
+    };
+    let Ok(plan) = serde_json::from_value::<FeaturePlan>(kept.plan) else {
+        tracing::warn!(job = root.id.0, "the approved plan cannot be read");
+        return Ok(None);
+    };
+    let corrections: Vec<String> = store
+        .revision_requests(root.id)
+        .await?
+        .into_iter()
+        .map(|r| r.feedback)
+        .collect();
+    let criteria: Vec<String> = plan
+        .criteria
+        .iter()
+        .map(|c| format!("Given {}, when {}, then {}.", c.given, c.when, c.then))
+        .collect();
+    let mut paths: Vec<String> = plan.sub_jobs.iter().flat_map(|j| j.scope.clone()).collect();
+    paths.sort();
+    paths.dedup();
+    let record = read_record(store, &root.ledger_key).await?;
+    let title = record
+        .and_then(|r| r.issue_title)
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| root.issue_ref.clone());
+    let facts = FeatureDesignFacts {
+        issue_title: &title,
+        summary: &plan.summary,
+        contracts: &plan.contracts,
+        criteria: &criteria,
+        corrections: &corrections,
+        paths: &paths,
+    };
+    let learned = match light {
+        Some((provider, model)) => extract_feature_design(provider, model, &facts).await.0,
+        None => fallback_feature_design(&facts),
+    };
+    store_learned(
+        store,
+        &root,
+        MemoryKind::BusinessRule,
+        design_ref(&root),
+        learned,
+        actor,
+    )
+    .await
+    .map(Some)
 }

@@ -1189,8 +1189,9 @@ fn pushed(hooks: &Hooks, delivery: &str, repo: &Repo, branch: &str) -> Handled {
 }
 
 /// Extracts `merged_pr` and `review_lesson` repository memories when an
-/// agent PR is merged (#456); the merge moved the main branch, so the
-/// repo's runbooks and business rules are synced too (#660).
+/// agent PR is merged (#456), and the design of the feature it belongs to,
+/// if any (#677); the merge moved the main branch, so the repo's runbooks
+/// and business rules are synced too (#660).
 async fn pr_merged(
     hooks: &Hooks,
     source: WebhookSource,
@@ -1212,7 +1213,20 @@ async fn pr_merged(
     );
     match extracted.await {
         Ok(saved) if saved.is_empty() => ignored(delivery, "no job opened this pull request"),
-        Ok(saved) => {
+        Ok(mut saved) => {
+            // A feature's code merged: its approved design is kept (#677).
+            let design = crate::memory_learn::extract_and_store_feature_design(
+                &hooks.store,
+                pr_url,
+                modes,
+                &hooks.config.secrets,
+                &actor,
+            );
+            match design.await {
+                Ok(Some(rule)) => saved.push(rule),
+                Ok(None) => {}
+                Err(e) => tracing::warn!(delivery, error = %e, "learning the feature's design"),
+            }
             let repo_id = saved[0].repo_id;
             let job_id = saved[0].job_id;
             if let (Some(sync), Ok(Some(repo))) =
