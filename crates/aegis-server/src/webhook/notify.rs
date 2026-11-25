@@ -656,9 +656,10 @@ fn gitlab_issue_ref(text: &str) -> Option<(&str, u64)> {
 
 /// The comment on the issue: the job's status, and for a job the
 /// diagnosis lane took (#451) its report, which the lifecycle built from
-/// checked sources and made inert item by item.
+/// checked sources and made inert item by item; for a feature waiting for
+/// approval (#677), its plan, made inert the same way.
 pub fn comment_with(job: &Job, diagnosis: Option<&str>, locale: Locale) -> String {
-    match diagnosis.filter(|_| job.outcome == Some(Outcome::Diagnosed)) {
+    match diagnosis.filter(|_| has_report(job)) {
         Some(report) => {
             let status = status_comment(job, locale);
             let (head, foot) = status.rsplit_once("\n\n").unwrap_or((&status, ""));
@@ -668,9 +669,18 @@ pub fn comment_with(job: &Job, diagnosis: Option<&str>, locale: Locale) -> Strin
     }
 }
 
+/// Whether the job's end comes with a report written for the ticket: a
+/// diagnosis (#451), or a feature's plan for approval (#677).
+fn has_report(job: &Job) -> bool {
+    matches!(
+        job.outcome,
+        Some(Outcome::Diagnosed | Outcome::AwaitingApproval)
+    )
+}
+
 /// [`comment_with`] in plain text, for the trackers.
 pub fn plain_comment_with(job: &Job, diagnosis: Option<&str>, locale: Locale) -> String {
-    match diagnosis.filter(|_| job.outcome == Some(Outcome::Diagnosed)) {
+    match diagnosis.filter(|_| has_report(job)) {
         Some(report) => {
             let status = plain_status_comment(job, locale);
             let (head, foot) = status.rsplit_once("\n\n").unwrap_or((&status, ""));
@@ -823,6 +833,22 @@ mod tests {
             comment_with(&done, None, Locale::En),
             status_comment(&done, Locale::En)
         );
+    }
+
+    #[test]
+    fn a_plan_waiting_for_approval_is_posted_with_the_job_s_end() {
+        let waiting = job(JobStatus::Done, Some(Outcome::AwaitingApproval));
+        let rfc = "**aegis-code** planned this feature in 1 sub-job(s).";
+        let text = comment_with(&waiting, Some(rfc), Locale::En);
+        assert!(
+            text.contains("its plan waits for a person's approval"),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!("\n\n{rfc}\n\n<sub>aegis-code job 7</sub>")),
+            "{text}"
+        );
+        assert!(plain_comment_with(&waiting, Some(rfc), Locale::En).contains(rfc));
     }
 
     #[test]

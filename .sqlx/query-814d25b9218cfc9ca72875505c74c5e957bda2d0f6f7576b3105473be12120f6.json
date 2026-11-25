@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT revision, plan, created_at FROM feature_plans\n             WHERE job_id = $1 ORDER BY revision",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "feature_plans",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "plan",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "feature_plans",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "feature_plans",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "814d25b9218cfc9ca72875505c74c5e957bda2d0f6f7576b3105473be12120f6"
+}

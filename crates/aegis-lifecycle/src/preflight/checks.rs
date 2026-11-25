@@ -334,6 +334,7 @@ mod tests {
             patch_scope: None,
             secrets: Default::default(),
             triage_lane: Default::default(),
+            feature_lane: Default::default(),
             sidecars: vec![],
             locale: Default::default(),
             app: None,

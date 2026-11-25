@@ -24,6 +24,7 @@ mod ledger;
 mod memory;
 mod page;
 mod pause;
+mod plans;
 mod polls;
 mod preflights;
 mod queue;
@@ -67,6 +68,7 @@ pub use memory::{
 };
 pub use page::{Page, PageOf};
 pub use pause::{Paused, REPO_PAUSED, RepoPause};
+pub use plans::{FeaturePlan, MAX_PLAN_BYTES};
 pub use preflights::{
     MAX_PREFLIGHT_ITEMS, PREFLIGHT_STALE_AFTER, PreflightItem, PreflightState, RepoPreflight,
 };

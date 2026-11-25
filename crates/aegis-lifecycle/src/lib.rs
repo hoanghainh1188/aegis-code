@@ -21,6 +21,7 @@ mod diagnose;
 mod error;
 mod eval;
 mod evidence;
+mod feature;
 pub mod flags;
 pub mod injection;
 mod issue;
@@ -51,6 +52,10 @@ pub use cve::CveTarget;
 pub use diagnose::TriageLane;
 pub use error::LifecycleError;
 pub use eval::{EvalIssue, hidden_command, load_set, next_run_id};
+pub use feature::{
+    Criterion, FeatureDeliveryMode, FeatureLane, FeaturePlan, MAX_PLANNED_SUB_JOBS, PlannedSubJob,
+    ProposedPackage, render as render_feature_plan,
+};
 pub use issue::{HiddenTests, IssueInput, IssueSummary, open_github_issues};
 pub use memory::{
     ExtractedMemory, MemoryLesson, MergedPrFacts, PITFALL_KIND, extract_from_merged_pr,

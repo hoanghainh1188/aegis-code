@@ -90,14 +90,31 @@ where
             .model_call(Tier::Light, &cfg.models.light.id, &r.usage)
             .await?;
     }
-    ledger.classified(class.kind).await?;
+    // A feature (#677): its source says so, or Light triaged it as one
+    // for a repo that turned the feature lane on. Light's own `kind` never
+    // names a feature (#675).
+    let feature = issue.kind == Some(IssueKind::Feature)
+        || class
+            .triage
+            .as_ref()
+            .is_some_and(|t| cfg.repo.feature_lane.takes(t));
+    let kind = if feature {
+        IssueKind::Feature
+    } else {
+        class.kind
+    };
+    ledger.classified(kind).await?;
     // Recorded (#497); the job works on the code whatever it says, unless
     // the repo turned the diagnosis lane on for it (#451).
     if let Some(triage) = class.triage.clone() {
         ledger.triaged(triage.clone()).await?;
-        if cfg.repo.triage_lane.takes(&triage) {
+        if !feature && cfg.repo.triage_lane.takes(&triage) {
             return crate::diagnose::diagnose(platform, ledger, issue, &triage).await;
         }
+    }
+    // Before any code is written: the plan, for a person to approve.
+    if feature {
+        return crate::feature::architect(platform, ledger, issue).await;
     }
     let profiles = cfg.repo.profiles(&platform.profiles)?;
     if class.needs_sonar_batching() {

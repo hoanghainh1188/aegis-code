@@ -262,7 +262,7 @@ fn render(triage: &Triage, checked: &Checked, locale: aegis_pr::Locale) -> Strin
 }
 
 /// The repo's tracked files at `base`.
-fn files_at(repo: &Path, base: &str) -> Vec<String> {
+pub(crate) fn files_at(repo: &Path, base: &str) -> Vec<String> {
     Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -315,7 +315,7 @@ fn reads_like_config(path: &str) -> bool {
 /// The files shown to Light, in order: those the ticket names, then
 /// configuration and documentation; sensitive files never. `(path, text)`
 /// with numbered lines, redacted.
-fn context(repo: &Path, base: &str, ticket: &str) -> (Vec<(String, String)>, usize) {
+pub(crate) fn context(repo: &Path, base: &str, ticket: &str) -> (Vec<(String, String)>, usize) {
     let files = files_at(repo, base);
     let named = files.iter().filter(|p| {
         let name = p.rsplit('/').next().unwrap_or(p);

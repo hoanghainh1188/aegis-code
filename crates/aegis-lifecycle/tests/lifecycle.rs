@@ -87,7 +87,29 @@ impl ModelProvider for Scripted {
         self.requests.lock().unwrap().push(request.clone());
         let system = request.system.concat();
         // A customer-jp repo's models are `jp.` profiles of the same tiers.
+        let asked = serde_json::to_string(&request.messages).unwrap();
         let content = match request.model.trim_start_matches("jp.") {
+            // The feature lane (#677): a ticket asking for new behavior.
+            "light" if system.contains("You triage") && asked.contains("NEW FEATURE") => {
+                vec![ContentBlock::text(
+                    r#"{"kind": "bug", "has_repro_info": false, "suspected_crates": [], "summary": "Carts should say how many items they hold.", "triage": "feature_request", "triage_confidence": 0.9, "triage_reason": "Asks for new behavior."}"#,
+                )]
+            }
+            "core" if system.contains("You are the architect") => {
+                vec![ContentBlock::text(if asked.contains("BAD PLAN") {
+                    r#"{"summary": "x", "criteria": [], "sub_jobs": []}"#
+                } else {
+                    r#"Here is the plan: {"summary": "Carts say how many items they hold.",
+                      "criteria": [{"given": "a cart of 2 items", "when": "it is counted", "then": "the count is 2"}],
+                      "contracts": ["Cart::count(&self) -> usize"],
+                      "dependencies": [],
+                      "sub_jobs": [
+                        {"id": "count", "title": "Add Cart::count", "scope": ["src/lib.rs"]},
+                        {"id": "docs", "title": "Document counting", "scope": ["README.md"], "depends_on": ["count"]}
+                      ],
+                      "delivery": "auto"}"#
+                })]
+            }
             "light" if system.contains("You triage") => vec![ContentBlock::text(
                 r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item.", "triage": "ops_or_config", "triage_confidence": 0.6, "triage_reason": "Reads like a limit set in configuration."}"#,
             )],
@@ -2522,4 +2544,119 @@ async fn a_job_cut_short_in_its_gate_checks_the_same_answer_again() {
     assert_eq!(p.provider.requests_for("core").len(), 4);
     assert_eq!(report.model_calls, 4);
     assert!(p.store.checkpoint(&id).await.unwrap().is_none());
+}
+
+fn feature_issue(title: &str) -> IssueInput {
+    IssueInput {
+        title: title.into(),
+        body: "Please add a way to count the items of a cart.".into(),
+        ..issue()
+    }
+}
+
+fn with_feature_lane(scratch: &Scratch, server: &str) -> RunConfig {
+    let mut cfg = config(scratch, server, 20);
+    cfg.repo.feature_lane = aegis_lifecycle::FeatureLane {
+        enabled: true,
+        ..Default::default()
+    };
+    cfg
+}
+
+/// #677: a ticket Light triages as a feature request, for a repo that
+/// turned the feature lane on, gets a plan before any code: Core reads the
+/// repo read-only, the plan is checked and rendered, and the job waits for
+/// approval with no worktree and no PR.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_feature_request_is_planned_and_waits_for_approval() {
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let p = platform(
+        with_feature_lane(&scratch, &server.uri()),
+        Scripted::new(vec![], vec![]),
+    );
+    let ticket = feature_issue("NEW FEATURE: count a cart's items");
+    let report = run_issue(Arc::clone(&p), ticket, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::AwaitingApproval, "{report:?}");
+    let plan = report.plan.clone().expect("the plan");
+    let ids: Vec<&str> = plan.sub_jobs.iter().map(|j| j.id.as_str()).collect();
+    assert_eq!(ids, ["count", "docs"]);
+    assert_eq!(plan.sub_jobs[1].depends_on, ["count"]);
+    assert_eq!(
+        plan.delivery,
+        aegis_lifecycle::FeatureDeliveryMode::IntegrationPr
+    );
+    let rfc = report.diagnosis.clone().expect("the RFC");
+    assert!(
+        rfc.starts_with("**aegis-code** planned this feature in 2 sub-job(s)"),
+        "{rfc}"
+    );
+    assert!(rfc.contains("`/aegis approve`"), "{rfc}");
+    // One read-only call to Core, with the repo's layout; no tools.
+    let core = p.provider.requests_for("core");
+    assert_eq!(core.len(), 1);
+    assert!(core[0].tools.is_empty());
+    assert!(
+        serde_json::to_string(&core[0].messages)
+            .unwrap()
+            .contains("src/lib.rs"),
+        "the layout is shown"
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "no PR"
+    );
+    assert!(
+        !scratch.0.join("state/jobs/fixture-7/repo").exists(),
+        "no worktree"
+    );
+    let events = p
+        .store
+        .events(&IssueId::parse("fixture-7").unwrap())
+        .await
+        .unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            LedgerEvent::Classified {
+                kind: aegis_ledger::IssueKind::Feature
+            }
+        )),
+        "{events:?}"
+    );
+}
+
+/// #677: a plan that cannot be checked is not posted; a feature its source
+/// names goes to the Architect phase even with the lane off.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_feature_plan_that_cannot_be_checked_is_not_posted() {
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let p = platform(
+        config(&scratch, &server.uri(), 20),
+        Scripted::new(vec![], vec![]),
+    );
+    let ticket = IssueInput {
+        kind: Some(aegis_ledger::IssueKind::Feature),
+        ..feature_issue("BAD PLAN: count a cart's items")
+    };
+    let report = run_issue(Arc::clone(&p), ticket, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::StoppedSteps, "{report:?}");
+    assert!(
+        report
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("the feature's plan could not be used (no acceptance criteria)"),
+        "{report:?}"
+    );
+    assert_eq!((report.diagnosis, report.plan), (None, None));
+    assert!(
+        p.provider.requests_for("light").is_empty(),
+        "its source knew"
+    );
 }

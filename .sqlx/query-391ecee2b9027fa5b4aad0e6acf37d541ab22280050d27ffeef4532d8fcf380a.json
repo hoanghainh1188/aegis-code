@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO feature_plans (job_id, revision, plan)\n               SELECT $1, coalesce(max(revision), 0) + 1, $2\n               FROM feature_plans WHERE job_id = $1\n               RETURNING revision, plan, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "feature_plans",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "plan",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "feature_plans",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "feature_plans",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "391ecee2b9027fa5b4aad0e6acf37d541ab22280050d27ffeef4532d8fcf380a"
+}

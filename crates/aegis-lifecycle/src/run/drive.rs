@@ -467,6 +467,7 @@ where
                     kept: Some(Kept { commit, answer }),
                     patch: None,
                     diagnosis: None,
+                    plan: None,
                 });
             }
             // What the job read that speaks to an agent, for the reviewer
@@ -492,6 +493,7 @@ where
                     kept: None,
                     patch,
                     diagnosis: None,
+                    plan: None,
                 });
             }
             let pr_url = if cfg.run.open_prs {
@@ -531,6 +533,7 @@ where
                 kept: None,
                 patch,
                 diagnosis: None,
+                plan: None,
             });
         }
 
