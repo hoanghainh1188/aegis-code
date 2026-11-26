@@ -249,7 +249,7 @@ async fn the_cli_prints_the_report_the_dashboard_shows() {
         "| Cost per job | $2.00 | $2.00 | ≤ $4 | ✔ |",
         "| Cost of the period | $4.50 | $2.00 | tracked | — |",
         "| Review time per PR (median) | 4.0 min | 20.0 min | ≤ 15 min | ✔ |",
-        "| MTTR | 3.0 h |",
+        "| MTTR | 3h 00m |",
         "| Shadow jobs | 1 | 0 | tracked | — |",
         "| Shadow jobs a reviewer would merge | 100% (1/1) | — | tracked | — |",
         "Monthly budget: $",

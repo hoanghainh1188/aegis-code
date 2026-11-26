@@ -9,7 +9,7 @@
 mod actions;
 mod admin;
 mod ai;
-mod ams;
+pub(crate) mod ams;
 mod audit;
 mod budget;
 mod connection;
