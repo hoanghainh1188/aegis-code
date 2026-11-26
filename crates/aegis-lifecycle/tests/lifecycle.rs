@@ -19,7 +19,7 @@ use aegis_ledger::{
 };
 use aegis_lifecycle::{
     IssueInput, IssueReport, ModeConfig, Modes, Platform, Replay, ReplayProvider, RepoSettings,
-    RepoSpec, ReviewRound, RunConfig, run_issue, run_review,
+    RepoSpec, ReviewRound, RunConfig, run_issue, run_review, run_shadow_publish,
 };
 use aegis_provider::{
     ContentBlock, ModelProvider, ProviderError, Request, Response, Role, StopReason, Usage,
@@ -407,6 +407,76 @@ async fn a_shadow_job_passes_the_gate_and_ends_shadowed_without_a_pr() {
     // Nothing reached the forge, and no branch was pushed.
     assert!(server.received_requests().await.unwrap().is_empty());
     assert!(!fork_refs(&scratch).contains("fixture-7"));
+
+    // Later, a person opens its PR (#699): the kept patch is gated again on
+    // its base and published under a ledger of its own, with no model but
+    // Light's commit message.
+    let kept = record.shadow_kept.clone().expect("the answer and the base");
+    assert_eq!(kept.base, rev_parse(&scratch.0.join("clone"), "main"));
+    let shadow = aegis_lifecycle::ShadowPatch {
+        kept,
+        diff: patch.diff.clone(),
+    };
+    let publisher = platform(
+        config(&scratch, &server.uri(), 20),
+        Scripted::new(vec![], vec![]),
+    );
+    let opened = run_shadow_publish(
+        Arc::clone(&publisher),
+        IssueInput {
+            id: "fixture-7-pr".into(),
+            ..issue()
+        },
+        shadow,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(opened.outcome, Outcome::PrOpened, "{opened:?}");
+    assert_eq!(
+        opened.pr_url.as_deref(),
+        Some("https://github.com/me/fixture/pull/3")
+    );
+    assert!(publisher.provider.requests_for("core").is_empty());
+    assert!(fork_refs(&scratch).contains("refs/heads/agent/fixture-7-pr"));
+    let published = publisher
+        .store
+        .record(&IssueId::parse("fixture-7-pr").unwrap())
+        .unwrap();
+    assert!(published.gate_runs.iter().all(|g| g.passed) && !published.gate_runs.is_empty());
+    assert_eq!(opened.patch.unwrap().diff, patch.diff);
+}
+
+/// #699: a kept patch that no longer applies opens no PR, and says why.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shadow_patch_that_does_not_apply_opens_no_pr() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let base = rev_parse(&scratch.0.join("clone"), "main");
+    let shadow = aegis_lifecycle::ShadowPatch {
+        kept: aegis_ledger::ShadowKept {
+            answer: r#"{"status": "fixed", "cause": "c", "changes": [{"location": "src/lib.rs", "note": "n"}]}"#
+                .into(),
+            base,
+        },
+        diff: "diff --git a/src/nowhere.rs b/src/nowhere.rs\n--- a/src/nowhere.rs\n+++ b/src/nowhere.rs\n@@ -1 +1 @@\n-a\n+b\n".into(),
+    };
+    let p = platform(
+        config(&scratch, &server.uri(), 20),
+        Scripted::new(vec![], vec![]),
+    );
+    let report = run_shadow_publish(Arc::clone(&p), issue(), shadow, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::StoppedSteps, "{report:?}");
+    assert!(
+        report.reason.as_deref().unwrap().contains("does not apply"),
+        "{report:?}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 /// #439: an eval's local round. The PR's head is a commit already in the

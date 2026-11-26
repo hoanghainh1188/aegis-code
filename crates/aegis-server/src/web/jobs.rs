@@ -325,6 +325,8 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
         // Shadow triage (#497) is measured against the review: a reviewer
         // who saw it might judge the PR by it. Only the KPI report shows it.
         LedgerEvent::Triaged { .. } | LedgerEvent::TicketMeta(_) => return None,
+        // The answer is on the page already; the patch's base is plumbing.
+        LedgerEvent::ShadowKept(_) => return None,
         LedgerEvent::Finished {
             outcome,
             wall_time_s,
@@ -439,6 +441,11 @@ struct JobHead {
     /// A maintainer may approve a plan that waits for it and is not
     /// approved yet (#675, #677).
     can_approve: bool,
+    /// A maintainer may ask for a shadow job's PR (#699), once, when it
+    /// kept a whole patch and its answer.
+    can_open_pr: bool,
+    /// The shadow job whose PR this one opens (#699).
+    publish_of: Option<i64>,
     /// Queued or running: the head asks for itself again.
     live: bool,
 }
@@ -491,6 +498,10 @@ async fn head_of(
         can_cancel: maintains && is_live(job) && !job.cancel_requested,
         can_retry: maintains && matches!(job.status, JobStatus::Failed | JobStatus::Cancelled),
         can_approve: maintains && waits,
+        can_open_pr: maintains
+            && job.outcome == Some(Outcome::Shadowed)
+            && store.shadow_publish_refusal(job).await?.is_none(),
+        publish_of: job.publish_of.map(|j| j.0),
         live: is_live(job),
     })
 }

@@ -656,6 +656,19 @@ pub enum LedgerEvent {
     InputFlagged(InputFlag),
     /// Intake dimensions recorded for bias tracking (#511).
     TicketMeta(TicketMeta),
+    /// What a shadow job (#699) keeps to open its PR later without the
+    /// agent: its final answer, redacted, and the commit its patch is on.
+    ShadowKept(ShadowKept),
+}
+
+/// [`LedgerEvent::ShadowKept`]: what the PR of a shadow job is opened
+/// from, with its patch the store keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShadowKept {
+    /// The agent's final answer, as the JSON object it gives (redacted).
+    pub answer: String,
+    /// The commit the patch applies to, which its gate ran against.
+    pub base: String,
 }
 
 impl LedgerEvent {
@@ -675,7 +688,8 @@ impl LedgerEvent {
             | Self::IssueRead { .. }
             | Self::Answered(_)
             | Self::InputFlagged(_)
-            | Self::TicketMeta(_) => &[],
+            | Self::TicketMeta(_)
+            | Self::ShadowKept(_) => &[],
             Self::HiddenTests { duration_s, .. } => &[("duration_s", *duration_s)],
             Self::ModelCall { cost_usd, .. } => &[("cost_usd", *cost_usd)],
             Self::GateRun(run) => &[("duration_s", run.duration_s)],
@@ -759,6 +773,9 @@ pub struct IssueRecord {
     /// The agent's last final answer.
     #[serde(default)]
     pub answer: Option<AnswerSummary>,
+    /// A shadow job's answer and base (#699), to open its PR from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_kept: Option<ShadowKept>,
     /// Embedded instructions the platform found in what the job read
     /// (#444).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -812,6 +829,7 @@ impl IssueRecord {
             issue_title: None,
             issue_url: None,
             answer: None,
+            shadow_kept: None,
             input_flags: Vec::new(),
             triage: None,
             ticket_meta: TicketMeta::default(),
@@ -886,6 +904,7 @@ impl IssueRecord {
             LedgerEvent::TicketMeta(meta) => {
                 self.ticket_meta = self.ticket_meta.merged_with(meta);
             }
+            LedgerEvent::ShadowKept(kept) => self.shadow_kept = Some(kept.clone()),
         }
         self
     }

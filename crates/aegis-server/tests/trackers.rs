@@ -100,6 +100,7 @@ fn ended(id: JobId, repo: &Repo, source: JobSource, key: &str, pr: Option<&str>)
         review_of: None,
         review_round: 0,
         shadow: false,
+        publish_of: None,
     }
 }
 

@@ -191,6 +191,11 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         .await
     }
 
+    /// What a shadow job (#699) keeps to open its PR later.
+    pub async fn shadow_kept(&mut self, kept: crate::ShadowKept) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::ShadowKept(kept)).await
+    }
+
     /// Records intake metadata dimensions for bias tracking (#511); no-op
     /// when every field is empty.
     pub async fn ticket_meta(&mut self, meta: TicketMeta) -> Result<(), LedgerError> {

@@ -194,6 +194,9 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Conventions" => "規約",
         "Shadow mode" => "シャドーモード",
         "Grade shadow job" => "シャドージョブを評価",
+        "Opens the PR of shadow job" => "シャドージョブの PR を開きます:",
+        ", from its patch, without the agent." => "、そのパッチから、エージェントなしで。",
+        "Open a PR from this patch" => "このパッチから PR を開く",
         "This repo is in shadow mode: the job passed the gate but opened no PR. Read its patch below as if it were a PR: if it were one, would you merge it? Your grade counts in the pilot's shadow acceptance, apart from the PRs." => {
             "このリポジトリはシャドーモードです。ジョブはゲートを通過しましたが PR は開いていません。下のパッチを PR だと思って読んでください。PR だったらマージしますか? 評価はパイロットのシャドー受け入れ率に、PR とは別に数えられます。"
         }

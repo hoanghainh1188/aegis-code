@@ -315,6 +315,8 @@ pub struct Job {
     /// Queued while its repo was in shadow mode (#699): it pushes no
     /// branch, opens no PR and writes nothing on the ticket.
     pub shadow: bool,
+    /// The shadow job whose PR this one opens from its patch (#699).
+    pub publish_of: Option<JobId>,
 }
 
 /// A webhook delivery that asks for a job.

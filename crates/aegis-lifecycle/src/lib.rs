@@ -40,6 +40,7 @@ mod registry;
 mod replay;
 mod review;
 mod run;
+mod shadow_publish;
 mod shown;
 mod untrusted;
 
@@ -81,8 +82,9 @@ pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;
 pub use run::{
     IssueReport, Platform, job_dir, run_feature_delivery, run_feature_revision,
-    run_feature_sub_job, run_issue, run_review,
+    run_feature_sub_job, run_issue, run_review, run_shadow_publish,
 };
+pub use shadow_publish::ShadowPatch;
 
 /// The start of a stop reason when the platform, not the agent, ended a
 /// run on an error (#557): its tools did not start, the store failed. The

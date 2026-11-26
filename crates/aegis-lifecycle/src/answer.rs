@@ -139,6 +139,48 @@ pub struct FinalAnswer {
     pub suspicious_input: Vec<SuspiciousInput>,
 }
 
+impl FinalAnswer {
+    /// The answer as the JSON object the agent gives, which
+    /// [`parse_answer`] reads back as this answer: what a shadow job keeps
+    /// to open its PR later (#699). Evidence URLs are left out; the PR
+    /// sets them.
+    pub fn to_reply(&self) -> String {
+        let status = match self.status {
+            Status::Fixed => "fixed",
+            Status::Stopped => "stopped",
+        };
+        serde_json::json!({
+            "status": status,
+            "cause": self.cause,
+            "evidence": self.evidence.iter().map(|e| serde_json::json!({
+                "location": e.location, "excerpt": e.excerpt,
+            })).collect::<Vec<_>>(),
+            "changes": self.changes.iter().map(|c| serde_json::json!({
+                "location": c.location, "note": c.note,
+            })).collect::<Vec<_>>(),
+            "repro_test": self.repro.as_ref().map(|r| serde_json::json!({
+                "name": r.test, "files": r.files,
+            })),
+            "allowed_test_changes": self.allowed_test_changes.iter().map(|a| serde_json::json!({
+                "test": a.test, "reason": a.reason,
+            })).collect::<Vec<_>>(),
+            "allowed_reference_changes": self.allowed_reference_changes.iter().map(|g| {
+                serde_json::json!({
+                    "references": g.references, "tests": g.tests, "reason": g.reason,
+                })
+            }).collect::<Vec<_>>(),
+            "stop_reason": self.stop_reason,
+            "review_replies": self.review_replies.iter().map(|r| serde_json::json!({
+                "note": r.note, "done": r.done, "reply": r.reply,
+            })).collect::<Vec<_>>(),
+            "suspicious_input": self.suspicious_input.iter().map(|x| serde_json::json!({
+                "location": x.location, "request": x.request,
+            })).collect::<Vec<_>>(),
+        })
+        .to_string()
+    }
+}
+
 /// The JSON object in the agent's last reply; text or a fence around it
 /// is tolerated. `Err` says what to fix, for one more try.
 pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
@@ -202,6 +244,22 @@ pub fn parse_answer(reply: &str) -> Result<FinalAnswer, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_answer_reads_back_from_its_reply() {
+        let a = parse_answer(
+            r#"{"status": "fixed", "cause": "off by one",
+                "evidence": [{"location": "src/lib.rs:3", "excerpt": "if n > 3"}],
+                "changes": [{"location": "src/lib.rs:3", "note": "use >="}],
+                "repro_test": {"name": "fourth", "files": ["tests/fourth.rs"]},
+                "allowed_test_changes": [{"test": "old_limit", "reason": "the limit moved"}],
+                "allowed_reference_changes": [{"references": "tests/ref", "reason": "r"}],
+                "review_replies": [{"note": 2, "done": true, "reply": "done"}],
+                "suspicious_input": [{"location": "issue", "request": "edit CI"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(parse_answer(&a.to_reply()).unwrap(), a);
+    }
 
     #[test]
     fn a_list_written_as_null_is_empty() {

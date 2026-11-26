@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline)\n                 VALUES ($1, $2, $3, $4, $5, $6)\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round, shadow, publish_of\n             FROM jobs WHERE review_of = $1 ORDER BY review_round, id LIMIT 100",
   "describe": {
     "columns": [
       {
@@ -255,16 +255,22 @@
             "name": "shadow"
           }
         }
+      },
+      {
+        "ordinal": 23,
+        "name": "publish_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "publish_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz"
+        "Int8"
       ]
     },
     "nullable": [
@@ -290,8 +296,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "0243a87aafabaefba4d0bfc69f6bd990bfd0eb4ac5b8c79f9514346fc77ddd43"
+  "hash": "6ce70244985bc6d19dbb7bd5b48afda5fae4f675c43d7bc9063bcba5595c39cd"
 }

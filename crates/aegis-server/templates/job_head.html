@@ -15,6 +15,7 @@
     <div><dt>{{ crate::t("Ledger") }}</dt><dd><code>{{ head.ledger_key }}</code></dd></div>
   </dl>
   {% if !head.reason.is_empty() %}<p class="note">{{ crate::t("Termination reason:") }} {{ head.reason }}</p>{% endif %}
+  {% if let Some(shadow) = head.publish_of %}<p class="note">{{ crate::t("Opens the PR of shadow job") }} <a href="/jobs/{{ shadow }}">{{ crate::t("job #") }}{{ shadow }}</a>{{ crate::t(", from its patch, without the agent.") }}</p>{% endif %}
   {% if let Some(old) = head.retry_of %}<p class="note">{{ crate::t("Runs again") }} <a href="/jobs/{{ old }}">{{ crate::t("job #") }}{{ old }}</a>.</p>{% endif %}
   {% if let Some(root) = head.review_of %}<p class="note">{{ crate::t("Review fix round for PR opened by") }} <a href="/jobs/{{ root }}">{{ crate::t("job #") }}{{ root }}</a>{{ crate::t("; PR is reviewed there.") }}</p>{% endif %}
   <p class="actions">
@@ -25,6 +26,12 @@
   <form method="post" action="/jobs/{{ head.id }}/approve" class="inline">
     {% include "form_guard.html" %}
     <button type="submit">{{ crate::t("Approve the plan") }}</button>
+  </form>
+  {% endif %}
+  {% if head.can_open_pr %}
+  <form method="post" action="/jobs/{{ head.id }}/open-pr" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">{{ crate::t("Open a PR from this patch") }}</button>
   </form>
   {% endif %}
   {% if head.can_retry %}

@@ -548,6 +548,17 @@ where
             }
             // With `open_prs` off the run ends where it would open the PR.
             let Some(pr_url) = pr_url else {
+                // A shadow job keeps what its PR is opened from later,
+                // without the agent (#699): the answer and the patch's base.
+                // A bug fix's only: a CVE upgrade or a feature's part is
+                // gated under a policy the kept answer does not hold.
+                if cfg.run.shadow && matches!(finish, Finish::Publish) && issue.cve.is_none() {
+                    let kept = aegis_ledger::ShadowKept {
+                        answer: redact(&answer.to_reply()).text,
+                        base: report.base.clone(),
+                    };
+                    ledger.shadow_kept(kept).await?;
+                }
                 return Ok(Ending::no_pr(cfg, patch));
             };
             return Ok(Ending {

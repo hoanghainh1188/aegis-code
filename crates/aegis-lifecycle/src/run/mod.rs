@@ -250,6 +250,22 @@ where
     run(platform, issue, Stage::Delivery(Box::new(delivery)), cancel).await
 }
 
+/// Opens the PR of the shadow job whose patch and answer `shadow` holds
+/// (#699), under `issue`'s own ledger: no agent, the patch gated again on
+/// the commit it was gated against.
+pub async fn run_shadow_publish<P, S>(
+    platform: Arc<Platform<P, S>>,
+    issue: IssueInput,
+    shadow: crate::ShadowPatch,
+    cancel: CancellationToken,
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    run(platform, issue, Stage::Shadow(Box::new(shadow)), cancel).await
+}
+
 /// What a run does.
 enum Stage {
     Issue,
@@ -257,6 +273,7 @@ enum Stage {
     Revision(Box<crate::FeatureRevision>),
     SubJob(Box<crate::FeatureTask>),
     Delivery(Box<crate::FeatureDelivery>),
+    Shadow(Box<crate::ShadowPatch>),
 }
 
 /// Runs a review round (#243) of `issue`'s PR under `issue.id`, its own
@@ -326,6 +343,9 @@ where
         Stage::Delivery(delivery) => {
             crate::feature_integrate::deliver(&platform, &mut ledger, &issue, &delivery, &cancel)
                 .await
+        }
+        Stage::Shadow(shadow) => {
+            crate::shadow_publish::open(&platform, &mut ledger, &issue, &shadow, &cancel).await
         }
         Stage::SubJob(task) => {
             sub_job_and_work(&platform, &mut ledger, &issue, *task, &cancel).await

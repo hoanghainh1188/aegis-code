@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                        status, review_of, review_round, parent_job_id, plan_key, shadow\n                 FROM jobs WHERE id = $1 FOR UPDATE",
+  "query": "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                        status, outcome\n                 FROM jobs WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -82,56 +82,12 @@
       },
       {
         "ordinal": 7,
-        "name": "review_of",
-        "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "jobs",
-            "name": "review_of"
-          }
-        }
-      },
-      {
-        "ordinal": 8,
-        "name": "review_round",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "jobs",
-            "name": "review_round"
-          }
-        }
-      },
-      {
-        "ordinal": 9,
-        "name": "parent_job_id",
-        "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "jobs",
-            "name": "parent_job_id"
-          }
-        }
-      },
-      {
-        "ordinal": 10,
-        "name": "plan_key",
+        "name": "outcome",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "jobs",
-            "name": "plan_key"
-          }
-        }
-      },
-      {
-        "ordinal": 11,
-        "name": "shadow",
-        "type_info": "Bool",
-        "origin": {
-          "Table": {
-            "table": "jobs",
-            "name": "shadow"
+            "name": "outcome"
           }
         }
       }
@@ -149,12 +105,8 @@
       true,
       true,
       false,
-      true,
-      false,
-      true,
-      true,
-      false
+      true
     ]
   },
-  "hash": "3f76c696f7dda3f96a5457728f4d4ae8b9407b737474a9b452107b7ab1215e84"
+  "hash": "a668a7b5b03bc58c8807a956226b420a11cc47c1d5302468cea99c0fcf4fb94b"
 }
