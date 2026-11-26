@@ -44,6 +44,17 @@ const MAX_DESCRIPTION: usize = 4000;
 /// when a repository's access control list cannot be read.
 pub const WRITER_GROUPS: [&str; 2] = ["Contributors", "Project Administrators"];
 
+/// How many groups up from a person's own the writer groups are looked
+/// for: a team in a team in Contributors is two (#703).
+const GROUP_DEPTH: usize = 4;
+
+/// At most this many groups are read in one check, however wide the
+/// groups above a person are.
+const GROUP_LIMIT: usize = 100;
+
+/// Groups read in one request to the identity service.
+const GROUP_BATCH: usize = 20;
+
 /// The Git Repositories security namespace.
 const GIT_NAMESPACE: &str = "2e9eb7ed-3c0a-47d4-87c1-0ffdd275fd87";
 
@@ -205,11 +216,21 @@ pub struct WriteEvidence {
     /// Its entry in the repository's access control list, or why there is
     /// none: the ACL could not be read, or holds no entry for it.
     pub entry: Result<AclEntry, String>,
-    /// Whether it is a member, groups included, of one of the project's
-    /// [`WRITER_GROUPS`].
-    pub in_writer_group: bool,
+    /// The project's [`WRITER_GROUPS`] it is a member of, and through
+    /// which groups; `None` when it is in none.
+    pub writer_group: Option<WriterGroup>,
     /// What [`AzureDevOps::can_write`] decides.
     pub writes: bool,
+}
+
+/// How a person is in one of the project's [`WRITER_GROUPS`] (#703).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriterGroup {
+    /// The writer group, as [`WRITER_GROUPS`] names it.
+    pub name: &'static str,
+    /// The descriptors of the groups from the person's own to the writer
+    /// group, both included: one when the person is in it directly.
+    pub via: Vec<String>,
 }
 
 /// An identity's entry in an access control list, its bits as Azure gives
@@ -446,7 +467,7 @@ impl AzureDevOps {
         if let Ok(Some(writes)) = self.acl_entry(&person).await.map(|e| e.writes()) {
             return Ok(writes);
         }
-        self.in_writer_group(&person).await
+        Ok(self.writer_group(&person).await?.is_some())
     }
 
     /// What Azure says of `id`'s right to write to this repository (#642):
@@ -458,20 +479,20 @@ impl AzureDevOps {
             return Ok(WriteEvidence {
                 descriptor: None,
                 entry: Err("no such identity".into()),
-                in_writer_group: false,
+                writer_group: None,
                 writes: false,
             });
         };
         let entry = self.acl_entry(&person).await;
-        let in_writer_group = self.in_writer_group(&person).await?;
+        let writer_group = self.writer_group(&person).await?;
         let writes = match entry.as_ref().ok().and_then(AclEntry::writes) {
             Some(writes) => writes,
-            None => in_writer_group,
+            None => writer_group.is_some(),
         };
         Ok(WriteEvidence {
             descriptor: descriptor(&person.descriptor),
             entry,
-            in_writer_group,
+            writer_group,
             writes,
         })
     }
@@ -491,36 +512,115 @@ impl AzureDevOps {
         Ok(found.value.into_iter().next())
     }
 
-    /// Whether `person` is a member, groups included, of one of the
-    /// project's [`WRITER_GROUPS`].
-    async fn in_writer_group(&self, person: &Identity) -> Result<bool, PrError> {
+    /// The project's [`WRITER_GROUPS`] `person` is a member of, and through
+    /// which groups. Its own groups are compared first, a writer group at a
+    /// time; then the groups above them, up to [`GROUP_DEPTH`] (#703): the
+    /// identity service may give only a person's direct groups, and a team
+    /// in Contributors is not one of them.
+    async fn writer_group(&self, person: &Identity) -> Result<Option<WriterGroup>, PrError> {
+        let own: Vec<Vec<String>> = person
+            .member_of
+            .iter()
+            .filter_map(descriptor)
+            .map(|d| vec![d])
+            .collect();
+        let mut writers = Vec::new();
+        for name in WRITER_GROUPS {
+            let named = self.group_descriptors(name).await?;
+            if let Some(found) = reaching(&own, name, &named) {
+                return Ok(Some(found));
+            }
+            writers.push((name, named));
+        }
+        let mut seen: Vec<String> = own.iter().map(|p| p[0].to_ascii_lowercase()).collect();
+        let mut level = own;
+        for _ in 0..GROUP_DEPTH {
+            level = self.groups_above(&level, &mut seen).await?;
+            if level.is_empty() {
+                break;
+            }
+            if let Some(found) = writers
+                .iter()
+                .find_map(|(name, named)| reaching(&level, name, named))
+            {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The descriptors of the project's group `name`.
+    async fn group_descriptors(&self, name: &str) -> Result<Vec<String>, PrError> {
         let ims = identities_root(&self.collection);
-        let member_of: Vec<String> = person.member_of.iter().filter_map(descriptor).collect();
-        for group in WRITER_GROUPS {
+        let url = reqwest::Url::parse_with_params(
+            &format!("{ims}/_apis/identities"),
+            &[
+                ("searchFilter", "General"),
+                ("filterValue", &format!("[{}]\\{name}", self.project)),
+                ("queryMembership", "None"),
+                ("api-version", "7.1"),
+            ],
+        )
+        .map_err(|e| PrError::InvalidRemote(e.to_string()))?;
+        let (status, text) = self.send(reqwest::Method::GET, url.as_str(), None).await?;
+        let groups: List<Identity> = parsed(status, &text)?;
+        Ok(groups
+            .value
+            .iter()
+            .filter_map(|g| descriptor(&g.descriptor))
+            .collect())
+    }
+
+    /// The groups right above the last group of each path in `level`, each
+    /// as its path made one longer; a group in `seen` is not followed
+    /// again, and no more than [`GROUP_LIMIT`] are.
+    async fn groups_above(
+        &self,
+        level: &[Vec<String>],
+        seen: &mut Vec<String>,
+    ) -> Result<Vec<Vec<String>>, PrError> {
+        let ims = identities_root(&self.collection);
+        let mut above = Vec::new();
+        for batch in level.chunks(GROUP_BATCH) {
+            let wanted: Vec<&str> = batch
+                .iter()
+                .filter_map(|p| p.last())
+                .map(String::as_str)
+                .collect();
             let url = reqwest::Url::parse_with_params(
                 &format!("{ims}/_apis/identities"),
                 &[
-                    ("searchFilter", "General"),
-                    ("filterValue", &format!("[{}]\\{group}", self.project)),
-                    ("queryMembership", "None"),
+                    ("descriptors", wanted.join(",").as_str()),
+                    ("queryMembership", "Direct"),
                     ("api-version", "7.1"),
                 ],
             )
             .map_err(|e| PrError::InvalidRemote(e.to_string()))?;
             let (status, text) = self.send(reqwest::Method::GET, url.as_str(), None).await?;
             let groups: List<Identity> = parsed(status, &text)?;
-            let named = groups
-                .value
-                .iter()
-                .filter_map(|g| descriptor(&g.descriptor));
-            if named
-                .into_iter()
-                .any(|d| member_of.iter().any(|m| m.eq_ignore_ascii_case(&d)))
-            {
-                return Ok(true);
+            for group in &groups.value {
+                let Some(own) = descriptor(&group.descriptor) else {
+                    continue;
+                };
+                let Some(path) = batch
+                    .iter()
+                    .find(|p| p.last().is_some_and(|d| d.eq_ignore_ascii_case(&own)))
+                else {
+                    continue;
+                };
+                for parent in group.member_of.iter().filter_map(descriptor) {
+                    let key = parent.to_ascii_lowercase();
+                    if seen.len() >= GROUP_LIMIT || seen.contains(&key) {
+                        continue;
+                    }
+                    seen.push(key);
+                    let mut longer = path.clone();
+                    longer.push(parent);
+                    above.push(longer);
+                }
             }
         }
-        Ok(false)
+        Ok(above)
     }
 
     /// `person`'s entry in this repository's access control list, in the
@@ -890,6 +990,21 @@ fn descriptor(value: &serde_json::Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// The first path in `paths` whose last group is one of `named`, as the
+/// way into the writer group `name`.
+fn reaching(paths: &[Vec<String>], name: &'static str, named: &[String]) -> Option<WriterGroup> {
+    paths
+        .iter()
+        .find(|p| {
+            p.last()
+                .is_some_and(|d| named.iter().any(|n| n.eq_ignore_ascii_case(d)))
+        })
+        .map(|p| WriterGroup {
+            name,
+            via: p.clone(),
+        })
 }
 
 fn is_guid(s: &str) -> bool {

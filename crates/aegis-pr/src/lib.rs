@@ -39,7 +39,8 @@ pub use actions::{FailedJob, FailedRun};
 pub use app::{AppKey, Gate, GitHubApp, TokenSource, TokenUse};
 pub use azure::{
     AclEntry, AzureDevOps, AzurePull, ENTRA_AUTHORITY, ENTRA_REFRESH_MARGIN, EntraToken,
-    WRITER_GROUPS, WriteEvidence, azure_name, azure_segment, azure_unescaped, entra_token,
+    WRITER_GROUPS, WriteEvidence, WriterGroup, azure_name, azure_segment, azure_unescaped,
+    entra_token,
 };
 pub use bitbucket::{BITBUCKET_API, Bitbucket, BitbucketPermission, BitbucketPull};
 pub use bitbucket_dc::{BitbucketDataCenter, DataCenterPull};
