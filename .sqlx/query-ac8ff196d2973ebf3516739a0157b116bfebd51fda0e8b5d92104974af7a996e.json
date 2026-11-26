@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                               parent_job_id, plan_key)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                       status, outcome, attempts, locked_by, locked_until, created_at,\n                       updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                       retry_of, review_of, review_round",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,\n                    review_round, shadow\n             FROM jobs\n             WHERE repo_id = $1 AND issue_ref = $2 AND parent_job_id IS NULL\n               AND status = 'done' AND outcome = 'awaiting_approval'\n             ORDER BY id DESC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -244,16 +244,21 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz",
         "Int8",
         "Text"
       ]
@@ -280,8 +285,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "8a80bad5167d10b36d12c4e5bbd8fa7746c01f8f0ac6e5a96f3486c20ea8d933"
+  "hash": "ac8ff196d2973ebf3516739a0157b116bfebd51fda0e8b5d92104974af7a996e"
 }

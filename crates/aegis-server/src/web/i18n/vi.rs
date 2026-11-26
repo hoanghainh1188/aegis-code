@@ -190,6 +190,10 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Content type" => "Content type",
         "Contract" => "Hợp đồng",
         "Conventions" => "Quy ước",
+        "Shadow mode" => "Chế độ shadow",
+        "jobs run to the end of the gate but push nothing, open no PR and write nothing on the ticket" => {
+            "job chạy hết gate nhưng không push, không mở PR và không ghi gì lên ticket"
+        }
         "Copy it now into the service's secret store; only its hash is kept here." => {
             "Hãy chép ngay vào kho bí mật của service; ở đây chỉ giữ mã băm của nó."
         }

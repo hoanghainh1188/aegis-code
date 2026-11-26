@@ -101,7 +101,7 @@ impl Store {
             "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                     status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,
-                    review_round
+                    review_round, shadow
              FROM jobs WHERE parent_job_id = $1 ORDER BY id LIMIT $2",
             parent.0,
             MAX_SUB_JOBS as i64 * 4,
@@ -125,7 +125,7 @@ impl Store {
             "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                     status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,
-                    review_round
+                    review_round, shadow
              FROM jobs
              WHERE repo_id = $1 AND issue_ref = $2 AND parent_job_id IS NULL
                AND status = 'done' AND outcome = 'awaiting_approval'
@@ -245,7 +245,7 @@ pub(crate) async fn insert_sub_job(
              RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                        status, outcome, attempts, locked_by, locked_until, created_at,
                        updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                       retry_of, review_of, review_round",
+                       retry_of, review_of, review_round, shadow",
         job.repo_id.0,
         job.issue_ref,
         job.ledger_key.as_str(),

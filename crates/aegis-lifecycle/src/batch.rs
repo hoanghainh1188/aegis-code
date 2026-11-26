@@ -453,15 +453,17 @@ where
         ));
     };
     if !cfg.run.open_prs {
-        return Ok(Ending {
-            outcome: Outcome::PrOpened,
-            reason: Some("no PR opened".into()),
-            pr_url: None,
-            kept: None,
-            patch: None,
-            diagnosis: None,
-            plan: None,
-        });
+        // A shadow batch (#699) keeps its patch for its page.
+        let patch = if cfg.run.shadow {
+            Some(crate::job::patch(
+                checkout.path(),
+                &report.base,
+                &report.tree,
+            )?)
+        } else {
+            None
+        };
+        return Ok(Ending::no_pr(cfg, patch));
     }
     // `agent/integration-<issue-id>` on the fork, like the local branch.
     let batch = IssueInput {

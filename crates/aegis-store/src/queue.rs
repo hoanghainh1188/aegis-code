@@ -276,7 +276,7 @@ impl Store {
                  RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
+                           retry_of, review_of, review_round, shadow",
                 worker,
                 secs(lease),
                 i64::from(max_workers),
@@ -427,7 +427,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
+                           retry_of, review_of, review_round, shadow",
                 run.job_id.0,
                 end.job_status().as_str(),
                 outcome,
@@ -507,7 +507,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
+                           retry_of, review_of, review_round, shadow",
                 job.0,
             )
             .fetch_optional(&mut *tx)
@@ -544,7 +544,7 @@ impl Store {
         let work = async {
             let old = sqlx::query!(
                 "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                        status, review_of, review_round, parent_job_id, plan_key
+                        status, review_of, review_round, parent_job_id, plan_key, shadow
                  FROM jobs WHERE id = $1 FOR UPDATE",
                 job.0,
             )
@@ -574,12 +574,13 @@ impl Store {
             let row = sqlx::query_as!(
                 JobRow,
                 "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                                   retry_of, review_of, review_round, parent_job_id, plan_key)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                   retry_of, review_of, review_round, parent_job_id, plan_key,
+                                   shadow)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
+                           retry_of, review_of, review_round, shadow",
                 old.repo_id,
                 old.issue_ref,
                 key.as_str(),
@@ -594,6 +595,8 @@ impl Store {
                 // same sub-job of its plan (#678).
                 old.parent_job_id,
                 old.plan_key,
+                // A shadow job run again stays one (#699).
+                old.shadow,
             )
             .fetch_one(&mut *tx)
             .await

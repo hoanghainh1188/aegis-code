@@ -36,6 +36,7 @@ pub(crate) struct JobRow {
     pub(crate) retry_of: Option<i64>,
     pub(crate) review_of: Option<i64>,
     pub(crate) review_round: i32,
+    pub(crate) shadow: bool,
 }
 
 impl TryFrom<JobRow> for Job {
@@ -69,6 +70,7 @@ impl TryFrom<JobRow> for Job {
             retry_of: row.retry_of.map(JobId),
             review_of: row.review_of.map(JobId),
             review_round: count("jobs.review_round", row.review_round)?,
+            shadow: row.shadow,
         })
     }
 }
@@ -123,7 +125,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
+                           retry_of, review_of, review_round, shadow",
                 job.repo_id.0,
                 job.issue_ref,
                 job.ledger_key.as_str(),
@@ -157,7 +159,7 @@ impl Store {
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                     status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
-                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round, shadow
              FROM jobs WHERE id = $1",
             id.0,
         )
@@ -178,7 +180,7 @@ impl Store {
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                     status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
-                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round, shadow
              FROM jobs WHERE repo_id = $1 AND issue_ref = $2 AND review_of IS NULL
              ORDER BY id DESC LIMIT 1",
             repo.0,
@@ -211,7 +213,7 @@ impl Store {
             JobRow,
             "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                     status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
-                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round
+                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round, shadow
              FROM jobs
              WHERE ($1::bigint IS NULL OR repo_id = $1)
                AND ($2::text IS NULL OR status = $2)
@@ -386,7 +388,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
+                           retry_of, review_of, review_round, shadow",
                 job.0,
                 status.as_str(),
                 outcome,

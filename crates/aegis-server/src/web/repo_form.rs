@@ -14,7 +14,7 @@ use crate::repo_cli::RepoFile;
 /// The fork's keys that have fields of their own.
 const FORK_FIELDS: [&str; 4] = ["platform", "owner", "name", "token_env"];
 /// The settings that have fields of their own.
-const SETTINGS_FIELDS: [&str; 2] = ["fork", "conventions"];
+const SETTINGS_FIELDS: [&str; 3] = ["fork", "conventions", "shadow"];
 /// The fork's API when its `[fork]` says none.
 const GITHUB_API: &str = "https://api.github.com";
 /// The ways to connect a repo (ADR 0017 §1): a fork with its token, or the
@@ -48,6 +48,9 @@ pub struct RepoForm {
     pub token_env: String,
     #[serde(default)]
     pub conventions: String,
+    /// Shadow mode (#699): the checkbox posts `on`, nothing when unticked.
+    #[serde(default)]
+    pub shadow: Option<String>,
     /// The rest of `[settings]`, as TOML.
     #[serde(default)]
     pub settings: String,
@@ -117,6 +120,9 @@ impl RepoForm {
                 "conventions".into(),
                 toml::Value::String(conventions.into()),
             );
+        }
+        if self.shadow.is_some() {
+            settings.insert("shadow".into(), toml::Value::Boolean(true));
         }
         let settings: RepoSettings = toml::Value::Table(settings)
             .try_into()
@@ -229,6 +235,7 @@ impl RepoForm {
             fork_name: String::new(),
             token_env: String::new(),
             conventions: file.settings.conventions.clone().unwrap_or_default(),
+            shadow: file.settings.shadow.then(|| "on".into()),
             settings: toml::to_string(&rest).map_err(|e| e.to_string())?,
         })
     }
@@ -316,6 +323,23 @@ mod tests {
         assert_eq!(back.to_file(None).unwrap(), file);
         assert!(!back.settings.contains("token_env"), "{}", back.settings);
         assert!(file_toml(&file).unwrap().contains("slug = \"demo\""));
+    }
+
+    #[test]
+    fn shadow_mode_has_its_box_and_reads_back() {
+        let mut f = form();
+        assert!(!f.to_file(None).unwrap().settings.shadow);
+        f.shadow = Some("on".into());
+        let file = f.to_file(None).unwrap();
+        assert!(file.settings.shadow);
+        let back = RepoForm::of(&file).unwrap();
+        assert_eq!(back.shadow.as_deref(), Some("on"));
+        assert!(!back.settings.contains("shadow"), "{}", back.settings);
+        assert_eq!(back.to_file(None).unwrap(), file);
+        // Set in its box, not in the other settings.
+        let mut twice = form();
+        twice.settings = "shadow = true\n".into();
+        assert!(twice.to_file(None).unwrap_err().contains("shadow"));
     }
 
     #[test]

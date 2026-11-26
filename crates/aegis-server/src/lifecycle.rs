@@ -329,6 +329,12 @@ impl LifecycleRunner {
     async fn attempt(&self, claim: &Claim, cancel: CancellationToken) -> Result<Attempt, Attempt> {
         let job = &claim.job;
         let RepoRun { repo, mut config } = self.configs.resolve(job.repo_id).await?;
+        // A shadow job (#699) pushes nothing and opens no PR: it runs as a
+        // dry run, and ends `shadowed` where it would open the PR.
+        if job.shadow {
+            config.run.open_prs = false;
+            config.run.shadow = true;
+        }
         let span = tracing::Span::current();
         span.record("repo", repo.slug.as_str());
         span.record("language", repo.language.as_str());

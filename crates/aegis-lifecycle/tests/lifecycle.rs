@@ -362,6 +362,53 @@ fn rev_parse(repo: &Path, rev: &str) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
+/// #699: a shadow job runs to the end of the gate like any job, but
+/// pushes nothing and calls no forge; it ends `shadowed` with the patch it
+/// would have opened a PR with.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shadow_job_passes_the_gate_and_ends_shadowed_without_a_pr() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let model = Scripted::new(
+        vec![
+            call("t1", "search_symbol", json!({"name": "Cart::add"})),
+            create_repro("t2"),
+            fix("t3"),
+            fixed_answer(),
+        ],
+        vec![],
+    );
+    let mut cfg = config(&scratch, &server.uri(), 20);
+    cfg.run.open_prs = false;
+    cfg.run.shadow = true;
+    let p = platform(cfg, model);
+    let report = run(&p, CancellationToken::new()).await;
+    assert_eq!(report.outcome, Outcome::Shadowed, "{report:?}");
+    assert_eq!(report.pr_url, None);
+    assert_eq!(
+        report.reason.as_deref(),
+        Some("shadow mode: the gate passed, no PR opened")
+    );
+    let patch = report.patch.as_ref().expect("the patch, for its page");
+    assert!(
+        patch.diff.contains("tests/fourth_item.rs"),
+        "{}",
+        patch.diff
+    );
+    let record = p
+        .store
+        .record(&IssueId::parse("fixture-7").unwrap())
+        .unwrap();
+    assert_eq!(record.outcome, Some(Outcome::Shadowed));
+    assert!(record.gate_runs.iter().any(|g| g.passed));
+    // Nothing reached the forge, and no branch was pushed.
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(!fork_refs(&scratch).contains("fixture-7"));
+}
+
 /// #439: an eval's local round. The PR's head is a commit already in the
 /// clone and its base is given: nothing is fetched, and without
 /// `open_prs` nothing is pushed or posted. The round ends as a run without

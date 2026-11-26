@@ -203,6 +203,7 @@ pub(crate) fn outcome_str(outcome: Outcome) -> &'static str {
         Outcome::Diagnosed => "diagnosed",
         Outcome::AwaitingApproval => "awaiting_approval",
         Outcome::Integrated => "integrated",
+        Outcome::Shadowed => "shadowed",
     }
 }
 
@@ -215,6 +216,7 @@ pub(crate) fn decode_outcome(text: &str) -> Result<Outcome, StoreError> {
         Outcome::Diagnosed,
         Outcome::AwaitingApproval,
         Outcome::Integrated,
+        Outcome::Shadowed,
     ]
     .into_iter()
     .find(|o| outcome_str(*o) == text)
@@ -310,6 +312,9 @@ pub struct Job {
     pub review_of: Option<JobId>,
     /// The PR's review round this is, from 1; 0 when not one.
     pub review_round: u32,
+    /// Queued while its repo was in shadow mode (#699): it pushes no
+    /// branch, opens no PR and writes nothing on the ticket.
+    pub shadow: bool,
 }
 
 /// A webhook delivery that asks for a job.

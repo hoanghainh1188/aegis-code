@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline)\n                 VALUES ($1, $2, $3, $4, $5, $6)\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round",
+  "query": "UPDATE jobs SET status = $2, outcome = $3, reason = $4, pr_url = $5,\n                                 retries = retries + $6,\n                                 run_after = CASE WHEN $7::float8 IS NULL THEN run_after\n                                             ELSE now() + make_interval(secs => $7) END,\n                                 locked_by = NULL, locked_until = NULL, updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
   "describe": {
     "columns": [
       {
@@ -244,6 +244,17 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -253,7 +264,8 @@
         "Text",
         "Text",
         "Text",
-        "Timestamptz"
+        "Int4",
+        "Float8"
       ]
     },
     "nullable": [
@@ -278,8 +290,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "093241a23e851c549dc8404e782dfffe1fa27d2b9214a19d3e03f7d30dd39221"
+  "hash": "876bbc7cd3eaeb063c6379ba1e9c2748db1800f4dd8fa9157203947d9dc15aa9"
 }

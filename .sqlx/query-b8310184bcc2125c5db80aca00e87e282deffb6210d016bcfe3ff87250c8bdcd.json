@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                                   retry_of, review_of, review_round, parent_job_id, plan_key)\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round",
+  "query": "UPDATE jobs SET cancel_requested = true,\n                     status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,\n                     reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'\n                                   ELSE reason END,\n                     updated_at = now()\n                 WHERE id = $1 AND status IN ('queued', 'running')\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
   "describe": {
     "columns": [
       {
@@ -244,21 +244,22 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz",
-        "Int8",
-        "Int8",
-        "Int4",
-        "Int8",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -283,8 +284,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "12d3777c183cecab24a6af0b310497f36d759b30365686b0a8aeeeed0c286a4b"
+  "hash": "b8310184bcc2125c5db80aca00e87e282deffb6210d016bcfe3ff87250c8bdcd"
 }

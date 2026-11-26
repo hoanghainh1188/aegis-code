@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round\n             FROM jobs WHERE id = $1",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline, status, reason)\n             SELECT $1, $2, $3, $4, $5, $6,\n                    CASE WHEN $7::text IS NULL THEN 'queued' ELSE 'cancelled' END, $7\n             WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE repo_id = $1 AND issue_ref = $2\n                               AND (status IN ('queued', 'running')\n                                    OR outcome = 'awaiting_approval'))\n             ON CONFLICT (repo_id, issue_ref)\n                 WHERE status IN ('queued', 'running') AND parent_job_id IS NULL DO NOTHING\n             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                       status, outcome, attempts, locked_by, locked_until, created_at,\n                       updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                       retry_of, review_of, review_round, shadow",
   "describe": {
     "columns": [
       {
@@ -244,11 +244,28 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text"
       ]
     },
     "nullable": [
@@ -273,8 +290,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "3def289ef4a5beb43c6083e0a87173f9da9177b425c9d8a8c7a3d748a1547ea1"
+  "hash": "2d9ed7d09ed05bfa3108042065af5f240ed58d94803cde6263587077fad15e8a"
 }

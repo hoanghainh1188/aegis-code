@@ -254,3 +254,46 @@ async fn itsm_priority_and_sla_deadline_persist_across_reads_and_retries() {
     }
     db.drop().await;
 }
+
+#[tokio::test]
+async fn a_job_queued_in_a_shadow_repo_stays_a_shadow_job_and_the_switch_is_audited() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let actor = aegis_store::Actor::system();
+    let with_shadow = |on: bool| NewRepo {
+        config: serde_json::json!({ "image": "aegis/rust:1", "shadow": on }),
+        ..repo("pilot")
+    };
+    let pilot = s.create_repo_by(&with_shadow(true), &actor).await.unwrap();
+    let plain = s.create_repo(&repo("plain")).await.unwrap();
+
+    let shadow_job = s.create_job(&job(pilot.id, 1)).await.unwrap();
+    assert!(shadow_job.shadow);
+    assert!(!s.create_job(&job(plain.id, 2)).await.unwrap().shadow);
+
+    // Turned off: the queued job stays a shadow job, the next is not.
+    s.update_repo_by(&with_shadow(false), &actor).await.unwrap();
+    assert!(s.job(shadow_job.id).await.unwrap().unwrap().shadow);
+    assert!(!s.create_job(&job(pilot.id, 3)).await.unwrap().shadow);
+    // Run again, it is still one.
+    s.request_cancel(shadow_job.id).await.unwrap();
+    assert!(s.retry_job(shadow_job.id).await.unwrap().shadow);
+
+    // Saving without a change is not a switch.
+    s.update_repo_by(&with_shadow(false), &actor).await.unwrap();
+    s.update_repo_by(&with_shadow(true), &actor).await.unwrap();
+    let mut switches: Vec<String> = s
+        .audit_log(Some(pilot.id), Page::first(50))
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|e| e.action)
+        .filter(|a| a.starts_with("repo.shadow"))
+        .collect();
+    switches.reverse();
+    assert_eq!(
+        switches,
+        ["repo.shadow_on", "repo.shadow_off", "repo.shadow_on"]
+    );
+}

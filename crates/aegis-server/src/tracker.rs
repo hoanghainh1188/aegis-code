@@ -299,7 +299,7 @@ pub async fn run_poller<N: JobNotifier>(
         match poll_if_due(&store, &secrets, every).await {
             Ok(refused) => {
                 for job in refused {
-                    notifier.job_ended(&job, None).await;
+                    crate::worker::tell(&notifier, &job, None).await;
                 }
             }
             Err(e) => tracing::error!(error = %e, "polling the trackers"),
