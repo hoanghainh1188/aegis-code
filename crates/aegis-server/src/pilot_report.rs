@@ -202,7 +202,8 @@ fn period(rows: &[(&IssueRecord, &KpiJob)], query: &PilotQuery) -> Period {
         kpi: Kpi::from_records(real.iter().copied()),
         shadow: Kpi::from_records(shadow.iter().copied()),
         shadow_jobs: shadow.len(),
-        cost_usd: rows.iter().map(|(r, _)| r.cost_usd).sum(),
+        // Not `sum()`: a float sum of nothing is -0.0, shown `$-0.00`.
+        cost_usd: rows.iter().fold(0.0, |total, (r, _)| total + r.cost_usd),
         review_median_minutes: median(
             real.iter()
                 .filter_map(|r| r.review.map(|v| v.review_minutes))
@@ -222,10 +223,6 @@ fn dollars(v: Option<f64>) -> String {
 
 fn minutes(v: Option<f64>) -> String {
     v.map_or("—".into(), |m| format!("{m:.1} min"))
-}
-
-fn hours(v: Option<f64>) -> String {
-    v.map_or("—".into(), |s| format!("{:.1} h", s / 3600.0))
 }
 
 fn triage_of(p: &Period, category: &str) -> String {
@@ -339,7 +336,13 @@ fn metrics(current: &Period, previous: &Period) -> Vec<Metric> {
                 .review_median_minutes
                 .map(|m| m <= REVIEW_MINUTES_MAX),
         ),
-        line("MTTR", |p| hours(p.mttr_s), tracked, None),
+        // As the AMS report shows it: `40s`, `14m`, `2h 05m`.
+        line(
+            "MTTR",
+            |p| crate::web::ams::duration(p.mttr_s),
+            tracked,
+            None,
+        ),
         line("Shadow jobs", |p| p.shadow_jobs.to_string(), tracked, None),
         line(
             "Shadow jobs a reviewer would merge",
@@ -526,5 +529,23 @@ mod tests {
         assert_eq!(median(vec![3.0, 1.0, 2.0]), Some(2.0));
         assert_eq!(median(vec![4.0, 1.0, 3.0, 2.0]), Some(2.5));
         assert_eq!(median(vec![]), None);
+    }
+
+    #[test]
+    fn a_period_without_jobs_costs_nothing_and_has_no_mttr() {
+        let q = PilotQuery::parse(None, Some("2026-11-19"), None, date!(2026 - 11 - 26)).unwrap();
+        let empty = period(&[], &q);
+        assert_eq!(empty.cost_usd.to_bits(), 0.0f64.to_bits());
+        let lines = metrics(&empty, &empty);
+        let of = |name: &str| {
+            lines
+                .iter()
+                .find(|m| m.name == name)
+                .unwrap()
+                .current
+                .clone()
+        };
+        assert_eq!(of("Cost of the period"), "$0.00");
+        assert_eq!(of("MTTR"), "—");
     }
 }
