@@ -188,7 +188,49 @@ struct Acl {
 #[serde(rename_all = "camelCase")]
 struct Ace {
     #[serde(default)]
+    allow: u32,
+    #[serde(default)]
+    deny: u32,
+    #[serde(default)]
     extended_info: Option<AceExtended>,
+}
+
+/// What Azure DevOps says of one identity's right to write to a
+/// repository (#642), for measuring the writer check on a real
+/// organization: [`AzureDevOps::write_evidence`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteEvidence {
+    /// The identity's descriptor; `None` when Azure knows no such identity.
+    pub descriptor: Option<String>,
+    /// Its entry in the repository's access control list, or why there is
+    /// none: the ACL could not be read, or holds no entry for it.
+    pub entry: Result<AclEntry, String>,
+    /// Whether it is a member, groups included, of one of the project's
+    /// [`WRITER_GROUPS`].
+    pub in_writer_group: bool,
+    /// What [`AzureDevOps::can_write`] decides.
+    pub writes: bool,
+}
+
+/// An identity's entry in an access control list, its bits as Azure gives
+/// them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AclEntry {
+    /// Set on this token for this identity itself.
+    pub allow: u32,
+    pub deny: u32,
+    /// Everything that applies, groups and inheritance included, as
+    /// `(allow, deny)`; `None` when Azure gave no extended information.
+    pub effective: Option<(u32, u32)>,
+}
+
+impl AclEntry {
+    /// Whether the entry decides: its effective bits allow
+    /// `GenericContribute` and do not deny it.
+    fn writes(&self) -> Option<bool> {
+        let (allow, deny) = self.effective?;
+        Some(allow & GENERIC_CONTRIBUTE != 0 && deny & GENERIC_CONTRIBUTE == 0)
+    }
 }
 
 /// An identity's permissions on a token, its groups' and the inherited
@@ -196,6 +238,7 @@ struct Ace {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AceExtended {
+    // Left out when 0.
     #[serde(default)]
     effective_allow: u32,
     #[serde(default)]
@@ -397,8 +440,47 @@ impl AzureDevOps {
     /// repository's security, an older server), a member, groups included,
     /// of one of the project's [`WRITER_GROUPS`].
     pub async fn can_write(&self, id: &str) -> Result<bool, PrError> {
-        if !is_guid(id) {
+        let Some(person) = self.identity(id).await? else {
             return Ok(false);
+        };
+        if let Ok(Some(writes)) = self.acl_entry(&person).await.map(|e| e.writes()) {
+            return Ok(writes);
+        }
+        self.in_writer_group(&person).await
+    }
+
+    /// What Azure says of `id`'s right to write to this repository (#642):
+    /// its entry in the repository's ACL, its groups, and what
+    /// [`Self::can_write`] makes of them. For measuring the check on a real
+    /// organization; the job's own check is [`Self::can_write`].
+    pub async fn write_evidence(&self, id: &str) -> Result<WriteEvidence, PrError> {
+        let Some(person) = self.identity(id).await? else {
+            return Ok(WriteEvidence {
+                descriptor: None,
+                entry: Err("no such identity".into()),
+                in_writer_group: false,
+                writes: false,
+            });
+        };
+        let entry = self.acl_entry(&person).await;
+        let in_writer_group = self.in_writer_group(&person).await?;
+        let writes = match entry.as_ref().ok().and_then(AclEntry::writes) {
+            Some(writes) => writes,
+            None => in_writer_group,
+        };
+        Ok(WriteEvidence {
+            descriptor: descriptor(&person.descriptor),
+            entry,
+            in_writer_group,
+            writes,
+        })
+    }
+
+    /// The identity `id` (a GUID), its groups expanded; `None` when Azure
+    /// knows none.
+    async fn identity(&self, id: &str) -> Result<Option<Identity>, PrError> {
+        if !is_guid(id) {
+            return Ok(None);
         }
         let ims = identities_root(&self.collection);
         let url = format!(
@@ -406,12 +488,13 @@ impl AzureDevOps {
         );
         let (status, text) = self.send(reqwest::Method::GET, &url, None).await?;
         let found: List<Identity> = parsed(status, &text)?;
-        let Some(person) = found.value.into_iter().next() else {
-            return Ok(false);
-        };
-        if let Some(writes) = self.effective_write(&person).await {
-            return Ok(writes);
-        }
+        Ok(found.value.into_iter().next())
+    }
+
+    /// Whether `person` is a member, groups included, of one of the
+    /// project's [`WRITER_GROUPS`].
+    async fn in_writer_group(&self, person: &Identity) -> Result<bool, PrError> {
+        let ims = identities_root(&self.collection);
         let member_of: Vec<String> = person.member_of.iter().filter_map(descriptor).collect();
         for group in WRITER_GROUPS {
             let url = reqwest::Url::parse_with_params(
@@ -440,15 +523,19 @@ impl AzureDevOps {
         Ok(false)
     }
 
-    /// Whether `person`'s effective permissions on this repository allow
-    /// `GenericContribute`: `None` when Azure does not say (an error, no
-    /// descriptor, no extended entry), for the groups to be asked instead.
-    async fn effective_write(&self, person: &Identity) -> Option<bool> {
-        let who = descriptor(&person.descriptor)?;
-        let repo: Repository = self.call(reqwest::Method::GET, "", None).await.ok()?;
+    /// `person`'s entry in this repository's access control list, in the
+    /// Git Repositories namespace, with its effective bits; why there is
+    /// none otherwise (an error, no descriptor, no entry), for the groups to
+    /// be asked instead.
+    async fn acl_entry(&self, person: &Identity) -> Result<AclEntry, String> {
+        let who = descriptor(&person.descriptor).ok_or("the identity has no descriptor")?;
+        let repo: Repository = self
+            .call(reqwest::Method::GET, "", None)
+            .await
+            .map_err(|e| format!("reading the repository: {e}"))?;
         let project = repo.project.id;
         if !is_guid(&project) || !is_guid(&repo.id) {
-            return None;
+            return Err("the repository has no project and repository IDs".into());
         }
         let token = format!("repoV2/{project}/{}", repo.id);
         let url = reqwest::Url::parse_with_params(
@@ -463,22 +550,26 @@ impl AzureDevOps {
                 ("api-version", "7.1"),
             ],
         )
-        .ok()?;
+        .map_err(|e| e.to_string())?;
         let (status, text) = self
             .send(reqwest::Method::GET, url.as_str(), None)
             .await
-            .ok()?;
-        let acls: List<Acl> = parsed(status, &text).ok()?;
+            .map_err(|e| format!("reading the ACL: {e}"))?;
+        let acls: List<Acl> = parsed(status, &text).map_err(|e| format!("reading the ACL: {e}"))?;
         acls.value
             .iter()
             .filter(|acl| acl.token.eq_ignore_ascii_case(&token))
             .flat_map(|acl| &acl.aces_dictionary)
             .find(|(key, _)| key.eq_ignore_ascii_case(&who))
-            .and_then(|(_, ace)| ace.extended_info.as_ref())
-            .map(|e| {
-                e.effective_allow & GENERIC_CONTRIBUTE != 0
-                    && e.effective_deny & GENERIC_CONTRIBUTE == 0
+            .map(|(_, ace)| AclEntry {
+                allow: ace.allow,
+                deny: ace.deny,
+                effective: ace
+                    .extended_info
+                    .as_ref()
+                    .map(|e| (e.effective_allow, e.effective_deny)),
             })
+            .ok_or_else(|| format!("the ACL of `{token}` has no entry for the identity"))
     }
 
     /// The comments in PR `id`'s active threads, oldest first, of people

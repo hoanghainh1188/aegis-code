@@ -459,6 +459,40 @@ async fn the_groups_decide_when_the_acl_cannot_be_read() {
     assert!(azure(&server, "pat").can_write(WRITER).await.unwrap());
 }
 
+/// #642: the evidence the measurement on a real organization records:
+/// the identity's entry in the ACL with its effective bits, its groups,
+/// and the decision, which the ACL's effective bits make.
+#[tokio::test]
+async fn the_evidence_shows_the_acl_entry_the_groups_and_the_decision() {
+    let server = MockServer::start().await;
+    person(&server, WRITER, WHO, true).await;
+    acl(&server, WHO, 2 | 16, 4).await;
+    groups(&server, 1..).await;
+    let evidence = azure(&server, "pat").write_evidence(WRITER).await.unwrap();
+    assert_eq!(evidence.descriptor.as_deref(), Some(WHO));
+    assert_eq!(
+        evidence.entry,
+        Ok(aegis_pr::AclEntry {
+            allow: 0,
+            deny: 0,
+            effective: Some((2 | 16, 4)),
+        })
+    );
+    assert!(evidence.in_writer_group);
+    assert!(!evidence.writes, "the deny on the repository wins");
+
+    // An identity Azure does not know writes nowhere.
+    let unknown = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "count": 0, "value": [] })))
+        .mount(&unknown)
+        .await;
+    let evidence = azure(&unknown, "pat").write_evidence(READER).await.unwrap();
+    assert_eq!(evidence.descriptor, None);
+    assert!(!evidence.writes);
+}
+
 /// The authority gives tokens `first` then `second`, each living
 /// `lifetime` seconds.
 async fn authority(server: &MockServer, lifetime: u64, first: &str, second: &str) {
