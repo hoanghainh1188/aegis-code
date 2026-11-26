@@ -218,6 +218,11 @@ where
                 head(tree.path())?
             }
         };
+        // A shadow part (#699) pushes nothing: no integration branch to
+        // meet on, so it ends as a shadow job, its patch on its page.
+        if cfg.run.shadow {
+            return Ok(Ending::no_pr(cfg, patch));
+        }
         if !cfg.run.open_prs {
             return Ok(Ending {
                 outcome: Outcome::Integrated,
@@ -328,15 +333,7 @@ where
     }
     let patch = Some(job::patch(clone, &base, &report.tree)?);
     if !cfg.run.open_prs {
-        return Ok(Ending {
-            outcome: Outcome::PrOpened,
-            reason: Some("no PR opened".into()),
-            pr_url: None,
-            kept: None,
-            patch,
-            diagnosis: None,
-            plan: None,
-        });
+        return Ok(Ending::no_pr(cfg, patch));
     }
     let fix = PublishContext {
         profiles: &profiles,

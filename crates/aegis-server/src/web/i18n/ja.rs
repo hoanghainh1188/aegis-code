@@ -192,6 +192,10 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Content type" => "Content type",
         "Contract" => "契約",
         "Conventions" => "規約",
+        "Shadow mode" => "シャドーモード",
+        "jobs run to the end of the gate but push nothing, open no PR and write nothing on the ticket" => {
+            "ジョブはゲートの最後まで実行しますが、push も PR の作成もチケットへの書き込みも行いません"
+        }
         "Copy it now into the service's secret store; only its hash is kept here." => {
             "今すぐサービスのシークレットストアにコピーしてください。ここにはハッシュだけが保存されます。"
         }

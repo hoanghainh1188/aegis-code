@@ -772,6 +772,7 @@ fn stop(outcome: Outcome, locale: Locale) -> &'static str {
         Outcome::Diagnosed => t.stop_diagnosed,
         Outcome::AwaitingApproval => t.stop_awaiting_approval,
         Outcome::Integrated => t.stop_integrated,
+        Outcome::Shadowed => t.stop_shadowed,
     }
 }
 
@@ -806,6 +807,7 @@ mod tests {
             retry_of: None,
             review_of: None,
             review_round: 0,
+            shadow: false,
         }
     }
 

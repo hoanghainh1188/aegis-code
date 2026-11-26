@@ -426,6 +426,10 @@ pub enum Outcome {
     /// gate passed, and again once merged into the feature's integration
     /// branch; it opens no PR of its own, the feature's comes at the end.
     Integrated,
+    /// A shadow job (#699) whose gate passed: it would have opened a PR,
+    /// but its repo is in shadow mode; its patch is kept for its page and
+    /// for a person to judge.
+    Shadowed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

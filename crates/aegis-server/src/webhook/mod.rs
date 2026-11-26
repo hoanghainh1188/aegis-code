@@ -80,7 +80,6 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::api::default_ledger_key;
-use crate::worker::JobNotifier;
 use events::{Kind, Skip, Wanted};
 
 pub use aegis_secrets::Secret;
@@ -1063,7 +1062,7 @@ async fn deliver(
                 hooks.config.gitlab_notifier.clone(),
             );
             // The answer does not wait for GitHub or GitLab.
-            tokio::spawn(async move { notifier.job_ended(&job, None).await });
+            tokio::spawn(async move { crate::worker::tell(&notifier, &job, None).await });
             let why = reason
                 .clone()
                 .unwrap_or_else(|| "the repo's budget is spent".into());

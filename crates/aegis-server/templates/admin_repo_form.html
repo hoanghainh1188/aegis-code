@@ -81,6 +81,7 @@
     <label>{{ crate::t("Conventions") }} <span class="note">{{ crate::t("added to the agent's instructions") }}</span>
       <textarea name="conventions" rows="4" maxlength="20000">{{ form.conventions }}</textarea>
     </label>
+    <label class="choice"><input type="checkbox" name="shadow" value="on"{% if form.shadow.is_some() %} checked{% endif %}> {{ crate::t("Shadow mode") }} <span class="note">{{ crate::t("jobs run to the end of the gate but push nothing, open no PR and write nothing on the ticket") }}</span></label>
     <label>{{ crate::t("Other settings") }} <span class="note">{{ crate::t("TOML, as") }} <code>[settings]</code> {{ crate::t("of a repo file: overrides, dirs, tracker, sonar…") }}</span>
       <textarea name="settings" rows="8" class="code" spellcheck="false" maxlength="50000">{{ form.settings }}</textarea>
     </label>

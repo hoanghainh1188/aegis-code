@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, review_of, review_round)\n             VALUES ($1, $2, $3, $4, $5, $6)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                       status, outcome, attempts, locked_by, locked_until, created_at,\n                       updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                       retry_of, review_of, review_round",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                               parent_job_id, plan_key)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                       status, outcome, attempts, locked_by, locked_until, created_at,\n                       updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                       retry_of, review_of, review_round, shadow",
   "describe": {
     "columns": [
       {
@@ -244,6 +244,17 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -252,8 +263,10 @@
         "Text",
         "Text",
         "Text",
+        "Text",
+        "Timestamptz",
         "Int8",
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -278,8 +291,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "76cd6049892dbfff24e6ba3592e4ce0c3f6ee12dd11eeb2b730736eb9a9767de"
+  "hash": "5912d443dfc28ef6093128716990addc3130f6191fba5aa576a0e0da12097254"
 }

@@ -165,6 +165,9 @@ pub struct PrStrings {
     /// A plan waits for a person's approval (#675).
     pub stop_awaiting_approval: &'static str,
     pub stop_integrated: &'static str,
+    /// A shadow job (#699) whose gate passed; its ticket is not told, the
+    /// text is for completeness.
+    pub stop_shadowed: &'static str,
 }
 
 impl PrStrings {
@@ -451,6 +454,7 @@ static EN: PrStrings = PrStrings {
     stop_awaiting_approval: "its plan waits for a person's approval",
     stop_integrated: "its part is merged into the feature's integration branch; the feature's \
                       pull request opens once every part is in",
+    stop_shadowed: "its repo is in shadow mode: the fix passed the gate, no pull request was opened",
 };
 
 static JA: PrStrings = PrStrings {
@@ -525,6 +529,7 @@ static JA: PrStrings = PrStrings {
     stop_diagnosed: "コード変更は不要と診断された",
     stop_awaiting_approval: "計画が承認待ちである",
     stop_integrated: "担当部分が機能の統合ブランチにマージされた (すべての部分が揃うと機能の pull request が開かれる)",
+    stop_shadowed: "リポジトリがシャドーモードである (修正はゲートを通過したが pull request は開かれていない)",
 };
 
 static VI: PrStrings = PrStrings {
@@ -600,6 +605,7 @@ static VI: PrStrings = PrStrings {
     stop_awaiting_approval: "kế hoạch đang chờ người duyệt",
     stop_integrated: "phần việc của nó đã được merge vào branch tích hợp của tính năng; pull \
                       request của tính năng sẽ mở khi đủ mọi phần",
+    stop_shadowed: "repo đang ở chế độ shadow: bản sửa đã qua gate, không mở pull request",
 };
 
 /// Non-ASCII letters only Vietnamese uses; tests check English and

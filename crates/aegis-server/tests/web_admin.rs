@@ -422,6 +422,8 @@ async fn an_admin_adds_a_repo_follows_its_clone_and_changes_it() {
                 "fork_name",
                 "token_env",
                 "conventions",
+                // Shadow mode's checkbox (#699).
+                "shadow",
                 "settings",
                 "htmx-config",
             ]

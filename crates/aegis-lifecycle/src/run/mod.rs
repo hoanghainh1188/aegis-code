@@ -132,6 +132,29 @@ pub(crate) struct Ending {
 }
 
 impl Ending {
+    /// A run whose gate passed and that opens no PR: `shadowed` for a
+    /// shadow job (#699), else a dry run's `pr_opened` (#104), with
+    /// `patch` for the job's page.
+    pub(crate) fn no_pr(cfg: &crate::RunConfig, patch: Option<aegis_store::Patch>) -> Self {
+        let (outcome, reason) = if cfg.run.shadow {
+            (
+                Outcome::Shadowed,
+                "shadow mode: the gate passed, no PR opened",
+            )
+        } else {
+            (Outcome::PrOpened, "no PR opened")
+        };
+        Self {
+            outcome,
+            reason: Some(reason.into()),
+            pr_url: None,
+            kept: None,
+            patch,
+            diagnosis: None,
+            plan: None,
+        }
+    }
+
     pub(crate) fn stop(outcome: Outcome, reason: impl Into<String>) -> Self {
         Self {
             outcome,

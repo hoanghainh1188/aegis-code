@@ -62,12 +62,17 @@ impl Kpi {
     pub fn from_records<'a>(records: impl IntoIterator<Item = &'a IssueRecord>) -> Self {
         // A plan waiting for approval (#675) has not finished; a feature's
         // part merged into its integration branch (#678) is not one of its
-        // own: the feature's PR at the end is.
+        // own: the feature's PR at the end is. A shadow job (#699) opened
+        // no PR to measure: its reviews count apart.
         let finished: Vec<&IssueRecord> = records
             .into_iter()
             .filter(|r| {
-                r.outcome
-                    .is_some_and(|o| !matches!(o, Outcome::AwaitingApproval | Outcome::Integrated))
+                r.outcome.is_some_and(|o| {
+                    !matches!(
+                        o,
+                        Outcome::AwaitingApproval | Outcome::Integrated | Outcome::Shadowed
+                    )
+                })
             })
             .collect();
         let prs: Vec<&&IssueRecord> = finished

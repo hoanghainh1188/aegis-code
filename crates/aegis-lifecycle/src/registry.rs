@@ -166,6 +166,12 @@ pub struct RepoSettings {
     /// The repo maintainers' conventions, added to the system prompt.
     #[serde(default)]
     pub conventions: Option<String>,
+    /// Shadow mode for a pilot (#699): its jobs run every step, the gate
+    /// included, but push no branch, open no PR and write nothing on the
+    /// ticket. A job that would open a PR ends `shadowed`, its patch kept
+    /// on its page. A job takes it when it is queued.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shadow: bool,
     /// The gate's image, in place of the language profile's; wins over an
     /// `image` in `overrides`.
     #[serde(default)]

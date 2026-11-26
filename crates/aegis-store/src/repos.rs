@@ -70,6 +70,47 @@ async fn audit_repo(
     audit::record(tx, actor, action, target, detail).await
 }
 
+/// Whether `config` puts the repo in shadow mode (#699), as the
+/// `jobs_take_repo_shadow` trigger reads it.
+fn shadow_of(config: &serde_json::Value) -> bool {
+    config
+        .get("shadow")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Shadow mode turned on or off (#699), audited apart from the rest of the
+/// settings: it says whether the repo's next jobs may write to the forge
+/// and the tracker.
+async fn audit_shadow(
+    tx: &mut sqlx::PgConnection,
+    actor: &Actor,
+    before: bool,
+    repo: &Repo,
+) -> Result<(), StoreError> {
+    let now = shadow_of(&repo.config);
+    if now == before {
+        return Ok(());
+    }
+    let action = if now {
+        "repo.shadow_on"
+    } else {
+        "repo.shadow_off"
+    };
+    let target = Target {
+        repo: Some(repo.id),
+        job: None,
+    };
+    audit::record(
+        tx,
+        actor,
+        action,
+        target,
+        serde_json::json!({ "slug": repo.slug }),
+    )
+    .await
+}
+
 struct RepoRow {
     id: i64,
     slug: String,
@@ -144,6 +185,7 @@ impl Store {
             .map_err(StoreError::from_db)?
             .try_into()?;
             audit_repo(&mut tx, actor, "repo.register", &created).await?;
+            audit_shadow(&mut tx, actor, false, &created).await?;
             Ok::<_, StoreError>(created)
         }
         .await;
@@ -157,6 +199,13 @@ impl Store {
         let max_jobs = max_jobs(repo.max_concurrent_jobs)?;
         let mut tx = self.pool.begin().await?;
         let work = async {
+            let before = sqlx::query_scalar!(
+                "SELECT config FROM repos WHERE slug = $1 FOR UPDATE",
+                repo.slug,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some_and(|config| shadow_of(&config));
             let updated: Repo = sqlx::query_as!(
                 RepoRow,
                 "UPDATE repos
@@ -178,6 +227,7 @@ impl Store {
             .ok_or_else(|| StoreError::NotFound(format!("repo `{}`", repo.slug)))?
             .try_into()?;
             audit_repo(&mut tx, actor, "repo.update", &updated).await?;
+            audit_shadow(&mut tx, actor, before, &updated).await?;
             Ok::<_, StoreError>(updated)
         }
         .await;

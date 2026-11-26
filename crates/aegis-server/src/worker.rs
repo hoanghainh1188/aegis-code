@@ -69,6 +69,17 @@ pub trait JobNotifier: Send + Sync + 'static {
     fn job_ended(&self, job: &Job, diagnosis: Option<&str>) -> impl Future<Output = ()> + Send;
 }
 
+/// Tells `notifier` that `job` ended, unless it is a shadow job (#699):
+/// those write nothing on the ticket or the forge, their end is on their
+/// page only.
+pub async fn tell<N: JobNotifier>(notifier: &N, job: &Job, diagnosis: Option<&str>) {
+    if job.shadow {
+        tracing::info!(job = job.id.0, "shadow job: the ticket is not told");
+        return;
+    }
+    notifier.job_ended(job, diagnosis).await;
+}
+
 /// Tells both, one after the other: a notifier per forge, each skipping
 /// the jobs of the others.
 impl<A: JobNotifier, B: JobNotifier> JobNotifier for (A, B) {
@@ -221,7 +232,7 @@ async fn attempt<R: JobRunner, N: JobNotifier>(
                         AttemptEnd::Done { diagnosis, .. } => diagnosis.as_deref(),
                         _ => None,
                     };
-                    notifier.job_ended(&j, diagnosis).await;
+                    tell(&*notifier, &j, diagnosis).await;
                 }
                 j.status.as_str()
             }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET status = $2, outcome = $3, reason = $4, pr_url = $5,\n                                 retries = retries + $6,\n                                 run_after = CASE WHEN $7::float8 IS NULL THEN run_after\n                                             ELSE now() + make_interval(secs => $7) END,\n                                 locked_by = NULL, locked_until = NULL, updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline)\n                 VALUES ($1, $2, $3, $4, $5, $6)\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
   "describe": {
     "columns": [
       {
@@ -244,6 +244,17 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -253,8 +264,7 @@
         "Text",
         "Text",
         "Text",
-        "Int4",
-        "Float8"
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -279,8 +289,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "6469e5a06e5d4d20eeecced645e3017689689ec65c5546e38a176d802ce9df7b"
+  "hash": "0243a87aafabaefba4d0bfc69f6bd990bfd0eb4ac5b8c79f9514346fc77ddd43"
 }

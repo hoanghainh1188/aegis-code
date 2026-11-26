@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,\n                    review_round\n             FROM jobs WHERE parent_job_id = $1 ORDER BY id LIMIT $2",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round, shadow\n             FROM jobs\n             WHERE ($1::bigint IS NULL OR repo_id = $1)\n               AND ($2::text IS NULL OR status = $2)\n               AND ($3::bigint IS NULL OR id < $3)\n               AND ($5::bigint[] IS NULL OR repo_id = ANY($5))\n             ORDER BY id DESC LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -244,12 +244,26 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
-        "Int8"
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -274,8 +288,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "3af5a3724ccfd31abbfd88d585d47aabf7cbcd3c33cb4f92053d822868ff76cb"
+  "hash": "5e29d798ce3211c29b4d1975ed810ece78089a306b8601fff356439bcd4abf42"
 }

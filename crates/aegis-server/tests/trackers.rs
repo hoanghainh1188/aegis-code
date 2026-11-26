@@ -99,6 +99,7 @@ fn ended(id: JobId, repo: &Repo, source: JobSource, key: &str, pr: Option<&str>)
         retry_of: None,
         review_of: None,
         review_round: 0,
+        shadow: false,
     }
 }
 
@@ -484,4 +485,139 @@ async fn itsm_jsm_and_servicenow_poll_store_sla_and_sync_results_back() {
         )
         .await;
     db.drop().await;
+}
+
+/// Ends each job as the lifecycle ends a shadow job, after checking the
+/// job says it is one when its repo is in shadow mode (#699).
+struct ShadowRunner;
+
+impl aegis_server::runner::JobRunner for ShadowRunner {
+    async fn run(
+        &self,
+        claim: &aegis_store::Claim,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Attempt {
+        let shadow = claim.job.issue_ref == "APP-1";
+        assert_eq!(claim.job.shadow, shadow, "{:?}", claim.job);
+        Attempt::Ended {
+            outcome: if shadow {
+                Outcome::Shadowed
+            } else {
+                Outcome::StoppedSteps
+            },
+            reason: Some(if shadow {
+                "shadow mode: the gate passed, no PR opened".into()
+            } else {
+                "step limit".into()
+            }),
+            pr_url: None,
+            patch: Some(aegis_store::Patch {
+                diff: "diff --git a/src/lib.rs b/src/lib.rs\n-a\n+b\n".into(),
+                truncated: false,
+            }),
+            diagnosis: None,
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_shadow_repo_s_ticket_runs_to_the_end_and_nothing_is_written_on_it() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shadow_jira = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/search/jql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issues": [{ "key": "APP-1" }], "isLast": true
+        })))
+        .mount(&shadow_jira)
+        .await;
+    // Not a comment, a link nor a transition: no write at all.
+    for verb in ["POST", "PUT", "PATCH", "DELETE"] {
+        Mock::given(method(verb))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "1" })))
+            .expect(0)
+            .mount(&shadow_jira)
+            .await;
+    }
+    // A repo out of shadow mode is still told, by the same worker.
+    let plain_jira = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/search/jql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issues": [{ "key": "OPS-2" }], "isLast": true
+        })))
+        .mount(&plain_jira)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/rest/api/2/issue/OPS-2/comment"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "1" })))
+        .expect(1)
+        .mount(&plain_jira)
+        .await;
+    let app = repo(s, "app", Some(jira(&shadow_jira, json!({})))).await;
+    let mut config = app.config.clone();
+    config["shadow"] = json!(true);
+    s.update_repo_by(
+        &NewRepo {
+            slug: app.slug.clone(),
+            url: app.url.clone(),
+            default_branch: app.default_branch.clone(),
+            language: app.language.clone(),
+            mode: app.mode.clone(),
+            max_concurrent_jobs: app.max_concurrent_jobs,
+            config,
+        },
+        &aegis_store::Actor::system(),
+    )
+    .await
+    .unwrap();
+    repo(s, "ops", Some(jira(&plain_jira, json!({})))).await;
+
+    poll_once(s, &secrets()).await.unwrap();
+    let queued = jobs(s).await;
+    assert_eq!(
+        queued
+            .iter()
+            .map(|j| (j.issue_ref.as_str(), j.shadow))
+            .collect::<Vec<_>>(),
+        [("APP-1", true), ("OPS-2", false)]
+    );
+
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let worker = tokio::spawn(aegis_server::worker::run_worker_notifying(
+        s.clone(),
+        std::sync::Arc::new(ShadowRunner),
+        std::sync::Arc::new(TrackerNotifier::new(s.clone(), secrets())),
+        aegis_server::worker::WorkerConfig {
+            worker_id: "w".into(),
+            max_workers: 2,
+            lease: std::time::Duration::from_secs(5),
+            renew_every: std::time::Duration::from_secs(1),
+            poll_every: std::time::Duration::from_millis(50),
+            drain: std::time::Duration::from_secs(5),
+            retry_base: std::time::Duration::from_millis(20),
+            max_cost_usd: 4.0,
+        },
+        shutdown.clone(),
+    ));
+    let started = std::time::Instant::now();
+    let done = loop {
+        let all = jobs(s).await;
+        if all.iter().all(|j| j.status == JobStatus::Done) {
+            break all;
+        }
+        assert!(started.elapsed().as_secs() < 20, "{all:#?}");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    shutdown.cancel();
+    worker.await.unwrap();
+
+    // Its end and patch are on its page, as any job's.
+    let shadowed = &done[0];
+    assert_eq!(shadowed.outcome, Some(Outcome::Shadowed));
+    assert!(s.patch(shadowed.id).await.unwrap().is_some());
+    // The plain repo's comment was posted; the mocks check the counts.
+    plain_jira.verify().await;
+    shadow_jira.verify().await;
 }

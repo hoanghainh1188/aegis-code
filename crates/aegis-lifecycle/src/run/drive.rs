@@ -547,10 +547,13 @@ where
                 ledger.hidden_tests(passed, took.as_secs_f64()).await?;
             }
             // With `open_prs` off the run ends where it would open the PR.
+            let Some(pr_url) = pr_url else {
+                return Ok(Ending::no_pr(cfg, patch));
+            };
             return Ok(Ending {
                 outcome: Outcome::PrOpened,
-                reason: pr_url.is_none().then(|| "no PR opened".to_owned()),
-                pr_url,
+                reason: None,
+                pr_url: Some(pr_url),
                 kept: None,
                 patch,
                 diagnosis: None,

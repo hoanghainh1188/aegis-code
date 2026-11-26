@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET status = 'queued', outcome = NULL, reason = NULL,\n                                 cancel_requested = false, run_after = now(), updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round, shadow\n             FROM jobs WHERE review_of = $1 ORDER BY review_round, id LIMIT 100",
   "describe": {
     "columns": [
       {
@@ -244,6 +244,17 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -273,8 +284,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "d156c7228889edb415625cb0c7b3d9d8a7a5840cc4ade4eb8ae8889ced470895"
+  "hash": "cacaf7748d9c48e15b46bac53e720f57c06210bc514d3f0472b63828435063cc"
 }

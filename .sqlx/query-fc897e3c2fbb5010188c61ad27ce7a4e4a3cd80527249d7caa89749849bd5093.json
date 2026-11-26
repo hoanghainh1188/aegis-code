@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of, review_round\n             FROM jobs\n             WHERE review_of IS NULL AND status = 'done' AND outcome = 'pr_opened'\n               AND lower(rtrim(pr_url, '/')) = $1\n             ORDER BY id DESC LIMIT 1",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,\n                    review_round, shadow\n             FROM jobs WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -244,11 +244,22 @@
             "name": "review_round"
           }
         }
+      },
+      {
+        "ordinal": 22,
+        "name": "shadow",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "shadow"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -273,8 +284,9 @@
       true,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "2797cba9a75a04375ec1d474e80f68284c1ba6ca0ae19fc739249fe636ac8c5f"
+  "hash": "fc897e3c2fbb5010188c61ad27ce7a4e4a3cd80527249d7caa89749849bd5093"
 }

@@ -111,6 +111,10 @@ pub struct RunSection {
     /// the run ends where the PR would be opened, hidden tests included.
     #[serde(default = "default_true")]
     pub open_prs: bool,
+    /// A shadow job (#699), set by the server from the job, never read
+    /// from a file: with `open_prs` off, a passing run ends `shadowed`.
+    #[serde(skip)]
+    pub shadow: bool,
     /// Run the gate in the profile's container image (#5), not on the
     /// machine.
     #[serde(default)]
