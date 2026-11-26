@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                                   retry_of, review_of, review_round, parent_job_id, plan_key,\n                                   shadow)\n                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
+  "query": "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,\n                                 updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow, publish_of",
   "describe": {
     "columns": [
       {
@@ -255,22 +255,24 @@
             "name": "shadow"
           }
         }
+      },
+      {
+        "ordinal": 23,
+        "name": "publish_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "publish_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
         "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz",
-        "Int8",
-        "Int8",
-        "Int4",
-        "Int8",
-        "Text",
-        "Bool"
+        "Text"
       ]
     },
     "nullable": [
@@ -296,8 +298,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "61205192d748059d0f96c96e7bd492beab94edefe6f4627d28c79c63d8fcf165"
+  "hash": "5f690f52a2a30d8c32263c2a7b70f3204255f8fb1d8b94b9d283b71ff3fe0e54"
 }

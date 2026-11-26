@@ -808,6 +808,7 @@ mod tests {
             review_of: None,
             review_round: 0,
             shadow: false,
+            publish_of: None,
         }
     }
 

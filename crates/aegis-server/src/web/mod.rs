@@ -114,6 +114,7 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/jobs/{id}/head", get(jobs::head))
         .route("/jobs/{id}/cancel", post(actions::cancel))
         .route("/jobs/{id}/retry", post(actions::retry))
+        .route("/jobs/{id}/open-pr", post(actions::open_pr))
         .route("/jobs/{id}/approve", post(actions::approve))
         .route(
             "/jobs/{id}/memories/{memory_id}/obsolete",

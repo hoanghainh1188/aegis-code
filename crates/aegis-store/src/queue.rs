@@ -276,7 +276,7 @@ impl Store {
                  RETURNING jobs.id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round, shadow",
+                           retry_of, review_of, review_round, shadow, publish_of",
                 worker,
                 secs(lease),
                 i64::from(max_workers),
@@ -427,7 +427,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round, shadow",
+                           retry_of, review_of, review_round, shadow, publish_of",
                 run.job_id.0,
                 end.job_status().as_str(),
                 outcome,
@@ -507,7 +507,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round, shadow",
+                           retry_of, review_of, review_round, shadow, publish_of",
                 job.0,
             )
             .fetch_optional(&mut *tx)
@@ -544,7 +544,8 @@ impl Store {
         let work = async {
             let old = sqlx::query!(
                 "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                        status, review_of, review_round, parent_job_id, plan_key, shadow
+                        status, review_of, review_round, parent_job_id, plan_key, shadow,
+                        publish_of
                  FROM jobs WHERE id = $1 FOR UPDATE",
                 job.0,
             )
@@ -575,12 +576,12 @@ impl Store {
                 JobRow,
                 "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                                    retry_of, review_of, review_round, parent_job_id, plan_key,
-                                   shadow)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                                   shadow, publish_of)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round, shadow",
+                           retry_of, review_of, review_round, shadow, publish_of",
                 old.repo_id,
                 old.issue_ref,
                 key.as_str(),
@@ -595,8 +596,10 @@ impl Store {
                 // same sub-job of its plan (#678).
                 old.parent_job_id,
                 old.plan_key,
-                // A shadow job run again stays one (#699).
+                // A shadow job run again stays one; a shadow job's PR asked
+                // again still opens it (#699).
                 old.shadow,
+                old.publish_of,
             )
             .fetch_one(&mut *tx)
             .await

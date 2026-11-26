@@ -29,12 +29,12 @@ use aegis_ledger::{
 use aegis_lifecycle::{
     CveTarget, ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun,
     ReviewRound, run_feature_delivery, run_feature_revision, run_feature_sub_job, run_issue,
-    run_review,
+    run_review, run_shadow_publish,
 };
 use aegis_pr::{PrError, REPLY_MARKER, TokenSource, TokenUse};
 use aegis_provider::{Observed, Provider};
 use aegis_secrets::{Secret, Secrets};
-use aegis_store::{Claim, Job, JobSource, ModeName, PgLedger, RepoId, RunId, Store};
+use aegis_store::{Claim, Job, JobId, JobSource, ModeName, PgLedger, RepoId, RunId, Store};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -302,6 +302,40 @@ impl LifecycleRunner {
         })
     }
 
+    /// What shadow job `of` kept to open its PR from (#699): the answer
+    /// and base in its ledger, its whole patch in the store. `Rejected`
+    /// with why when it kept no such thing.
+    async fn shadow_patch(&self, of: JobId) -> Result<aegis_lifecycle::ShadowPatch, Attempt> {
+        let infra = |e: aegis_store::StoreError| Attempt::Infra(e.to_string());
+        let shadow = self
+            .store
+            .job(of)
+            .await
+            .map_err(infra)?
+            .ok_or_else(|| Attempt::Rejected(format!("no shadow job {}", of.0)))?;
+        let events = self
+            .ledger
+            .events(&shadow.ledger_key)
+            .await
+            .map_err(|e| Attempt::Infra(e.to_string()))?;
+        let kept = IssueRecord::from_events(shadow.ledger_key.clone(), &events)
+            .shadow_kept
+            .ok_or_else(|| {
+                Attempt::Rejected(format!(
+                    "shadow job {} kept no answer to open a PR from",
+                    of.0
+                ))
+            })?;
+        let patch = self.store.patch(of).await.map_err(infra)?;
+        match patch {
+            Some(p) if !p.truncated => Ok(aegis_lifecycle::ShadowPatch { kept, diff: p.diff }),
+            _ => Err(Attempt::Rejected(format!(
+                "shadow job {} kept no whole patch to open a PR from",
+                of.0
+            ))),
+        }
+    }
+
     /// The runtime of `mode`, by the name [`Modes::config`] finds it
     /// under (`_` and `-` alike).
     fn runtime(&self, mode: &ModeName) -> Result<&ModeRuntime, Attempt> {
@@ -374,6 +408,12 @@ impl LifecycleRunner {
             _ => crate::feature_gate::feature_delivery(&self.store, job)
                 .await
                 .map_err(task_error)?,
+        };
+        // A shadow job's PR asked for by a person (#699): from what that
+        // job kept, without the agent.
+        let shadow = match job.publish_of {
+            Some(of) => Some(self.shadow_patch(of).await?),
+            None => None,
         };
         // An earlier attempt may have closed the ledger before its worker
         // died: its outcome is the job's.
@@ -537,6 +577,13 @@ impl LifecycleRunner {
             None => self.feature_task(job).await?,
         };
         let (future, pull): (Run, _) = match round {
+            None if shadow.is_some() => {
+                let shadow = shadow.expect("just matched");
+                (
+                    Box::pin(run_shadow_publish(platform, issue, shadow, cancel)),
+                    None,
+                )
+            }
             None if delivery.is_some() => {
                 let delivery = delivery.expect("just matched");
                 (

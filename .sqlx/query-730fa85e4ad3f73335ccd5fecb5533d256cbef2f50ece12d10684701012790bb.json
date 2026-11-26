@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM ledger_events\n                          WHERE ledger_key = $1 AND event ->> 'event' = 'shadow_kept') AS \"kept!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kept!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "730fa85e4ad3f73335ccd5fecb5533d256cbef2f50ece12d10684701012790bb"
+}

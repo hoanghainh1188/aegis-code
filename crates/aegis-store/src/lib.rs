@@ -31,6 +31,7 @@ mod preflights;
 mod queue;
 mod repos;
 mod reviews;
+mod shadow;
 mod sonar;
 mod stats;
 mod tenants;

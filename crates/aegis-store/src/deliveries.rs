@@ -144,7 +144,7 @@ pub(crate) async fn queue_in(
              RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                        status, outcome, attempts, locked_by, locked_until, created_at,
                        updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                       retry_of, review_of, review_round, shadow",
+                       retry_of, review_of, review_round, shadow, publish_of",
         job.repo_id.0,
         job.issue_ref,
         job.ledger_key.as_str(),

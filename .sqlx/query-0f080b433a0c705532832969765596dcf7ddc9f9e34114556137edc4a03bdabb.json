@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET status = $2, outcome = $3, locked_by = NULL, locked_until = NULL,\n                                 updated_at = now()\n                 WHERE id = $1\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
+  "query": "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                               parent_job_id, plan_key)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                       status, outcome, attempts, locked_by, locked_until, created_at,\n                       updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                       retry_of, review_of, review_round, shadow, publish_of",
   "describe": {
     "columns": [
       {
@@ -255,12 +255,28 @@
             "name": "shadow"
           }
         }
+      },
+      {
+        "ordinal": 23,
+        "name": "publish_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "publish_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
         "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int8",
         "Text"
       ]
     },
@@ -287,8 +303,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "8dbc36f2bdb130e506b25b2d650659fbf666b14f5b9a0d599f18ca8a517156dd"
+  "hash": "0f080b433a0c705532832969765596dcf7ddc9f9e34114556137edc4a03bdabb"
 }

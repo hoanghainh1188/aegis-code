@@ -306,7 +306,7 @@ impl Store {
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round, shadow",
+                           retry_of, review_of, review_round, shadow, publish_of",
                 job.0,
             )
             .fetch_one(&mut *tx)
@@ -396,7 +396,7 @@ impl Store {
             "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                     status, outcome, attempts, locked_by, locked_until, created_at, updated_at,
                     run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,
-                    review_round, shadow
+                    review_round, shadow, publish_of
              FROM jobs WHERE id = $1",
             job.0,
         )

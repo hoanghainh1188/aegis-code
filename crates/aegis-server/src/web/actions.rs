@@ -50,6 +50,8 @@ pub enum Done {
     DiagnosisConfirmed,
     /// The job's plan was approved and queued again (#675).
     Approved,
+    /// A shadow job's PR was asked for (#699): this job opens it.
+    PrAsked,
 }
 
 impl Done {
@@ -76,10 +78,14 @@ impl Done {
                  PRs: each opens a PR on top of the one before. One integration PR: each is \
                  merged into the feature's branch, and the feature's PR opens once all are in."
             }
+            Self::PrAsked => {
+                "PR asked for: this job applies the shadow job's patch, gates it again and opens \
+                 the PR, without the agent."
+            }
         }
     }
 
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Created,
         Self::Cancelled,
         Self::CancelRequested,
@@ -88,6 +94,7 @@ impl Done {
         Self::MemoryObsolete,
         Self::DiagnosisConfirmed,
         Self::Approved,
+        Self::PrAsked,
     ];
 
     fn word(self) -> &'static str {
@@ -100,6 +107,7 @@ impl Done {
             Self::MemoryObsolete => "memory_obsolete",
             Self::DiagnosisConfirmed => "diagnosis_confirmed",
             Self::Approved => "approved",
+            Self::PrAsked => "pr_asked",
         }
     }
 
@@ -275,6 +283,19 @@ pub async fn approve(
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
     let job = crate::feature_gate::approve(&store, JobId(id), None, &access.actor).await?;
     Ok(to_job(job.id, Done::Approved))
+}
+
+/// Queues the job that opens the PR of shadow job `id` from its patch
+/// (#699). As retry, for the repo's maintainers: it writes to the forge
+/// and spends the repo's budget.
+pub async fn open_pr(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path(id): Path<i64>,
+) -> WebResult {
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.publish_shadow_by(JobId(id), &access.actor).await?;
+    Ok(to_job(job.id, Done::PrAsked))
 }
 
 pub async fn retry(

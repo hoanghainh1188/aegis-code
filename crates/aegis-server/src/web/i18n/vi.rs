@@ -192,6 +192,9 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Conventions" => "Quy ước",
         "Shadow mode" => "Chế độ shadow",
         "Grade shadow job" => "Chấm job shadow",
+        "Opens the PR of shadow job" => "Mở PR của job shadow",
+        ", from its patch, without the agent." => ", từ patch của nó, không chạy agent.",
+        "Open a PR from this patch" => "Mở PR từ patch này",
         "This repo is in shadow mode: the job passed the gate but opened no PR. Read its patch below as if it were a PR: if it were one, would you merge it? Your grade counts in the pilot's shadow acceptance, apart from the PRs." => {
             "Repo này đang ở chế độ shadow: job đã qua gate nhưng không mở PR. Hãy đọc patch bên dưới như một PR: nếu là PR thì bạn có merge không? Điểm của bạn được tính vào tỉ lệ chấp nhận job shadow của pilot, tách khỏi các PR."
         }

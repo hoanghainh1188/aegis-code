@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE jobs SET cancel_requested = true,\n                     status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,\n                     reason = CASE WHEN status = 'queued' THEN 'cancelled before it ran'\n                                   ELSE reason END,\n                     updated_at = now()\n                 WHERE id = $1 AND status IN ('queued', 'running')\n                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                           status, outcome, attempts, locked_by, locked_until, created_at,\n                           updated_at, run_after, retries, cancel_requested, reason, pr_url,\n                           retry_of, review_of, review_round, shadow",
+  "query": "SELECT id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                    status, outcome, attempts, locked_by, locked_until, created_at, updated_at,\n                    run_after, retries, cancel_requested, reason, pr_url, retry_of, review_of,\n                    review_round, shadow, publish_of\n             FROM jobs WHERE parent_job_id = $1 ORDER BY id LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -255,10 +255,22 @@
             "name": "shadow"
           }
         }
+      },
+      {
+        "ordinal": 23,
+        "name": "publish_of",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "publish_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
+        "Int8",
         "Int8"
       ]
     },
@@ -285,8 +297,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "b8310184bcc2125c5db80aca00e87e282deffb6210d016bcfe3ff87250c8bdcd"
+  "hash": "76f3dd80ee62fa6cf8b450b741637dc374f76d0948a75fd0024452182246cb1f"
 }
