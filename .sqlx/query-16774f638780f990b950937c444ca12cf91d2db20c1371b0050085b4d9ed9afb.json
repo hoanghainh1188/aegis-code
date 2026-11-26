@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM jobs WHERE parent_job_id = $1)\n                      AND NOT EXISTS (\n                          SELECT 1 FROM jobs s\n                          WHERE s.parent_job_id = $1\n                            AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.retry_of = s.id)\n                            AND (s.status <> 'done' OR s.outcome IS DISTINCT FROM 'integrated'))\n               AS \"integrated!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "integrated!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "16774f638780f990b950937c444ca12cf91d2db20c1371b0050085b4d9ed9afb"
+}

@@ -422,6 +422,10 @@ pub enum Outcome {
     /// no lease and has not failed; a write-authorized approval queues it
     /// again.
     AwaitingApproval,
+    /// A feature's sub-job delivered as one integration PR (#678): its
+    /// gate passed, and again once merged into the feature's integration
+    /// branch; it opens no PR of its own, the feature's comes at the end.
+    Integrated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

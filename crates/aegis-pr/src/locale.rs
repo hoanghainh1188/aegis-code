@@ -141,6 +141,8 @@ pub struct PrStrings {
     pub feature_part: fn(usize, usize, &str, &str) -> String,
     /// The URL of the PR it goes on top of.
     pub stacked_on: fn(&str) -> String,
+    /// A feature's one PR: how many parts, the ticket's URL.
+    pub feature_whole: fn(usize, &str) -> String,
     // The comment on the issue when its job ends (#589); each follows
     // `**aegis-code** ` or `aegis-code `.
     pub pull_request: &'static str,
@@ -162,6 +164,7 @@ pub struct PrStrings {
     pub stop_diagnosed: &'static str,
     /// A plan waits for a person's approval (#675).
     pub stop_awaiting_approval: &'static str,
+    pub stop_integrated: &'static str,
 }
 
 impl PrStrings {
@@ -263,6 +266,25 @@ fn feature_part_ja(at: usize, of: usize, issue: &str, title: &str) -> String {
 }
 fn feature_part_vi(at: usize, of: usize, issue: &str, title: &str) -> String {
     format!("Phần {at} trên {of} của tính năng đã được duyệt ở {issue}: {title}.")
+}
+
+fn feature_whole_en(parts: usize, issue: &str) -> String {
+    format!(
+        "The feature approved on {issue}, in {parts} parts: each passed its own gate and again \
+         once merged on this branch, and the whole branch passed the gate below."
+    )
+}
+fn feature_whole_ja(parts: usize, issue: &str) -> String {
+    format!(
+        "{issue} で承認された機能 ({parts} 件の部分)。各部分は自身のゲートと、このブランチへの\
+         マージ後のゲートを通過し、ブランチ全体も下記のゲートを通過しました。"
+    )
+}
+fn feature_whole_vi(parts: usize, issue: &str) -> String {
+    format!(
+        "Tính năng đã được duyệt ở {issue}, gồm {parts} phần: mỗi phần đã qua gate của riêng nó \
+         và qua gate lần nữa khi merge vào branch này, và cả branch đã qua gate bên dưới."
+    )
 }
 
 fn stacked_on_en(pr: &str) -> String {
@@ -410,6 +432,7 @@ static EN: PrStrings = PrStrings {
     feature_heading: "Feature",
     feature_part: feature_part_en,
     stacked_on: stacked_on_en,
+    feature_whole: feature_whole_en,
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_en,
@@ -426,6 +449,8 @@ static EN: PrStrings = PrStrings {
     stop_expert: "even the strongest model could not fix it",
     stop_diagnosed: "it was diagnosed as needing no code change",
     stop_awaiting_approval: "its plan waits for a person's approval",
+    stop_integrated: "its part is merged into the feature's integration branch; the feature's \
+                      pull request opens once every part is in",
 };
 
 static JA: PrStrings = PrStrings {
@@ -481,6 +506,7 @@ static JA: PrStrings = PrStrings {
     feature_heading: "機能",
     feature_part: feature_part_ja,
     stacked_on: stacked_on_ja,
+    feature_whole: feature_whole_ja,
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_ja,
@@ -498,6 +524,7 @@ static JA: PrStrings = PrStrings {
     stop_expert: "最上位のモデルでも修正できなかった",
     stop_diagnosed: "コード変更は不要と診断された",
     stop_awaiting_approval: "計画が承認待ちである",
+    stop_integrated: "担当部分が機能の統合ブランチにマージされた (すべての部分が揃うと機能の pull request が開かれる)",
 };
 
 static VI: PrStrings = PrStrings {
@@ -553,6 +580,7 @@ static VI: PrStrings = PrStrings {
     feature_heading: "Tính năng",
     feature_part: feature_part_vi,
     stacked_on: stacked_on_vi,
+    feature_whole: feature_whole_vi,
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_vi,
@@ -570,6 +598,8 @@ static VI: PrStrings = PrStrings {
     stop_expert: "ngay cả model mạnh nhất cũng không sửa được",
     stop_diagnosed: "được chẩn đoán là không cần sửa code",
     stop_awaiting_approval: "kế hoạch đang chờ người duyệt",
+    stop_integrated: "phần việc của nó đã được merge vào branch tích hợp của tính năng; pull \
+                      request của tính năng sẽ mở khi đủ mọi phần",
 };
 
 /// Non-ASCII letters only Vietnamese uses; tests check English and
@@ -604,9 +634,10 @@ mod tests {
         for l in [Locale::En, Locale::Ja] {
             let s = l.strings();
             let all = format!(
-                "{s:?}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                "{s:?}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
                 (s.feature_part)(1, 2, "https://x", "t"),
                 (s.stacked_on)("https://x"),
+                (s.feature_whole)(2, "https://x"),
                 (s.rfc)(2, "stacked_prs"),
                 (s.rfc_after)("a"),
                 (s.rfc_revision)(2),

@@ -202,6 +202,7 @@ pub(crate) fn outcome_str(outcome: Outcome) -> &'static str {
         Outcome::StoppedExpertFail => "stopped_expert_fail",
         Outcome::Diagnosed => "diagnosed",
         Outcome::AwaitingApproval => "awaiting_approval",
+        Outcome::Integrated => "integrated",
     }
 }
 
@@ -213,6 +214,7 @@ pub(crate) fn decode_outcome(text: &str) -> Result<Outcome, StoreError> {
         Outcome::StoppedExpertFail,
         Outcome::Diagnosed,
         Outcome::AwaitingApproval,
+        Outcome::Integrated,
     ]
     .into_iter()
     .find(|o| outcome_str(*o) == text)

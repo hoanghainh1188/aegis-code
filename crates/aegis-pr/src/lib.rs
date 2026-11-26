@@ -117,6 +117,22 @@ pub fn push_gated_onto(
     Ok(Pushed { branch, commit })
 }
 
+/// Moves `agent/<issue_id>` on the fork to `commit`, without force (#678):
+/// a feature's integration branch, after a part is merged on its tip. A
+/// branch that moved since its tip was fetched is left as it is, and the
+/// push refused. The commit must be in `repo`'s objects.
+pub fn push_commit(
+    repo: &Path,
+    issue_id: &str,
+    commit: &str,
+    remote: &Remote,
+) -> Result<AgentBranch, PrError> {
+    let branch = AgentBranch::for_issue(issue_id)?;
+    let staging = git::Staging::new(repo)?;
+    git::push(&staging, remote, &branch, commit)?;
+    Ok(branch)
+}
+
 /// Sets `eval/<run_id>` on the fork at `commit`, the base the eval run's
 /// PR targets, so the PR shows only the agent's patch. The commit must be in
 /// `repo`'s objects.

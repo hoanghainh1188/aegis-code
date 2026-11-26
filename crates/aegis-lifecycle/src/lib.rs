@@ -22,6 +22,7 @@ mod error;
 mod eval;
 mod evidence;
 mod feature;
+mod feature_integrate;
 mod feature_job;
 pub mod flags;
 pub mod injection;
@@ -57,6 +58,7 @@ pub use feature::{
     Criterion, FeatureDeliveryMode, FeatureLane, FeaturePlan, FeatureRevision,
     MAX_PLANNED_SUB_JOBS, PlannedSubJob, ProposedPackage, render as render_feature_plan,
 };
+pub use feature_integrate::FeatureDelivery;
 pub use feature_job::{FeatureTask, StackedOn};
 pub use issue::{HiddenTests, IssueInput, IssueSummary, open_github_issues};
 pub use memory::{
@@ -78,8 +80,8 @@ pub use registry::{
 pub use replay::{Replay, ReplayProvider};
 pub use review::ReviewRound;
 pub use run::{
-    IssueReport, Platform, job_dir, run_feature_revision, run_feature_sub_job, run_issue,
-    run_review,
+    IssueReport, Platform, job_dir, run_feature_delivery, run_feature_revision,
+    run_feature_sub_job, run_issue, run_review,
 };
 
 /// The start of a stop reason when the platform, not the agent, ended a

@@ -1,10 +1,13 @@
 //! A sub-job of an approved feature (#678, ADR 0019 §4): one entry of the
-//! plan's DAG, run as a fix loop of its own on the feature's ticket. It
-//! starts from the main branch, or for `stacked_prs` from the branch of the
-//! sub-job before it, and its gate runs the acceptance tests the patch
-//! writes for the plan's criteria (#676), the packages the plan proposed
-//! allowed in. Its PR targets what it started from, so each PR shows only
-//! its own part.
+//! plan's DAG, run as a fix loop of its own on the feature's ticket. Its
+//! gate runs the acceptance tests the patch writes for the plan's criteria
+//! (#676), the packages the plan proposed allowed in.
+//!
+//! As `stacked_prs` it starts from the branch of the sub-job before it, or
+//! the main branch for the first, and its PR targets what it started from,
+//! so each PR shows only its own part. As `integration_pr` it starts from
+//! the feature's integration branch and is merged into it
+//! ([`crate::feature_integrate`]), with no PR of its own.
 
 use aegis_gate::ProposedDependency;
 use serde::{Deserialize, Serialize};
@@ -27,6 +30,11 @@ pub struct FeatureTask {
     /// `stacked_prs`: the PR of the sub-job before it, which this one goes
     /// on top of; `None` for the first.
     pub stacked_on: Option<StackedOn>,
+    /// `integration_pr`: the feature's integration branch, `agent/<id>` of
+    /// the job that planned it, which the sub-job starts from and is
+    /// merged into.
+    #[serde(default)]
+    pub integration_branch: Option<String>,
 }
 
 /// The PR a stacked sub-job goes on top of.
@@ -137,7 +145,7 @@ impl FeatureTask {
                 scope.join(", ")
             ));
         }
-        if self.stacked_on.is_some() {
+        if self.stacked_on.is_some() || self.integration_branch.is_some() {
             out.push_str(
                 "The parts before it are in the tree already; build on them and do not redo them.\n",
             );
@@ -212,6 +220,7 @@ mod tests {
                 branch: "agent/f7-model".into(),
                 pr_url: Some("https://github.com/o/r/pull/41".into()),
             }),
+            integration_branch: None,
         }
     }
 

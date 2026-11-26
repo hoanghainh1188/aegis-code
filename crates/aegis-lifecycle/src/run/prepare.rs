@@ -192,9 +192,12 @@ where
         Ok(first) => first,
         Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
     };
-    let base = match &task.stacked_on {
-        None => issue.base.clone(),
-        Some(on) => Some(fetch_branch(platform, &on.branch, &issue.id).await?),
+    let base = match (&task.stacked_on, &task.integration_branch) {
+        (Some(on), _) => Some(fetch_branch(platform, &on.branch, &issue.id).await?),
+        // The integration branch as it is, with every part this one
+        // depends on; none yet: the main branch.
+        (None, Some(branch)) => fetch_branch(platform, branch, &issue.id).await.ok(),
+        (None, None) => issue.base.clone(),
     };
     let issue = &IssueInput {
         title: title.text,
@@ -207,7 +210,7 @@ where
 
 /// `branch` of the fork as it is now, fetched into the clone under
 /// `refs/aegis/feature/<id>`: its head commit.
-async fn fetch_branch<P, S>(
+pub(crate) async fn fetch_branch<P, S>(
     platform: &Platform<P, S>,
     branch: &str,
     id: &str,

@@ -42,6 +42,9 @@ struct Scripted {
     /// Core's call past its script waits forever, as a call in flight
     /// when a worker dies (#662), instead of failing the test.
     hang_when_done: std::sync::atomic::AtomicBool,
+    /// Run once, as Core gives its last scripted reply: what happens
+    /// elsewhere while the job works (#678).
+    on_last: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl Scripted {
@@ -51,6 +54,7 @@ impl Scripted {
             expert: Mutex::new(expert.into()),
             requests: Mutex::new(vec![]),
             hang_when_done: std::sync::atomic::AtomicBool::new(false),
+            on_last: Mutex::new(None),
         }
     }
 
@@ -138,7 +142,14 @@ impl ModelProvider for Scripted {
             }
             "light" => vec![ContentBlock::text("fix: refuse a fourth item in the cart")],
             "core" => {
-                let next = self.core.lock().unwrap().pop_front();
+                let (next, last) = {
+                    let mut core = self.core.lock().unwrap();
+                    let next = core.pop_front();
+                    (next, core.is_empty())
+                };
+                if last && let Some(on_last) = self.on_last.lock().unwrap().take() {
+                    on_last();
+                }
                 match next {
                     Some(next) => next,
                     None if self
@@ -2818,6 +2829,7 @@ async fn a_stacked_sub_job_opens_its_pr_on_the_one_before() {
             branch: "agent/f7-model".into(),
             pr_url: Some("https://github.com/me/fixture/pull/2".into()),
         }),
+        integration_branch: None,
     };
     let issue = IssueInput {
         id: "f7-api".into(),
@@ -2871,4 +2883,168 @@ async fn a_stacked_sub_job_opens_its_pr_on_the_one_before() {
         "{body}"
     );
     assert!(body.contains("fourth_item_is_refused"), "{body}");
+}
+
+/// Commits `NOTES.md` on `main` of the clone, on no branch of it, and
+/// pushes it to `agent/<id>` of the fork: another part of the feature.
+fn push_other_part(root: &Path, branch: &str) -> String {
+    let clone = root.join("clone");
+    let tree_dir = root.join("other-part");
+    git(
+        &clone,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            tree_dir.to_str().unwrap(),
+            "main",
+        ],
+    );
+    std::fs::write(tree_dir.join("NOTES.md"), "A cart holds three items.\n").unwrap();
+    git(&tree_dir, &["add", "NOTES.md"]);
+    git(
+        &tree_dir,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "notes",
+        ],
+    );
+    let commit = rev_parse(&tree_dir, "HEAD");
+    git(
+        &tree_dir,
+        &[
+            "push",
+            "-q",
+            root.join("fork.git").to_str().unwrap(),
+            &format!("HEAD:refs/heads/{branch}"),
+        ],
+    );
+    git(
+        &clone,
+        &["worktree", "remove", "--force", tree_dir.to_str().unwrap()],
+    );
+    commit
+}
+
+/// #678, one integration PR: a part starts from the main branch (no part
+/// is in yet), and while it works another part moves the integration
+/// branch. Its gate passed, it merges on the branch's new tip, passes the
+/// gate there too, and moves the branch, opening no PR. Then the job that
+/// planned the feature gates the branch against the main branch and opens
+/// the one PR from it, pushing nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn parts_meet_on_the_integration_branch_and_the_feature_opens_one_pr() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let main = rev_parse(&scratch.0.join("clone"), "main");
+    let model = Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]);
+    let other = std::sync::Arc::new(Mutex::new(None));
+    *model.on_last.lock().unwrap() = Some(Box::new({
+        let (root, other) = (scratch.0.clone(), other.clone());
+        move || *other.lock().unwrap() = Some(push_other_part(&root, "agent/fixture-7"))
+    }));
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+    let plan = aegis_lifecycle::FeaturePlan {
+        delivery: aegis_lifecycle::FeatureDeliveryMode::IntegrationPr,
+        ..stacked_plan()
+    };
+    let task = aegis_lifecycle::FeatureTask {
+        plan: plan.clone(),
+        sub_job: "api".into(),
+        delivery: aegis_lifecycle::FeatureDeliveryMode::IntegrationPr,
+        stacked_on: None,
+        integration_branch: Some("agent/fixture-7".into()),
+    };
+    let part = IssueInput {
+        id: "f9-api".into(),
+        ..issue()
+    };
+    let report = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move {
+            aegis_lifecycle::run_feature_sub_job(p, part, task, CancellationToken::new())
+                .await
+                .unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::Integrated, "{report:?}");
+    assert_eq!(report.pr_url, None);
+    let other = other
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the other part pushed");
+
+    // Merged on the other part's tip, gated there, no PR of its own.
+    let fork = scratch.0.join("fork.git");
+    assert_eq!(rev_parse(&fork, "agent/fixture-7^1"), other);
+    assert_eq!(rev_parse(&fork, "agent/fixture-7^2^"), main);
+    let record = p.store.record(&IssueId::parse("f9-api").unwrap()).unwrap();
+    assert_eq!(record.outcome, Some(Outcome::Integrated));
+    assert_eq!(record.gate_runs.len(), 2, "{:?}", record.gate_runs);
+    assert!(record.gate_runs.iter().all(|g| g.passed));
+    assert!(server.received_requests().await.unwrap().is_empty());
+    let patch = report.patch.as_ref().unwrap();
+    assert!(!patch.diff.contains("NOTES.md"), "{}", patch.diff);
+    let merged = rev_parse(&fork, "agent/fixture-7");
+
+    // The feature's one PR, from its plan's ledger waiting for approval.
+    let root = IssueId::parse("fixture-7").unwrap();
+    let mut ledger = aegis_ledger::IssueLedger::open(&p.store, &p.prices, false, root.clone())
+        .await
+        .unwrap();
+    ledger
+        .finished(Outcome::AwaitingApproval, 1.0)
+        .await
+        .unwrap();
+    let delivery = aegis_lifecycle::FeatureDelivery {
+        plan,
+        branch: "agent/fixture-7".into(),
+    };
+    let report = aegis_lifecycle::run_feature_delivery(
+        Arc::clone(&p),
+        issue(),
+        delivery,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+    assert_eq!(
+        rev_parse(&fork, "agent/fixture-7"),
+        merged,
+        "nothing pushed"
+    );
+    let patch = report.patch.as_ref().unwrap();
+    assert!(
+        patch.diff.contains("NOTES.md") && patch.diff.contains("src/lib.rs"),
+        "{}",
+        patch.diff
+    );
+    let record = p.store.record(&root).unwrap();
+    assert_eq!(record.outcome, Some(Outcome::PrOpened));
+    let pr: Value = server.received_requests().await.unwrap()[0]
+        .body_json()
+        .unwrap();
+    assert_eq!(pr["head"], "agent/fixture-7");
+    assert_eq!(pr["base"], "main");
+    let body = pr["body"].as_str().unwrap();
+    assert!(
+        body.starts_with(
+            "## Feature\nThe feature approved on https://github.com/me/fixture/issues/7, in 2 parts"
+        ),
+        "{body}"
+    );
 }

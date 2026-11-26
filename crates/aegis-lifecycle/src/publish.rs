@@ -92,6 +92,9 @@ pub(crate) struct PublishContext<'a> {
     /// A feature's sub-job (#678): its PR targets the branch it is stacked
     /// on, and says what part of the feature it is.
     pub feature: Option<&'a crate::FeatureTask>,
+    /// A feature's one PR (#678): its integration branch, `agent/<id>`,
+    /// is on the fork already at this commit; nothing is pushed.
+    pub whole: Option<(&'a crate::FeatureDelivery, &'a str)>,
 }
 
 pub(crate) async fn publish<P, S>(
@@ -111,6 +114,7 @@ where
         gate,
         flags,
         feature,
+        whole,
     } = fix;
     let cfg = &platform.config;
     let light = &cfg.models.light;
@@ -148,7 +152,13 @@ where
         name: cfg.identity.name.clone(),
         email: cfg.identity.email.clone(),
     };
-    let pushed = push_gated(tree, &issue.id, gate, &commit_message, &identity, &remote)?;
+    let pushed = match whole {
+        Some((_, tip)) => aegis_pr::Pushed {
+            branch: aegis_pr::AgentBranch::for_issue(&issue.id)?,
+            commit: tip.to_owned(),
+        },
+        None => push_gated(tree, &issue.id, gate, &commit_message, &identity, &remote)?,
+    };
     // An eval run's PR targets a branch at the issue's old base, so it shows
     // only the agent's patch (#98).
     let target = match &issue.hidden {
@@ -200,9 +210,10 @@ where
             .collect(),
         locale: cfg.repo.locale,
     });
-    let body = match feature {
-        Some(task) => task.pr_section(&issue.url, cfg.repo.locale) + &body,
-        None => body,
+    let body = match (feature, whole) {
+        (Some(task), _) => task.pr_section(&issue.url, cfg.repo.locale) + &body,
+        (None, Some((delivery, _))) => delivery.pr_section(&issue.url, cfg.repo.locale) + &body,
+        (None, None) => body,
     };
     let body = masked(ledger, "PR", &body).await?;
     let title = commit_message.lines().next().unwrap_or("fix").to_owned();
@@ -211,6 +222,8 @@ where
         .await
     {
         Ok(url) => Ok(Published { url, note: None }),
+        // The feature's branch holds its merged parts: it stays.
+        Err(e) if whole.is_some() => Err(e.into()),
         Err(e) => {
             // No PR, no branch: the fork is left as it was.
             let _ = abandon(tree, &pushed, &remote);

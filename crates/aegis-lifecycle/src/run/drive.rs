@@ -496,6 +496,22 @@ where
                     plan: None,
                 });
             }
+            // A part of an integration PR (#678): merged into the
+            // feature's branch, no PR of its own.
+            if let Finish::Feature(task) = finish
+                && task.integration_branch.is_some()
+            {
+                let part = crate::feature_integrate::Part {
+                    profiles,
+                    issue,
+                    task,
+                    answer: &answer,
+                    report: &report,
+                    policy,
+                    job_dir,
+                };
+                return crate::feature_integrate::integrate(platform, ledger, part, cancel).await;
+            }
             let pr_url = if cfg.run.open_prs {
                 let fix = PublishContext {
                     profiles,
@@ -508,6 +524,7 @@ where
                         Finish::Feature(task) => Some(task.as_ref()),
                         _ => None,
                     },
+                    whole: None,
                 };
                 let published = publish(platform, ledger, fix).await?;
                 Some(published.url)
