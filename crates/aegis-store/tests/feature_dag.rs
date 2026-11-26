@@ -8,8 +8,8 @@ use aegis_ledger::{IssueId, LedgerEvent, LedgerStore, Outcome, Tier, TokenCounts
 use aegis_store::testing::test_db;
 use aegis_store::{
     Actor, AttemptEnd, AuditFilter, Delivered, DeliveryMode, EPIC_BUDGET_SPENT, Job, JobId,
-    JobSource, JobStatus, ModeName, NewDelivery, NewJob, NewRepo, Page, RepoId, Store, StoreError,
-    WebhookSource,
+    JobSource, JobStatus, ModeName, NewDelivery, NewJob, NewRepo, Page, PlannedJob, RepoId, Store,
+    StoreError, WebhookSource, sub_job_ledger_key,
 };
 
 async fn repo(s: &Store, slug: &str) -> RepoId {
@@ -457,5 +457,123 @@ async fn the_design_gate_approves_once_and_caps_revisions() {
         .filter(|a| a == "job.revise" || a == "job.approve")
         .collect();
     assert_eq!(log, ["job.approve", "job.revise"], "newest first");
+    db.drop().await;
+}
+
+fn planned(key: &str, depends_on: &[&str]) -> PlannedJob {
+    PlannedJob {
+        key: key.into(),
+        depends_on: depends_on.iter().map(|d| (*d).into()).collect(),
+    }
+}
+
+#[tokio::test]
+async fn an_approval_queues_the_plan_s_sub_jobs_in_its_order() {
+    // #678: the sub-jobs are made with the approval, on the feature's
+    // ticket, each claimed once the one before opened its PR.
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = repo(s, "shop").await;
+    let root = s.create_job(&job(shop, 1, "shop-1")).await.unwrap();
+    run(s, root.id, Outcome::AwaitingApproval).await;
+
+    // A plan that is not a DAG of earlier sub-jobs: nothing is made, and
+    // the plan is not approved.
+    for bad in [
+        vec![planned("api", &["model"]), planned("model", &[])],
+        vec![planned("model", &[]), planned("model", &[])],
+    ] {
+        let err = s
+            .approve_feature_by(root.id, None, &bad, &Actor::system())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Invalid { .. }), "{err}");
+        assert!(s.sub_jobs(root.id).await.unwrap().is_empty());
+        assert_eq!(s.approval(root.id).await.unwrap(), None);
+    }
+
+    let plan = [
+        planned("model", &[]),
+        planned("api", &["model"]),
+        planned("ui", &["api"]),
+    ];
+    let approved = s
+        .approve_feature_by(
+            root.id,
+            Some(DeliveryMode::StackedPrs),
+            &plan,
+            &Actor::system(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(approved.outcome, Some(Outcome::AwaitingApproval));
+    let subs = s.sub_jobs(root.id).await.unwrap();
+    let keys: Vec<(String, Option<String>)> = {
+        let mut keys = Vec::new();
+        for j in &subs {
+            keys.push((
+                j.ledger_key.as_str().to_owned(),
+                s.plan_key(j.id).await.unwrap(),
+            ));
+        }
+        keys
+    };
+    let key = |k: &str| sub_job_ledger_key(root.id, k).unwrap().as_str().to_owned();
+    assert_eq!(
+        keys,
+        vec![
+            (key("model"), Some("model".into())),
+            (key("api"), Some("api".into())),
+            (key("ui"), Some("ui".into())),
+        ]
+    );
+    assert!(
+        subs.iter()
+            .all(|j| j.issue_ref == root.issue_ref && j.source == root.source)
+    );
+    assert_eq!(
+        s.job_links(subs[1].id).await.unwrap().depends_on,
+        vec![subs[0].id]
+    );
+    assert_eq!(s.plan_key(root.id).await.unwrap(), None);
+    let audit = s
+        .audit_log_where(&AuditFilter::default(), Page::first(50))
+        .await
+        .unwrap();
+    let approve = audit
+        .items
+        .iter()
+        .find(|e| e.action == "job.approve")
+        .unwrap();
+    assert_eq!(
+        approve.detail["sub_jobs"],
+        serde_json::json!(subs.iter().map(|j| j.id.0).collect::<Vec<_>>())
+    );
+
+    // In order; a sub-job that fails and runs again stays the same part.
+    let first = claim(s).await.unwrap();
+    assert_eq!(first.job.id, subs[0].id);
+    assert_eq!(claim_id(s).await, None, "api waits for model");
+    s.finish_attempt(
+        &first.run,
+        "w",
+        &AttemptEnd::Failed {
+            error: "the sandbox died".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let again = s.retry_job_by(subs[0].id, &Actor::system()).await.unwrap();
+    assert_eq!(s.plan_key(again.id).await.unwrap(), Some("model".into()));
+    run(s, again.id, Outcome::PrOpened).await;
+    run(s, subs[1].id, Outcome::PrOpened).await;
+    run(s, subs[2].id, Outcome::PrOpened).await;
+
+    // Approved once: no second set.
+    let err = s
+        .approve_feature_by(root.id, None, &plan, &Actor::system())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::Conflict(_)), "{err}");
     db.drop().await;
 }

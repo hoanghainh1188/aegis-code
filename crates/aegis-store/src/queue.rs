@@ -535,7 +535,7 @@ impl Store {
         let work = async {
             let old = sqlx::query!(
                 "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                        status, review_of, review_round, parent_job_id
+                        status, review_of, review_round, parent_job_id, plan_key
                  FROM jobs WHERE id = $1 FOR UPDATE",
                 job.0,
             )
@@ -565,8 +565,8 @@ impl Store {
             let row = sqlx::query_as!(
                 JobRow,
                 "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                                   retry_of, review_of, review_round, parent_job_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                   retry_of, review_of, review_round, parent_job_id, plan_key)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                  RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
                            status, outcome, attempts, locked_by, locked_until, created_at,
                            updated_at, run_after, retries, cancel_requested, reason, pr_url,
@@ -581,8 +581,10 @@ impl Store {
                 // A review round run again is the same round of the same PR.
                 old.review_of,
                 old.review_round,
-                // A sub-job run again stays under its parent (#675).
+                // A sub-job run again stays under its parent (#675), the
+                // same sub-job of its plan (#678).
                 old.parent_job_id,
+                old.plan_key,
             )
             .fetch_one(&mut *tx)
             .await

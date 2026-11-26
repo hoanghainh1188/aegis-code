@@ -1523,9 +1523,7 @@ async fn design_gate(
     let actor = aegis_store::Actor::forge_user(source.as_str(), sender);
     let done = match command {
         GateCommand::Approve(mode) => match mode.map(crate::feature_gate::parse_mode).transpose() {
-            Ok(mode) => hooks
-                .store
-                .approve_job_by(plan.id, mode, &actor)
+            Ok(mode) => crate::feature_gate::approve(&hooks.store, plan.id, mode, &actor)
                 .await
                 .map(|job| {
                     (

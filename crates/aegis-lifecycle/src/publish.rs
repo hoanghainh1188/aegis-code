@@ -89,6 +89,9 @@ pub(crate) struct PublishContext<'a> {
     pub answer: &'a FinalAnswer,
     pub gate: &'a GateReport,
     pub flags: &'a [InputFlag],
+    /// A feature's sub-job (#678): its PR targets the branch it is stacked
+    /// on, and says what part of the feature it is.
+    pub feature: Option<&'a crate::FeatureTask>,
 }
 
 pub(crate) async fn publish<P, S>(
@@ -107,6 +110,7 @@ where
         answer,
         gate,
         flags,
+        feature,
     } = fix;
     let cfg = &platform.config;
     let light = &cfg.models.light;
@@ -151,7 +155,10 @@ where
         Some(_) => push_eval_base(tree, &issue.id, &gate.base, &remote)?
             .name()
             .to_owned(),
-        None => cfg.repo.base.clone(),
+        None => match feature.and_then(|f| f.stacked_on.as_ref()) {
+            Some(on) => on.branch.clone(),
+            None => cfg.repo.base.clone(),
+        },
     };
 
     // The sources were checked before the gate (#508); each links to its
@@ -193,6 +200,10 @@ where
             .collect(),
         locale: cfg.repo.locale,
     });
+    let body = match feature {
+        Some(task) => task.pr_section(&issue.url, cfg.repo.locale) + &body,
+        None => body,
+    };
     let body = masked(ledger, "PR", &body).await?;
     let title = commit_message.lines().next().unwrap_or("fix").to_owned();
     match forge

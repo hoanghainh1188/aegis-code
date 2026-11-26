@@ -133,6 +133,107 @@ where
     .await
 }
 
+/// A feature's sub-job (#678): no triage, the ticket's; it starts from the
+/// branch of the sub-job it is stacked on, fetched from the fork, or from
+/// the main branch, and is told its part of the plan.
+pub(super) async fn sub_job_and_work<P, S>(
+    platform: &Platform<P, S>,
+    ledger: &mut IssueLedger<'_, S>,
+    issue: &IssueInput,
+    task: crate::FeatureTask,
+    cancel: &CancellationToken,
+) -> Result<Ending, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    let cfg = &platform.config;
+    if cancel.is_cancelled() {
+        return Ok(Ending::stop(Outcome::StoppedSteps, "cancelled"));
+    }
+    let finish = Finish::Feature(Box::new(task));
+    let Finish::Feature(task) = &finish else {
+        unreachable!("just made")
+    };
+    let profiles = cfg.repo.profiles(&platform.profiles)?;
+    // Gone on from its checkpoint (#662), from the commit it started at.
+    let record = ledger.record();
+    let (id, calls) = (record.issue_id.clone(), record.model_calls);
+    if let Some(resume) = checkpoint::load(&platform.store, &id, &cfg.repo.path, calls).await {
+        let issue = &IssueInput {
+            title: redact(&issue.title).text,
+            body: redact(&issue.body).text,
+            ..issue.clone()
+        };
+        return work_from(
+            platform,
+            ledger,
+            &profiles,
+            issue,
+            String::new(),
+            &finish,
+            Some(resume),
+            cancel,
+        )
+        .await;
+    }
+    let (title, body) = (redact(&issue.title), redact(&issue.body));
+    ledger
+        .secrets_redacted(count(title.count() + body.count()))
+        .await?;
+    ledger.issue_read(&title.text, &issue.url).await?;
+    ledger.ticket_meta(ticket_meta(cfg, issue)).await?;
+    ledger.classified(IssueKind::Feature).await?;
+    let first = match task.first_message(&IssueInput {
+        title: title.text.clone(),
+        body: body.text.clone(),
+        ..issue.clone()
+    }) {
+        Ok(first) => first,
+        Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
+    };
+    let base = match &task.stacked_on {
+        None => issue.base.clone(),
+        Some(on) => Some(fetch_branch(platform, &on.branch, &issue.id).await?),
+    };
+    let issue = &IssueInput {
+        title: title.text,
+        body: body.text,
+        base,
+        ..issue.clone()
+    };
+    work(platform, ledger, &profiles, issue, first, &finish, cancel).await
+}
+
+/// `branch` of the fork as it is now, fetched into the clone under
+/// `refs/aegis/feature/<id>`: its head commit.
+async fn fetch_branch<P, S>(
+    platform: &Platform<P, S>,
+    branch: &str,
+    id: &str,
+) -> Result<String, LifecycleError> {
+    let cfg = &platform.config;
+    let remote = fork_remote(platform).await?;
+    let clone = cfg.repo.path.clone();
+    let branch = branch.to_owned();
+    let url = remote.url().to_owned();
+    let auth = remote
+        .credentials()
+        .filter(|(_, t)| !t.is_empty())
+        .map(|(u, t)| (u, t.to_owned()));
+    let into = format!("feature/{id}");
+    tokio::task::spawn_blocking(move || {
+        let source = crate::clone::Source {
+            url: &url,
+            token: auth.as_ref().map(|(_, t)| t.as_str()),
+            user: auth.as_ref().map_or(aegis_pr::GITHUB_USER, |(u, _)| u),
+        };
+        crate::clone::fetch_ref(&clone, source, &branch, &into)
+    })
+    .await
+    .map_err(|e| LifecycleError::Config(format!("fetching the branch it goes on: {e}")))?
+}
+
 /// Steps 2–10 on the job's own worktree.
 pub(crate) async fn work<P, S>(
     platform: &Platform<P, S>,
@@ -279,19 +380,37 @@ where
     // A CVE job (#501, ADR 0015): the platform raises the package; the
     // gate checks that first, and the agent works only if it fails. A
     // resumed job's upgrade, if any, is in its tree already.
-    let (policy, prepared, first_message) = match issue.cve.as_ref().filter(|_| resumed.is_none()) {
-        None => (DependencyPolicy::Locked, None, first_message),
-        Some(target) => {
-            let root = &profiles.parts()[0];
-            let upgrade =
-                match cve::upgrade(cfg, root, env.root(), env.job_dir(), target, cancel).await? {
-                    Ok(upgrade) => upgrade,
-                    Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
-                };
-            let message = cve::first_message(target, &upgrade);
-            let answer = cve::answer(target, &upgrade);
-            (DependencyPolicy::Upgrade(upgrade), Some(answer), message)
-        }
+    let (dependencies, prepared, first_message) =
+        match issue.cve.as_ref().filter(|_| resumed.is_none()) {
+            // A feature's sub-job (#678): the packages its plan proposed, and
+            // its acceptance tests.
+            None => match finish {
+                Finish::Feature(task) => (
+                    DependencyPolicy::AllowProposed(task.proposed()),
+                    None,
+                    first_message,
+                ),
+                _ => (DependencyPolicy::Locked, None, first_message),
+            },
+            Some(target) => {
+                let root = &profiles.parts()[0];
+                let upgrade =
+                    match cve::upgrade(cfg, root, env.root(), env.job_dir(), target, cancel).await?
+                    {
+                        Ok(upgrade) => upgrade,
+                        Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
+                    };
+                let message = cve::first_message(target, &upgrade);
+                let answer = cve::answer(target, &upgrade);
+                (DependencyPolicy::Upgrade(upgrade), Some(answer), message)
+            }
+        };
+    let policy = GatePolicy {
+        dependencies,
+        tests: match finish {
+            Finish::Feature(_) => aegis_gate::TestMode::Acceptance,
+            _ => aegis_gate::TestMode::Reproduce,
+        },
     };
     let first_message = first_message + &crate::language::directive(cfg.repo.locale);
     let tools = McpTools::connect(&env.tool_servers(cfg, profiles)?).await?;
@@ -310,8 +429,8 @@ where
     );
     let issue_id = ledger.record().issue_id.clone();
     // Checkpoints only where a job can go on from one (see `checkpoint`).
-    let saving =
-        (matches!(finish, Finish::Publish) && issue.cve.is_none()).then_some(checkpoint::Saving {
+    let saving = (matches!(finish, Finish::Publish | Finish::Feature(_)) && issue.cve.is_none())
+        .then_some(checkpoint::Saving {
             issue: &issue_id,
             base,
             start,

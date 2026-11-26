@@ -234,7 +234,7 @@ where
                     job_dir: self.job_dir,
                 },
                 &answer,
-                &aegis_gate::DependencyPolicy::Locked,
+                &crate::run::GatePolicy::locked(),
                 self.cancel,
             )
             .await?;
@@ -477,6 +477,7 @@ where
         // A Sonar batch's input is the analyser's own messages, and its
         // groups ran as jobs of their own: nothing here to flag (#444).
         flags: &[],
+        feature: None,
     };
     let published = publish(platform, ledger, fix).await?;
     let patch = crate::job::patch(checkout.path(), &report.base, &report.tree)?;

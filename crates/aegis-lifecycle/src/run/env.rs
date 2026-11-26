@@ -13,7 +13,9 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use aegis_gate::{DependencyPolicy, GateReport};
+use aegis_gate::GateReport;
+
+use super::GatePolicy;
 use aegis_lang::RepoProfiles;
 use aegis_orchestrator::McpServerSpec;
 use tokio_util::sync::CancellationToken;
@@ -58,7 +60,7 @@ pub(crate) trait ExecutionEnv: Send + Sync {
         profiles: &RepoProfiles,
         base: &str,
         answer: &FinalAnswer,
-        policy: &DependencyPolicy,
+        policy: &GatePolicy,
         cancel: &CancellationToken,
     ) -> impl Future<Output = Result<GateReport, LifecycleError>> + Send;
 
@@ -156,7 +158,7 @@ impl ExecutionEnv for LocalExecutionEnv {
         profiles: &RepoProfiles,
         base: &str,
         answer: &FinalAnswer,
-        policy: &DependencyPolicy,
+        policy: &GatePolicy,
         cancel: &CancellationToken,
     ) -> Result<GateReport, LifecycleError> {
         let job = JobTree {
@@ -338,7 +340,7 @@ impl ExecutionEnv for RemoteExecutionEnv {
         profiles: &RepoProfiles,
         base: &str,
         answer: &FinalAnswer,
-        policy: &DependencyPolicy,
+        policy: &GatePolicy,
         cancel: &CancellationToken,
     ) -> Result<GateReport, LifecycleError> {
         self.local
@@ -479,7 +481,7 @@ impl ExecutionEnv for JobEnv {
         profiles: &RepoProfiles,
         base: &str,
         answer: &FinalAnswer,
-        policy: &DependencyPolicy,
+        policy: &GatePolicy,
         cancel: &CancellationToken,
     ) -> Result<GateReport, LifecycleError> {
         match self {

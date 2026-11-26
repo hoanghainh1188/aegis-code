@@ -78,7 +78,7 @@ pub(super) struct DriveContext<'a, E> {
     /// The commit the patch is checked against.
     pub(super) base: &'a str,
     pub(super) finish: &'a Finish,
-    pub(super) policy: &'a DependencyPolicy,
+    pub(super) policy: &'a GatePolicy,
     /// Where the job's checkpoints go (#662); `None`: none are kept.
     pub(super) saving: Option<checkpoint::Saving<'a>>,
 }
@@ -504,6 +504,10 @@ where
                     answer: &answer,
                     gate: &report,
                     flags: &flags,
+                    feature: match finish {
+                        Finish::Feature(task) => Some(task.as_ref()),
+                        _ => None,
+                    },
                 };
                 let published = publish(platform, ledger, fix).await?;
                 Some(published.url)

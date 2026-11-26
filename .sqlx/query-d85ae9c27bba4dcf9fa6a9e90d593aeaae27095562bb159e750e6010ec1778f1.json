@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                        status, review_of, review_round, parent_job_id\n                 FROM jobs WHERE id = $1 FOR UPDATE",
+  "query": "SELECT repo_id, issue_ref, ledger_key, source, priority, sla_deadline,\n                        status, review_of, review_round, parent_job_id, plan_key\n                 FROM jobs WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -112,6 +112,17 @@
             "name": "parent_job_id"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "plan_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "plan_key"
+          }
+        }
       }
     ],
     "parameters": {
@@ -129,8 +140,9 @@
       false,
       true,
       false,
+      true,
       true
     ]
   },
-  "hash": "1d88d88885b1719f61a41c1eb74c1154ed582fab1129d17cd95c60808e21c186"
+  "hash": "d85ae9c27bba4dcf9fa6a9e90d593aeaae27095562bb159e750e6010ec1778f1"
 }
