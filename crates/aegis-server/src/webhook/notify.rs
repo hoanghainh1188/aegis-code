@@ -771,6 +771,7 @@ fn stop(outcome: Outcome, locale: Locale) -> &'static str {
         Outcome::StoppedExpertFail => t.stop_expert,
         Outcome::Diagnosed => t.stop_diagnosed,
         Outcome::AwaitingApproval => t.stop_awaiting_approval,
+        Outcome::Integrated => t.stop_integrated,
     }
 }
 

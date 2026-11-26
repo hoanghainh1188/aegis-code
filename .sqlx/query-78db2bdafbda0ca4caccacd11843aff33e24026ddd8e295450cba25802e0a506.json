@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs p SET status = 'queued', outcome = NULL, reason = NULL,\n                           run_after = now(), updated_at = now()\n         WHERE p.id = $1 AND p.status = 'done' AND p.outcome = 'awaiting_approval'\n           AND EXISTS (SELECT 1 FROM job_approvals a WHERE a.job_id = p.id)\n           AND NOT EXISTS (\n               SELECT 1 FROM jobs s\n               WHERE s.parent_job_id = p.id\n                 AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.retry_of = s.id)\n                 AND (s.status <> 'done' OR s.outcome IS DISTINCT FROM 'integrated'))\n           AND NOT EXISTS (\n               SELECT 1 FROM jobs o\n               WHERE o.repo_id = p.repo_id AND o.issue_ref = p.issue_ref\n                 AND o.parent_job_id IS NULL AND o.id <> p.id\n                 AND o.status IN ('queued', 'running'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "78db2bdafbda0ca4caccacd11843aff33e24026ddd8e295450cba25802e0a506"
+}

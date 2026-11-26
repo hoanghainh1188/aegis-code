@@ -519,8 +519,7 @@ fn two_part_plan(delivery: &str) -> Value {
 }
 
 /// #678: approving a plan delivered as stacked PRs queues its sub-jobs,
-/// each on the one before; one delivered as one integration PR queues
-/// none yet.
+/// each on the one before.
 #[tokio::test]
 async fn an_approved_stacked_plan_queues_its_sub_jobs() {
     let Some(db) = test_db().await else { return };
@@ -528,10 +527,6 @@ async fn an_approved_stacked_plan_queues_its_sub_jobs() {
     let shop = repo(s).await;
     let stacked = ended(s, shop, 1, Outcome::AwaitingApproval).await;
     s.save_feature_plan(stacked.id, &two_part_plan("integration_pr"))
-        .await
-        .unwrap();
-    let integrated = ended(s, shop, 2, Outcome::AwaitingApproval).await;
-    s.save_feature_plan(integrated.id, &two_part_plan("integration_pr"))
         .await
         .unwrap();
     let app = router(s.clone(), common::auth(s));
@@ -619,9 +614,60 @@ async fn an_approved_stacked_plan_queues_its_sub_jobs() {
         .unwrap();
     assert!(sub_job_task(s, &by_hand).await.unwrap().is_none());
 
-    let (status, body) = approve(&app, &maintainer, &integrated).await;
+    db.drop().await;
+}
+
+/// #678: approving a plan delivered as one integration PR queues its
+/// sub-jobs as its DAG says, each merged into the feature's own branch;
+/// once every part is in, the plan is queued for the feature's PR.
+#[tokio::test]
+async fn an_approved_integration_plan_merges_its_parts_then_opens_one_pr() {
+    use aegis_server::feature_gate::{feature_delivery, sub_job_task};
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = repo(s).await;
+    let root = ended(s, shop, 2, Outcome::AwaitingApproval).await;
+    s.save_feature_plan(root.id, &two_part_plan("integration_pr"))
+        .await
+        .unwrap();
+    let app = router(s.clone(), common::auth(s));
+    let maintainer = common::token(s, "lead-bot").await;
+    common::grant(s, "lead-bot", shop, RepoRole::Maintainer).await;
+    let (status, body) = approve(&app, &maintainer, &root).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(s.sub_jobs(integrated.id).await.unwrap().is_empty());
-    assert!(s.approval(integrated.id).await.unwrap().is_some());
+    let subs = s.sub_jobs(root.id).await.unwrap();
+    assert_eq!(subs.len(), 2);
+    // `api` depends on `model`, as the plan says.
+    assert_eq!(
+        s.job_links(subs[1].id).await.unwrap().depends_on,
+        vec![subs[0].id]
+    );
+    let task = sub_job_task(s, &subs[1]).await.unwrap().unwrap();
+    assert_eq!(
+        task.delivery,
+        aegis_lifecycle::FeatureDeliveryMode::IntegrationPr
+    );
+    assert_eq!(task.integration_branch.as_deref(), Some("agent/shop-2"));
+    assert_eq!(task.stacked_on, None);
+    assert!(feature_delivery(s, &root).await.unwrap().is_none());
+
+    for sub in &subs {
+        let claim = s
+            .claim_job("w", Duration::from_secs(60), 10)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(claim.job.id, sub.id);
+        s.finish_attempt(&claim.run, "w", &done(Outcome::Integrated))
+            .await
+            .unwrap();
+    }
+    let queued = s.job(root.id).await.unwrap().unwrap();
+    assert_eq!(queued.status, JobStatus::Queued);
+    let delivery = feature_delivery(s, &root).await.unwrap().unwrap();
+    assert_eq!(delivery.branch, "agent/shop-2");
+    assert_eq!(delivery.plan.sub_jobs.len(), 2);
+    // A sub-job, or a plan delivered as stacked PRs, opens no such PR.
+    assert!(feature_delivery(s, &subs[0]).await.unwrap().is_none());
     db.drop().await;
 }

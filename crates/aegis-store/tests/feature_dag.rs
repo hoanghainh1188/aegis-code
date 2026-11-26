@@ -577,3 +577,68 @@ async fn an_approval_queues_the_plan_s_sub_jobs_in_its_order() {
     assert!(matches!(err, StoreError::Conflict(_)), "{err}");
     db.drop().await;
 }
+
+#[tokio::test]
+async fn the_last_part_merged_queues_the_feature_s_pr() {
+    // #678: as one integration PR, a part ends `integrated`; the parts
+    // after it are claimed then, and once the last run of every part is
+    // in, the job that planned the feature is queued for its one PR.
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = repo(s, "shop").await;
+    let root = s.create_job(&job(shop, 1, "shop-1")).await.unwrap();
+    run(s, root.id, Outcome::AwaitingApproval).await;
+    let plan = [
+        planned("model", &[]),
+        planned("api", &[]),
+        planned("ui", &["model"]),
+    ];
+    s.approve_feature_by(
+        root.id,
+        Some(DeliveryMode::IntegrationPr),
+        &plan,
+        &Actor::system(),
+    )
+    .await
+    .unwrap();
+    let subs = s.sub_jobs(root.id).await.unwrap();
+    assert!(!s.feature_integrated(root.id).await.unwrap());
+
+    // `model` and `api` side by side; `ui` waits for `model`.
+    let model = claim(s).await.unwrap();
+    let api = claim(s).await.unwrap();
+    assert_eq!((model.job.id, api.job.id), (subs[0].id, subs[1].id));
+    assert_eq!(claim_id(s).await, None, "ui waits for model");
+    s.finish_attempt(&model.run, "w", &done(Outcome::Integrated))
+        .await
+        .unwrap();
+    let ui = claim(s).await.unwrap();
+    assert_eq!(ui.job.id, subs[2].id);
+
+    // `api` fails and runs again: its first run no longer counts.
+    s.finish_attempt(
+        &api.run,
+        "w",
+        &AttemptEnd::Failed {
+            error: "the sandbox died".into(),
+        },
+    )
+    .await
+    .unwrap();
+    s.finish_attempt(&ui.run, "w", &done(Outcome::Integrated))
+        .await
+        .unwrap();
+    let waiting = s.job(root.id).await.unwrap().unwrap();
+    assert_eq!(waiting.outcome, Some(Outcome::AwaitingApproval));
+    assert!(!s.feature_integrated(root.id).await.unwrap());
+    let again = s.retry_job_by(subs[1].id, &Actor::system()).await.unwrap();
+    run(s, again.id, Outcome::Integrated).await;
+
+    // Every part in: the plan is queued for its PR, approved still.
+    assert!(s.feature_integrated(root.id).await.unwrap());
+    let queued = s.job(root.id).await.unwrap().unwrap();
+    assert_eq!((queued.status, queued.outcome), (JobStatus::Queued, None));
+    assert!(s.approval(root.id).await.unwrap().is_some());
+    assert_eq!(claim_id(s).await, Some(root.id));
+    db.drop().await;
+}

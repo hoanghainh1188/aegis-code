@@ -72,9 +72,9 @@ impl Done {
                 "Diagnosis confirmed: the repo's next jobs are given it as a memory."
             }
             Self::Approved => {
-                "Plan approved, to be delivered as it recommends. Stacked PRs: its sub-jobs are \
-                 queued, each opening a PR on top of the one before. One integration PR: its \
-                 sub-jobs are not run yet, that comes with a later release."
+                "Plan approved, to be delivered as it recommends, and its sub-jobs queued. Stacked \
+                 PRs: each opens a PR on top of the one before. One integration PR: each is \
+                 merged into the feature's branch, and the feature's PR opens once all are in."
             }
         }
     }

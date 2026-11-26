@@ -211,12 +211,29 @@ where
     run(platform, issue, Stage::SubJob(Box::new(task)), cancel).await
 }
 
+/// Opens the one PR of `issue`'s feature (#678), delivered as an
+/// integration PR, once every part is merged into its integration branch:
+/// under the same ledger as its plan, which must be waiting, approved.
+pub async fn run_feature_delivery<P, S>(
+    platform: Arc<Platform<P, S>>,
+    issue: IssueInput,
+    delivery: crate::FeatureDelivery,
+    cancel: CancellationToken,
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    run(platform, issue, Stage::Delivery(Box::new(delivery)), cancel).await
+}
+
 /// What a run does.
 enum Stage {
     Issue,
     Review(ReviewRound),
     Revision(Box<crate::FeatureRevision>),
     SubJob(Box<crate::FeatureTask>),
+    Delivery(Box<crate::FeatureDelivery>),
 }
 
 /// Runs a review round (#243) of `issue`'s PR under `issue.id`, its own
@@ -256,8 +273,9 @@ where
     };
     let mut ledger =
         IssueLedger::open(&platform.store, &platform.prices, regional, issue_id).await?;
-    // A plan waiting for approval goes on when it is revised (#677).
-    let revising = matches!(stage, Stage::Revision(_));
+    // A plan waiting for approval goes on when it is revised (#677), or
+    // when its feature's one PR is opened (#678).
+    let revising = matches!(stage, Stage::Revision(_) | Stage::Delivery(_));
     match ledger.record().outcome {
         None => {}
         Some(Outcome::AwaitingApproval) if revising => {}
@@ -281,6 +299,10 @@ where
         }
         Stage::Revision(revision) => {
             crate::feature::revise(&platform, &mut ledger, &issue, &revision).await
+        }
+        Stage::Delivery(delivery) => {
+            crate::feature_integrate::deliver(&platform, &mut ledger, &issue, &delivery, &cancel)
+                .await
         }
         Stage::SubJob(task) => {
             sub_job_and_work(&platform, &mut ledger, &issue, *task, &cancel).await

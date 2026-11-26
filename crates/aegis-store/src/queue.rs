@@ -238,12 +238,16 @@ impl Store {
                             OR coalesce(tb.n, 0) < t.max_concurrent_jobs)
                        AND j.repo_id <> ALL($4)
                        -- A sub-job waits for the jobs it depends on to open
-                       -- their PR (#675); it holds back no other job.
+                       -- their PR (#675), or to be merged into their
+                       -- feature's integration branch (#678); it holds back
+                       -- no other job.
                        AND NOT EXISTS (
                            SELECT 1 FROM job_dependencies d
                            JOIN jobs p ON p.id = d.depends_on
                            WHERE d.job_id = j.id
-                             AND (p.status, p.outcome) IS DISTINCT FROM ('done', 'pr_opened'))
+                             AND (p.status <> 'done'
+                                  OR p.outcome IS NULL
+                                  OR p.outcome NOT IN ('pr_opened', 'integrated')))
                        AND (j.parent_job_id IS NULL OR j.parent_job_id <> ALL($7))
                        AND (SELECT count(*) FROM jobs
                             WHERE status = 'running' AND locked_by = $1) < $3
@@ -434,6 +438,11 @@ impl Store {
             )
             .fetch_one(&mut *tx)
             .await?;
+            // The last part of a feature merged into its integration
+            // branch (#678): the job that planned it opens the one PR.
+            if outcome == Some("integrated") {
+                crate::dag::deliver_when_integrated(&mut tx, run.job_id).await?;
+            }
             row.try_into()
         }
         .await;

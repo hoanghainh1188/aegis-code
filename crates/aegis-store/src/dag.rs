@@ -76,6 +76,24 @@ impl Store {
             .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))
     }
 
+    /// Whether every part of the feature `parent` planned is merged into
+    /// its integration branch (#678): it has sub-jobs, and the last run of
+    /// each ended `integrated`.
+    pub async fn feature_integrated(&self, parent: JobId) -> Result<bool, StoreError> {
+        Ok(sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM jobs WHERE parent_job_id = $1)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM jobs s
+                          WHERE s.parent_job_id = $1
+                            AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.retry_of = s.id)
+                            AND (s.status <> 'done' OR s.outcome IS DISTINCT FROM 'integrated'))
+               AS "integrated!""#,
+            parent.0,
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// The sub-jobs `parent` planned, in the order they were made.
     pub async fn sub_jobs(&self, parent: JobId) -> Result<Vec<Job>, StoreError> {
         sqlx::query_as!(
@@ -120,6 +138,50 @@ impl Store {
         .map(Job::try_from)
         .transpose()
     }
+}
+
+/// When `job`, a sub-job just ended `integrated`, is the last part of its
+/// feature to be merged (#678): queues the job that planned it again, in
+/// `conn`'s transaction, to open the feature's one PR. Only an approved
+/// plan that still waits, whose every sub-job (the last run of each) is
+/// integrated, and whose ticket has no other live job.
+pub(crate) async fn deliver_when_integrated(
+    conn: &mut sqlx::PgConnection,
+    job: JobId,
+) -> Result<(), StoreError> {
+    let Some(parent) = sqlx::query_scalar!("SELECT parent_job_id FROM jobs WHERE id = $1", job.0)
+        .fetch_one(&mut *conn)
+        .await?
+    else {
+        return Ok(());
+    };
+    // One part at a time: the last to commit sees every other one.
+    sqlx::query!("SELECT id FROM jobs WHERE id = $1 FOR UPDATE", parent)
+        .fetch_one(&mut *conn)
+        .await?;
+    let queued = sqlx::query!(
+        "UPDATE jobs p SET status = 'queued', outcome = NULL, reason = NULL,
+                           run_after = now(), updated_at = now()
+         WHERE p.id = $1 AND p.status = 'done' AND p.outcome = 'awaiting_approval'
+           AND EXISTS (SELECT 1 FROM job_approvals a WHERE a.job_id = p.id)
+           AND NOT EXISTS (
+               SELECT 1 FROM jobs s
+               WHERE s.parent_job_id = p.id
+                 AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.retry_of = s.id)
+                 AND (s.status <> 'done' OR s.outcome IS DISTINCT FROM 'integrated'))
+           AND NOT EXISTS (
+               SELECT 1 FROM jobs o
+               WHERE o.repo_id = p.repo_id AND o.issue_ref = p.issue_ref
+                 AND o.parent_job_id IS NULL AND o.id <> p.id
+                 AND o.status IN ('queued', 'running'))",
+        parent,
+    )
+    .execute(&mut *conn)
+    .await?;
+    if queued.rows_affected() == 1 {
+        tracing::info!(job = parent, "every part merged: the feature's PR is next");
+    }
+    Ok(())
 }
 
 /// Queues `job` under `parent` in `conn`'s transaction, as

@@ -28,7 +28,8 @@ use aegis_ledger::{
 };
 use aegis_lifecycle::{
     CveTarget, ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun,
-    ReviewRound, run_feature_revision, run_feature_sub_job, run_issue, run_review,
+    ReviewRound, run_feature_delivery, run_feature_revision, run_feature_sub_job, run_issue,
+    run_review,
 };
 use aegis_pr::{PrError, REPLY_MARKER, TokenSource, TokenUse};
 use aegis_provider::{Observed, Provider};
@@ -355,6 +356,19 @@ impl LifecycleRunner {
                 diagnosis: None,
             });
         }
+        // A plan waiting for approval goes on under its ledger when it was
+        // sent back (#677), or when every part of its feature is merged
+        // and its one PR is next (#678).
+        let revision = match job.source {
+            JobSource::Review => None,
+            _ => self.pending_revision(job).await?,
+        };
+        let delivery = match (job.source, &revision) {
+            (JobSource::Review, _) | (_, Some(_)) => None,
+            _ => crate::feature_gate::feature_delivery(&self.store, job)
+                .await
+                .map_err(task_error)?,
+        };
         // An earlier attempt may have closed the ledger before its worker
         // died: its outcome is the job's.
         let events = self
@@ -362,7 +376,10 @@ impl LifecycleRunner {
             .events(&job.ledger_key)
             .await
             .map_err(|e| Attempt::Infra(e.to_string()))?;
-        if let Some(outcome) = IssueRecord::from_events(job.ledger_key.clone(), &events).outcome {
+        let ended = IssueRecord::from_events(job.ledger_key.clone(), &events).outcome;
+        let goes_on =
+            ended == Some(Outcome::AwaitingApproval) && (revision.is_some() || delivery.is_some());
+        if let Some(outcome) = ended.filter(|_| !goes_on) {
             return Ok(Attempt::Ended {
                 outcome,
                 reason: Some("ended by an earlier attempt".into()),
@@ -509,15 +526,18 @@ impl LifecycleRunner {
         type Run = std::pin::Pin<
             Box<dyn Future<Output = Result<aegis_lifecycle::IssueReport, LifecycleError>> + Send>,
         >;
-        let revision = match round {
-            Some(_) => None,
-            None => self.pending_revision(job).await?,
-        };
         let task = match round {
             Some(_) => None,
             None => self.feature_task(job).await?,
         };
         let (future, pull): (Run, _) = match round {
+            None if delivery.is_some() => {
+                let delivery = delivery.expect("just matched");
+                (
+                    Box::pin(run_feature_delivery(platform, issue, delivery, cancel)),
+                    None,
+                )
+            }
             None if task.is_some() => {
                 let task = task.expect("just matched");
                 (
@@ -579,6 +599,14 @@ impl LifecycleRunner {
     }
 }
 
+/// A feature's task the store could not give: out of reach, or missing.
+fn task_error(e: crate::feature_gate::TaskError) -> Attempt {
+    match e {
+        crate::feature_gate::TaskError::Store(e) => Attempt::Infra(e.to_string()),
+        crate::feature_gate::TaskError::Refused(why) => Attempt::Rejected(why),
+    }
+}
+
 /// A token of `source` for `use_`, asked for now: the fixed one on the
 /// token path, a fresh installation token on the app path. GitHub out of
 /// reach is the infrastructure's; a refusal (the app not installed, the
@@ -637,10 +665,7 @@ impl LifecycleRunner {
     ) -> Result<Option<aegis_lifecycle::FeatureTask>, Attempt> {
         crate::feature_gate::sub_job_task(&self.store, job)
             .await
-            .map_err(|e| match e {
-                crate::feature_gate::TaskError::Store(e) => Attempt::Infra(e.to_string()),
-                crate::feature_gate::TaskError::Refused(why) => Attempt::Rejected(why),
-            })
+            .map_err(task_error)
     }
 
     /// Keeps a feature's plan (#677) for its approval, with the repo's

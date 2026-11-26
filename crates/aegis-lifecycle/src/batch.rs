@@ -478,6 +478,7 @@ where
         // groups ran as jobs of their own: nothing here to flag (#444).
         flags: &[],
         feature: None,
+        whole: None,
     };
     let published = publish(platform, ledger, fix).await?;
     let patch = crate::job::patch(checkout.path(), &report.base, &report.tree)?;
