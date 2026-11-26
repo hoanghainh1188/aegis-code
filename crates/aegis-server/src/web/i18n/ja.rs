@@ -194,6 +194,25 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Conventions" => "規約",
         "Shadow mode" => "シャドーモード",
         "Grade shadow job" => "シャドージョブを評価",
+        "Pilot report" => "パイロットレポート",
+        "Ledger · jobs created in the period" => "台帳 · 期間内に作成されたジョブ",
+        "Against the period of the same length before it, and the KPI thresholds of ADR 0005, with the formulas of" => {
+            "直前の同じ長さの期間、および ADR 0005 の KPI しきい値と比較します。計算式は次と同じです:"
+        }
+        "Dates are UTC. Shadow jobs are counted apart: the other lines are the jobs that write." => {
+            "日付は UTC です。シャドージョブは別に数えます。その他の行は書き込みを行うジョブです。"
+        }
+        "All repos" => "すべてのリポジトリ",
+        "To (included)" => "終了日 (含む)",
+        "Metric" => "指標",
+        "This period" => "今期",
+        "Previous period" => "前期",
+        "Threshold" => "しきい値",
+        "Monthly budget:" => "月次予算:",
+        "no monthly cap" => "月次上限なし",
+        "Download Markdown" => "Markdown をダウンロード",
+        "Download CSV" => "CSV をダウンロード",
+        "Pilot" => "パイロット",
         "Opens the PR of shadow job" => "シャドージョブの PR を開きます:",
         ", from its patch, without the agent." => "、そのパッチから、エージェントなしで。",
         "Open a PR from this patch" => "このパッチから PR を開く",

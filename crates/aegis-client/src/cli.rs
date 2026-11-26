@@ -26,6 +26,9 @@ aegis: give aegis-code jobs and follow them, from your terminal.
   aegis retry <job>
   aegis review <job>            a review round of the PR the job opened
   aegis open <job>              its PR, or its page on the dashboard
+  aegis report --since <date> [--until <date>] [--repo <repo>] [--csv]
+                                the pilot report (Markdown), dates as
+                                YYYY-MM-DD, both included
 
   --json                        print the server's answer as JSON
 ";
@@ -426,6 +429,32 @@ pub fn run_with(
                 .unwrap_or_else(|| format!("{}/jobs/{}", client.server(), job.id));
             w(out, url.clone())?;
             open_url(&url)?;
+        }
+        "report" => {
+            let since = take_opt(&mut rest, "--since")?
+                .ok_or("usage: aegis report --since <YYYY-MM-DD> [--until <YYYY-MM-DD>] [--repo <repo>] [--csv]")?;
+            let until = take_opt(&mut rest, "--until")?;
+            let repo = take_opt(&mut rest, "--repo")?;
+            let csv = take_flag(&mut rest, "--csv");
+            if let Some(extra) = rest.first() {
+                return Err(format!("aegis report: unknown `{extra}`"));
+            }
+            // A repo by its id, or by its slug among the caller's.
+            let repo_id = match repo {
+                Some(r) => Some(match r.parse::<i64>() {
+                    Ok(id) => id,
+                    Err(_) => client.repo(&r)?.id,
+                }),
+                None => None,
+            };
+            let data = client.pilot_report(repo_id, &since, until.as_deref())?;
+            if json {
+                return print_json(out, &data["report"]).map(|()| Exit::Ok);
+            }
+            let text = data[if csv { "csv" } else { "markdown" }]
+                .as_str()
+                .ok_or("unexpected answer: no report text")?;
+            write!(out, "{text}").map_err(|e| e.to_string())?;
         }
         other => return Err(format!("unknown command `{other}`\n\n{USAGE}")),
     }

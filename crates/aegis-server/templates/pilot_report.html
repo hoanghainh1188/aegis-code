@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ crate::t("Pilot report") }}{% endblock %}
+{% block content %}
+<section class="hero" aria-labelledby="pilot-heading">
+  <p class="eyebrow">{{ crate::t("Ledger · jobs created in the period") }}</p>
+  <h1 id="pilot-heading">{{ crate::t("Pilot report") }}{% if let Some(r) = report %}: {{ r.scope }}{% endif %}</h1>
+  <p class="note">{{ crate::t("Against the period of the same length before it, and the KPI thresholds of ADR 0005, with the formulas of") }} <code>aegis-local report</code>. {{ crate::t("Dates are UTC. Shadow jobs are counted apart: the other lines are the jobs that write.") }}</p>
+  <form method="get" action="/reports/pilot" class="filters">
+    <label>{{ crate::t("Repo") }}
+      <select name="repo_id">
+        <option value="">{{ crate::t("All repos") }}</option>
+        {% for r in repos %}<option value="{{ r.id }}"{% if r.chosen %} selected{% endif %}>{{ r.slug }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>{{ crate::t("From") }} <input type="date" name="since" value="{{ since }}"></label>
+    <label>{{ crate::t("To (included)") }} <input type="date" name="until" value="{{ until }}"></label>
+    <button type="submit">{{ crate::t("Show") }}</button>
+  </form>
+  {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
+</section>
+
+{% if let Some(r) = report %}
+<section aria-labelledby="pilot-table-heading" class="band">
+  <h2 id="pilot-table-heading">{{ r.current.since }} → {{ r.current.last }}</h2>
+  <div class="scroll">
+  <table class="pilot">
+    <thead><tr><th scope="col">{{ crate::t("Metric") }}</th><th scope="col" class="num">{{ crate::t("This period") }}</th><th scope="col" class="num">{{ crate::t("Previous period") }}</th><th scope="col">{{ crate::t("Threshold") }}</th><th scope="col"></th></tr></thead>
+    <tbody>
+    {% for m in r.metrics %}
+      <tr>
+        <th scope="row">{{ m.name }}</th>
+        <td class="num">{{ m.current }}</td>
+        <td class="num">{{ m.previous }}</td>
+        <td>{{ m.threshold }}</td>
+        <td class="{% match m.ok %}{% when Some(true) %}ok{% when Some(false) %}bad{% when None %}{% endmatch %}">{% match m.ok %}{% when Some(true) %}✔{% when Some(false) %}✘{% when None %}—{% endmatch %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="note">{{ crate::t("Monthly budget:") }} {% match r.budget.monthly_usd %}{% when Some(cap) %}${{ "{:.2}"|format(r.budget.spent_usd) }} / ${{ "{:.2}"|format(cap) }}{% when None %}${{ "{:.2}"|format(r.budget.spent_usd) }}, {{ crate::t("no monthly cap") }}{% endmatch %}</p>
+  <p class="actions"><a class="button ghost" href="/reports/pilot.md?{{ query }}">{{ crate::t("Download Markdown") }}</a> <a class="button ghost" href="/reports/pilot.csv?{{ query }}">{{ crate::t("Download CSV") }}</a></p>
+</section>
+{% endif %}
+{% endblock %}

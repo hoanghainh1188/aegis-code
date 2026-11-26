@@ -13,7 +13,7 @@ mod ams;
 mod audit;
 mod budget;
 mod connection;
-mod dashboard;
+pub(crate) mod dashboard;
 mod guard;
 pub mod i18n;
 mod installations;
@@ -21,6 +21,7 @@ mod issue_hint;
 mod jobs;
 mod patch;
 mod pause_all;
+mod pilot;
 mod preflight;
 mod repo_admin;
 mod repo_form;
@@ -28,7 +29,7 @@ mod review;
 mod service_tokens;
 mod tokens;
 mod users;
-mod view;
+pub(crate) mod view;
 mod webhooks;
 
 use aegis_store::{Job, JobId, RepoRole, Store, StoreError};
@@ -106,6 +107,9 @@ pub fn router(auth: Auth, repos: Option<RepoAdmin>) -> Router<Store> {
         .route("/auth/signed-out", get(oidc::signed_out))
         .route("/", get(dashboard::page))
         .route("/ams", get(ams::page))
+        .route("/reports/pilot", get(pilot::page))
+        .route("/reports/pilot.md", get(pilot::markdown))
+        .route("/reports/pilot.csv", get(pilot::csv))
         .route("/jobs", get(jobs::list).post(actions::create))
         .route("/jobs/cve", post(actions::create_cve))
         .route("/jobs/issue-choices", get(issue_hint::choices))

@@ -48,6 +48,7 @@ bedrock = ["aegis-provider/bedrock"]
 # types, and it pulls chrono in anyway (#578).
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 aws-lc-rs.workspace = true
+aegis-client = { path = "../aegis-client" }
 aegis-gate = { path = "../aegis-gate" }
 aegis-secrets = { path = "../aegis-secrets" }
 aegis-store = { path = "../aegis-store", features = ["testing"] }
