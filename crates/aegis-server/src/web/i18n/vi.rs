@@ -192,6 +192,25 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Conventions" => "Quy ước",
         "Shadow mode" => "Chế độ shadow",
         "Grade shadow job" => "Chấm job shadow",
+        "Pilot report" => "Báo cáo pilot",
+        "Ledger · jobs created in the period" => "Ledger · job tạo trong khoảng thời gian",
+        "Against the period of the same length before it, and the KPI thresholds of ADR 0005, with the formulas of" => {
+            "So với khoảng thời gian cùng độ dài ngay trước đó và với ngưỡng KPI của ADR 0005, dùng cùng công thức với"
+        }
+        "Dates are UTC. Shadow jobs are counted apart: the other lines are the jobs that write." => {
+            "Ngày tính theo UTC. Job shadow được đếm riêng: các dòng khác là các job có ghi."
+        }
+        "All repos" => "Mọi repo",
+        "To (included)" => "Đến (bao gồm)",
+        "Metric" => "Chỉ số",
+        "This period" => "Kỳ này",
+        "Previous period" => "Kỳ trước",
+        "Threshold" => "Ngưỡng",
+        "Monthly budget:" => "Ngân sách tháng:",
+        "no monthly cap" => "không có giới hạn tháng",
+        "Download Markdown" => "Tải Markdown",
+        "Download CSV" => "Tải CSV",
+        "Pilot" => "Pilot",
         "Opens the PR of shadow job" => "Mở PR của job shadow",
         ", from its patch, without the agent." => ", từ patch của nó, không chạy agent.",
         "Open a PR from this patch" => "Mở PR từ patch này",

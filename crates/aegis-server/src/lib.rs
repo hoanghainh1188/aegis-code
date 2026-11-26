@@ -26,6 +26,7 @@ pub mod memory_learn;
 pub mod memory_sync;
 pub mod metrics;
 pub mod pause_all;
+pub mod pilot_report;
 pub mod repo_cli;
 pub(crate) mod repo_issue;
 pub mod runner;

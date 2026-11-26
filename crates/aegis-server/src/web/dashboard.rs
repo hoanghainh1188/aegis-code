@@ -86,7 +86,7 @@ pub(super) async fn all_repos(store: &Store) -> Result<BTreeMap<RepoId, Repo>, W
 /// The records the KPIs count: a review round (#245) is not a run of its
 /// own; its cost, calls and tokens are added to the record of the job
 /// that opened its PR. Also the rounds each of those had.
-fn fold_rounds(rows: &[KpiRecord]) -> (Vec<IssueRecord>, BTreeMap<String, u32>) {
+pub(crate) fn fold_rounds(rows: &[KpiRecord]) -> (Vec<IssueRecord>, BTreeMap<String, u32>) {
     let mut records: BTreeMap<String, IssueRecord> = rows
         .iter()
         .filter(|r| r.job.as_ref().is_none_or(|j| j.review_of.is_none()))
@@ -357,6 +357,9 @@ mod tests {
                 created_at: time::OffsetDateTime::UNIX_EPOCH,
                 review_of: review_of.map(|k| IssueId::parse(k.to_owned()).unwrap()),
                 review_round: round,
+                issue_ref: "x/demo#1".into(),
+                shadow: false,
+                ended_at: None,
             }),
         }
     }

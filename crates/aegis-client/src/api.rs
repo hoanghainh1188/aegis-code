@@ -192,6 +192,29 @@ impl Client {
         )
     }
 
+    /// The pilot report (#700) from `since` to `until` (both included,
+    /// `YYYY-MM-DD`), of `repo_id` or of every repo the caller sees: its
+    /// figures, and the same as `markdown` and `csv`.
+    pub fn pilot_report(
+        &self,
+        repo_id: Option<i64>,
+        since: &str,
+        until: Option<&str>,
+    ) -> Result<Value, String> {
+        let mut query = vec![format!("since={}", encode(since))];
+        if let Some(u) = until {
+            query.push(format!("until={}", encode(u)));
+        }
+        if let Some(r) = repo_id {
+            query.push(format!("repo_id={r}"));
+        }
+        self.call(
+            reqwest::Method::GET,
+            &format!("reports/pilot?{}", query.join("&")),
+            None,
+        )
+    }
+
     pub fn cancel(&self, id: i64) -> Result<Job, String> {
         self.call(reqwest::Method::POST, &format!("jobs/{id}/cancel"), None)
     }
@@ -204,4 +227,17 @@ impl Client {
     pub fn review(&self, id: i64) -> Result<Job, String> {
         self.call(reqwest::Method::POST, &format!("jobs/{id}/review"), None)
     }
+}
+
+/// `text` safe in a query string: what is not a letter, digit, `-`, `.`,
+/// `_` or `~` is percent-encoded.
+fn encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }

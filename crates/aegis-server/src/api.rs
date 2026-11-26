@@ -85,6 +85,7 @@ pub fn router_with(store: Store, auth: Auth, repo_admin: Option<crate::web::Repo
             get(crate::pause_all::show).post(crate::pause_all::pause),
         )
         .route("/api/v1/admin/resume", post(crate::pause_all::resume))
+        .route("/api/v1/reports/pilot", get(pilot_report))
         .route("/api/v1/me", get(me))
         .route("/api/v1/repos", get(repos))
         .route(
@@ -575,6 +576,39 @@ fn page_of(limit: Option<u32>, cursor: Option<i64>) -> Page {
         Some(c) => Page::after(c, limit),
         None => Page::first(limit),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct PilotParams {
+    repo_id: Option<i64>,
+    since: Option<String>,
+    until: Option<String>,
+}
+
+/// The pilot's report (#700) of a repo, or of every repo the caller sees:
+/// its figures, and the same as Markdown and CSV for `aegis report`.
+async fn pilot_report(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    query: Result<Query<PilotParams>, QueryRejection>,
+) -> ApiResult {
+    let Query(q) = query?;
+    let today = time::OffsetDateTime::now_utc().date();
+    let query = crate::pilot_report::PilotQuery::parse(
+        q.repo_id,
+        q.since.as_deref(),
+        q.until.as_deref(),
+        today,
+    )
+    .map_err(ApiError::invalid)?;
+    let within = access.visible();
+    let report = crate::pilot_report::pilot_report(&store, within.as_deref(), &query).await?;
+    let body = serde_json::json!({
+        "markdown": report.markdown(),
+        "csv": report.csv(),
+        "report": report,
+    });
+    Ok(ok(StatusCode::OK, body))
 }
 
 async fn list_jobs(

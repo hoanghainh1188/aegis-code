@@ -23,6 +23,12 @@ pub struct KpiJob {
     /// and which round of it this is.
     pub review_of: Option<IssueId>,
     pub review_round: u32,
+    /// The ticket it works on, as its tracker names it.
+    pub issue_ref: String,
+    /// A shadow job (#699): counted apart from the jobs that write.
+    pub shadow: bool,
+    /// When its last run ended; `None` while it has not.
+    pub ended_at: Option<OffsetDateTime>,
 }
 
 /// One ledger's record and its job; `None` for CLI and eval runs.
@@ -65,7 +71,9 @@ impl Store {
                       t.slug AS "tenant?",
                       j.source AS "source?",
                       j.created_at AS "created_at?",
-                      root.ledger_key AS "review_of?", j.review_round AS "review_round?"
+                      root.ledger_key AS "review_of?", j.review_round AS "review_round?",
+                      j.issue_ref AS "issue_ref?", j.shadow AS "shadow?",
+                      (SELECT max(u.ended_at) FROM runs u WHERE u.job_id = j.id) AS "ended_at?"
                FROM keys k
                LEFT JOIN stale s ON s.ledger_key = k.ledger_key
                LEFT JOIN issue_records r ON r.ledger_key = k.ledger_key
@@ -122,6 +130,9 @@ impl Store {
                         .review_round
                         .and_then(|r| u32::try_from(r).ok())
                         .unwrap_or(0),
+                    issue_ref: row.issue_ref.unwrap_or_default(),
+                    shadow: row.shadow.unwrap_or(false),
+                    ended_at: row.ended_at,
                 }),
                 _ => None,
             };

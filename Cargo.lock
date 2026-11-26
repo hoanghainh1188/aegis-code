@@ -253,6 +253,7 @@ dependencies = [
 name = "aegis-server"
 version = "0.19.0"
 dependencies = [
+ "aegis-client",
  "aegis-gate",
  "aegis-lang",
  "aegis-ledger",
