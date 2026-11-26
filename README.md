@@ -191,7 +191,7 @@ cargo test -p aegis-provider --features bedrock
 
 The platform is written in **Rust** as one Cargo workspace ([ADR 0001](docs/adr/0001-platform-in-rust.md), [ADR 0003](docs/adr/0003-platform-service-architecture.md)). Three views describe it:
 
-* **System context and crate topology:** how Aegis connects to forges, trackers, model providers and the host, and how its 16 crates are wired together. Both diagrams are in [Platform Topology](docs/design/02-platform-topology.md).
+* **System context and crate topology:** how Aegis connects to forges, trackers, model providers and the host, and how its 18 crates are wired together. Both diagrams are in [Platform Topology](docs/design/02-platform-topology.md).
 * **The 4-layer control pipeline** of one job, below.
 * **The core engine in detail,** layer by layer: [Architecture Specification](docs/design/01-architecture-detail.md).
 
@@ -276,6 +276,10 @@ flowchart TD
 * 🛠️ **Syntax-Guarded Patching:** Rejects AST-invalid code edits immediately without wasting full sandbox test cycles.
 * 📦 **Sonar Batching:** Clusters related static analysis warnings by AST node or tainted dataflow, resolving them concurrently.
 * 🛡️ **Zero Regression Enforcement:** A PR is opened only when the full test suite passes in the sandbox. With Sonar configured, its quality gate (coverage $\ge 80\%$, no new bugs or hotspots) must pass too.
+* 🏗️ **Spec-Driven Hierarchical Feature Lane ([ADR 0019](docs/adr/0019-feature-lane.md)):** Read-only Architect phase generates an RFC + DAG sub-job plan, pauses at `AwaitingApproval` for `/aegis revise` or `/aegis approve`, and delivers via `stacked_prs` or `integration_pr` with `AcceptanceTest` and `AllowProposed` gate modes.
+* 🧠 **4-Channel Incident & Domain Memory:** Hybrid RRF recall (`path`, full-text, trigram substring, optional `pgvector` semantic) with staleness curation, `main`-branch Git runbook sync, and automatic learning from merged PRs, rejected PR pitfalls, confirmed diagnoses, and approved RFC designs.
+* ☁️ **Checkpointing & Remote Execution:** Machine-independent job checkpoints resume across worker failover; `ExecutionEnv` supports local worktrees as well as mTLS remote execution hosts/pod pools and S3 remote build caches.
+* 👻 **Shadow Mode:** Pilot repositories can run jobs all the way through the verification gate without posting comments, branches, or PRs to the forge or tracker.
 * 💰 **Auditable Cost Ledger:** `aegis-ledger` tracks token expenditures per call and terminates tasks before budgets are exceeded.
 
 ---
@@ -292,25 +296,27 @@ aegis-code/
 │   ├── aegis-cli/            # Local CLI binary `aegis-local`: single-issue runner and evaluation benchmark harness
 │   │
 │   ├── # 2. Platform Service, State & Secrets
-│   ├── aegis-server/         # Unified service (`--role api|worker|all`): HTTP API, webhooks, pollers, workers, SSR UI (ADR 0003)
-│   ├── aegis-store/          # PostgreSQL persistence (`sqlx`): transactional job queue (`SKIP LOCKED`), leases, repos, audit logs
+│   ├── aegis-server/         # Unified service (`--role api|worker|all`): HTTP API, webhooks, pollers, workers, SSR UI (EN/JA/VI), shadow mode (ADR 0003)
+│   ├── aegis-store/          # PostgreSQL persistence (`sqlx` + optional `pgvector`): SLA & DAG queue (`SKIP LOCKED`), leases, checkpoints, 4-channel memory, audit logs
 │   ├── aegis-secrets/        # Secret loading & live rotation: AWS Secrets Manager, on-prem files, or environment variables
-│   ├── aegis-ledger/         # Financial accounting: per-call token ledger, prompt cache metrics, and USD cost calculation
+│   ├── aegis-ledger/         # Financial accounting: per-call token ledger, prompt cache metrics, checkpoint events, and USD cost calculation
 │   │
-│   ├── # 3. Issue Lifecycle & Core Agent Engine
-│   ├── aegis-lifecycle/      # End-to-end job coordinator: worktree setup, triage, agent loop, gate, escalation, PR handoff
-│   ├── aegis-orchestrator/   # Multi-turn agent loop, MCP tool dispatch (`rmcp`), and batch observation collapsing
+│   ├── # 3. Issue & Feature Lifecycle Engine
+│   ├── aegis-lifecycle/      # End-to-end job coordinator: `ExecutionEnv` (local/remote/pod pool + S3 cache), triage, diagnostic, CVE, Feature Architect/DAG, gate, PR handoff
+│   ├── aegis-orchestrator/   # Multi-turn agent loop, MCP tool dispatch (`rmcp`), thinking-block stripping, and batch observation collapsing
 │   ├── aegis-router/         # Model tier selection (Light / Core / Expert), escalation matrix, and $4 / call-cap circuit breaker
-│   ├── aegis-provider/       # LLM backends (Claude API, AWS Bedrock `jp.*`, Ollama) and 4-breakpoint prompt caching (BP1–BP4)
+│   ├── aegis-provider/       # LLM backends (Claude, Bedrock, Vertex AI, OpenAI/Azure, Ollama), residency-safe failover, embeddings, and BP1–BP4 caching (ADR 0018)
 │   │
-│   ├── # 4. Code Intelligence & Sandboxed Verification
-│   ├── aegis-aci/            # MCP tool server (`rmcp` stdio): bounded `open`, `search_symbol`, LSP navigation, syntax-safe `edit`
-│   ├── aegis-lang/           # Language profiles (Rust, Python, TS/JS, Java, Go, C#, Kotlin): Tree-sitter AST, linters, lockfiles (ADR 0004)
-│   ├── aegis-gate/           # 6-step Docker sandbox runner (`--network none`): fmt, lint, repro test, suite, coverage, Sonar
+│   ├── # 4. Code Intelligence, Remote Execution & Sandboxed Verification
+│   ├── aegis-aci/            # MCP tool server (`rmcp` stdio & mTLS remote): bounded `open`, `search_symbol`, LSP navigation, syntax-safe `edit`
+│   ├── aegis-lang/           # Language profiles (Rust, Python, TS/JS, Java, Go, C#, PHP, Kotlin): Tree-sitter AST, linters, lockfiles, monorepo parts (ADR 0004)
+│   ├── aegis-gate/           # 11-step Docker sandbox runner (`--network none`, DB sidecars): scope, secrets, deps, fmt, lint, repro/acceptance test, suite, coverage, Sonar, integrity
+│   ├── aegis-docker-proxy/   # Body-inspecting Docker proxy over Unix socket or mTLS TCP enforcing container and sidecar hardening (ADR 0010, ADR 0013)
+│   ├── aegis-mtls/           # Mutual TLS (PEM/PKI) transport helper for worker-to-remote-execution-host ACI and Docker proxy links
 │   │
 │   └── # 5. External Integrations & PR Delivery
-│       ├── aegis-pr/             # Git branch management (`agent/<id>`), structured PR synthesis, Golden Master & review rounds
-│       ├── aegis-tracker/        # Issue tracker connectors: Jira and Backlog polling (JQL/filters) and status write-back
+│       ├── aegis-pr/             # Multi-forge delivery (GitHub App, GitLab, Bitbucket Cloud/DC, Azure DevOps): stacked/integration PRs, Golden Master & review rounds
+│       ├── aegis-tracker/        # ITSM & APM connectors: Jira, Backlog, JSM, ServiceNow polling/write-back, and read-only Sentry/Datadog telemetry
 │       └── aegis-sonar-batch/    # SonarQube integration: AST/dataflow alert clustering and integration branch merging
 │
 ├── config/                   # Server mode configurations (`poc.toml`, `customer-jp.toml`, `local.toml`)
@@ -341,9 +347,9 @@ Progress is tracked via [GitHub Milestones](https://github.com/hoanghainh1188/ae
   - **Completed** (started before the pilot under the [ADR 0011](docs/adr/0011-ams-direction.md) amendments): triage and diagnostic lane, off by default (#451, [ADR 0012](docs/adr/0012-triage-and-diagnostic-lane.md)); APM intake from Sentry, Datadog, CloudWatch (#452); ITSM intake from ServiceNow and Jira Service Management with P1–P3 and SLA deadline (#453); database sidecars and Golden Master (#454, [ADR 0013](docs/adr/0013-ephemeral-database-sidecars.md), [report](docs/measurements/2026-11-15-sidecar-golden-master.md)); controlled CVE remediation (#455, [ADR 0015](docs/adr/0015-cve-remediation-lane.md)); more languages (#37).
   - **Remaining:** OpenTofu staging cloud (#33, IaC written and `tofu plan` passes, waits for an AWS account) and bias measurement (#511, [ADR 0016](docs/adr/0016-platform-bias-scope-and-measurement.md)). The Phase 3 measurement milestone (triage labels, KPIs on APM and ITSM tickets, a sample CVE fix) is measured on the pilot (#158).
   - SBFL (#34), deep context compression (#35), and SpecRover-style review evidence (#36) were measured and deferred ([reports](docs/measurements/)).
-* 🚧 **Phase 4 – Enterprise AMS Scale & Governance** (Features mostly built, `Phase 4 – AMS Quy mô Doanh nghiệp`):
-  - **Completed** (started before the pilot under the [ADR 0011](docs/adr/0011-ams-direction.md) amendments; #457 was split into #524–#526): SLA priority queue P1 > P2 > P3 without starving any repository (#524); tenant and contract entity with isolated permissions, budget, secrets and worktrees (#525), each tenant using only its own GitHub App installation (#541); AMS report with MTTR, SLA on-time rate, triage-versus-PR resolution and cost per contract (#526).
-  - **Remaining:** incident and domain memory (#456) is built and tested with scripted model replies ([report](docs/measurements/2026-11-15-incident-domain-memory.md)); it stays open until its effect on acceptance rate and model calls is measured. Formal entry into Phase 4 and its measurement milestone (MTTR and SLA per tenant, cost per contract) wait for the pilot (#158) and internal-repository KPIs (#157).
+* 🚧 **Phase 4 – Enterprise AMS Scale & Governance** (Features built, `Phase 4 – AMS Quy mô Doanh nghiệp`):
+  - **Completed** (started before the pilot under the [ADR 0011](docs/adr/0011-ams-direction.md) amendments; #457 was split into #524–#526): SLA priority queue P1 > P2 > P3 without starving any repository (#524); tenant and contract entity with isolated permissions, budget, secrets and worktrees (#525), each tenant using only its own GitHub App installation (#541); AMS report with MTTR, SLA on-time rate, triage-versus-PR resolution and cost per contract (#526); 4-channel curated incident & domain memory with `pgvector` semantic recall, `main`-branch Git runbook sync, and pitfall/diagnosis learning (#655, #657, #658, #660); machine-independent job checkpointing, `ExecutionEnv`, mTLS remote execution (`aegis-mtls`), S3 remote build cache, and execution pod pool (#662–#665); Spec-Driven Hierarchical Feature Lane ([ADR 0019](docs/adr/0019-feature-lane.md), #675–#678); pilot Shadow Mode (#699, 1/3).
+  - **Remaining:** incident and domain memory (#456) and `pgvector` semantic recall evaluation (#659) stay open until their effect on acceptance rate and model calls is measured. Formal entry into Phase 4 and its measurement milestone (MTTR and SLA per tenant, cost per contract) wait for the pilot (#158) and internal-repository KPIs (#157).
 * 🔮 **Phase 5 – Autonomous Self-Healing & Prevention** (Conceptual Vision): anomaly-to-patch pipeline from APM traces, scheduled technical debt auto-pruning, continuous compliance audit. No issues or ADR yet.
 
 The scope and the measurement milestone of each phase are in [Proposal §9](docs/design/00-proposal.md#9-implementation-roadmap). This section is the one place that lists the open work of the current phase.
