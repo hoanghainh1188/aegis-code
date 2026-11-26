@@ -311,6 +311,8 @@ struct JobView {
     retry_of: Option<i64>,
     review_of: Option<i64>,
     review_round: u32,
+    /// A shadow job (#699): it writes nothing on the forge or the ticket.
+    shadow: bool,
     locked_by: Option<String>,
     locked_until: Option<String>,
     run_after: String,
@@ -338,6 +340,7 @@ impl From<Job> for JobView {
             retry_of: j.retry_of.map(|r| r.0),
             review_of: j.review_of.map(|r| r.0),
             review_round: j.review_round,
+            shadow: j.shadow,
             locked_by: j.locked_by,
             locked_until: j.locked_until.map(crate::when::rfc3339),
             run_after: crate::when::rfc3339(j.run_after),

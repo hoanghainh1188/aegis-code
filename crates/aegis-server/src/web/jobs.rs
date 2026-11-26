@@ -422,6 +422,8 @@ struct JobHead {
     reason: String,
     pr_url: Option<String>,
     can_review: bool,
+    /// A shadow job (#699): its review grades the PR it would have opened.
+    shadow: bool,
     tiers: String,
     model_calls: u32,
     cost: String,
@@ -442,10 +444,11 @@ struct JobHead {
 }
 
 /// Whether a job's PR may be reviewed from its row or its page: it opened
-/// one, it is not a review round (a round's PR is reviewed on the job that
+/// one or is a shadow job that would have, it is not a review round (a round's PR is reviewed on the job that
 /// opened it, #563), and the viewer reviews in its repo.
 fn can_review(job: &Job, access: &Access) -> bool {
-    job.outcome == Some(Outcome::PrOpened)
+    // A shadow job (#699) is graded as the PR it would have opened.
+    matches!(job.outcome, Some(Outcome::PrOpened | Outcome::Shadowed))
         && job.review_of.is_none()
         && access.can(job.repo_id, RepoRole::Reviewer)
 }
@@ -478,6 +481,7 @@ async fn head_of(
         reason: job.reason.clone().unwrap_or_default(),
         pr_url: pr_link(job),
         can_review: can_review(job, access),
+        shadow: job.shadow,
         tiers: tiers(record),
         model_calls: record.model_calls,
         cost: dollars(record.cost_usd),

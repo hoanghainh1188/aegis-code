@@ -883,3 +883,93 @@ async fn the_dashboard_breaks_down_ticket_sources_languages_and_bias_alerts() {
     );
     db.drop().await;
 }
+
+/// #699: a shadow job is graded on the review form as the PR it would have
+/// opened, and the dashboard shows how many a reviewer would merge, apart
+/// from the PRs.
+#[tokio::test]
+async fn a_shadow_job_is_graded_and_the_dashboard_counts_it_apart() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let pilot = s
+        .create_repo(&NewRepo {
+            slug: "pilot".into(),
+            url: "https://github.com/x/pilot".into(),
+            default_branch: "main".into(),
+            language: "rust".into(),
+            mode: ModeName::POC,
+            max_concurrent_jobs: 1,
+            config: json!({ "shadow": true }),
+        })
+        .await
+        .unwrap()
+        .id;
+    let graded = job(
+        s,
+        pilot,
+        "pilot-1",
+        Some(Outcome::Shadowed),
+        &[call(1.0, Tier::Core)],
+    )
+    .await;
+    job(s, pilot, "pilot-2", Some(Outcome::Shadowed), &[]).await;
+    let app = app(s).await;
+
+    let page = get(&app, &format!("/jobs/{}", graded.0)).await;
+    assert!(page.body.contains("Grade shadow job"), "{}", page.body);
+    let form = get(&app, &format!("/jobs/{}/review", graded.0)).await;
+    assert_eq!(form.status, StatusCode::OK, "{}", form.body);
+    assert!(
+        form.body.contains("If it were a PR, would you merge it?"),
+        "{}",
+        form.body
+    );
+    assert!(!form.body.contains("Open PR in new tab"), "{}", form.body);
+    // Before any grade, the rate is not a number yet.
+    let before = get(&app, "/").await;
+    assert!(
+        before.body.contains("Shadow jobs a reviewer would merge"),
+        "{}",
+        before.body
+    );
+
+    let opened_at =
+        (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64 - 60_000;
+    let sig = opened_at_signature(
+        &Signer::new(common::KEY.as_bytes()),
+        graded,
+        app.browser.user,
+        opened_at,
+    );
+    let sent = post_form(
+        &app,
+        &format!("/jobs/{}/review", graded.0),
+        &format!("verdict=accepted&lines_edited=0&opened_at={opened_at}&opened_sig={sig}"),
+    )
+    .await;
+    assert_eq!(sent.status, StatusCode::SEE_OTHER, "{}", sent.body);
+    let record = s
+        .record(&IssueId::parse("pilot-1").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        record.review.map(|r| r.verdict),
+        Some(ReviewVerdict::Accepted)
+    );
+
+    let d = dashboard_kpis(s).await.unwrap();
+    assert_eq!(
+        (d.total.runs, d.total.shadowed, d.total.shadow_reviewed),
+        (0, 2, 1)
+    );
+    assert_eq!(d.total.shadow_accept_rate(), Some(1.0));
+    let after = get(&app, "/").await;
+    assert!(after.body.contains("100% (1/1)"), "{}", after.body);
+    assert!(
+        after.body.contains("2 shadow jobs, 1 not graded"),
+        "{}",
+        after.body
+    );
+    db.drop().await;
+}

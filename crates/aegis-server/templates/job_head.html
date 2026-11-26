@@ -19,7 +19,7 @@
   {% if let Some(root) = head.review_of %}<p class="note">{{ crate::t("Review fix round for PR opened by") }} <a href="/jobs/{{ root }}">{{ crate::t("job #") }}{{ root }}</a>{{ crate::t("; PR is reviewed there.") }}</p>{% endif %}
   <p class="actions">
     {%- if let Some(url) = head.pr_url %}<a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ crate::t("Open PR") }}</a>{% endif %}
-    {%- if head.can_review %} <a class="button" href="/jobs/{{ head.id }}/review">{{ crate::t("Review PR") }}</a>{% endif -%}
+    {%- if head.can_review %} <a class="button" href="/jobs/{{ head.id }}/review">{% if head.shadow %}{{ crate::t("Grade shadow job") }}{% else %}{{ crate::t("Review PR") }}{% endif %}</a>{% endif -%}
   </p>
   {% if head.can_approve %}
   <form method="post" action="/jobs/{{ head.id }}/approve" class="inline">

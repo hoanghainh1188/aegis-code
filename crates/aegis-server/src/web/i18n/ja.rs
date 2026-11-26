@@ -193,6 +193,15 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Contract" => "契約",
         "Conventions" => "規約",
         "Shadow mode" => "シャドーモード",
+        "Grade shadow job" => "シャドージョブを評価",
+        "This repo is in shadow mode: the job passed the gate but opened no PR. Read its patch below as if it were a PR: if it were one, would you merge it? Your grade counts in the pilot's shadow acceptance, apart from the PRs." => {
+            "このリポジトリはシャドーモードです。ジョブはゲートを通過しましたが PR は開いていません。下のパッチを PR だと思って読んでください。PR だったらマージしますか? 評価はパイロットのシャドー受け入れ率に、PR とは別に数えられます。"
+        }
+        "If it were a PR, would you merge it?" => "PR だったらマージしますか?",
+        "The patch breaks existing tests" => "パッチが既存のテストを壊す",
+        "Shadow jobs a reviewer would merge" => "レビュアーがマージするシャドージョブ",
+        "shadow jobs," => "件のシャドージョブ、",
+        "not graded" => "件が未評価",
         "jobs run to the end of the gate but push nothing, open no PR and write nothing on the ticket" => {
             "ジョブはゲートの最後まで実行しますが、push も PR の作成もチケットへの書き込みも行いません"
         }

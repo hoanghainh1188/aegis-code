@@ -14,6 +14,7 @@
     <div><dt>{{ crate::t("Diagnosed, no PR") }}</dt><dd>{{ total.diagnosed }}</dd><dd class="threshold">{{ crate::t("triage lane") }}</dd></div>
     <div><dt>{{ crate::t("Held: no verifiable sources") }}</dt><dd>{{ total.held_for_sources }}</dd><dd class="threshold">{{ crate::t("tracked") }}</dd></div>
     <div><dt>{{ crate::t("Awaiting review") }}</dt><dd>{{ total.awaiting_review }}</dd><dd class="threshold">{{ crate::t("PRs without review") }}</dd></div>
+    {% if total.shadowed > 0 %}<div id="shadow-accept"><dt>{{ crate::t("Shadow jobs a reviewer would merge") }}</dt><dd>{{ total.shadow_accept }}</dd><dd class="threshold">{{ total.shadowed }} {{ crate::t("shadow jobs,") }} {{ total.shadow_awaiting }} {{ crate::t("not graded") }}</dd></div>{% endif %}
   </dl>
   <p class="note">{{ crate::t("Same formulas as") }} <code>aegis-local report</code> {{ crate::t("(ADR 0005): acceptance target ≥ 40% overall, ≥ 35% per language. Hidden test results are not shown here.") }}</p>
 </section>

@@ -85,6 +85,9 @@ struct ReviewPage<'a> {
     /// "pull request", or "merge request" on GitLab: what the form says
     /// it does not touch (#562).
     request: &'static str,
+    /// A shadow job (#699): no PR, the reviewer says whether they would
+    /// merge its patch if it were one.
+    shadow: bool,
     existing: Option<String>,
     opened_at: i64,
     opened_sig: String,
@@ -104,7 +107,8 @@ struct Viewer<'a> {
 
 async fn reviewable(store: &Store, access: &Access, id: i64) -> Result<Job, WebError> {
     let job = job_for(store, access, id, RepoRole::Reviewer).await?;
-    if job.outcome != Some(Outcome::PrOpened) {
+    // A shadow job (#699) is graded as the PR it would have opened.
+    if !matches!(job.outcome, Some(Outcome::PrOpened | Outcome::Shadowed)) {
         return Err(WebError::new(
             StatusCode::CONFLICT,
             format!("job {id} did not open a PR so there is nothing to review"),
@@ -160,6 +164,7 @@ async fn page(
         issue_ref: job.issue_ref.clone(),
         pr_url: job.pr_url.clone().filter(|u| u.starts_with("https://")),
         request: request_word(job.pr_url.as_deref()),
+        shadow: job.outcome == Some(Outcome::Shadowed),
         existing,
         opened_at,
         opened_sig: opened_at_signature(

@@ -191,6 +191,15 @@ pub(super) fn get(en: &str) -> Option<&'static str> {
         "Contract" => "Hợp đồng",
         "Conventions" => "Quy ước",
         "Shadow mode" => "Chế độ shadow",
+        "Grade shadow job" => "Chấm job shadow",
+        "This repo is in shadow mode: the job passed the gate but opened no PR. Read its patch below as if it were a PR: if it were one, would you merge it? Your grade counts in the pilot's shadow acceptance, apart from the PRs." => {
+            "Repo này đang ở chế độ shadow: job đã qua gate nhưng không mở PR. Hãy đọc patch bên dưới như một PR: nếu là PR thì bạn có merge không? Điểm của bạn được tính vào tỉ lệ chấp nhận job shadow của pilot, tách khỏi các PR."
+        }
+        "If it were a PR, would you merge it?" => "Nếu là PR thì bạn có merge không?",
+        "The patch breaks existing tests" => "Patch làm hỏng test có sẵn",
+        "Shadow jobs a reviewer would merge" => "Job shadow người duyệt sẽ merge",
+        "shadow jobs," => "job shadow,",
+        "not graded" => "chưa chấm",
         "jobs run to the end of the gate but push nothing, open no PR and write nothing on the ticket" => {
             "job chạy hết gate nhưng không push, không mở PR và không ghi gì lên ticket"
         }

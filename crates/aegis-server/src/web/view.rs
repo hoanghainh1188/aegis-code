@@ -83,6 +83,12 @@ pub struct KpiRow {
     pub diagnosed: String,
     /// Review rounds per accepted PR (#245).
     pub rounds: String,
+    /// Shadow jobs (#699), apart from the runs.
+    pub shadowed: usize,
+    /// Those graded as a PR a reviewer would merge, over those graded.
+    pub shadow_accept: String,
+    /// Those not graded yet.
+    pub shadow_awaiting: usize,
 }
 
 impl KpiRow {
@@ -122,6 +128,9 @@ impl KpiRow {
             held_for_sources: pct(kpi.held_for_sources, kpi.runs),
             diagnosed: pct(kpi.diagnosed, kpi.runs),
             rounds: "—".into(),
+            shadowed: kpi.shadowed,
+            shadow_accept: pct(kpi.shadow_accepted, kpi.shadow_reviewed),
+            shadow_awaiting: kpi.shadowed - kpi.shadow_reviewed,
         }
     }
 }

@@ -3,9 +3,14 @@
 {% block content %}
 <section aria-labelledby="review-heading" class="review">
   <p class="eyebrow"><a href="/jobs/{{ id }}">{{ crate::t("Job #") }}{{ id }}</a> · <span class="ref">{{ issue_ref }}</span></p>
+  {% if shadow %}
+  <h1 id="review-heading">{{ crate::t("Grade shadow job") }}</h1>
+  <p class="notice" role="note">{{ crate::t("This repo is in shadow mode: the job passed the gate but opened no PR. Read its patch below as if it were a PR: if it were one, would you merge it? Your grade counts in the pilot's shadow acceptance, apart from the PRs.") }}</p>
+  {% else %}
   <h1 id="review-heading">{{ crate::t("Review PR") }}</h1>
   {% if let Some(url) = pr_url %}<p><a class="button ghost" href="{{ url }}" rel="noopener noreferrer" target="_blank">{{ crate::t("Open PR in new tab") }}</a></p>{% endif %}
   <p class="notice" role="note">{{ crate::t("Your verdict is recorded for the pilot's measures: acceptance, the lines you edited and your review time. It does not approve, merge or change the") }} {{ request }}{{ crate::t(": do that on") }} {% if let Some(url) = pr_url %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">{% if request == "merge request" %}{{ crate::t("the merge request") }}{% else %}{{ crate::t("the pull request") }}{% endif %}</a>{% else %}{{ crate::t("the forge") }}{% endif %}{{ crate::t(". To have the agent work on it again, use Request changes there or comment") }} <code>/aegis fix</code> {{ crate::t("on a line of its own.") }}</p>
+  {% endif %}
   <p class="note">{{ crate::t("Review time is calculated automatically from opening this page until submission.") }}</p>
   {% if let Some(e) = error %}<p class="notice bad" role="alert">{{ e }}</p>{% endif %}
   {% if let Some(r) = existing %}<p class="notice">{{ crate::t("Existing review:") }} {{ r }}</p>{% endif %}
@@ -15,7 +20,7 @@
     <input type="hidden" name="opened_at" value="{{ opened_at }}">
     <input type="hidden" name="opened_sig" value="{{ opened_sig }}">
     <fieldset>
-      <legend>{{ crate::t("Verdict") }}</legend>
+      <legend>{% if shadow %}{{ crate::t("If it were a PR, would you merge it?") }}{% else %}{{ crate::t("Verdict") }}{% endif %}</legend>
       <label class="choice"><input type="radio" name="verdict" value="accepted" required> {{ crate::t("Accepted") }}</label>
       <label class="choice"><input type="radio" name="verdict" value="accepted_with_edits"> {{ crate::t("Accepted with edits") }}</label>
       <label class="choice"><input type="radio" name="verdict" value="rejected"> {{ crate::t("Rejected") }}</label>
@@ -23,11 +28,11 @@
     <label>{{ crate::t("Lines edited") }}
       <input type="number" name="lines_edited" min="0" step="1" value="0" required inputmode="numeric">
     </label>
-    <label class="choice"><input type="checkbox" name="broke_tests" value="on"> {{ crate::t("PR broke existing tests") }}</label>
+    <label class="choice"><input type="checkbox" name="broke_tests" value="on"> {% if shadow %}{{ crate::t("The patch breaks existing tests") }}{% else %}{{ crate::t("PR broke existing tests") }}{% endif %}</label>
     <label>{{ crate::t("Why rejected (optional)") }}
       <textarea name="rejection_note" rows="3" maxlength="2000"></textarea>
     </label>
-    <p class="note">{{ crate::t("With a rejected verdict, what the agent tried and your reason are kept as a pitfall: the repo's next jobs are told not to repeat it.") }}</p>
+    {% if !shadow %}<p class="note">{{ crate::t("With a rejected verdict, what the agent tried and your reason are kept as a pitfall: the repo's next jobs are told not to repeat it.") }}</p>{% endif %}
     {% if existing.is_some() %}<label class="choice"><input type="checkbox" name="replace" value="on"> {{ crate::t("Replace existing review") }}</label>{% endif %}
     <button type="submit">{{ crate::t("Submit review") }}</button>
   </form>
