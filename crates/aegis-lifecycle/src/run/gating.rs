@@ -181,13 +181,32 @@ pub(crate) struct JobTree<'a> {
     pub job_dir: &'a Path,
 }
 
+/// What a job's gate lets its patch do: change the dependencies as
+/// `dependencies` says (#500), and prove itself with tests as `tests` does
+/// (#676): a bug-fix's reproduction, or a feature's acceptance tests.
+#[derive(Debug, Clone)]
+pub(crate) struct GatePolicy {
+    pub dependencies: DependencyPolicy,
+    pub tests: aegis_gate::TestMode,
+}
+
+impl GatePolicy {
+    /// A bug-fix's: the lockfiles as they are, a test that reproduces it.
+    pub(crate) fn locked() -> Self {
+        Self {
+            dependencies: DependencyPolicy::Locked,
+            tests: aegis_gate::TestMode::Reproduce,
+        }
+    }
+}
+
 /// The gate on the job's tree, off the async runtime; `cancel` stops it.
 pub(crate) async fn gate(
     cfg: &RunConfig,
     profiles: &RepoProfiles,
     job: JobTree<'_>,
     answer: &FinalAnswer,
-    policy: &DependencyPolicy,
+    policy: &GatePolicy,
     cancel: &CancellationToken,
 ) -> Result<GateReport, LifecycleError> {
     let JobTree {
@@ -196,7 +215,8 @@ pub(crate) async fn gate(
         job_dir,
     } = job;
     let allowed = allowed_packages(cfg)?;
-    let dependency_policy = policy.clone();
+    let dependency_policy = policy.dependencies.clone();
+    let test_mode = policy.tests;
     let root = &profiles.parts()[0];
     // Each directory's own container, fetch and cache (#71).
     let parts = profiles.parts()[1..]
@@ -305,9 +325,7 @@ pub(crate) async fn gate(
             parts,
             sidecars,
             dependency_policy,
-            // Feature jobs gate their acceptance tests once the feature
-            // lane runs them (#677, #678).
-            test_mode: aegis_gate::TestMode::Reproduce,
+            test_mode,
         })
     })
     .await

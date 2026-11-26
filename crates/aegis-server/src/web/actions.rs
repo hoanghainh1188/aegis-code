@@ -72,8 +72,9 @@ impl Done {
                 "Diagnosis confirmed: the repo's next jobs are given it as a memory."
             }
             Self::Approved => {
-                "Plan approved, to be delivered as it recommends. Its sub-jobs are not run yet: \
-                 running them comes with a later release (#678)."
+                "Plan approved, to be delivered as it recommends. Stacked PRs: its sub-jobs are \
+                 queued, each opening a PR on top of the one before. One integration PR: its \
+                 sub-jobs are not run yet, that comes with a later release."
             }
         }
     }
@@ -272,7 +273,7 @@ pub async fn approve(
     Path(id): Path<i64>,
 ) -> WebResult {
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
-    let job = store.approve_job_by(JobId(id), None, &access.actor).await?;
+    let job = crate::feature_gate::approve(&store, JobId(id), None, &access.actor).await?;
     Ok(to_job(job.id, Done::Approved))
 }
 

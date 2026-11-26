@@ -44,89 +44,8 @@ impl Store {
             });
         }
         let mut tx = self.pool.begin().await?;
-        let work = async {
-            let root = sqlx::query!(
-                "SELECT repo_id, parent_job_id FROM jobs WHERE id = $1 FOR UPDATE",
-                parent.0,
-            )
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| StoreError::NotFound(format!("job {}", parent.0)))?;
-            if root.repo_id != job.repo_id.0 {
-                return Err(invalid("parent", "a job of another repo"));
-            }
-            if root.parent_job_id.is_some() {
-                return Err(invalid("parent", "a sub-job plans no sub-jobs"));
-            }
-            let planned = sqlx::query_scalar!(
-                r#"SELECT count(*) AS "n!" FROM jobs WHERE parent_job_id = $1"#,
-                parent.0,
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-            if planned >= MAX_SUB_JOBS as i64 {
-                return Err(invalid(
-                    "parent",
-                    &format!("it has {MAX_SUB_JOBS} sub-jobs already"),
-                ));
-            }
-            let ids: Vec<i64> = deps.iter().map(|d| d.0).collect();
-            let siblings = sqlx::query_scalar!(
-                r#"SELECT count(*) AS "n!" FROM jobs WHERE id = ANY($1) AND parent_job_id = $2"#,
-                &ids,
-                parent.0,
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-            if siblings != ids.len() as i64 {
-                return Err(invalid(
-                    "depends_on",
-                    "every job depended on is a sub-job of the same parent",
-                ));
-            }
-            budget::check(&mut tx, &self.budget, job.repo_id).await?;
-            crate::epic::check(&mut tx, &self.budget, parent).await?;
-            let created: Job = sqlx::query_as!(
-                JobRow,
-                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                                   parent_job_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
-                           status, outcome, attempts, locked_by, locked_until, created_at,
-                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
-                           retry_of, review_of, review_round",
-                job.repo_id.0,
-                job.issue_ref,
-                job.ledger_key.as_str(),
-                job.source.as_str(),
-                job.priority.map(SlaPriority::as_str),
-                job.sla_deadline,
-                parent.0,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(StoreError::from_db)?
-            .try_into()?;
-            sqlx::query!(
-                "INSERT INTO job_dependencies (job_id, depends_on)
-                 SELECT $1, unnest($2::bigint[])",
-                created.id.0,
-                &ids,
-            )
-            .execute(&mut *tx)
-            .await?;
-            let detail = serde_json::json!({ "parent": parent.0, "depends_on": ids });
-            audit::record(
-                &mut tx,
-                actor,
-                "job.create",
-                Target::of_job(&created),
-                detail,
-            )
-            .await?;
-            Ok::<_, StoreError>(created)
-        }
-        .await;
+        let work = insert_sub_job(&mut tx, self, parent, &deps, job, None, actor);
+        let work = work.await;
         tx::commit(tx, work).await
     }
 
@@ -146,6 +65,15 @@ impl Store {
             parent: parent.map(JobId),
             depends_on: depends_on.into_iter().map(JobId).collect(),
         })
+    }
+
+    /// Which of its feature plan's sub-jobs `job` is (#678), by the plan's
+    /// id for it; `None` for a job made otherwise.
+    pub async fn plan_key(&self, job: JobId) -> Result<Option<String>, StoreError> {
+        sqlx::query_scalar!("SELECT plan_key FROM jobs WHERE id = $1", job.0)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))
     }
 
     /// The sub-jobs `parent` planned, in the order they were made.
@@ -192,6 +120,101 @@ impl Store {
         .map(Job::try_from)
         .transpose()
     }
+}
+
+/// Queues `job` under `parent` in `conn`'s transaction, as
+/// [`Store::create_sub_job_by`] says, as the plan's sub-job `plan_key` when
+/// one is given.
+pub(crate) async fn insert_sub_job(
+    conn: &mut sqlx::PgConnection,
+    store: &Store,
+    parent: JobId,
+    deps: &BTreeSet<JobId>,
+    job: &NewJob,
+    plan_key: Option<&str>,
+    actor: &Actor,
+) -> Result<Job, StoreError> {
+    let root = sqlx::query!(
+        "SELECT repo_id, parent_job_id FROM jobs WHERE id = $1 FOR UPDATE",
+        parent.0,
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .ok_or_else(|| StoreError::NotFound(format!("job {}", parent.0)))?;
+    if root.repo_id != job.repo_id.0 {
+        return Err(invalid("parent", "a job of another repo"));
+    }
+    if root.parent_job_id.is_some() {
+        return Err(invalid("parent", "a sub-job plans no sub-jobs"));
+    }
+    let planned = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM jobs WHERE parent_job_id = $1"#,
+        parent.0,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if planned >= MAX_SUB_JOBS as i64 {
+        return Err(invalid(
+            "parent",
+            &format!("it has {MAX_SUB_JOBS} sub-jobs already"),
+        ));
+    }
+    let ids: Vec<i64> = deps.iter().map(|d| d.0).collect();
+    let siblings = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM jobs WHERE id = ANY($1) AND parent_job_id = $2"#,
+        &ids,
+        parent.0,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if siblings != ids.len() as i64 {
+        return Err(invalid(
+            "depends_on",
+            "every job depended on is a sub-job of the same parent",
+        ));
+    }
+    budget::check(&mut *conn, &store.budget, job.repo_id).await?;
+    crate::epic::check(&mut *conn, &store.budget, parent).await?;
+    let created: Job = sqlx::query_as!(
+        JobRow,
+        "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                               parent_job_id, plan_key)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                       status, outcome, attempts, locked_by, locked_until, created_at,
+                       updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                       retry_of, review_of, review_round",
+        job.repo_id.0,
+        job.issue_ref,
+        job.ledger_key.as_str(),
+        job.source.as_str(),
+        job.priority.map(SlaPriority::as_str),
+        job.sla_deadline,
+        parent.0,
+        plan_key,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(StoreError::from_db)?
+    .try_into()?;
+    sqlx::query!(
+        "INSERT INTO job_dependencies (job_id, depends_on)
+             SELECT $1, unnest($2::bigint[])",
+        created.id.0,
+        &ids,
+    )
+    .execute(&mut *conn)
+    .await?;
+    let detail = serde_json::json!({ "parent": parent.0, "depends_on": ids, "plan_key": plan_key });
+    audit::record(
+        &mut *conn,
+        actor,
+        "job.create",
+        Target::of_job(&created),
+        detail,
+    )
+    .await?;
+    Ok(created)
 }
 
 fn invalid(field: &'static str, message: &str) -> StoreError {

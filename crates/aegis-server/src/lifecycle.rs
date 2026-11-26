@@ -28,7 +28,7 @@ use aegis_ledger::{
 };
 use aegis_lifecycle::{
     CveTarget, ForkPlatform, IssueInput, LifecycleError, ModeConfig, Modes, Platform, RepoRun,
-    ReviewRound, run_feature_revision, run_issue, run_review,
+    ReviewRound, run_feature_revision, run_feature_sub_job, run_issue, run_review,
 };
 use aegis_pr::{PrError, REPLY_MARKER, TokenSource, TokenUse};
 use aegis_provider::{Observed, Provider};
@@ -513,7 +513,18 @@ impl LifecycleRunner {
             Some(_) => None,
             None => self.pending_revision(job).await?,
         };
+        let task = match round {
+            Some(_) => None,
+            None => self.feature_task(job).await?,
+        };
         let (future, pull): (Run, _) = match round {
+            None if task.is_some() => {
+                let task = task.expect("just matched");
+                (
+                    Box::pin(run_feature_sub_job(platform, issue, task, cancel)),
+                    None,
+                )
+            }
             None if revision.is_some() => {
                 let revision = revision.expect("just matched");
                 (
@@ -616,6 +627,20 @@ impl LifecycleRunner {
             feedback: asked.feedback,
             revision: u32::try_from(next).unwrap_or(u32::MAX),
         }))
+    }
+
+    /// What `job` runs when it is a sub-job of an approved feature (#678),
+    /// as [`crate::feature_gate::sub_job_task`] finds it.
+    async fn feature_task(
+        &self,
+        job: &Job,
+    ) -> Result<Option<aegis_lifecycle::FeatureTask>, Attempt> {
+        crate::feature_gate::sub_job_task(&self.store, job)
+            .await
+            .map_err(|e| match e {
+                crate::feature_gate::TaskError::Store(e) => Attempt::Infra(e.to_string()),
+                crate::feature_gate::TaskError::Refused(why) => Attempt::Rejected(why),
+            })
     }
 
     /// Keeps a feature's plan (#677) for its approval, with the repo's

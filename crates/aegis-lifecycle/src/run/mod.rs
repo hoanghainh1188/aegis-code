@@ -160,6 +160,9 @@ pub(crate) enum Finish {
     Keep(Author),
     /// One more commit on an open PR's branch, and a reply (#243).
     Update(Box<ReviewRound>),
+    /// A feature's sub-job (#678): its acceptance tests gated, its PR on
+    /// what it started from.
+    Feature(Box<crate::FeatureTask>),
 }
 
 /// Runs one issue. `cancel` is checked before every model call and stops a
@@ -192,11 +195,28 @@ where
     run(platform, issue, Stage::Revision(Box::new(revision)), cancel).await
 }
 
+/// Runs `issue`'s sub-job `task` of an approved feature (#678) under
+/// `issue.id`, its own ledger: the part of the plan it is, from what it is
+/// stacked on, to a PR of its own.
+pub async fn run_feature_sub_job<P, S>(
+    platform: Arc<Platform<P, S>>,
+    issue: IssueInput,
+    task: crate::FeatureTask,
+    cancel: CancellationToken,
+) -> Result<IssueReport, LifecycleError>
+where
+    P: ModelProvider + Send + Sync + 'static,
+    S: LedgerStore + Send + Sync + 'static,
+{
+    run(platform, issue, Stage::SubJob(Box::new(task)), cancel).await
+}
+
 /// What a run does.
 enum Stage {
     Issue,
     Review(ReviewRound),
     Revision(Box<crate::FeatureRevision>),
+    SubJob(Box<crate::FeatureTask>),
 }
 
 /// Runs a review round (#243) of `issue`'s PR under `issue.id`, its own
@@ -261,6 +281,9 @@ where
         }
         Stage::Revision(revision) => {
             crate::feature::revise(&platform, &mut ledger, &issue, &revision).await
+        }
+        Stage::SubJob(task) => {
+            sub_job_and_work(&platform, &mut ledger, &issue, *task, &cancel).await
         }
         Stage::Issue => prepare_and_work(&platform, &mut ledger, &issue, &cancel).await,
     };

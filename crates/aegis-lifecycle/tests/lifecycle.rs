@@ -2740,3 +2740,135 @@ async fn a_plan_sent_back_is_planned_again_with_its_feedback() {
             .contains("revision 2 still waits for approval"),
     );
 }
+
+/// A plan of two parts, `model` then `api`, delivered as stacked PRs.
+fn stacked_plan() -> aegis_lifecycle::FeaturePlan {
+    let sub = |id: &str, title: &str| aegis_lifecycle::PlannedSubJob {
+        id: id.into(),
+        title: title.into(),
+        scope: vec!["src/lib.rs".into(), "tests/fourth_item.rs".into()],
+        depends_on: vec![],
+    };
+    aegis_lifecycle::FeaturePlan {
+        summary: "Carts hold at most three items.".into(),
+        criteria: vec![aegis_lifecycle::Criterion {
+            given: "a cart of three items".into(),
+            when: "a fourth is added".into(),
+            then: "it is refused".into(),
+        }],
+        contracts: vec!["Cart::add(&mut self, item) -> Result<(), CartError>".into()],
+        dependencies: vec![],
+        sub_jobs: vec![
+            sub("model", "Notes on the cart's limit"),
+            sub("api", "Refuse a fourth item"),
+        ],
+        delivery: aegis_lifecycle::FeatureDeliveryMode::StackedPrs,
+    }
+}
+
+/// #678: a stacked sub-job starts from the branch of the one before it,
+/// fetched from the fork, is told its part of the plan, passes the gate on
+/// the acceptance tests it writes, and opens its PR on that branch: the PR
+/// holds its own part only.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stacked_sub_job_opens_its_pr_on_the_one_before() {
+    if !tools_ready() {
+        return;
+    }
+    let scratch = repo_with_bug();
+    let server = github().await;
+    // The part before it, already on the fork.
+    let clone = scratch.0.join("clone");
+    git(&clone, &["checkout", "-q", "-b", "below"]);
+    std::fs::write(clone.join("NOTES.md"), "A cart holds three items.\n").unwrap();
+    git(&clone, &["add", "NOTES.md"]);
+    git(
+        &clone,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "notes",
+        ],
+    );
+    let below = rev_parse(&clone, "HEAD");
+    git(
+        &clone,
+        &[
+            "push",
+            "-q",
+            scratch.0.join("fork.git").to_str().unwrap(),
+            "below:refs/heads/agent/f7-model",
+        ],
+    );
+    git(&clone, &["checkout", "-q", "main"]);
+    git(&clone, &["branch", "-q", "-D", "below"]);
+
+    let model = Scripted::new(vec![create_repro("t1"), fix("t2"), fixed_answer()], vec![]);
+    let p = platform(config(&scratch, &server.uri(), 20), model);
+    let task = aegis_lifecycle::FeatureTask {
+        plan: stacked_plan(),
+        sub_job: "api".into(),
+        delivery: aegis_lifecycle::FeatureDeliveryMode::StackedPrs,
+        stacked_on: Some(aegis_lifecycle::StackedOn {
+            branch: "agent/f7-model".into(),
+            pr_url: Some("https://github.com/me/fixture/pull/2".into()),
+        }),
+    };
+    let issue = IssueInput {
+        id: "f7-api".into(),
+        ..issue()
+    };
+    let report = tokio::spawn({
+        let p = Arc::clone(&p);
+        async move {
+            aegis_lifecycle::run_feature_sub_job(p, issue, task, CancellationToken::new())
+                .await
+                .unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.outcome, Outcome::PrOpened, "{report:?}");
+
+    // Told its part, with no triage of its own.
+    let core = p.provider.requests_for("core");
+    let first = serde_json::to_string(&core[0].messages).unwrap();
+    assert!(first.contains("part 2 of 2"), "{first}");
+    assert!(
+        first.contains("Your part: Refuse a fourth item."),
+        "{first}"
+    );
+    assert!(
+        p.provider
+            .requests_for("light")
+            .iter()
+            .all(|r| !r.system.concat().contains("You triage"))
+    );
+    let record = p.store.record(&IssueId::parse("f7-api").unwrap()).unwrap();
+    assert_eq!(record.kind, Some(aegis_ledger::IssueKind::Feature));
+    assert!(record.gate_runs[0].passed);
+
+    // On top of the part before it, holding only its own.
+    let fork = scratch.0.join("fork.git");
+    assert_eq!(rev_parse(&fork, "agent/f7-api^"), below);
+    let patch = report.patch.as_ref().unwrap();
+    assert!(patch.diff.contains("src/lib.rs"), "{}", patch.diff);
+    assert!(!patch.diff.contains("NOTES.md"), "{}", patch.diff);
+    let pr: Value = server.received_requests().await.unwrap()[0]
+        .body_json()
+        .unwrap();
+    assert_eq!(pr["head"], "agent/f7-api");
+    assert_eq!(pr["base"], "agent/f7-model");
+    let body = pr["body"].as_str().unwrap();
+    assert!(body.starts_with("## Feature\nPart 2 of 2"), "{body}");
+    assert!(
+        body.contains("https://github.com/me/fixture/pull/2"),
+        "{body}"
+    );
+    assert!(body.contains("fourth_item_is_refused"), "{body}");
+}

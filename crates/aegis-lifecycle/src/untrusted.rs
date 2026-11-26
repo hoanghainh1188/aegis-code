@@ -14,6 +14,13 @@ const TAGS: &[&str] = &[
     "review",
     "pull_request",
     "check-output",
+    // A feature's sub-job (#678): the approved plan around the ticket.
+    "plan",
+    "summary",
+    "criteria",
+    "contracts",
+    "dependencies",
+    "sub-jobs",
 ];
 
 /// Zero-width space: the text still reads the same, but is no tag.

@@ -698,7 +698,7 @@ async fn approve_job(
         .map(crate::feature_gate::parse_mode)
         .transpose()
         .map_err(ApiError::invalid)?;
-    let job = store.approve_job_by(JobId(id), mode, &access.actor).await?;
+    let job = crate::feature_gate::approve(&store, JobId(id), mode, &access.actor).await?;
     Ok(ok(StatusCode::OK, JobView::from(job)))
 }
 

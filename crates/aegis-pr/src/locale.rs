@@ -135,6 +135,12 @@ pub struct PrStrings {
     pub rfc_revision: fn(u32) -> String,
     /// How a person approves the plan, or asks for changes.
     pub rfc_how: &'static str,
+    // A feature's sub-job PR (#678).
+    pub feature_heading: &'static str,
+    /// Its place in the plan, of how many, the ticket's URL, its title.
+    pub feature_part: fn(usize, usize, &str, &str) -> String,
+    /// The URL of the PR it goes on top of.
+    pub stacked_on: fn(&str) -> String,
     // The comment on the issue when its job ends (#589); each follows
     // `**aegis-code** ` or `aegis-code `.
     pub pull_request: &'static str,
@@ -247,6 +253,26 @@ fn rfc_revision_ja(revision: u32) -> String {
 }
 fn rfc_revision_vi(revision: u32) -> String {
     format!("Bản sửa {revision} của kế hoạch, theo góp ý khi bị trả lại.")
+}
+
+fn feature_part_en(at: usize, of: usize, issue: &str, title: &str) -> String {
+    format!("Part {at} of {of} of the feature approved on {issue}: {title}.")
+}
+fn feature_part_ja(at: usize, of: usize, issue: &str, title: &str) -> String {
+    format!("{issue} で承認された機能の {of} 件中 {at} 件目: {title}。")
+}
+fn feature_part_vi(at: usize, of: usize, issue: &str, title: &str) -> String {
+    format!("Phần {at} trên {of} của tính năng đã được duyệt ở {issue}: {title}.")
+}
+
+fn stacked_on_en(pr: &str) -> String {
+    format!("It goes on top of {pr}: review and merge that one first.")
+}
+fn stacked_on_ja(pr: &str) -> String {
+    format!("{pr} の上に積まれています。先にそちらをレビューしてマージしてください。")
+}
+fn stacked_on_vi(pr: &str) -> String {
+    format!("PR này nằm trên {pr}: hãy review và merge PR đó trước.")
 }
 
 fn revise_refused_en(why: &str) -> String {
@@ -381,6 +407,9 @@ static EN: PrStrings = PrStrings {
     rfc_how: "Nothing is changed until someone who can write to the repository comments \
               `/aegis approve` (or `/aegis approve mode=integration_pr|stacked_prs`) on this \
               issue, or approves the job on the dashboard.",
+    feature_heading: "Feature",
+    feature_part: feature_part_en,
+    stacked_on: stacked_on_en,
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_en,
@@ -449,6 +478,9 @@ static JA: PrStrings = PrStrings {
     rfc_how: "リポジトリへの書き込み権限を持つ人がこの issue に `/aegis approve` \
               (または `/aegis approve mode=integration_pr|stacked_prs`) とコメントするか、\
               ダッシュボードでジョブを承認するまで、何も変更されません。",
+    feature_heading: "機能",
+    feature_part: feature_part_ja,
+    stacked_on: stacked_on_ja,
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_ja,
@@ -518,6 +550,9 @@ static VI: PrStrings = PrStrings {
     rfc_how: "Chưa có gì bị thay đổi cho tới khi người có quyền ghi vào repo comment \
               `/aegis approve` (hoặc `/aegis approve mode=integration_pr|stacked_prs`) trên \
               issue này, hoặc duyệt job trên dashboard.",
+    feature_heading: "Tính năng",
+    feature_part: feature_part_vi,
+    stacked_on: stacked_on_vi,
     pull_request: "pull request",
     merge_request: "merge request",
     opened: opened_vi,
@@ -569,7 +604,9 @@ mod tests {
         for l in [Locale::En, Locale::Ja] {
             let s = l.strings();
             let all = format!(
-                "{s:?}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                "{s:?}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                (s.feature_part)(1, 2, "https://x", "t"),
+                (s.stacked_on)("https://x"),
                 (s.rfc)(2, "stacked_prs"),
                 (s.rfc_after)("a"),
                 (s.rfc_revision)(2),

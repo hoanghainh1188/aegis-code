@@ -55,7 +55,9 @@ pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};
 pub use dag::{JobLinks, MAX_SUB_JOBS};
-pub use design_gate::{Approval, DeliveryMode, MAX_FEEDBACK_CHARS, RevisionRequest};
+pub use design_gate::{
+    Approval, DeliveryMode, MAX_FEEDBACK_CHARS, PlannedJob, RevisionRequest, sub_job_ledger_key,
+};
 pub use epic::{EPIC_BUDGET_SPENT, EpicBudget};
 pub use error::StoreError;
 pub use installations::{

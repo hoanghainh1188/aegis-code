@@ -502,3 +502,126 @@ async fn a_writer_approves_a_plan_on_its_issue() {
     assert_eq!(data["job_id"], third.id.0);
     db.drop().await;
 }
+
+/// The plan Core wrote for a two-part feature, as the worker keeps it.
+fn two_part_plan(delivery: &str) -> Value {
+    serde_json::json!({
+        "summary": "Refunds of a charge.",
+        "criteria": [{"given": "a charge", "when": "it is refunded", "then": "the refund never exceeds it"}],
+        "contracts": ["fn refund(charge: &Charge, cents: u64) -> Result<Refund>"],
+        "dependencies": [],
+        "sub_jobs": [
+            {"id": "model", "title": "The refund model", "scope": ["src/refund.rs"], "depends_on": []},
+            {"id": "api", "title": "The refund endpoint", "scope": ["src/api.rs"], "depends_on": ["model"]}
+        ],
+        "delivery": delivery
+    })
+}
+
+/// #678: approving a plan delivered as stacked PRs queues its sub-jobs,
+/// each on the one before; one delivered as one integration PR queues
+/// none yet.
+#[tokio::test]
+async fn an_approved_stacked_plan_queues_its_sub_jobs() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let shop = repo(s).await;
+    let stacked = ended(s, shop, 1, Outcome::AwaitingApproval).await;
+    s.save_feature_plan(stacked.id, &two_part_plan("integration_pr"))
+        .await
+        .unwrap();
+    let integrated = ended(s, shop, 2, Outcome::AwaitingApproval).await;
+    s.save_feature_plan(integrated.id, &two_part_plan("integration_pr"))
+        .await
+        .unwrap();
+    let app = router(s.clone(), common::auth(s));
+    let maintainer = common::token(s, "lead-bot").await;
+    common::grant(s, "lead-bot", shop, RepoRole::Maintainer).await;
+
+    // The person's mode wins over the plan's recommendation.
+    let (status, body) = approve_as(&app, &maintainer, &stacked, "?mode=stacked_prs").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let subs = s.sub_jobs(stacked.id).await.unwrap();
+    assert_eq!(subs.len(), 2);
+    assert!(subs.iter().all(|j| j.status == JobStatus::Queued));
+    assert_eq!(
+        s.plan_key(subs[0].id).await.unwrap().as_deref(),
+        Some("model")
+    );
+    assert_eq!(
+        s.plan_key(subs[1].id).await.unwrap().as_deref(),
+        Some("api")
+    );
+    assert_eq!(
+        s.job_links(subs[1].id).await.unwrap().depends_on,
+        vec![subs[0].id]
+    );
+    assert_eq!(subs[0].issue_ref, "acme/shop#1");
+
+    // What each runs: its part, the first from the main branch, the
+    // second on the first's PR once it is open.
+    use aegis_server::feature_gate::sub_job_task;
+    let first = sub_job_task(s, &subs[0]).await.unwrap().unwrap();
+    assert_eq!(first.sub_job, "model");
+    assert_eq!(
+        first.delivery,
+        aegis_lifecycle::FeatureDeliveryMode::StackedPrs
+    );
+    assert_eq!(first.stacked_on, None);
+    assert_eq!(first.plan.sub_jobs.len(), 2);
+    let claim = s
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.job.id, subs[0].id);
+    s.finish_attempt(
+        &claim.run,
+        "w",
+        &AttemptEnd::Done {
+            outcome: Outcome::PrOpened,
+            reason: None,
+            pr_url: Some("https://github.com/acme/shop/pull/9".into()),
+            patch: None,
+            diagnosis: None,
+        },
+    )
+    .await
+    .unwrap();
+    let second = sub_job_task(s, &subs[1]).await.unwrap().unwrap();
+    assert_eq!(second.sub_job, "api");
+    let on = second.stacked_on.unwrap();
+    assert_eq!(
+        on.branch,
+        format!("agent/{}", subs[0].ledger_key.as_str().to_ascii_lowercase())
+    );
+    assert_eq!(
+        on.pr_url.as_deref(),
+        Some("https://github.com/acme/shop/pull/9")
+    );
+    // The planning job, and a sub-job made by hand, run as they did.
+    assert!(sub_job_task(s, &stacked).await.unwrap().is_none());
+    let by_hand = s
+        .create_sub_job_by(
+            stacked.id,
+            &[],
+            &NewJob {
+                repo_id: shop,
+                issue_ref: "acme/shop#1".into(),
+                ledger_key: IssueId::parse("shop-1-hand").unwrap(),
+                source: JobSource::Github,
+                priority: None,
+                sla_deadline: None,
+            },
+            &aegis_store::Actor::system(),
+        )
+        .await
+        .unwrap();
+    assert!(sub_job_task(s, &by_hand).await.unwrap().is_none());
+
+    let (status, body) = approve(&app, &maintainer, &integrated).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(s.sub_jobs(integrated.id).await.unwrap().is_empty());
+    assert!(s.approval(integrated.id).await.unwrap().is_some());
+    db.drop().await;
+}
