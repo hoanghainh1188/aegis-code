@@ -42,6 +42,13 @@ pub struct Kpi {
     pub stopped_steps: usize,
     /// Fix attempts where Expert failed repeatedly.
     pub stopped_expert_fail: usize,
+    /// Shadow jobs (#699) whose gate passed: no PR was opened, so they are
+    /// counted apart from the runs above.
+    pub shadowed: usize,
+    /// Those a person graded: "if it were a PR, would you merge it?".
+    pub shadow_reviewed: usize,
+    /// Those graded as accepted, as [`accepted`] counts a PR.
+    pub shadow_accepted: usize,
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
@@ -60,12 +67,18 @@ pub fn accepted(record: &IssueRecord) -> bool {
 
 impl Kpi {
     pub fn from_records<'a>(records: impl IntoIterator<Item = &'a IssueRecord>) -> Self {
+        let records: Vec<&IssueRecord> = records.into_iter().collect();
+        let shadowed: Vec<&&IssueRecord> = records
+            .iter()
+            .filter(|r| r.outcome == Some(Outcome::Shadowed))
+            .collect();
         // A plan waiting for approval (#675) has not finished; a feature's
         // part merged into its integration branch (#678) is not one of its
         // own: the feature's PR at the end is. A shadow job (#699) opened
         // no PR to measure: its reviews count apart.
         let finished: Vec<&IssueRecord> = records
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|r| {
                 r.outcome.is_some_and(|o| {
                     !matches!(
@@ -132,6 +145,9 @@ impl Kpi {
                 .iter()
                 .filter(|r| r.outcome == Some(Outcome::StoppedExpertFail))
                 .count(),
+            shadowed: shadowed.len(),
+            shadow_reviewed: shadowed.iter().filter(|r| r.review.is_some()).count(),
+            shadow_accepted: shadowed.iter().filter(|r| accepted(r)).count(),
         }
     }
 
@@ -140,6 +156,13 @@ impl Kpi {
     pub fn accept_rate(&self) -> Option<f64> {
         let fixes = self.runs - self.diagnosed;
         (fixes > 0).then(|| self.accepted as f64 / fixes as f64)
+    }
+
+    /// Shadow jobs graded as accepted over those graded (#699): what a
+    /// pilot's reviewers would have merged. `None` before any grade.
+    pub fn shadow_accept_rate(&self) -> Option<f64> {
+        (self.shadow_reviewed > 0)
+            .then(|| self.shadow_accepted as f64 / self.shadow_reviewed as f64)
     }
 
     /// Fix attempts that stopped without opening a PR (#511).
@@ -264,6 +287,15 @@ impl fmt::Display for Kpi {
         writeln!(f, "| --- | --- | --- | --- |")?;
         for (name, value, threshold, ok) in rows {
             writeln!(f, "| {name} | {value} | {threshold} | {} |", verdict(ok))?;
+        }
+        // Only a pilot in shadow mode (#699) has any.
+        if self.shadowed > 0 {
+            writeln!(
+                f,
+                "| Shadow jobs a reviewer would merge ({} shadow jobs) | {} | tracked | — |",
+                self.shadowed,
+                pct(self.shadow_accepted, self.shadow_reviewed)
+            )?;
         }
         Ok(())
     }
@@ -397,5 +429,54 @@ mod tests {
             kpi.to_string()
                 .contains("| Cost per issue, failures included | — | ≤ $4 | — |")
         );
+    }
+
+    #[test]
+    fn shadow_jobs_are_graded_apart_from_the_runs() {
+        let review = |verdict, lines_edited| Review {
+            verdict,
+            lines_edited,
+            review_minutes: 5.0,
+            broke_tests: false,
+        };
+        let records = [
+            record(
+                "a-1",
+                Outcome::PrOpened,
+                1.0,
+                Some(review(ReviewVerdict::Accepted, 0)),
+                false,
+            ),
+            record(
+                "s-1",
+                Outcome::Shadowed,
+                1.0,
+                Some(review(ReviewVerdict::Accepted, 0)),
+                false,
+            ),
+            record(
+                "s-2",
+                Outcome::Shadowed,
+                1.0,
+                Some(review(ReviewVerdict::AcceptedWithEdits, 30)),
+                false,
+            ),
+            record("s-3", Outcome::Shadowed, 1.0, None, false),
+        ];
+        let kpi = Kpi::from_records(&records);
+        assert_eq!((kpi.runs, kpi.accepted, kpi.reviewed), (1, 1, 1));
+        assert_eq!(
+            (kpi.shadowed, kpi.shadow_reviewed, kpi.shadow_accepted),
+            (3, 2, 1)
+        );
+        assert_eq!(kpi.shadow_accept_rate(), Some(0.5));
+        assert!(
+            kpi.to_string()
+                .contains("| Shadow jobs a reviewer would merge (3 shadow jobs) | 50% (1/2) |"),
+            "{kpi}"
+        );
+        let none = Kpi::from_records(&records[..1]);
+        assert_eq!(none.shadow_accept_rate(), None);
+        assert!(!none.to_string().contains("Shadow"), "{none}");
     }
 }
