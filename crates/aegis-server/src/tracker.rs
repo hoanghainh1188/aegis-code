@@ -98,7 +98,14 @@ pub fn apm_config(repo: &Repo) -> Result<Option<ApmConfig>, Unusable> {
 /// Enriches `issue.body` with production telemetry from the repository's
 /// configured APM provider (#452). Fails soft: a missing secret or transient
 /// APM error is logged and leaves `issue` untouched.
-pub async fn enrich_with_apm(repo: &Repo, secrets: &Secrets, issue: &mut IssueInput) {
+///
+/// `around` is when the ticket arrived: CloudWatch reads the logs around it.
+pub async fn enrich_with_apm(
+    repo: &Repo,
+    secrets: &Secrets,
+    issue: &mut IssueInput,
+    around: time::OffsetDateTime,
+) {
     let config = match apm_config(repo) {
         Ok(Some(c)) => c,
         Ok(None) => return,
@@ -107,9 +114,15 @@ pub async fn enrich_with_apm(repo: &Repo, secrets: &Secrets, issue: &mut IssueIn
             return;
         }
     };
-    let Ok(Some(token)) = secrets.get_or_load(config.token_env()).await else {
-        tracing::warn!(repo = %repo.slug, secret = %config.token_env(), "missing apm token secret");
-        return;
+    let token = match config.token_env() {
+        Some(name) => match secrets.get_or_load(name).await {
+            Ok(Some(t)) => Some(t),
+            _ => {
+                tracing::warn!(repo = %repo.slug, secret = %name, "missing apm token secret");
+                return;
+            }
+        },
+        None => None,
     };
     let app_key = match config.app_key_env() {
         Some(name) => match secrets.get_or_load(name).await {
@@ -123,7 +136,7 @@ pub async fn enrich_with_apm(repo: &Repo, secrets: &Secrets, issue: &mut IssueIn
     };
     let client = match ApmClient::new(
         &config,
-        token.expose(),
+        token.as_ref().map(|t| t.expose()),
         app_key.as_ref().map(|k| k.expose()),
     ) {
         Ok(c) => c,
@@ -132,7 +145,10 @@ pub async fn enrich_with_apm(repo: &Repo, secrets: &Secrets, issue: &mut IssueIn
             return;
         }
     };
-    let query = TelemetryQuery::from_ticket(&issue.title, &issue.body);
+    let query = TelemetryQuery {
+        around: Some(around),
+        ..TelemetryQuery::from_ticket(&issue.title, &issue.body)
+    };
     match client.fetch(&query).await {
         Ok(Some(telemetry)) => issue.body.push_str(&telemetry.to_markdown()),
         Ok(None) => {}

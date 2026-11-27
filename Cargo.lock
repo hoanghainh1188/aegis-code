@@ -325,6 +325,8 @@ dependencies = [
 name = "aegis-tracker"
 version = "0.19.0"
 dependencies = [
+ "aws-config",
+ "aws-sdk-cloudwatchlogs",
  "reqwest",
  "serde",
  "serde_json",
@@ -635,6 +637,30 @@ dependencies = [
  "fastrand",
  "http",
  "http-body-util",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
+name = "aws-sdk-cloudwatchlogs"
+version = "1.167.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1d4910928f73ac46e212737170d32dd05a04f5e52bcf6989d4fc2af3fb68a93"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-eventstream",
+ "aws-smithy-http",
+ "aws-smithy-json 0.65.1",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema 1.2.0",
+ "aws-smithy-types",
+ "aws-types",
+ "fastrand",
  "regex-lite",
  "tracing",
 ]

@@ -1,17 +1,21 @@
 [package]
 name = "aegis-tracker"
-description = "Jira and Backlog as issue trackers: tickets by JQL or filter with their logs, the job's end written back (#26)."
+description = "Jira and Backlog as issue trackers: tickets by JQL or filter with their logs, the job's end written back (#26); Sentry, Datadog and CloudWatch Logs telemetry (#452, #704)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
+aws-config.workspace = true
+# Như aegis-secrets: tắt `rustls` mặc định, nó kéo hyper 0.14 + rustls 0.21 có advisory (#42).
+aws-sdk-cloudwatchlogs = { version = "1.167.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 reqwest = { workspace = true, features = ["form", "json", "query", "rustls", "http2"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["macros", "parsing"] }
+tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

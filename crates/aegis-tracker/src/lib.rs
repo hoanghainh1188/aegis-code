@@ -5,8 +5,8 @@
 //!   (`servicenow`), and Backlog (Nulab) poll matching tickets with optional SLA
 //!   priority (`P1`–`P3`) and deadlines, read ticket descriptions and log
 //!   attachments, and write completion status / PR links back.
-//! - Sentry and Datadog APM enrichment (`apm`) read stack traces and
-//!   breadcrumbs for issues lacking logs (#452).
+//! - Sentry, Datadog and CloudWatch Logs APM enrichment (`apm`) read stack traces and
+//!   breadcrumbs for issues lacking logs (#452, #704).
 //!
 //! A ticket's text is untrusted (design §7), like a GitHub issue's.
 //! Tokens are not in the configuration: `token_env` names the secret, the
@@ -22,7 +22,9 @@ mod jsm;
 mod servicenow;
 mod ticket;
 
-pub use apm::{ApmClient, ApmConfig, DatadogConfig, SentryConfig, Telemetry, TelemetryQuery};
+pub use apm::{
+    ApmClient, ApmConfig, CloudWatchConfig, DatadogConfig, SentryConfig, Telemetry, TelemetryQuery,
+};
 use backlog::Backlog;
 pub use config::{
     BacklogConfig, Deployment, JiraConfig, JsmConfig, ServiceNowConfig, TrackerConfig,

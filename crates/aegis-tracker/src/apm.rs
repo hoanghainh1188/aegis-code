@@ -1,10 +1,12 @@
 //! Read-only APM telemetry enrichment (#452, ADR 0011): pulls stack
 //! traces, release commit SHAs, error frequency, and recent breadcrumbs
-//! from Sentry or Datadog when a ticket lacks full production logs.
+//! from Sentry, Datadog or AWS CloudWatch Logs (#704) when a ticket lacks
+//! full production logs.
 //!
 //! Telemetry text is untrusted input (ADR 0009): every fetched block is
 //! size-capped and wrapped in a fence it cannot close before reaching `BP3`.
 
+mod cloudwatch;
 mod datadog;
 mod sentry;
 
@@ -14,6 +16,7 @@ use crate::TrackerError;
 use crate::config::{site_url, token_env};
 use crate::ticket::longest_run;
 
+use cloudwatch::CloudWatch;
 use datadog::Datadog;
 use sentry::Sentry;
 
@@ -32,6 +35,8 @@ const MAX_TELEMETRY_CHARS: usize = 6_000;
 pub enum ApmConfig {
     Sentry(SentryConfig),
     Datadog(DatadogConfig),
+    #[serde(rename = "cloudwatch")]
+    CloudWatch(CloudWatchConfig),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,17 +70,75 @@ pub struct DatadogConfig {
     pub env: Option<String>,
 }
 
+/// AWS CloudWatch Logs (#704): Logs Insights over `log_groups`, with the
+/// standard AWS credential chain. No secret is named here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloudWatchConfig {
+    /// The log groups' region, e.g. `ap-northeast-1`.
+    pub region: String,
+    /// Log groups to query (1 to 50), e.g. `/ecs/checkout`.
+    pub log_groups: Vec<String>,
+    /// A named profile from the AWS config files; the default chain (the
+    /// machine's role) when absent.
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// How far before the ticket's time to read; the window also runs an
+    /// hour past it.
+    #[serde(default = "default_lookback_minutes")]
+    pub lookback_minutes: u32,
+}
+
+/// Logs Insights accepts at most 50 log groups per query.
+const MAX_LOG_GROUPS: usize = 50;
+/// Two weeks: Logs Insights bills by the data it scans.
+const MAX_LOOKBACK_MINUTES: u32 = 14 * 24 * 60;
+
+fn default_lookback_minutes() -> u32 {
+    24 * 60
+}
+
+impl CloudWatchConfig {
+    fn check(&self) -> Result<(), TrackerError> {
+        let bad = |what: &str| Err(TrackerError::Config(format!("cloudwatch: {what}")));
+        let region = self.region.trim();
+        if region.is_empty()
+            || !region
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return bad("`region` is not a region name");
+        }
+        if self.log_groups.is_empty() || self.log_groups.len() > MAX_LOG_GROUPS {
+            return bad("`log_groups` needs 1 to 50 log groups");
+        }
+        if self.log_groups.iter().any(|g| g.trim().is_empty()) {
+            return bad("`log_groups` has an empty name");
+        }
+        if self.profile.as_deref().is_some_and(|p| p.trim().is_empty()) {
+            return bad("`profile` is empty");
+        }
+        if self.lookback_minutes == 0 || self.lookback_minutes > MAX_LOOKBACK_MINUTES {
+            return bad("`lookback_minutes` must be 1 to 20160 (two weeks)");
+        }
+        Ok(())
+    }
+}
+
 impl ApmConfig {
-    pub fn token_env(&self) -> &str {
+    /// The secret holding the provider's token; `None` for CloudWatch, which
+    /// takes the standard AWS credential chain.
+    pub fn token_env(&self) -> Option<&str> {
         match self {
-            Self::Sentry(c) => &c.token_env,
-            Self::Datadog(c) => &c.token_env,
+            Self::Sentry(c) => Some(&c.token_env),
+            Self::Datadog(c) => Some(&c.token_env),
+            Self::CloudWatch(_) => None,
         }
     }
 
     pub fn app_key_env(&self) -> Option<&str> {
         match self {
-            Self::Sentry(_) => None,
+            Self::Sentry(_) | Self::CloudWatch(_) => None,
             Self::Datadog(c) => Some(&c.app_key_env),
         }
     }
@@ -96,6 +159,7 @@ impl ApmConfig {
                 token_env(&c.token_env)?;
                 token_env(&c.app_key_env)?;
             }
+            Self::CloudWatch(c) => c.check()?,
         }
         Ok(())
     }
@@ -112,6 +176,9 @@ pub struct TelemetryQuery {
     pub error_code: Option<String>,
     /// Fallback search text (typically the ticket title).
     pub fallback_text: String,
+    /// When the ticket arrived: CloudWatch reads the logs around it. `None`
+    /// is now.
+    pub around: Option<time::OffsetDateTime>,
 }
 
 impl TelemetryQuery {
@@ -126,6 +193,7 @@ impl TelemetryQuery {
             ),
             error_code: find_error_code(&combined),
             fallback_text: title.trim().chars().take(120).collect(),
+            around: None,
         }
     }
 
@@ -194,22 +262,31 @@ impl Telemetry {
 pub enum ApmClient {
     Sentry(Sentry),
     Datadog(Datadog),
+    CloudWatch(CloudWatch),
 }
 
 impl ApmClient {
+    /// `token` is the secret named by [`ApmConfig::token_env`], `app_key`
+    /// the one named by [`ApmConfig::app_key_env`]; CloudWatch takes neither.
     pub fn new(
         config: &ApmConfig,
-        token: &str,
+        token: Option<&str>,
         app_key: Option<&str>,
     ) -> Result<Self, TrackerError> {
         config.check()?;
+        let token = || {
+            token
+                .filter(|t| !t.is_empty())
+                .ok_or_else(|| TrackerError::Config("apm: missing the `token_env` secret".into()))
+        };
         Ok(match config {
-            ApmConfig::Sentry(c) => Self::Sentry(Sentry::new(c, token)?),
+            ApmConfig::Sentry(c) => Self::Sentry(Sentry::new(c, token()?)?),
+            ApmConfig::CloudWatch(c) => Self::CloudWatch(CloudWatch::new(c)),
             ApmConfig::Datadog(c) => {
                 let app_key = app_key.filter(|k| !k.is_empty()).ok_or_else(|| {
                     TrackerError::Config("datadog: missing `app_key_env` secret".into())
                 })?;
-                Self::Datadog(Datadog::new(c, token, app_key)?)
+                Self::Datadog(Datadog::new(c, token()?, app_key)?)
             }
         })
     }
@@ -220,6 +297,7 @@ impl ApmClient {
         match self {
             Self::Sentry(s) => s.fetch(query).await,
             Self::Datadog(d) => d.fetch(query).await,
+            Self::CloudWatch(c) => c.fetch(query).await,
         }
     }
 }
