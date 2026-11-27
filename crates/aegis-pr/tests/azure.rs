@@ -186,6 +186,26 @@ async fn identities(server: &MockServer) {
             .mount(server)
             .await;
     }
+    // The readers' group is in no other group.
+    above(
+        server,
+        "Microsoft.TeamFoundation.Identity;S-1-9-readers",
+        &[],
+    )
+    .await;
+}
+
+/// The identity service says group `group` is directly in `parents`.
+async fn above(server: &MockServer, group: &str, parents: &[&str]) {
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(query_param("descriptors", group))
+        .and(query_param("queryMembership", "Direct"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1, "value": [{ "descriptor": group, "memberOf": parents }]
+        })))
+        .mount(server)
+        .await;
 }
 
 #[tokio::test]
@@ -478,7 +498,13 @@ async fn the_evidence_shows_the_acl_entry_the_groups_and_the_decision() {
             effective: Some((2 | 16, 4)),
         })
     );
-    assert!(evidence.in_writer_group);
+    assert_eq!(
+        evidence.writer_group,
+        Some(aegis_pr::WriterGroup {
+            name: "Contributors",
+            via: vec!["Microsoft.TeamFoundation.Identity;S-1-9-contrib".into()],
+        })
+    );
     assert!(!evidence.writes, "the deny on the repository wins");
 
     // An identity Azure does not know writes nowhere.
@@ -582,4 +608,151 @@ async fn a_service_principal_is_not_a_github_token() {
     let server = MockServer::start().await;
     let source = TokenSource::Entra(principal(&server));
     assert!(aegis_pr::GitHub::with_source("https://api.github.com", "o", "r", source).is_err());
+}
+
+const SQUAD: &str = "Microsoft.TeamFoundation.Identity;S-1-9-squad";
+const TEAM: &str = "Microsoft.TeamFoundation.Identity;S-1-9-team";
+const CONTRIB: &str = "Microsoft.TeamFoundation.Identity;S-1-9-contrib";
+
+/// A person `id` named [`WHO`], directly in `own` only; the repository;
+/// its ACL, holding the person's effective bits `entry` or no entry for
+/// them; and the project's writer groups.
+async fn nested_person(server: &MockServer, id: &str, own: &[&str], entry: Option<(u32, u32)>) {
+    Mock::given(method("GET"))
+        .and(path("/acme/_apis/identities"))
+        .and(query_param("identityIds", id))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "value": [{ "id": id, "descriptor": WHO, "memberOf": own }]
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(REPO))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": REPO_ID, "name": "cart",
+            "project": { "id": PROJECT_ID, "name": "Shop" },
+        })))
+        .mount(server)
+        .await;
+    let aces = match entry {
+        Some((allow, deny)) => json!({ WHO: {
+            "descriptor": WHO, "allow": 0, "deny": 0,
+            "extendedInfo": { "effectiveAllow": allow, "effectiveDeny": deny }
+        } }),
+        None => json!({}),
+    };
+    let token = format!("repoV2/{PROJECT_ID}/{REPO_ID}");
+    Mock::given(method("GET"))
+        .and(path(NAMESPACE))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "value": [{ "token": token, "acesDictionary": aces }]
+        })))
+        .mount(server)
+        .await;
+    for (group, sid) in [
+        ("Contributors", "S-1-9-contrib"),
+        ("Project Administrators", "S-1-9-admins"),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/acme/_apis/identities"))
+            .and(query_param(
+                "filterValue",
+                format!("[Shop]\\{group}").as_str(),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "count": 1,
+                "value": [{ "descriptor": format!("Microsoft.TeamFoundation.Identity;{sid}") }]
+            })))
+            .mount(server)
+            .await;
+    }
+}
+
+/// The groups read above a person's own: the requests for direct
+/// memberships.
+async fn groups_read(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| {
+            r.url
+                .query()
+                .is_some_and(|q| q.contains("queryMembership=Direct"))
+        })
+        .count()
+}
+
+/// #703: someone in a squad, in a team, in Contributors, with no entry in
+/// the repository's ACL, writes; the evidence shows the way.
+#[tokio::test]
+async fn a_member_of_a_team_in_contributors_writes() {
+    let server = MockServer::start().await;
+    nested_person(&server, WRITER, &[SQUAD], None).await;
+    above(&server, SQUAD, &[TEAM]).await;
+    above(&server, TEAM, &[CONTRIB]).await;
+    let az = azure(&server, "pat");
+    assert!(az.can_write(WRITER).await.unwrap());
+    let evidence = az.write_evidence(WRITER).await.unwrap();
+    assert!(evidence.entry.is_err(), "no entry: {:?}", evidence.entry);
+    assert_eq!(
+        evidence.writer_group,
+        Some(aegis_pr::WriterGroup {
+            name: "Contributors",
+            via: vec![SQUAD.into(), TEAM.into(), CONTRIB.into()],
+        })
+    );
+    assert!(evidence.writes);
+}
+
+/// #703: someone whose groups lead to no writer group does not write; the
+/// groups are read once each though they hold each other.
+#[tokio::test]
+async fn groups_that_lead_to_no_writer_group_do_not_write() {
+    let server = MockServer::start().await;
+    let readers = "Microsoft.TeamFoundation.Identity;S-1-9-readers";
+    let valid = "Microsoft.TeamFoundation.Identity;S-1-9-valid";
+    nested_person(&server, READER, &[readers], None).await;
+    above(&server, readers, &[valid]).await;
+    above(&server, valid, &[readers]).await;
+    let evidence = azure(&server, "pat").write_evidence(READER).await.unwrap();
+    assert_eq!(evidence.writer_group, None);
+    assert!(!evidence.writes);
+    assert_eq!(groups_read(&server).await, 2, "each group is read once");
+}
+
+/// #703: the groups are followed four up from a person's own, no
+/// further: Contributors four groups up is found, five up is not.
+#[tokio::test]
+async fn groups_are_followed_four_deep_at_most() {
+    for (up, writes) in [(4, true), (5, false)] {
+        let server = MockServer::start().await;
+        let chain: Vec<String> = (0..up)
+            .map(|i| format!("Microsoft.TeamFoundation.Identity;S-1-9-g{i}"))
+            .collect();
+        nested_person(&server, READER, &[chain[0].as_str()], None).await;
+        for pair in chain.windows(2) {
+            above(&server, &pair[0], &[pair[1].as_str()]).await;
+        }
+        above(&server, &chain[up - 1], &[CONTRIB]).await;
+        assert_eq!(
+            azure(&server, "pat").can_write(READER).await.unwrap(),
+            writes,
+            "Contributors {up} groups up"
+        );
+    }
+}
+
+/// #703: the ACL's effective bits still decide first: a deny on the
+/// repository wins over a team in Contributors, and no group is read.
+#[tokio::test]
+async fn a_deny_on_the_repository_wins_over_a_team_in_contributors() {
+    let server = MockServer::start().await;
+    nested_person(&server, WRITER, &[TEAM], Some((2, 4))).await;
+    above(&server, TEAM, &[CONTRIB]).await;
+    assert!(!azure(&server, "pat").can_write(WRITER).await.unwrap());
+    assert_eq!(groups_read(&server).await, 0);
 }

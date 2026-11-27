@@ -76,7 +76,12 @@ async fn the_writer_check_on_a_real_organization() {
         };
         println!(
             "| {name} | {kind} | {ace} | {effective} | {} | {} | {expected} |",
-            e.in_writer_group, e.writes
+            e.writer_group.as_ref().map_or("none".into(), |g| format!(
+                "{} via {}",
+                g.name,
+                g.via.join(" > ")
+            )),
+            e.writes
         );
         if e.writes != *expected {
             wrong.push(name.clone());
