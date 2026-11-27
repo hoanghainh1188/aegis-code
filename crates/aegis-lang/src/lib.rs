@@ -8,6 +8,7 @@
 //! read the resolved profile and name no tool of any language.
 
 mod command;
+mod deprecation;
 mod deps;
 mod error;
 mod go_lock;
@@ -31,6 +32,7 @@ mod test_path;
 mod yarn_lock;
 
 pub use command::{CommandTemplate, Placeholder};
+pub use deprecation::{Deprecation, DeprecationOutput, Deprecations, read_deprecations};
 pub use deps::{
     DependencyViolation, LockedDependency, VersionChange, ViolationKind, new_dependency_violations,
     version_changes,

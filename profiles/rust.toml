@@ -88,3 +88,9 @@ conventions = "rust.md"
 # (#471, ADR 0014). typst-7541 chỉ qua khi trên 40 lượt, ở cả hai lần đo (#156).
 [budget]
 max_model_calls = 80
+
+# Deprecation warnings (#705): rustc's `deprecated` lint, as JSON. Cargo
+# replays the warnings of crates already built.
+[deprecations]
+command = ["cargo", "check", "--workspace", "--all-targets", "--message-format=json"]
+output = "cargo-json"

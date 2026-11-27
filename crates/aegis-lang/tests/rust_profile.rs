@@ -168,3 +168,44 @@ fn fixture_lockfile_has_no_external_crates_and_adding_one_is_blocked() {
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0].dependency.name, "left-pad");
 }
+
+/// #705: the profile's `[deprecations]` command lists the calls of a
+/// deprecated function, one per call, in the repo's own code.
+#[test]
+fn deprecations_list_each_call_of_a_deprecated_api() {
+    let profiles = Profiles::builtin().unwrap();
+    let listed = profiles
+        .get(Language::Rust)
+        .unwrap()
+        .deprecations
+        .clone()
+        .expect("the Rust profile lists deprecations");
+    let ws = Workspace::new("rust");
+    let lib = ws.repo().join("src/lib.rs");
+    let mut file = std::fs::OpenOptions::new().append(true).open(&lib).unwrap();
+    writeln!(
+        file,
+        "\n#[deprecated(note = \"use `sum` instead\")]\npub fn old_total(a: u32) -> u32 {{ a }}\n\
+         pub fn first() -> u32 {{ old_total(1) }}\npub fn second() -> u32 {{ old_total(2) }}"
+    )
+    .unwrap();
+    let out = ws.run(&plain(&listed.command));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let found = aegis_lang::read_deprecations(
+        listed.output,
+        &String::from_utf8_lossy(&out.stdout),
+        &ws.repo(),
+    );
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .all(|d| d.path == "src/lib.rs" && d.code == "deprecated")
+    );
+    assert!(found[0].message.contains("old_total"), "{found:?}");
+    assert_ne!(found[0].line, found[1].line);
+}
