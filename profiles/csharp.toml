@@ -102,3 +102,9 @@ build = ["dotnet", "build", "--no-restore"]
 
 [prompt]
 conventions = "csharp.md"
+
+# Deprecation warnings (#705): CS0612, CS0618 and SYSLIB obsoletions,
+# compiled again so warnings of built projects are shown.
+[deprecations]
+command = ["dotnet", "build", "--no-restore", "--no-incremental", "-clp:NoSummary"]
+output = "msbuild"

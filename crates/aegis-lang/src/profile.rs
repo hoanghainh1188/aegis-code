@@ -64,6 +64,10 @@ pub struct Profile {
     pub prompt: Prompt,
     #[serde(default)]
     pub budget: ProfileBudget,
+    /// How the repo's deprecation warnings are listed (#705); `None` for a
+    /// language whose toolchain has no reader yet.
+    #[serde(default)]
+    pub deprecations: Option<crate::Deprecations>,
 }
 
 /// The language's own job budget (#471), taken when the run's `[budget]`
@@ -950,6 +954,10 @@ mod tests {
         assert_eq!(
             rust.gate.test.argv(),
             ["cargo", "test", "--workspace", "--no-fail-fast"]
+        );
+        assert_eq!(
+            rust.deprecations.as_ref().map(|d| d.output),
+            Some(crate::DeprecationOutput::CargoJson)
         );
         assert_eq!(rust.gate.test_output, Some(TestOutput::Libtest));
         assert!(

@@ -128,3 +128,9 @@ writable = ["/home/aegis"]
 
 [prompt]
 conventions = "java.md"
+
+# Deprecation warnings (#705): javac's `[deprecation]` and `[removal]`
+# warnings, shown by Maven.
+[deprecations]
+command = ["mvn", "-B", "-o", "test-compile", "-Dmaven.compiler.showDeprecation=true", "-Dmaven.compiler.showWarnings=true"]
+output = "javac"

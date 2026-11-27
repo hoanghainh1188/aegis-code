@@ -128,3 +128,9 @@ writable = ["/home/aegis"]
 
 [prompt]
 conventions = "kotlin.md"
+
+# Deprecation warnings (#705): kotlinc's warnings through Gradle, compiled
+# again so warnings of built classes are shown.
+[deprecations]
+command = ["gradle", "--offline", "--no-configuration-cache", "--rerun-tasks", "testClasses"]
+output = "kotlinc"
