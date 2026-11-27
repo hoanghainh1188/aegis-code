@@ -23,7 +23,8 @@ mod servicenow;
 mod ticket;
 
 pub use apm::{
-    ApmClient, ApmConfig, CloudWatchConfig, DatadogConfig, SentryConfig, Telemetry, TelemetryQuery,
+    Anomaly, ApmClient, ApmConfig, CloudWatchConfig, DatadogConfig, ErrorCount, Release,
+    SentryConfig, SpikeRules, Telemetry, TelemetryQuery, anomalies,
 };
 use backlog::Backlog;
 pub use config::{

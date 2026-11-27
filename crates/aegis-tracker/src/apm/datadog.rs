@@ -1,9 +1,11 @@
 //! Datadog Logs API v2 client for [`super::ApmClient`].
 
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 use crate::TrackerError;
-use crate::apm::{DatadogConfig, Telemetry, TelemetryQuery};
+use crate::apm::sentry::rfc3339;
+use crate::apm::{DatadogConfig, ErrorCount, Telemetry, TelemetryQuery};
 use crate::config::site_url;
 use crate::http;
 
@@ -62,6 +64,31 @@ struct LogAttributes {
     attributes: serde_json::Value,
 }
 
+/// The facet error logs are counted by (Datadog's standard attribute).
+const ERROR_FACET: &str = "@error.kind";
+/// Error types read per window: the most frequent first.
+const MAX_ERROR_TYPES: u32 = 100;
+
+#[derive(Deserialize)]
+struct AggregateAnswer {
+    #[serde(default)]
+    data: AggregateData,
+}
+
+#[derive(Default, Deserialize)]
+struct AggregateData {
+    #[serde(default)]
+    buckets: Vec<Bucket>,
+}
+
+#[derive(Deserialize)]
+struct Bucket {
+    #[serde(default)]
+    by: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    computes: serde_json::Map<String, serde_json::Value>,
+}
+
 fn error_message(v: &serde_json::Value) -> Option<String> {
     v.get("errors")
         .and_then(|e| e.as_array())
@@ -86,6 +113,66 @@ impl Datadog {
         })
     }
 
+    /// The `service:`/`env:` filters of this connection.
+    fn scope(&self) -> Vec<String> {
+        let mut parts = Vec::new();
+        if let Some(svc) = &self.service {
+            parts.push(format!("service:{svc}"));
+        }
+        if let Some(env) = &self.env {
+            parts.push(format!("env:{env}"));
+        }
+        parts
+    }
+
+    /// Error logs of `[from, to)` per `@error.kind`, from the logs
+    /// aggregation API.
+    pub(crate) async fn error_counts(
+        &self,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+    ) -> Result<Vec<ErrorCount>, TrackerError> {
+        let mut query = self.scope();
+        query.push("status:error".into());
+        let body = serde_json::json!({
+            "compute": [{"aggregation": "count", "type": "total"}],
+            "filter": {"query": query.join(" "), "from": rfc3339(from)?, "to": rfc3339(to)?},
+            "group_by": [{
+                "facet": ERROR_FACET,
+                "limit": MAX_ERROR_TYPES,
+                "sort": {"aggregation": "count", "order": "desc", "type": "measure"}
+            }]
+        });
+        let url = format!("{}/api/v2/logs/analytics/aggregate", self.base);
+        let req = self
+            .client
+            .post(url)
+            .header("DD-API-KEY", &self.api_key)
+            .header("DD-APPLICATION-KEY", &self.app_key)
+            .json(&body);
+        let answer = http::json::<AggregateAnswer>("datadog", req, error_message).await?;
+        Ok(answer
+            .data
+            .buckets
+            .into_iter()
+            .filter_map(|bucket| {
+                let kind = bucket.by.get(ERROR_FACET)?.as_str()?.trim().to_owned();
+                if kind.is_empty() {
+                    return None;
+                }
+                let count = bucket
+                    .computes
+                    .values()
+                    .find_map(serde_json::Value::as_u64)?;
+                Some(ErrorCount {
+                    fingerprint: format!("datadog:{kind}"),
+                    title: kind,
+                    count,
+                })
+            })
+            .collect())
+    }
+
     pub(crate) async fn fetch(
         &self,
         query: &TelemetryQuery,
@@ -94,13 +181,7 @@ impl Datadog {
         if term.is_empty() {
             return Ok(None);
         }
-        let mut parts = Vec::new();
-        if let Some(svc) = &self.service {
-            parts.push(format!("service:{svc}"));
-        }
-        if let Some(env) = &self.env {
-            parts.push(format!("env:{env}"));
-        }
+        let mut parts = self.scope();
         parts.push(format!("\"{}\"", term.replace('"', "")));
 
         let url = format!("{}/api/v2/logs/events/search", self.base);
