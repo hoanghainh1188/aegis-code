@@ -1,6 +1,9 @@
-//! Wiremock tests for the Sentry and Datadog APM connectors (#452).
+//! Wiremock tests for the Sentry and Datadog APM connectors (#452), and the
+//! CloudWatch configuration (#704; its queries are tested in `apm/cloudwatch.rs`).
 
-use aegis_tracker::{ApmClient, ApmConfig, DatadogConfig, SentryConfig, TelemetryQuery};
+use aegis_tracker::{
+    ApmClient, ApmConfig, CloudWatchConfig, DatadogConfig, SentryConfig, TelemetryQuery,
+};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -63,7 +66,7 @@ async fn sentry_fetches_issue_by_id_with_stacktrace_and_breadcrumbs() {
         project: Some("shop".into()),
         token_env: "SENTRY_TOKEN".into(),
     });
-    let client = ApmClient::new(&cfg, "sentry-secret", None).unwrap();
+    let client = ApmClient::new(&cfg, Some("sentry-secret"), None).unwrap();
     let query = TelemetryQuery::from_ticket(
         "Checkout fails with 500",
         "Customer reported error, see SENTRY-987654",
@@ -95,7 +98,7 @@ async fn sentry_searches_org_issues_and_returns_none_when_empty() {
         project: None,
         token_env: "SENTRY_TOKEN".into(),
     });
-    let client = ApmClient::new(&cfg, "sentry-secret", None).unwrap();
+    let client = ApmClient::new(&cfg, Some("sentry-secret"), None).unwrap();
     let query = TelemetryQuery::from_ticket("500 error", "correlation_id: req-445566");
     assert!(client.fetch(&query).await.unwrap().is_none());
 }
@@ -134,7 +137,7 @@ async fn datadog_searches_logs_and_extracts_stacktrace() {
         service: Some("checkout".into()),
         env: Some("prod".into()),
     });
-    let client = ApmClient::new(&cfg, "dd-api", Some("dd-app")).unwrap();
+    let client = ApmClient::new(&cfg, Some("dd-api"), Some("dd-app")).unwrap();
     let query = TelemetryQuery::from_ticket("Checkout lock error", "code: ERR_CART_LOCK");
     let telemetry = client.fetch(&query).await.unwrap().unwrap();
     assert_eq!(telemetry.provider, "datadog");
@@ -161,5 +164,90 @@ fn rejects_invalid_apm_configs() {
         service: None,
         env: None,
     });
-    assert!(ApmClient::new(&missing_app_key, "dd-api", None).is_err());
+    assert!(ApmClient::new(&missing_app_key, Some("dd-api"), None).is_err());
+}
+
+#[test]
+fn cloudwatch_is_configured_without_a_secret() {
+    let config: ApmConfig = serde_json::from_value(serde_json::json!({
+        "kind": "cloudwatch",
+        "region": "ap-northeast-1",
+        "log_groups": ["/ecs/checkout", "/ecs/cart"]
+    }))
+    .unwrap();
+    let ApmConfig::CloudWatch(cw) = &config else {
+        panic!("{config:?}");
+    };
+    assert_eq!(cw.lookback_minutes, 24 * 60);
+    assert_eq!(cw.profile, None);
+    assert_eq!(config.token_env(), None);
+    assert_eq!(config.app_key_env(), None);
+    assert!(ApmClient::new(&config, None, None).is_ok());
+
+    // A key in the settings is refused: credentials come from the AWS chain.
+    let with_key = serde_json::from_value::<ApmConfig>(serde_json::json!({
+        "kind": "cloudwatch",
+        "region": "ap-northeast-1",
+        "log_groups": ["/ecs/checkout"],
+        "access_key_id": "AKIA0000"
+    }));
+    assert!(with_key.is_err());
+}
+
+#[test]
+fn rejects_invalid_cloudwatch_configs() {
+    let valid = CloudWatchConfig {
+        region: "ap-northeast-1".into(),
+        log_groups: vec!["/ecs/checkout".into()],
+        profile: Some("aegis-readonly".into()),
+        lookback_minutes: 60,
+    };
+    assert!(ApmConfig::CloudWatch(valid.clone()).check().is_ok());
+    let bad = [
+        CloudWatchConfig {
+            region: "Tokyo".into(),
+            ..valid.clone()
+        },
+        CloudWatchConfig {
+            log_groups: vec![],
+            ..valid.clone()
+        },
+        CloudWatchConfig {
+            log_groups: vec![" ".into()],
+            ..valid.clone()
+        },
+        CloudWatchConfig {
+            log_groups: vec!["/g".into(); 51],
+            ..valid.clone()
+        },
+        CloudWatchConfig {
+            profile: Some(String::new()),
+            ..valid.clone()
+        },
+        CloudWatchConfig {
+            lookback_minutes: 0,
+            ..valid.clone()
+        },
+        CloudWatchConfig {
+            lookback_minutes: 14 * 24 * 60 + 1,
+            ..valid
+        },
+    ];
+    for config in bad {
+        let config = ApmConfig::CloudWatch(config);
+        assert!(config.check().is_err(), "{config:?}");
+    }
+}
+
+#[test]
+fn sentry_and_datadog_still_need_their_token() {
+    let sentry = ApmConfig::Sentry(SentryConfig {
+        url: "https://sentry.io".into(),
+        organization: "acme".into(),
+        project: None,
+        token_env: "SENTRY_TOKEN".into(),
+    });
+    assert_eq!(sentry.token_env(), Some("SENTRY_TOKEN"));
+    assert!(ApmClient::new(&sentry, None, None).is_err());
+    assert!(ApmClient::new(&sentry, Some(""), None).is_err());
 }

@@ -523,7 +523,7 @@ impl LifecycleRunner {
             }
         };
         if round.is_none() && !matches!(job.source, JobSource::Cve | JobSource::Sonar) {
-            enrich_with_apm(&repo, &self.secrets, &mut issue).await;
+            enrich_with_apm(&repo, &self.secrets, &mut issue, job.created_at).await;
             let embedder = match config.model_policy() {
                 Ok(policy) => {
                     crate::memory::embedder_of(&config.memory, policy, &self.secrets).await
