@@ -233,8 +233,86 @@ impl GitHubNotifier {
     }
 }
 
+impl GitHubNotifier {
+    /// The end of an `apm` job (#706, 3/3), for a repo whose spike reports
+    /// go to GitHub: a spike's diagnosis opens an issue of the repo with
+    /// the report, and a fix job's end is commented on that issue.
+    async fn apm_job_ended(&self, job: &Job, diagnosis: Option<&str>) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let repo = match store.repo(job.repo_id).await {
+            Ok(Some(repo)) => repo,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(job = job.id.0, error = %e, "reading the spike's repo");
+                return;
+            }
+        };
+        if crate::anomaly::report_to(&repo) != crate::anomaly::ReportTo::Github {
+            return;
+        }
+        let Some((owner, name)) = super::owner_and_name(&repo.url) else {
+            tracing::warn!(job = job.id.0, "the repo's URL names no GitHub repository");
+            return;
+        };
+        let fix = job.issue_ref.strip_suffix(aegis_store::ANOMALY_FIX_SUFFIX);
+        let spike = fix.unwrap_or(&job.issue_ref);
+        let ticket = match store.anomaly_ticket(repo.id, spike).await {
+            Ok(ticket) => ticket,
+            Err(e) => {
+                tracing::warn!(job = job.id.0, error = %e, "reading the spike's issue");
+                return;
+            }
+        };
+        let on_app = self.job_on_app(job).await;
+        let locale = self.locales.of(job.repo_id).await;
+        // A fix job's end, or a spike diagnosed again: on its issue.
+        if let Some(ticket) = ticket {
+            if let Ok((_, _, number)) = parse_issue_ref(&ticket) {
+                let text = comment_with(job, diagnosis, locale);
+                self.comment(owner, name, number, &text, on_app).await;
+            }
+            return;
+        }
+        let Some(report) = diagnosis.filter(|_| fix.is_none() && has_report(job)) else {
+            return;
+        };
+        let (title, body) = match store.anomaly(repo.id, spike).await {
+            Ok(Some(found)) => found,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(job = job.id.0, error = %e, "reading the spike");
+                return;
+            }
+        };
+        let text = format!("{body}\n\n{report}\n\n{}", locale.strings().spike_fix);
+        let opened = match self.client(owner, name, on_app, TokenUse::Comment).await {
+            Ok(Some(github)) => github
+                .open_issue(&aegis_pr::inert(&title), &text)
+                .await
+                .map_err(|e| e.to_string()),
+            Ok(None) => return,
+            Err(e) => Err(e),
+        };
+        match opened {
+            Ok(issue) => {
+                let ticket = format!("{owner}/{name}#{}", issue.number);
+                if let Err(e) = store.set_anomaly_ticket(repo.id, spike, &ticket).await {
+                    tracing::warn!(job = job.id.0, error = %e, "keeping the spike's issue");
+                }
+                tracing::info!(job = job.id.0, url = %issue.url, "opened the spike's issue");
+            }
+            Err(e) => tracing::warn!(job = job.id.0, error = %e, "opening the spike's issue"),
+        }
+    }
+}
+
 impl JobNotifier for GitHubNotifier {
     async fn job_ended(&self, job: &Job, diagnosis: Option<&str>) {
+        if job.source == JobSource::Apm {
+            return self.apm_job_ended(job, diagnosis).await;
+        }
         if job.source != JobSource::Github {
             return;
         }

@@ -23,8 +23,8 @@ use aegis_ledger::{IssueId, IssueKind};
 use aegis_lifecycle::IssueInput;
 use aegis_secrets::Secrets;
 use aegis_store::{
-    AnomalyLimits, AnomalySkipped, Delivered, Job, JobSource, NewAnomaly, NewJob, Page, Repo,
-    Store, StoreError,
+    ANOMALY_FIX_SUFFIX, AnomalyLimits, AnomalySkipped, Delivered, Job, JobSource, NewAnomaly,
+    NewJob, Page, Repo, Store, StoreError,
 };
 use aegis_tracker::{SpikeRules, anomalies};
 use serde::Deserialize;
@@ -65,6 +65,30 @@ pub struct AnomalyConfig {
     /// again: 0 to 90.
     #[serde(default = "default_dedupe_days")]
     pub dedupe_days: u32,
+    /// Where a spike's report goes (3/3): the job's page only, or also a
+    /// new issue of the repo on GitHub, where `/aegis fix` asks for a fix.
+    #[serde(default)]
+    pub report_to: ReportTo,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReportTo {
+    /// The job's page (the dashboard) only.
+    #[default]
+    Dashboard,
+    /// Also an issue opened on the repo's GitHub.
+    Github,
+}
+
+/// Where `repo`'s spike reports go; the dashboard when its settings say
+/// nothing or cannot be read.
+pub fn report_to(repo: &Repo) -> ReportTo {
+    repo.config
+        .get("apm_anomaly")
+        .and_then(|v| v.get("report_to"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
 }
 
 fn default_every_s() -> u64 {
@@ -336,19 +360,22 @@ pub async fn run_checker(
 }
 
 /// The issue of an `apm` job of `repo`, under its ledger key: the spike
-/// as it was found, of kind Anomaly, for the diagnosis lane.
+/// as it was found, of kind Anomaly, for the diagnosis lane. A spike's fix
+/// job (`issue_ref` ending `-fix`, asked for by a person, 3/3) is the
+/// spike with its diagnosis, of kind Bug, for the fix loop: its PR links
+/// the ticket the report was posted to, if it was.
 pub async fn apm_issue(job: &Job, repo: &Repo, store: &Store) -> Result<IssueInput, Attempt> {
+    let fix = job.issue_ref.strip_suffix(ANOMALY_FIX_SUFFIX);
+    let spike = fix.unwrap_or(&job.issue_ref);
+    let infra = |e: StoreError| Attempt::Infra(e.to_string());
     let (title, body) = store
-        .anomaly(repo.id, &job.issue_ref)
+        .anomaly(repo.id, spike)
         .await
-        .map_err(|e| Attempt::Infra(e.to_string()))?
+        .map_err(infra)?
         .ok_or_else(|| {
-            Attempt::Rejected(format!(
-                "repo `{}` has no APM spike `{}`",
-                repo.slug, job.issue_ref
-            ))
+            Attempt::Rejected(format!("repo `{}` has no APM spike `{spike}`", repo.slug))
         })?;
-    Ok(IssueInput {
+    let issue = IssueInput {
         cve: None,
         id: job.ledger_key.as_str().to_owned(),
         title,
@@ -359,7 +386,42 @@ pub async fn apm_issue(job: &Job, repo: &Repo, store: &Store) -> Result<IssueInp
         kind: Some(IssueKind::Anomaly),
         source: Some("apm".into()),
         memory: String::new(),
+    };
+    if fix.is_none() {
+        return Ok(issue);
+    }
+    let report = store.anomaly_report(repo.id, spike).await.map_err(infra)?;
+    let url = match store.anomaly_ticket(repo.id, spike).await.map_err(infra)? {
+        Some(ticket) => ticket_url(repo, &ticket).unwrap_or_default(),
+        None => String::new(),
+    };
+    let mut body = issue.body;
+    if let Some(report) = report {
+        body.push_str(
+            "\n\nIts diagnosis, before the fix was asked for (read-only, checked \
+                       sources):\n\n",
+        );
+        body.push_str(&report);
+    }
+    Ok(IssueInput {
+        title: format!("Fix: {}", issue.title),
+        body,
+        url,
+        // A person asked for a fix: the code is worked on, not triaged.
+        kind: Some(IssueKind::Bug),
+        ..issue
     })
+}
+
+/// The web address of `owner/name#12` on the repo's GitHub.
+fn ticket_url(repo: &Repo, ticket: &str) -> Option<String> {
+    let (path, number) = ticket.rsplit_once('#')?;
+    let host = repo
+        .url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())?;
+    Some(format!("https://{host}/{path}/issues/{number}"))
 }
 
 #[cfg(test)]
@@ -373,6 +435,10 @@ mod tests {
         assert_eq!(config.window_minutes, 60);
         assert_eq!(config.rules(), SpikeRules::default());
         assert_eq!(config.limits().per_day, 3);
+        assert_eq!(config.report_to, ReportTo::Dashboard);
+        let github: AnomalyConfig = serde_json::from_str(r#"{"report_to": "github"}"#).unwrap();
+        assert_eq!(github.report_to, ReportTo::Github);
+        assert!(serde_json::from_str::<AnomalyConfig>(r#"{"report_to": "jira"}"#).is_err());
         assert!(config.check().is_ok());
         for bad in [
             r#"{"every_s": 60}"#,

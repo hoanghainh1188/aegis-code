@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use aegis_ledger::IssueId;
+use aegis_ledger::{IssueId, Outcome};
 use aegis_store::testing::test_db;
 use aegis_store::{
-    AnomalyLimits, AnomalySkipped, Delivered, JobSource, JobStatus, ModeName, NewAnomaly, NewJob,
-    NewRepo, RepoId, Store, StoreError,
+    Actor, AnomalyLimits, AnomalySkipped, AttemptEnd, Delivered, JobSource, JobStatus, ModeName,
+    NewAnomaly, NewJob, NewRepo, RepoId, Store, StoreError,
 };
 use serde_json::json;
 
@@ -131,6 +131,92 @@ async fn a_spike_is_diagnosed_once_and_a_repo_gets_its_cap_a_day() {
             }
         ),
         "{err}"
+    );
+    db.drop().await;
+}
+
+/// #706 (3/3): a spike's diagnosis is turned into one fix job at a time,
+/// and the ticket its report was posted to finds it.
+#[tokio::test]
+async fn a_diagnosed_spike_becomes_a_fix_job() {
+    let Some(db) = test_db().await else { return };
+    let s = &db.store;
+    let app = repo(s, "app").await;
+    s.deliver_anomaly(&job(app, "apm-1"), &spike("sentry:A"), LIMITS)
+        .await
+        .unwrap()
+        .unwrap();
+    let actor = Actor::cli();
+    let claim = s
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let diagnosis = claim.job.id;
+    // Not before it is diagnosed.
+    assert!(matches!(
+        s.fix_anomaly_by(diagnosis, &actor).await,
+        Err(StoreError::Conflict(_))
+    ));
+    let end = AttemptEnd::Done {
+        outcome: Outcome::Diagnosed,
+        reason: None,
+        pr_url: None,
+        patch: None,
+        diagnosis: Some("**Diagnosis**: code_bug (confidence 0.80).".into()),
+    };
+    s.finish_attempt(&claim.run, "w", &end).await.unwrap();
+    assert_eq!(
+        s.anomaly_report(app, "apm-1").await.unwrap().as_deref(),
+        Some("**Diagnosis**: code_bug (confidence 0.80).")
+    );
+
+    s.set_anomaly_ticket(app, "apm-1", "acme/app#12")
+        .await
+        .unwrap();
+    assert_eq!(
+        s.anomaly_ticket(app, "apm-1").await.unwrap().as_deref(),
+        Some("acme/app#12")
+    );
+    assert_eq!(
+        s.anomaly_job_by_ticket(app, "acme/app#12").await.unwrap(),
+        Some(diagnosis)
+    );
+    assert_eq!(
+        s.anomaly_job_by_ticket(app, "acme/app#13").await.unwrap(),
+        None
+    );
+
+    let fix = s.fix_anomaly_by(diagnosis, &actor).await.unwrap();
+    assert_eq!(
+        (fix.source, fix.status, fix.issue_ref.as_str()),
+        (JobSource::Apm, JobStatus::Queued, "apm-1-fix")
+    );
+    assert_eq!(fix.ledger_key.as_str(), format!("APP-APM-1-{}-FIX", app.0));
+    // One at a time, and a fix job is not a spike to fix.
+    assert!(matches!(
+        s.fix_anomaly_by(diagnosis, &actor).await,
+        Err(StoreError::Conflict(_))
+    ));
+    assert!(matches!(
+        s.fix_anomaly_by(fix.id, &actor).await,
+        Err(StoreError::Conflict(_))
+    ));
+    // Once that fix failed, another may be asked for, under a new key.
+    let claim = s
+        .claim_job("w", Duration::from_secs(60), 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.job.id, fix.id);
+    let failed = AttemptEnd::Failed {
+        error: "the gate failed".into(),
+    };
+    s.finish_attempt(&claim.run, "w", &failed).await.unwrap();
+    let again = s.fix_anomaly_by(diagnosis, &actor).await.unwrap();
+    assert_eq!(
+        again.ledger_key.as_str(),
+        format!("APP-APM-1-{}-FIX2", app.0)
     );
     db.drop().await;
 }

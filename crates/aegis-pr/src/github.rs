@@ -52,6 +52,14 @@ pub struct IssueComment {
     pub url: String,
 }
 
+/// An issue the platform opened (#706): its number and web address.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OpenedIssue {
+    pub number: u64,
+    #[serde(rename = "html_url")]
+    pub url: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiError {
     message: String,
@@ -386,6 +394,17 @@ impl GitHub {
             Err(PrError::GitHub { status: 404, .. }) => Ok("none".into()),
             Err(e) => Err(e),
         }
+    }
+
+    /// Opens an issue of this repo: an error spike's report, for the team to
+    /// read and answer with `/aegis fix` (#706). The caller makes `title`
+    /// and `body` inert.
+    pub async fn open_issue(&self, title: &str, body: &str) -> Result<OpenedIssue, PrError> {
+        self.post(
+            "issues",
+            &json!({ "title": crate::masked(title), "body": crate::masked(body) }),
+        )
+        .await
     }
 
     /// Comments on issue `number` of this repo: the job's status for whoever

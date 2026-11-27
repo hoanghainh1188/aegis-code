@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE apm_anomalies SET ticket_ref = $3 WHERE repo_id = $1 AND issue_ref = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf88b2dd693ef8645b0a8556bb419ae1390bdcec4e9654527fdf638fec7ee731"
+}

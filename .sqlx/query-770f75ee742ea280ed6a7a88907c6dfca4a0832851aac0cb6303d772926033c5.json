@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.report FROM jobs j JOIN job_diagnoses d ON d.job_id = j.id\n             WHERE j.repo_id = $1 AND j.issue_ref = $2 AND j.source = 'apm'\n             ORDER BY j.id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "report",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_diagnoses",
+            "name": "report"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "770f75ee742ea280ed6a7a88907c6dfca4a0832851aac0cb6303d772926033c5"
+}

@@ -53,6 +53,10 @@ pub enum Kind {
     /// (#677): the issue's plan is sent back with `feedback`, everything
     /// after the command, if `sender` can write to the repo.
     Revise { sender: String, feedback: String },
+    /// `/aegis fix` in a comment on an open issue by `sender` (#706): if
+    /// the issue holds an error spike's report the platform opened, the
+    /// spike is fixed in the code when `sender` can write to the repo.
+    FixSpike { sender: String },
 }
 
 /// The command that asks for a review round in a comment on a PR.
@@ -440,7 +444,8 @@ pub fn github(event: &str, body: &[u8], label: &str) -> Result<Wanted, Skip> {
                 return Err(ignored(format!("not a comment with `{FIX_COMMAND}`")));
             }
             if e.issue.pull_request.is_none() {
-                return Err(ignored("a comment on an issue, not a pull request"));
+                // An issue: only an error spike's report takes it (#706).
+                return design_gate(e, |sender| Kind::FixSpike { sender });
             }
             if e.issue.state != "open" {
                 return Err(ignored("the pull request is not open"));
@@ -1780,10 +1785,11 @@ mod tests {
                                "issue": { "number": 3, "html_url": "https://github.com/bot/demo/issues/3",
                                           "state": "open" },
                                "repository": repo(), "sender": person() });
-        assert!(matches!(
-            github("issue_comment", on_issue.to_string().as_bytes(), "aegis"),
-            Err(Skip::Ignored(_))
-        ));
+        // On an issue it asks for an error spike's fix (#706): the handler
+        // finds the spike the issue holds, or ignores it.
+        let wanted = github("issue_comment", on_issue.to_string().as_bytes(), "aegis").unwrap();
+        assert_eq!(wanted.issue_ref, "bot/demo#3");
+        assert!(matches!(wanted.kind, Kind::FixSpike { .. }));
         let line = json!({ "action": "created", "comment": { "body": "/aegis fix" },
                            "pull_request": pull("open", "agent/demo-1"),
                            "repository": repo(), "sender": person() });

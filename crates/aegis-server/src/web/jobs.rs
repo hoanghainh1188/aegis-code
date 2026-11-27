@@ -6,7 +6,7 @@
 //! know them before giving a verdict.
 
 use aegis_ledger::{AnswerSummary, InputFlag, IssueRecord, LedgerEvent, LedgerStore, Outcome};
-use aegis_store::{Job, JobFilter, JobStatus, Page, RepoId, RepoRole, Store};
+use aegis_store::{Job, JobFilter, JobSource, JobStatus, Page, RepoId, RepoRole, Store};
 use askama::Template;
 use axum::Extension;
 use axum::extract::{Path, Query, State};
@@ -444,6 +444,9 @@ struct JobHead {
     /// A maintainer may ask for a shadow job's PR (#699), once, when it
     /// kept a whole patch and its answer.
     can_open_pr: bool,
+    /// A maintainer may ask for an error spike's fix (#706) once its
+    /// diagnosis is done.
+    can_fix: bool,
     /// The shadow job whose PR this one opens (#699).
     publish_of: Option<i64>,
     /// Queued or running: the head asks for itself again.
@@ -501,6 +504,10 @@ async fn head_of(
         can_open_pr: maintains
             && job.outcome == Some(Outcome::Shadowed)
             && store.shadow_publish_refusal(job).await?.is_none(),
+        can_fix: maintains
+            && job.source == JobSource::Apm
+            && job.outcome == Some(Outcome::Diagnosed)
+            && !job.issue_ref.ends_with(aegis_store::ANOMALY_FIX_SUFFIX),
         publish_of: job.publish_of.map(|j| j.0),
         live: is_live(job),
     })

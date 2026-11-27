@@ -5,9 +5,18 @@
 
 use std::time::Duration;
 
+use aegis_ledger::IssueId;
+
+use crate::audit::{self, Target};
 use crate::deliveries::queue_in;
-use crate::tx;
-use crate::{Actor, Delivered, NewJob, RepoId, Store, StoreError};
+use crate::jobs::JobRow;
+use crate::{
+    Actor, Delivered, Job, JobId, JobSource, NewJob, RepoId, Store, StoreError, budget, tx,
+};
+
+/// What a spike's fix job adds to the spike's `issue_ref`.
+pub const FIX_SUFFIX: &str = "-fix";
+const MAX_TICKET_REF_CHARS: usize = 300;
 
 const MAX_FINGERPRINT_CHARS: usize = 300;
 const MAX_TITLE_CHARS: usize = 300;
@@ -153,5 +162,161 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?
         .map(|row| (row.title, row.body)))
+    }
+
+    /// The ticket the report of spike `issue_ref` of `repo` was posted to:
+    /// `owner/name#12` on GitHub.
+    pub async fn set_anomaly_ticket(
+        &self,
+        repo: RepoId,
+        issue_ref: &str,
+        ticket_ref: &str,
+    ) -> Result<(), StoreError> {
+        if ticket_ref.is_empty() || ticket_ref.chars().count() > MAX_TICKET_REF_CHARS {
+            return Err(invalid("ticket_ref", MAX_TICKET_REF_CHARS));
+        }
+        sqlx::query!(
+            "UPDATE apm_anomalies SET ticket_ref = $3 WHERE repo_id = $1 AND issue_ref = $2",
+            repo.0,
+            issue_ref,
+            ticket_ref,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::from_db)?;
+        Ok(())
+    }
+
+    /// The ticket a spike's report was posted to, if it was.
+    pub async fn anomaly_ticket(
+        &self,
+        repo: RepoId,
+        issue_ref: &str,
+    ) -> Result<Option<String>, StoreError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT ticket_ref FROM apm_anomalies WHERE repo_id = $1 AND issue_ref = $2",
+            repo.0,
+            issue_ref,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten())
+    }
+
+    /// The job that diagnosed the spike whose report was posted to
+    /// `ticket_ref` of `repo`.
+    pub async fn anomaly_job_by_ticket(
+        &self,
+        repo: RepoId,
+        ticket_ref: &str,
+    ) -> Result<Option<JobId>, StoreError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT j.id FROM apm_anomalies a
+             JOIN jobs j ON j.repo_id = a.repo_id AND j.issue_ref = a.issue_ref
+                        AND j.source = 'apm'
+             WHERE a.repo_id = $1 AND a.ticket_ref = $2
+             ORDER BY j.id DESC LIMIT 1",
+            repo.0,
+            ticket_ref,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(JobId))
+    }
+
+    /// The report of the job that diagnosed spike `issue_ref` of `repo`,
+    /// the newest if it ran more than once.
+    pub async fn anomaly_report(
+        &self,
+        repo: RepoId,
+        issue_ref: &str,
+    ) -> Result<Option<String>, StoreError> {
+        Ok(sqlx::query_scalar!(
+            "SELECT d.report FROM jobs j JOIN job_diagnoses d ON d.job_id = j.id
+             WHERE j.repo_id = $1 AND j.issue_ref = $2 AND j.source = 'apm'
+             ORDER BY j.id DESC LIMIT 1",
+            repo.0,
+            issue_ref,
+        )
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// A fix job for the spike `job` diagnosed, asked for by `actor` (#706):
+    /// an `apm` job whose `issue_ref` is the spike's with [`FIX_SUFFIX`].
+    /// Refused unless `job` diagnosed a spike, or while a fix of it is live
+    /// or opened a PR; the repo's budget is checked as for any job.
+    pub async fn fix_anomaly_by(&self, job: JobId, actor: &Actor) -> Result<Job, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let work = async {
+            let spike = sqlx::query!(
+                "SELECT repo_id, issue_ref, ledger_key, source, status, outcome
+                 FROM jobs WHERE id = $1 FOR UPDATE",
+                job.0,
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(format!("job {}", job.0)))?;
+            let diagnosed = spike.source == JobSource::Apm.as_str()
+                && !spike.issue_ref.ends_with(FIX_SUFFIX)
+                && (spike.status.as_str(), spike.outcome.as_deref()) == ("done", Some("diagnosed"));
+            if !diagnosed {
+                return Err(StoreError::Conflict(format!(
+                    "job {} is not an error spike's diagnosis",
+                    job.0
+                )));
+            }
+            let issue_ref = format!("{}{FIX_SUFFIX}", spike.issue_ref);
+            let earlier = sqlx::query!(
+                "SELECT status, outcome FROM jobs WHERE repo_id = $1 AND issue_ref = $2",
+                spike.repo_id,
+                issue_ref,
+            )
+            .fetch_all(&mut *tx)
+            .await?;
+            if earlier.iter().any(|j| {
+                matches!(j.status.as_str(), "queued" | "running")
+                    || j.outcome.as_deref() == Some("pr_opened")
+            }) {
+                return Err(StoreError::Conflict(format!(
+                    "the spike of job {} already has a fix running or a PR",
+                    job.0
+                )));
+            }
+            budget::check(&mut tx, &self.budget, RepoId(spike.repo_id)).await?;
+            let key = match earlier.len() {
+                0 => format!("{}{FIX_SUFFIX}", spike.ledger_key),
+                n => format!("{}{FIX_SUFFIX}{}", spike.ledger_key, n + 1),
+            };
+            let key = IssueId::parse(key)?;
+            let created: Job = sqlx::query_as!(
+                JobRow,
+                "INSERT INTO jobs (repo_id, issue_ref, ledger_key, source)
+                 VALUES ($1, $2, $3, 'apm')
+                 RETURNING id, repo_id, issue_ref, ledger_key, source, priority, sla_deadline,
+                           status, outcome, attempts, locked_by, locked_until, created_at,
+                           updated_at, run_after, retries, cancel_requested, reason, pr_url,
+                           retry_of, review_of, review_round, shadow, publish_of",
+                spike.repo_id,
+                issue_ref,
+                key.as_str(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::from_db)?
+            .try_into()?;
+            let detail = serde_json::json!({ "diagnosis_job": job.0 });
+            audit::record(
+                &mut tx,
+                actor,
+                "job.fix_spike",
+                Target::of_job(&created),
+                detail,
+            )
+            .await?;
+            Ok::<_, StoreError>(created)
+        }
+        .await;
+        tx::commit(tx, work).await
     }
 }

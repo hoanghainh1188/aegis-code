@@ -872,6 +872,15 @@ async fn deliver(
         };
         return issue_closed(hooks, closed, &repo).await;
     }
+    if let Kind::FixSpike { sender } = &wanted.kind {
+        let at = DeliveryMeta {
+            source,
+            via,
+            delivery,
+            event,
+        };
+        return fix_spike(hooks, at, &repo, &wanted.issue_ref, sender).await;
+    }
     let gate = match &wanted.kind {
         Kind::Approve { sender, mode } => Some((sender, GateCommand::Approve(mode.as_deref()))),
         Kind::Revise { sender, feedback } => Some((sender, GateCommand::Revise(feedback))),
@@ -992,7 +1001,8 @@ async fn deliver(
             | Kind::Push { .. }
             | Kind::IssueClosed { .. }
             | Kind::Approve { .. }
-            | Kind::Revise { .. },
+            | Kind::Revise { .. }
+            | Kind::FixSpike { .. },
             _,
         ) => {
             unreachable!("handled above")
@@ -1610,6 +1620,73 @@ async fn design_gate(
         Some(repo.id),
     )
     .with_job(plan.id)
+}
+
+/// `/aegis fix` on an issue (#706): the issue's error spike, if the
+/// platform opened it with a spike's report, is fixed in the code when the
+/// sender can write to the repo. Any other issue is ignored, as before.
+async fn fix_spike(
+    hooks: &Hooks,
+    at: DeliveryMeta<'_>,
+    repo: &Repo,
+    issue_ref: &str,
+    sender: &str,
+) -> Handled {
+    let DeliveryMeta {
+        source,
+        via,
+        delivery,
+        ..
+    } = at;
+    let ignored = |why: &str| ignored_in(delivery, why, Some(repo.id));
+    let diagnosis = match hooks.store.anomaly_job_by_ticket(repo.id, issue_ref).await {
+        Ok(Some(job)) => job,
+        Ok(None) => return ignored("a comment on an issue, not a pull request"),
+        Err(e) => return internal(delivery, &e),
+    };
+    let on_app = (via == Some(Via::App)).then_some(repo.tenant_id);
+    match sender_can_write(hooks, source, repo, sender, on_app).await {
+        Ok(Ok(true)) => {}
+        Ok(Ok(false)) => {
+            tracing::info!(delivery, sender, repo = %repo.slug, "spike fix asked by someone who cannot write");
+            return ignored("the sender cannot write to the repository");
+        }
+        Ok(Err(why)) => {
+            tracing::warn!(delivery, why, "checking the sender's rights");
+            return ignored("the sender's rights could not be checked");
+        }
+        Err(why) => return ignored(why),
+    }
+    let actor = aegis_store::Actor::forge_user(source.as_str(), sender);
+    match hooks.store.fix_anomaly_by(diagnosis, &actor).await {
+        Ok(job) => {
+            tracing::info!(delivery, job = job.id.0, repo = %repo.slug, "spike fix from a webhook");
+            Handled::new(
+                answer(
+                    StatusCode::ACCEPTED,
+                    json!({ "status": "queued", "job_id": job.id.0 }),
+                ),
+                WebhookOutcome::Queued,
+                Some(format!("the fix of job {}'s error spike", diagnosis.0)),
+                Some(repo.id),
+            )
+            .with_job(job.id)
+        }
+        Err(StoreError::Conflict(why) | StoreError::BudgetSpent(why)) => {
+            tracing::info!(delivery, why, "spike fix refused");
+            Handled::new(
+                answer(
+                    StatusCode::OK,
+                    json!({ "status": "refused", "job_id": diagnosis.0, "reason": why }),
+                ),
+                WebhookOutcome::Refused,
+                Some(why),
+                Some(repo.id),
+            )
+            .with_job(diagnosis)
+        }
+        Err(e) => internal(delivery, &e),
+    }
 }
 
 /// Where a delivery came from: the forge, the way it reached the server
