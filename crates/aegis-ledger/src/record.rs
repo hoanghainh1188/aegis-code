@@ -81,6 +81,9 @@ pub enum IssueKind {
     /// An error spike an APM source showed before any ticket (#706):
     /// diagnosed, never fixed, until a person asks for a fix.
     Anomaly,
+    /// The repo's deprecation warnings, on its schedule (#705): fixed as a
+    /// batch, the way Sonar warnings are.
+    Deprecation,
 }
 
 /// What a ticket needs, as Light reads it (#497, ADR 0012): a code fix,

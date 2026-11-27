@@ -76,6 +76,13 @@ where
     if issue.kind == Some(IssueKind::Anomaly) {
         return crate::anomaly::diagnose_spike(platform, ledger, issue).await;
     }
+    // The repo's deprecation warnings (#705): listed at the base, fixed as
+    // a batch.
+    if issue.kind == Some(IssueKind::Deprecation) {
+        let profiles = cfg.repo.profiles(&platform.profiles)?;
+        return super::deprecations::deprecation_batch(platform, ledger, &profiles, issue, cancel)
+            .await;
+    }
     let (class, response) = match issue.kind {
         // Its source knows: nothing for Light to decide.
         Some(kind) => (
