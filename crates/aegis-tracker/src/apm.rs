@@ -6,6 +6,7 @@
 //! Telemetry text is untrusted input (ADR 0009): every fetched block is
 //! size-capped and wrapped in a fence it cannot close before reaching `BP3`.
 
+mod anomaly;
 mod cloudwatch;
 mod datadog;
 mod sentry;
@@ -16,6 +17,7 @@ use crate::TrackerError;
 use crate::config::{site_url, token_env};
 use crate::ticket::longest_run;
 
+pub use anomaly::{Anomaly, ErrorCount, Release, SpikeRules, anomalies};
 use cloudwatch::CloudWatch;
 use datadog::Datadog;
 use sentry::Sentry;
@@ -298,6 +300,44 @@ impl ApmClient {
             Self::Sentry(s) => s.fetch(query).await,
             Self::Datadog(d) => d.fetch(query).await,
             Self::CloudWatch(c) => c.fetch(query).await,
+        }
+    }
+
+    /// The provider's name, as in [`Telemetry::provider`].
+    pub fn provider(&self) -> &'static str {
+        match self {
+            Self::Sentry(_) => "sentry",
+            Self::Datadog(_) => "datadog",
+            Self::CloudWatch(_) => "cloudwatch",
+        }
+    }
+
+    /// Whether [`Self::error_counts`] is answered: Sentry and Datadog
+    /// (#706). CloudWatch logs carry no error type to count by.
+    pub fn counts_errors(&self) -> bool {
+        !matches!(self, Self::CloudWatch(_))
+    }
+
+    /// Errors of `[from, to)` per error type (#706).
+    pub async fn error_counts(
+        &self,
+        from: time::OffsetDateTime,
+        to: time::OffsetDateTime,
+    ) -> Result<Vec<ErrorCount>, TrackerError> {
+        match self {
+            Self::Sentry(s) => s.error_counts(from, to).await,
+            Self::Datadog(d) => d.error_counts(from, to).await,
+            Self::CloudWatch(_) => Err(TrackerError::Config(
+                "cloudwatch: error counts per type are not read (#706)".into(),
+            )),
+        }
+    }
+
+    /// The newest release, where the provider records releases (Sentry).
+    pub async fn latest_release(&self) -> Result<Option<Release>, TrackerError> {
+        match self {
+            Self::Sentry(s) => s.latest_release().await,
+            Self::Datadog(_) | Self::CloudWatch(_) => Ok(None),
         }
     }
 }

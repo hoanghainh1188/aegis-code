@@ -1,9 +1,11 @@
 //! Sentry REST API v0 client for [`super::ApmClient`].
 
 use serde::Deserialize;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::TrackerError;
-use crate::apm::{SentryConfig, Telemetry, TelemetryQuery};
+use crate::apm::{ErrorCount, Release, SentryConfig, Telemetry, TelemetryQuery};
 use crate::config::site_url;
 use crate::http;
 
@@ -113,6 +115,46 @@ struct Breadcrumb {
     message: Option<String>,
 }
 
+/// Error types read per window: the most frequent first.
+const MAX_ERROR_TYPES: &str = "100";
+
+#[derive(Deserialize)]
+struct DiscoverAnswer {
+    #[serde(default)]
+    data: Vec<DiscoverRow>,
+}
+
+#[derive(Deserialize)]
+struct DiscoverRow {
+    #[serde(default)]
+    issue: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default, rename = "count()")]
+    count: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseRow {
+    version: String,
+    #[serde(
+        default,
+        rename = "dateReleased",
+        with = "time::serde::rfc3339::option"
+    )]
+    released: Option<OffsetDateTime>,
+    #[serde(default, rename = "dateCreated", with = "time::serde::rfc3339::option")]
+    created: Option<OffsetDateTime>,
+    #[serde(default, rename = "lastCommit")]
+    last_commit: Option<ReleaseCommit>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseCommit {
+    #[serde(default)]
+    id: Option<String>,
+}
+
 fn error_message(v: &serde_json::Value) -> Option<String> {
     v.get("detail").and_then(|d| d.as_str()).map(str::to_owned)
 }
@@ -170,6 +212,72 @@ impl Sentry {
 
         Ok(Some(build_telemetry(issue, event)))
     }
+
+    /// Error events of `[from, to)` per Sentry issue, from Discover.
+    pub(crate) async fn error_counts(
+        &self,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+    ) -> Result<Vec<ErrorCount>, TrackerError> {
+        let url = format!(
+            "{}/api/0/organizations/{}/events/",
+            self.base, self.organization
+        );
+        let mut query = "event.type:error".to_owned();
+        if let Some(project) = &self.project {
+            query.push_str(&format!(" project:{project}"));
+        }
+        let (start, end) = (rfc3339(from)?, rfc3339(to)?);
+        let req = self.client.get(url).bearer_auth(&self.token).query(&[
+            ("field", "issue"),
+            ("field", "title"),
+            ("field", "count()"),
+            ("query", query.as_str()),
+            ("sort", "-count"),
+            ("per_page", MAX_ERROR_TYPES),
+            ("start", start.as_str()),
+            ("end", end.as_str()),
+        ]);
+        let answer = http::json::<DiscoverAnswer>("sentry", req, error_message).await?;
+        Ok(answer
+            .data
+            .into_iter()
+            .filter_map(|row| {
+                let issue = row.issue.filter(|i| !i.trim().is_empty())?;
+                Some(ErrorCount {
+                    fingerprint: format!("sentry:{}", issue.trim()),
+                    title: row.title.unwrap_or_else(|| issue.clone()),
+                    count: row.count.unwrap_or(0),
+                })
+            })
+            .collect())
+    }
+
+    /// The organization's newest release, when it has one.
+    pub(crate) async fn latest_release(&self) -> Result<Option<Release>, TrackerError> {
+        let url = format!(
+            "{}/api/0/organizations/{}/releases/",
+            self.base, self.organization
+        );
+        let req = self
+            .client
+            .get(url)
+            .bearer_auth(&self.token)
+            .query(&[("per_page", "1")]);
+        let rows = http::json::<Vec<ReleaseRow>>("sentry", req, error_message).await?;
+        Ok(rows.into_iter().next().and_then(|row| {
+            Some(Release {
+                at: row.released.or(row.created)?,
+                version: row.version,
+                commit: row.last_commit.and_then(|c| c.id),
+            })
+        }))
+    }
+}
+
+pub(crate) fn rfc3339(at: OffsetDateTime) -> Result<String, TrackerError> {
+    at.format(&Rfc3339)
+        .map_err(|e| TrackerError::Config(format!("a time out of range: {e}")))
 }
 
 fn build_telemetry(issue: SentryIssue, event: SentryEvent) -> Telemetry {
