@@ -376,6 +376,10 @@ async fn a_cve_job_is_asked_for_with_a_checked_target() {
             .contains("/cve-jobs"),
         "{body}"
     );
+    // Nor an error spike's diagnosis, which the platform finds itself (#706).
+    let apm = json!({ "repo_id": repo_id, "issue_ref": "apm-1", "source": "apm" });
+    let (status, body) = call(&app, "POST", "/api/v1/jobs", Some(apm)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     db.drop().await;
 }
 

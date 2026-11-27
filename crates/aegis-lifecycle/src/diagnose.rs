@@ -28,7 +28,7 @@ use crate::{IssueInput, LifecycleError, Platform};
 const MAX_FILES: usize = 12;
 const MAX_FILE_CHARS: usize = 6_000;
 const MAX_TOTAL_CHARS: usize = 40_000;
-const MAX_REPORT_TOKENS: u32 = 2_000;
+pub(crate) const MAX_REPORT_TOKENS: u32 = 2_000;
 /// Items of each kind kept in the report.
 const MAX_ITEMS: usize = 10;
 /// Where a source in the ticket points: `ticket:3-5`, its lines.
@@ -109,16 +109,16 @@ struct RawSource {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RawItem {
+pub(crate) struct RawItem {
     text: String,
     #[serde(default)]
     evidence: Vec<RawSource>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-struct RawReport {
+pub(crate) struct RawReport {
     #[serde(default)]
-    findings: Vec<RawItem>,
+    pub(crate) findings: Vec<RawItem>,
     #[serde(default)]
     steps: Vec<RawItem>,
     #[serde(default)]
@@ -126,6 +126,11 @@ struct RawReport {
 }
 
 fn parse_report(reply: &str) -> Result<RawReport, String> {
+    json_object(reply)
+}
+
+/// The JSON object of a model's reply, text around it ignored.
+pub(crate) fn json_object<T: serde::de::DeserializeOwned>(reply: &str) -> Result<T, String> {
     let (Some(start), Some(end)) = (reply.find('{'), reply.rfind('}')) else {
         return Err("no JSON object".into());
     };
@@ -144,19 +149,19 @@ struct Kept {
 
 /// What survived the check.
 #[derive(Debug, Clone, Default, PartialEq)]
-struct Checked {
+pub(crate) struct Checked {
     findings: Vec<Kept>,
     steps: Vec<Kept>,
     questions: Vec<String>,
-    dropped: usize,
+    pub(crate) dropped: usize,
 }
 
 impl Checked {
-    fn kept(&self) -> usize {
+    pub(crate) fn kept(&self) -> usize {
         self.findings.len() + self.steps.len()
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.kept() == 0 && self.questions.is_empty()
     }
 }
@@ -195,7 +200,7 @@ fn in_text(text: &str, cited: &Cited, excerpt: Option<&str>) -> bool {
     }
 }
 
-fn check(repo: &Path, base: &str, ticket: &str, raw: RawReport) -> Checked {
+pub(crate) fn check(repo: &Path, base: &str, ticket: &str, raw: RawReport) -> Checked {
     let mut checked = Checked::default();
     let keep = |items: Vec<RawItem>, into: &mut Vec<Kept>, dropped: &mut usize| {
         for item in items {
@@ -229,7 +234,7 @@ fn check(repo: &Path, base: &str, ticket: &str, raw: RawReport) -> Checked {
 }
 
 /// The report as posted: every model text inert, one item per line.
-fn render(triage: &Triage, checked: &Checked, locale: aegis_pr::Locale) -> String {
+pub(crate) fn render(triage: &Triage, checked: &Checked, locale: aegis_pr::Locale) -> String {
     let t = locale.strings();
     let inert = |t: &str| aegis_pr::inert(t);
     let sources = |k: &Kept| {
@@ -352,7 +357,11 @@ pub(crate) fn context(repo: &Path, base: &str, ticket: &str) -> (Vec<(String, St
     (shown, hidden)
 }
 
-fn prompt(issue: &IssueInput, files: &[(String, String)], locale: aegis_pr::Locale) -> String {
+pub(crate) fn prompt(
+    issue: &IssueInput,
+    files: &[(String, String)],
+    locale: aegis_pr::Locale,
+) -> String {
     let ticket: String = issue
         .body
         .lines()

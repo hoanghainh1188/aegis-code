@@ -489,6 +489,13 @@ pub(crate) fn new_job(
                 .into(),
         );
     }
+    if source == JobSource::Apm {
+        return Err(
+            "source: an `apm` job diagnoses an error spike the platform found itself (#706); \
+             it is not asked for"
+                .into(),
+        );
+    }
     let key = ledger_key.unwrap_or_else(|| default_ledger_key(issue_ref));
     let ledger_key = IssueId::parse(key).map_err(|e| e.to_string())?;
     Ok(NewJob {

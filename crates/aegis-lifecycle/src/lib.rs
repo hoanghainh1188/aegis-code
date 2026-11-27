@@ -9,6 +9,7 @@
 //! (ADR 0003). Each registered repo runs with its mode's configuration and
 //! its own settings ([`Modes`], #24).
 
+mod anomaly;
 mod answer;
 mod batch;
 pub mod cache_sweep;

@@ -95,6 +95,43 @@ pub fn apm_config(repo: &Repo) -> Result<Option<ApmConfig>, Unusable> {
     }
 }
 
+/// `repo`'s APM client, with its secrets from `secrets`; `None` when it has
+/// no APM source. Shared by ticket enrichment (#452) and error spikes (#706).
+pub async fn apm_client(repo: &Repo, secrets: &Secrets) -> Result<Option<ApmClient>, Unusable> {
+    let Some(config) = apm_config(repo)? else {
+        return Ok(None);
+    };
+    let read = |name: &str| {
+        let name = name.to_owned();
+        async move {
+            match secrets.get_or_load(&name).await {
+                Ok(Some(value)) => Ok(value),
+                Ok(None) => Err(Unusable::Config(format!(
+                    "repo `{}`: no secret {name} (its APM's) in {}",
+                    repo.slug,
+                    secrets.source()
+                ))),
+                Err(e) => Err(Unusable::Unreached(e.to_string())),
+            }
+        }
+    };
+    let token = match config.token_env() {
+        Some(name) => Some(read(name).await?),
+        None => None,
+    };
+    let app_key = match config.app_key_env() {
+        Some(name) => Some(read(name).await?),
+        None => None,
+    };
+    ApmClient::new(
+        &config,
+        token.as_ref().map(|t| t.expose()),
+        app_key.as_ref().map(|k| k.expose()),
+    )
+    .map(Some)
+    .map_err(|e| Unusable::Config(format!("repo `{}`: apm: {e}", repo.slug)))
+}
+
 /// Enriches `issue.body` with production telemetry from the repository's
 /// configured APM provider (#452). Fails soft: a missing secret or transient
 /// APM error is logged and leaves `issue` untouched.
@@ -106,42 +143,11 @@ pub async fn enrich_with_apm(
     issue: &mut IssueInput,
     around: time::OffsetDateTime,
 ) {
-    let config = match apm_config(repo) {
-        Ok(Some(c)) => c,
+    let client = match apm_client(repo, secrets).await {
+        Ok(Some(client)) => client,
         Ok(None) => return,
         Err(e) => {
-            tracing::warn!(repo = %repo.slug, error = %e, "ignoring invalid apm config");
-            return;
-        }
-    };
-    let token = match config.token_env() {
-        Some(name) => match secrets.get_or_load(name).await {
-            Ok(Some(t)) => Some(t),
-            _ => {
-                tracing::warn!(repo = %repo.slug, secret = %name, "missing apm token secret");
-                return;
-            }
-        },
-        None => None,
-    };
-    let app_key = match config.app_key_env() {
-        Some(name) => match secrets.get_or_load(name).await {
-            Ok(Some(k)) => Some(k),
-            _ => {
-                tracing::warn!(repo = %repo.slug, secret = %name, "missing apm app key secret");
-                return;
-            }
-        },
-        None => None,
-    };
-    let client = match ApmClient::new(
-        &config,
-        token.as_ref().map(|t| t.expose()),
-        app_key.as_ref().map(|k| k.expose()),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(repo = %repo.slug, error = %e, "apm client config rejected");
+            tracing::warn!(repo = %repo.slug, error = %e, "no apm telemetry");
             return;
         }
     };

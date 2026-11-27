@@ -72,6 +72,10 @@ where
         )
         .await;
     }
+    // An error spike (#706): diagnosed whatever the repo's triage lane.
+    if issue.kind == Some(IssueKind::Anomaly) {
+        return crate::anomaly::diagnose_spike(platform, ledger, issue).await;
+    }
     let (class, response) = match issue.kind {
         // Its source knows: nothing for Light to decide.
         Some(kind) => (

@@ -42,6 +42,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub sonar: SonarSection,
     #[serde(default)]
+    pub apm: ApmSection,
+    #[serde(default)]
     pub reviews: ReviewsSection,
     #[serde(default)]
     pub web: WebSection,
@@ -193,6 +195,21 @@ pub struct SonarSection {
 }
 
 impl Default for SonarSection {
+    fn default() -> Self {
+        Self { check_s: 60 }
+    }
+}
+
+/// Error spikes of the repos' APM sources (#706), each repo checked on its
+/// own `apm_anomaly.every_s` by the `api` role, one process per period.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApmSection {
+    /// Seconds between two looks at which repos are due; 0 checks none.
+    pub check_s: u64,
+}
+
+impl Default for ApmSection {
     fn default() -> Self {
         Self { check_s: 60 }
     }
@@ -652,6 +669,7 @@ mod tests {
         assert!(config.auth.oidc.is_none());
         assert_eq!(config.auth.session_hours, 12);
         assert_eq!(config.sonar.check_s, 60);
+        assert_eq!(config.apm.check_s, 60);
         let worker = config.worker("w".into());
         assert!(worker.renew_every < worker.lease);
         assert_eq!(worker.max_cost_usd, 4.0);

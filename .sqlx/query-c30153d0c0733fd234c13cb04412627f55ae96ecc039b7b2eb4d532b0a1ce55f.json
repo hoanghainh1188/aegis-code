@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                     SELECT 1 FROM apm_anomalies\n                     WHERE repo_id = $1 AND fingerprint = $2\n                       AND found_at > now() - make_interval(secs => $3::bigint)\n                   ) AS \"seen!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seen!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c30153d0c0733fd234c13cb04412627f55ae96ecc039b7b2eb4d532b0a1ce55f"
+}

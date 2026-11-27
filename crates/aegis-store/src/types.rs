@@ -114,7 +114,8 @@ fn is_mode_name(text: &str) -> bool {
 text_enum! {
     /// Where the job came from. `cve`: a dependency upgrade for an
     /// advisory (#502), its target in `issue_ref` as
-    /// `cve:<advisory> <package> <version>`.
+    /// `cve:<advisory> <package> <version>`. `apm`: an error spike an APM
+    /// source showed before any ticket (#706), diagnosed, never fixed.
     JobSource {
         Cli = "cli",
         Github = "github",
@@ -127,6 +128,7 @@ text_enum! {
         Ci = "ci",
         Review = "review",
         Cve = "cve",
+        Apm = "apm",
     }
 }
 
