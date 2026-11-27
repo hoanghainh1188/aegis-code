@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ticket_ref FROM apm_anomalies WHERE repo_id = $1 AND issue_ref = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticket_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "apm_anomalies",
+            "name": "ticket_ref"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "b760e8000da8d2939d6d9723c89ab3bf34a2da1012891c176a604357ebc29bf3"
+}

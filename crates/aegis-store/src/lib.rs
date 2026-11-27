@@ -53,7 +53,7 @@ use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 pub use ams::{AmsReport, AmsRow};
-pub use anomalies::{AnomalyLimits, AnomalySkipped, NewAnomaly};
+pub use anomalies::{AnomalyLimits, AnomalySkipped, FIX_SUFFIX as ANOMALY_FIX_SUFFIX, NewAnomaly};
 pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};

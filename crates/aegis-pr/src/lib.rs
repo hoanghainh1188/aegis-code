@@ -57,7 +57,7 @@ pub use git::{
     AZURE_DEVOPS_USER, BEARER_USER, BITBUCKET_USER, GITHUB_USER, GITLAB_USER, Identity, Remote,
     is_entra_token, token_env, token_env_as,
 };
-pub use github::{GitHub, IssueComment, PullRequest};
+pub use github::{GitHub, IssueComment, OpenedIssue, PullRequest};
 pub use gitlab::{GitLab, GitLabIssue, IssueNote, MergeRequest};
 pub use hooks::HookDone;
 pub use locale::{Locale, PrStrings, UnknownLocale};

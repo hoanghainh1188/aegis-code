@@ -124,6 +124,8 @@ pub struct PrStrings {
     pub questions: &'static str,
     /// An error spike's diagnosis (#706): the commits it may come from.
     pub suspects: &'static str,
+    /// The end of an error spike's issue (#706): how to ask for a fix.
+    pub spike_fix: &'static str,
     // A feature's plan for review (#677).
     /// The heading: the number of sub-jobs and the delivery mode.
     pub rfc: fn(usize, &str) -> String,
@@ -425,6 +427,7 @@ static EN: PrStrings = PrStrings {
     steps: "Suggested steps for an operator (not applied):",
     questions: "Questions for the reporter:",
     suspects: "Commits that may have caused it, each checked in the repository's history:",
+    spike_fix: "Found by **aegis-code** in production before any ticket. To have it fixed in the code, someone who can write to this repository comments `/aegis fix` here.",
     rfc: rfc_en,
     rfc_criteria: "Acceptance criteria:",
     rfc_contracts: "Interfaces and contracts:",
@@ -501,6 +504,7 @@ static JA: PrStrings = PrStrings {
     steps: "運用担当者向けの推奨手順 (未適用):",
     questions: "報告者への質問:",
     suspects: "原因の可能性があるコミット (それぞれリポジトリの履歴で確認済み):",
+    spike_fix: "**aegis-code** がチケットより前に本番環境で検知しました。コードで修正するには、このリポジトリに書き込める人がここに `/aegis fix` とコメントしてください。",
     rfc: rfc_ja,
     rfc_criteria: "受け入れ基準:",
     rfc_contracts: "インターフェースと契約:",
@@ -577,6 +581,7 @@ static VI: PrStrings = PrStrings {
     steps: "Các bước gợi ý cho người vận hành (chưa áp dụng):",
     questions: "Câu hỏi cho người báo lỗi:",
     suspects: "Các commit có thể gây ra lỗi, mỗi commit đã đối chiếu trong lịch sử repo:",
+    spike_fix: "**aegis-code** phát hiện lỗi này trên production trước khi có ticket. Để sửa trong code, người có quyền ghi vào repo này comment `/aegis fix` tại đây.",
     rfc: rfc_vi,
     rfc_criteria: "Tiêu chí nghiệm thu:",
     rfc_contracts: "Giao diện và hợp đồng:",

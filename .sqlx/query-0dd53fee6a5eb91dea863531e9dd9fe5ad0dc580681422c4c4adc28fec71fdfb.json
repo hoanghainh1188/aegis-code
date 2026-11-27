@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id FROM apm_anomalies a\n             JOIN jobs j ON j.repo_id = a.repo_id AND j.issue_ref = a.issue_ref\n                        AND j.source = 'apm'\n             WHERE a.repo_id = $1 AND a.ticket_ref = $2\n             ORDER BY j.id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0dd53fee6a5eb91dea863531e9dd9fe5ad0dc580681422c4c4adc28fec71fdfb"
+}

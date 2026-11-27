@@ -52,6 +52,8 @@ pub enum Done {
     Approved,
     /// A shadow job's PR was asked for (#699): this job opens it.
     PrAsked,
+    /// An error spike's fix was asked for (#706): this job makes it.
+    FixAsked,
 }
 
 impl Done {
@@ -82,10 +84,14 @@ impl Done {
                 "PR asked for: this job applies the shadow job's patch, gates it again and opens \
                  the PR, without the agent."
             }
+            Self::FixAsked => {
+                "Fix asked for: this job works on the error spike in the code, with its \
+                 diagnosis, and opens a PR if the gate passes."
+            }
         }
     }
 
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Created,
         Self::Cancelled,
         Self::CancelRequested,
@@ -95,6 +101,7 @@ impl Done {
         Self::DiagnosisConfirmed,
         Self::Approved,
         Self::PrAsked,
+        Self::FixAsked,
     ];
 
     fn word(self) -> &'static str {
@@ -108,6 +115,7 @@ impl Done {
             Self::DiagnosisConfirmed => "diagnosis_confirmed",
             Self::Approved => "approved",
             Self::PrAsked => "pr_asked",
+            Self::FixAsked => "fix_asked",
         }
     }
 
@@ -296,6 +304,18 @@ pub async fn open_pr(
     job_for(&store, &access, id, RepoRole::Maintainer).await?;
     let job = store.publish_shadow_by(JobId(id), &access.actor).await?;
     Ok(to_job(job.id, Done::PrAsked))
+}
+
+/// Queues the job that fixes in the code the error spike job `id`
+/// diagnosed (#706). As retry, for the repo's maintainers.
+pub async fn fix_spike(
+    State(store): State<Store>,
+    Extension(access): Extension<Access>,
+    Path(id): Path<i64>,
+) -> WebResult {
+    job_for(&store, &access, id, RepoRole::Maintainer).await?;
+    let job = store.fix_anomaly_by(JobId(id), &access.actor).await?;
+    Ok(to_job(job.id, Done::FixAsked))
 }
 
 pub async fn retry(

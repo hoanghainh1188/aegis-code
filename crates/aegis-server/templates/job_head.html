@@ -34,6 +34,12 @@
     <button type="submit">{{ crate::t("Open a PR from this patch") }}</button>
   </form>
   {% endif %}
+  {% if head.can_fix %}
+  <form method="post" action="/jobs/{{ head.id }}/fix" class="inline">
+    {% include "form_guard.html" %}
+    <button type="submit">{{ crate::t("Fix it in the code") }}</button>
+  </form>
+  {% endif %}
   {% if head.can_retry %}
   <form method="post" action="/jobs/{{ head.id }}/retry" class="inline">
     {% include "form_guard.html" %}
