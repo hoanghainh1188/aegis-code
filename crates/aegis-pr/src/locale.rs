@@ -122,6 +122,8 @@ pub struct PrStrings {
     pub findings: &'static str,
     pub steps: &'static str,
     pub questions: &'static str,
+    /// An error spike's diagnosis (#706): the commits it may come from.
+    pub suspects: &'static str,
     // A feature's plan for review (#677).
     /// The heading: the number of sub-jobs and the delivery mode.
     pub rfc: fn(usize, &str) -> String,
@@ -422,6 +424,7 @@ static EN: PrStrings = PrStrings {
     findings: "Findings, each with the sources it was checked against:",
     steps: "Suggested steps for an operator (not applied):",
     questions: "Questions for the reporter:",
+    suspects: "Commits that may have caused it, each checked in the repository's history:",
     rfc: rfc_en,
     rfc_criteria: "Acceptance criteria:",
     rfc_contracts: "Interfaces and contracts:",
@@ -497,6 +500,7 @@ static JA: PrStrings = PrStrings {
     findings: "所見 (それぞれ照合したソース付き):",
     steps: "運用担当者向けの推奨手順 (未適用):",
     questions: "報告者への質問:",
+    suspects: "原因の可能性があるコミット (それぞれリポジトリの履歴で確認済み):",
     rfc: rfc_ja,
     rfc_criteria: "受け入れ基準:",
     rfc_contracts: "インターフェースと契約:",
@@ -572,6 +576,7 @@ static VI: PrStrings = PrStrings {
     findings: "Các phát hiện, mỗi mục kèm nguồn đã đối chiếu:",
     steps: "Các bước gợi ý cho người vận hành (chưa áp dụng):",
     questions: "Câu hỏi cho người báo lỗi:",
+    suspects: "Các commit có thể gây ra lỗi, mỗi commit đã đối chiếu trong lịch sử repo:",
     rfc: rfc_vi,
     rfc_criteria: "Tiêu chí nghiệm thu:",
     rfc_contracts: "Giao diện và hợp đồng:",

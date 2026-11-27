@@ -119,6 +119,18 @@ impl ModelProvider for Scripted {
             "light" if system.contains("You triage") => vec![ContentBlock::text(
                 r#"{"kind": "bug", "has_repro_info": true, "suspected_crates": [], "summary": "Cart accepts a fourth item.", "triage": "ops_or_config", "triage_confidence": 0.6, "triage_reason": "Reads like a limit set in configuration."}"#,
             )],
+            // An error spike (#706): the newest commit shown is the suspect,
+            // with one made up; one finding the repo shows.
+            "light" if system.contains("You diagnose an error spike") => {
+                let shown = asked.split("<commits>\\n").nth(1).unwrap_or("");
+                let newest: String = shown.chars().take(12).collect();
+                vec![ContentBlock::text(format!(
+                    r#"{{"category": "code_bug", "confidence": 0.7,
+                      "findings": [{{"text": "The cart's limit is a constant of the code.", "evidence": [{{"location": "src/lib.rs", "excerpt": "MAX_ITEMS"}}]}}],
+                      "steps": [], "questions": [],
+                      "suspects": [{{"commit": "{newest}", "why": "the newest change to the cart"}}, {{"commit": "deadbeef00", "why": "made up"}}]}}"#
+                ))]
+            }
             // The diagnosis lane (#451): one finding the repo shows, one
             // made up, one step the ticket shows; nothing that holds for a
             // ticket whose title asks for it.
@@ -3163,5 +3175,74 @@ async fn parts_meet_on_the_integration_branch_and_the_feature_opens_one_pr() {
             "## Feature\nThe feature approved on https://github.com/me/fixture/issues/7, in 2 parts"
         ),
         "{body}"
+    );
+}
+
+/// #706: an error spike from an APM source is diagnosed whatever the
+/// repo's triage lane (off here): no Light triage of a ticket, no Core
+/// call, no worktree, no PR; the suspect commit kept is one shown.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_error_spike_is_diagnosed_without_a_fix() {
+    let scratch = repo_with_bug();
+    let server = github().await;
+    let cfg = config(&scratch, &server.uri(), 20);
+    assert!(cfg.repo.triage_lane.is_off());
+    let p = platform(cfg, Scripted::new(vec![], vec![]));
+    let spike = IssueInput {
+        title: "Error spike: CartError::Full".into(),
+        body: "An error spike found in sentry before any ticket (#706).\n\n- Change: 200 errors \
+               in the last hour, 20 in the baseline window (10.0×)"
+            .into(),
+        url: String::new(),
+        kind: Some(aegis_ledger::IssueKind::Anomaly),
+        source: Some("apm".into()),
+        ..issue()
+    };
+    let report = run_issue(Arc::clone(&p), spike, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::Diagnosed, "{report:?}");
+    assert_eq!(report.pr_url, None);
+    let text = report.diagnosis.clone().unwrap();
+    assert!(
+        text.starts_with("**Diagnosis**: code_bug (confidence 0.70)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("The cart's limit is a constant of the code."),
+        "{text}"
+    );
+    assert!(text.contains("Commits that may have caused it"), "{text}");
+    assert!(text.contains("the newest change to the cart"), "{text}");
+    assert!(!text.contains("made up"), "{text}");
+    let requests = p.provider.requests.lock().unwrap().clone();
+    assert!(
+        requests
+            .iter()
+            .all(|r| !r.system.concat().contains("You triage")),
+        "the spike is not triaged as a ticket"
+    );
+    assert!(
+        p.provider.requests_for("core").is_empty(),
+        "no fix was tried"
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "no PR"
+    );
+    let id = IssueId::parse("fixture-7").unwrap();
+    let record = p.store.record(&id).unwrap();
+    assert_eq!(record.kind, Some(aegis_ledger::IssueKind::Anomaly));
+    let events = p.store.events(&id).await.unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            LedgerEvent::Diagnosed {
+                kept: 2,
+                dropped: 1,
+                ..
+            }
+        )),
+        "{events:?}"
     );
 }

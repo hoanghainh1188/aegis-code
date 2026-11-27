@@ -4,6 +4,7 @@
 //! in PostgreSQL and run each issue's lifecycle in its own worktree and
 //! gate containers.
 
+pub mod anomaly;
 pub mod api;
 
 /// The page's text for `en`, in the request's language (#590); what

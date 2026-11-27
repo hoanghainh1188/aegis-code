@@ -9,6 +9,7 @@
 //! paged ([`Page`]).
 
 mod ams;
+mod anomalies;
 mod audit;
 mod budget;
 mod clones;
@@ -52,6 +53,7 @@ use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 pub use ams::{AmsReport, AmsRow};
+pub use anomalies::{AnomalyLimits, AnomalySkipped, NewAnomaly};
 pub use audit::{Actor, AuditEntry, AuditFilter};
 pub use budget::{BUDGET_SPENT, BudgetRules, BudgetState, RepoBudget};
 pub use clones::{CloneState, MAX_CLONE_LOG_BYTES, RepoClone};

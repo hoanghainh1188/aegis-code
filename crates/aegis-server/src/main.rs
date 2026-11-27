@@ -270,6 +270,18 @@ async fn run(args: Args) -> Result<(), String> {
             Ok(())
         });
     }
+    if args.role.serves_api() && config.apm.check_s > 0 {
+        let checker = aegis_server::anomaly::run_checker(
+            store.clone(),
+            secrets.clone(),
+            std::time::Duration::from_secs(config.apm.check_s),
+            shutdown.clone(),
+        );
+        parts.spawn(async move {
+            checker.await;
+            Ok(())
+        });
+    }
     if args.role.serves_api() {
         let listener = tokio::net::TcpListener::bind(config.api.listen)
             .await

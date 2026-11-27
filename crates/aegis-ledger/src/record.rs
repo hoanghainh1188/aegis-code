@@ -78,6 +78,9 @@ pub enum IssueKind {
     /// DAG of sub-jobs a person approves before any code is written. Set
     /// by the feature lane, never by Light's classification.
     Feature,
+    /// An error spike an APM source showed before any ticket (#706):
+    /// diagnosed, never fixed, until a person asks for a fix.
+    Anomaly,
 }
 
 /// What a ticket needs, as Light reads it (#497, ADR 0012): a code fix,

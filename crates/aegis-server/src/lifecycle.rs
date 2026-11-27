@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
+use crate::anomaly::apm_issue;
 use crate::metrics::JobObserver;
 use crate::runner::{Attempt, JobRunner};
 use crate::sonar::sonar_issue;
@@ -517,12 +518,18 @@ impl LifecycleRunner {
                 ci_issue(job, &config.repo.fork, &repo.default_branch, &token).await?
             }
             (None, JobSource::Cve) => cve_issue(job)?,
+            (None, JobSource::Apm) => apm_issue(job, &repo, &self.store).await?,
             (None, _) => {
                 let token = use_token(&github, TokenUse::Read).await?;
                 issue(job, &config.repo.fork.api, &token).await?
             }
         };
-        if round.is_none() && !matches!(job.source, JobSource::Cve | JobSource::Sonar) {
+        if round.is_none()
+            && !matches!(
+                job.source,
+                JobSource::Cve | JobSource::Sonar | JobSource::Apm
+            )
+        {
             enrich_with_apm(&repo, &self.secrets, &mut issue, job.created_at).await;
             let embedder = match config.model_policy() {
                 Ok(policy) => {
