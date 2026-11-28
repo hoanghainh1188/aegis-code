@@ -116,6 +116,8 @@ text_enum! {
     /// advisory (#502), its target in `issue_ref` as
     /// `cve:<advisory> <package> <version>`. `apm`: an error spike an APM
     /// source showed before any ticket (#706), diagnosed, never fixed.
+    /// `deprecation`: the repo's deprecation warnings, fixed as a batch on
+    /// its schedule (#705).
     JobSource {
         Cli = "cli",
         Github = "github",
@@ -129,6 +131,7 @@ text_enum! {
         Review = "review",
         Cve = "cve",
         Apm = "apm",
+        Deprecation = "deprecation",
     }
 }
 

@@ -44,6 +44,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub apm: ApmSection,
     #[serde(default)]
+    pub deprecations: DeprecationsSection,
+    #[serde(default)]
     pub reviews: ReviewsSection,
     #[serde(default)]
     pub web: WebSection,
@@ -212,6 +214,21 @@ pub struct ApmSection {
 impl Default for ApmSection {
     fn default() -> Self {
         Self { check_s: 60 }
+    }
+}
+
+/// The repos' deprecation batches (#705), each repo on its own
+/// `deprecation_poll`, inside its off-hours window, by the `api` role.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeprecationsSection {
+    /// Seconds between two looks at which repos are due; 0 schedules none.
+    pub check_s: u64,
+}
+
+impl Default for DeprecationsSection {
+    fn default() -> Self {
+        Self { check_s: 300 }
     }
 }
 
@@ -670,6 +687,7 @@ mod tests {
         assert_eq!(config.auth.session_hours, 12);
         assert_eq!(config.sonar.check_s, 60);
         assert_eq!(config.apm.check_s, 60);
+        assert_eq!(config.deprecations.check_s, 300);
         let worker = config.worker("w".into());
         assert!(worker.renew_every < worker.lease);
         assert_eq!(worker.max_cost_usd, 4.0);

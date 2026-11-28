@@ -519,6 +519,9 @@ impl LifecycleRunner {
             }
             (None, JobSource::Cve) => cve_issue(job)?,
             (None, JobSource::Apm) => apm_issue(job, &repo, &self.store).await?,
+            (None, JobSource::Deprecation) => {
+                crate::deprecations::deprecation_issue(job, &repo, &self.store).await?
+            }
             (None, _) => {
                 let token = use_token(&github, TokenUse::Read).await?;
                 issue(job, &config.repo.fork.api, &token).await?

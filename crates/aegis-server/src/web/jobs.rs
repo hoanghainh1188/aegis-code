@@ -299,6 +299,9 @@ fn event_row(event: &LedgerEvent) -> Option<EventRow> {
             )
         }
         LedgerEvent::SecretsRedacted { count } => row("redact secrets", format!("{count} values")),
+        LedgerEvent::DeprecationsTaken { keys } => {
+            row("take deprecations", format!("{} warnings", keys.len()))
+        }
         LedgerEvent::Diagnosed {
             category,
             kept,

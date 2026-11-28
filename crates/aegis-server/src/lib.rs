@@ -17,6 +17,7 @@ pub mod auth;
 pub mod cache_sweeper;
 pub mod chatops;
 pub mod config;
+pub mod deprecations;
 pub mod feature_gate;
 pub mod github_app;
 pub mod lifecycle;

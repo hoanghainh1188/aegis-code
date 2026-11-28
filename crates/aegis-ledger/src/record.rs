@@ -583,6 +583,11 @@ pub enum LedgerEvent {
         kept: u32,
         dropped: u32,
     },
+    /// The deprecation warnings a deprecation batch took (#705), by key:
+    /// the repo's next scheduled batch takes only others.
+    DeprecationsTaken {
+        keys: Vec<String>,
+    },
     /// `cost_usd` is priced when the call happens, so later price changes do
     /// not rewrite history.
     ModelCall {
@@ -687,6 +692,7 @@ impl LedgerEvent {
             | Self::SecretsBlocked { .. }
             | Self::SourcesChecked { .. }
             | Self::Diagnosed { .. }
+            | Self::DeprecationsTaken { .. }
             | Self::ToolCalls { .. }
             | Self::TestReminded { .. }
             | Self::ImpactChecked { .. }
@@ -853,7 +859,7 @@ impl IssueRecord {
         match event {
             LedgerEvent::Classified { kind } => self.kind = Some(*kind),
             LedgerEvent::Triaged { triage } => self.triage = Some(triage.clone()),
-            LedgerEvent::Diagnosed { .. } => {}
+            LedgerEvent::Diagnosed { .. } | LedgerEvent::DeprecationsTaken { .. } => {}
             LedgerEvent::ModelCall {
                 tier,
                 model,

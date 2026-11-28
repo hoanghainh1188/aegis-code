@@ -270,6 +270,17 @@ async fn run(args: Args) -> Result<(), String> {
             Ok(())
         });
     }
+    if args.role.serves_api() && config.deprecations.check_s > 0 {
+        let poller = aegis_server::deprecations::run_poller(
+            store.clone(),
+            std::time::Duration::from_secs(config.deprecations.check_s),
+            shutdown.clone(),
+        );
+        parts.spawn(async move {
+            poller.await;
+            Ok(())
+        });
+    }
     if args.role.serves_api() && config.apm.check_s > 0 {
         let checker = aegis_server::anomaly::run_checker(
             store.clone(),

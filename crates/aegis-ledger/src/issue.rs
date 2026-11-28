@@ -141,6 +141,11 @@ impl<'a, S: LedgerStore> IssueLedger<'a, S> {
         self.push(LedgerEvent::SecretsRedacted { count }).await
     }
 
+    /// The deprecation warnings a batch took (#705), by key.
+    pub async fn deprecations_taken(&mut self, keys: Vec<String>) -> Result<(), LedgerError> {
+        self.push(LedgerEvent::DeprecationsTaken { keys }).await
+    }
+
     /// The diagnosis lane's report (#451): its category, items kept and
     /// dropped.
     pub async fn diagnosed(

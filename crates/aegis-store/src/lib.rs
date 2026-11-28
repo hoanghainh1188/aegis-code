@@ -15,6 +15,7 @@ mod budget;
 mod clones;
 mod dag;
 mod deliveries;
+mod deprecations;
 mod design_gate;
 mod epic;
 mod error;
