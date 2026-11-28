@@ -37,7 +37,7 @@ use crate::{IssueInput, LifecycleError, Platform, RunConfig};
 /// Warnings read from the server for one issue.
 const MAX_WARNINGS: usize = 100;
 /// Sessions of one batch; the PR lists the groups past this as not fixed.
-const MAX_GROUPS: usize = 8;
+pub(crate) const MAX_GROUPS: usize = 8;
 
 /// The warnings: the `/api/issues/search` response in a ```json block of
 /// the issue, else the project's open issues on the configured server.
@@ -419,7 +419,7 @@ where
         Ok(found) => found,
         Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
     };
-    run_batch(platform, ledger, profile, issue, &found, cancel).await
+    run_batch(platform, ledger, profile, issue, &found, MAX_GROUPS, cancel).await
 }
 
 /// `found` as one batch: groups, side-by-side sessions, merged one at a
@@ -431,6 +431,7 @@ pub(crate) async fn run_batch<P, S>(
     profile: &RepoProfiles,
     issue: &IssueInput,
     found: &[SonarIssue],
+    max_groups: usize,
     cancel: &CancellationToken,
 ) -> Result<Ending, LifecycleError>
 where
@@ -446,7 +447,7 @@ where
     let job_dir = cfg.run.state_dir.join("jobs").join(&issue.id);
     let checkout = Worktree::create(&cfg.repo.path, &base, &job_dir.join("integration"))?;
     let mut groups = group(found, checkout.path(), cfg.repo.language);
-    let left_out = groups.split_off(MAX_GROUPS.min(groups.len()));
+    let left_out = groups.split_off(max_groups.clamp(1, MAX_GROUPS).min(groups.len()));
     // Made once here, not by every session at the same time.
     module_map(cfg, profile, checkout.path(), &base)?;
 

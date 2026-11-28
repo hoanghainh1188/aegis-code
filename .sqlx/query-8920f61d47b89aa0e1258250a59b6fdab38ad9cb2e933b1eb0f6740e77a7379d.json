@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT k AS \"k!\"\n               FROM jobs j\n               JOIN ledger_events e ON e.ledger_key = j.ledger_key\n                                   AND e.kind = 'deprecations_taken'\n               CROSS JOIN LATERAL jsonb_array_elements_text(e.event -> 'keys') AS k\n               WHERE j.repo_id = $1 AND j.source = 'deprecation'\n                 AND (j.status IN ('queued', 'running') OR j.outcome IN ('pr_opened', 'shadowed'))\n               ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "k!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8920f61d47b89aa0e1258250a59b6fdab38ad9cb2e933b1eb0f6740e77a7379d"
+}

@@ -12,7 +12,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use aegis_lang::Profiles;
-use aegis_ledger::{IssueId, IssueKind, MemoryLedger, Outcome, PriceTable};
+use aegis_ledger::{IssueId, IssueKind, LedgerStore, MemoryLedger, Outcome, PriceTable};
 use aegis_lifecycle::{IssueInput, Platform, run_issue};
 use aegis_provider::{
     ContentBlock, Message, ModelProvider, ProviderError, Request, Response, Role, StopReason, Usage,
@@ -247,6 +247,20 @@ async fn two_deprecated_calls_in_two_functions_become_one_pr() {
     assert_eq!(record.outcome, Some(Outcome::PrOpened));
     assert_eq!(record.gate_runs.len(), 4);
     assert!(record.gate_runs.iter().all(|g| g.passed));
+    // The keys it took, for the next scheduled batch to skip (3/3).
+    let taken: Vec<String> = p
+        .store
+        .events(&IssueId::parse("fixture-9").unwrap())
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e {
+            aegis_ledger::LedgerEvent::DeprecationsTaken { keys } => Some(keys),
+            _ => None,
+        })
+        .expect("the batch's keys are recorded");
+    assert_eq!(taken.len(), 2, "{taken:?}");
+    assert_ne!(taken[0], taken[1]);
 
     let first = p
         .provider
@@ -322,4 +336,74 @@ async fn a_repo_without_deprecations_stops_with_nothing_to_fix() {
     );
     assert!(p.provider.requests.lock().unwrap().is_empty());
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// 3/3: a scheduled batch skips the warnings earlier batches took; with
+/// none left it stops before any model call.
+#[tokio::test(flavor = "multi_thread")]
+async fn warnings_earlier_batches_took_are_skipped() {
+    if !tools_ready() {
+        return;
+    }
+    let (scratch, _) = repo_with_deprecations();
+    let root = scratch.0.join("clone");
+    let profiles = Profiles::builtin().unwrap();
+    let listed = profiles
+        .get(aegis_lang::Language::Rust)
+        .unwrap()
+        .deprecations
+        .clone()
+        .unwrap();
+    let argv = listed.command.render(&[]).unwrap();
+    let out = Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let keys: Vec<String> =
+        aegis_lang::read_deprecations(listed.output, &String::from_utf8_lossy(&out.stdout), &root)
+            .iter()
+            .map(aegis_lang::Deprecation::key)
+            .collect();
+    assert_eq!(keys.len(), 2);
+    let server = github().await;
+    let p = Arc::new(Platform {
+        config: config(&scratch, &server.uri(), 20),
+        provider: PerGroup {
+            scripts: vec![],
+            requests: Mutex::new(vec![]),
+        },
+        store: MemoryLedger::new(),
+        prices: PriceTable::from_toml(PRICES).unwrap(),
+        profiles,
+        github: aegis_pr::TokenSource::Static("t".into()),
+    });
+    let issue = IssueInput {
+        cve: None,
+        id: "fixture-11".into(),
+        title: "Deprecation warnings in fixture".into(),
+        body: format!(
+            "Scheduled.\n\n```json\n{}\n```\n",
+            json!({ "skip": keys, "max_groups": 2 })
+        ),
+        url: String::new(),
+        base: None,
+        hidden: None,
+        kind: Some(IssueKind::Deprecation),
+        source: Some("deprecation".into()),
+        memory: String::new(),
+    };
+    let report = run_issue(Arc::clone(&p), issue, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(report.outcome, Outcome::StoppedSteps, "{report:?}");
+    assert!(
+        report
+            .reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("earlier batches took them"),
+        "{report:?}"
+    );
+    assert!(p.provider.requests.lock().unwrap().is_empty());
 }

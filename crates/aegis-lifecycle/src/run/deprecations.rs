@@ -39,12 +39,37 @@ pub(crate) fn as_warning(d: &Deprecation) -> SonarIssue {
     }
 }
 
-/// The keys the issue limits the batch to: a ```json array of strings.
-fn wanted_keys(body: &str) -> Option<Vec<String>> {
-    let start = body.find("```json")? + "```json".len();
+/// What the job's issue asks of the batch, in a ```json block of its
+/// body: the keys to take (an array), or an object with the keys earlier
+/// batches took (`skip`, the server's schedule, 3/3) and how many groups
+/// at most (`max_groups`).
+#[derive(Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Asked {
+    #[serde(default)]
+    take: Option<Vec<String>>,
+    #[serde(default)]
+    skip: Vec<String>,
+    #[serde(default)]
+    max_groups: Option<usize>,
+}
+
+fn asked(body: &str) -> Asked {
+    let Some(start) = body.find("```json").map(|i| i + "```json".len()) else {
+        return Asked::default();
+    };
     let rest = &body[start..];
-    let end = rest.find("```")?;
-    serde_json::from_str(rest[..end].trim()).ok()
+    let Some(end) = rest.find("```") else {
+        return Asked::default();
+    };
+    let json = rest[..end].trim();
+    match serde_json::from_str::<Vec<String>>(json) {
+        Ok(take) => Asked {
+            take: Some(take),
+            ..Asked::default()
+        },
+        Err(_) => serde_json::from_str(json).unwrap_or_default(),
+    }
 }
 
 /// The deprecations of every part of the repo at `tree` (the base).
@@ -145,21 +170,33 @@ where
         Ok(found) => found,
         Err(why) => return Ok(Ending::stop(Outcome::StoppedSteps, why)),
     };
-    let wanted = wanted_keys(&issue.body);
+    let asked = asked(&issue.body);
     let mut warnings: Vec<SonarIssue> = found
         .iter()
-        .filter(|d| wanted.as_ref().is_none_or(|keys| keys.contains(&d.key())))
+        .filter(|d| {
+            let key = d.key();
+            asked.take.as_ref().is_none_or(|keys| keys.contains(&key)) && !asked.skip.contains(&key)
+        })
         .map(as_warning)
         .collect();
     warnings.dedup_by(|a, b| a.key == b.key);
     warnings.truncate(MAX_WARNINGS);
     if warnings.is_empty() {
-        return Ok(Ending::stop(
-            Outcome::StoppedSteps,
-            "no deprecation warnings to fix at the base",
-        ));
+        let why = if found.is_empty() {
+            "no deprecation warnings to fix at the base"
+        } else {
+            "no new deprecation warnings to fix at the base: earlier batches took them"
+        };
+        return Ok(Ending::stop(Outcome::StoppedSteps, why));
     }
-    run_batch(platform, ledger, profiles, issue, &warnings, cancel).await
+    ledger
+        .deprecations_taken(warnings.iter().map(|w| w.key.clone()).collect())
+        .await?;
+    let max_groups = asked.max_groups.unwrap_or(crate::batch::MAX_GROUPS);
+    run_batch(
+        platform, ledger, profiles, issue, &warnings, max_groups, cancel,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -187,11 +224,18 @@ mod tests {
     }
 
     #[test]
-    fn the_issue_may_list_the_keys_it_takes() {
+    fn the_issue_may_list_the_keys_it_takes_or_skips() {
         assert_eq!(
-            wanted_keys("New ones:\n```json\n[\"deprecation:00ff\"]\n```\n"),
+            asked("New ones:\n```json\n[\"deprecation:00ff\"]\n```\n").take,
             Some(vec!["deprecation:00ff".into()])
         );
-        assert_eq!(wanted_keys("Scheduled."), None);
+        let scheduled = asked(
+            "Scheduled.\n```json\n{\"skip\": [\"deprecation:01\"], \"max_groups\": 3}\n```\n",
+        );
+        assert_eq!(scheduled.take, None);
+        assert_eq!(scheduled.skip, ["deprecation:01"]);
+        assert_eq!(scheduled.max_groups, Some(3));
+        assert_eq!(asked("Scheduled."), Asked::default());
+        assert_eq!(asked("```json\n{\"other\": 1}\n```"), Asked::default());
     }
 }
