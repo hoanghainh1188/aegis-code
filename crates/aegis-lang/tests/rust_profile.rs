@@ -208,4 +208,6 @@ fn deprecations_list_each_call_of_a_deprecated_api() {
     );
     assert!(found[0].message.contains("old_total"), "{found:?}");
     assert_ne!(found[0].line, found[1].line);
+    assert_eq!((found[0].occurrence, found[1].occurrence), (0, 1));
+    assert_ne!(found[0].key(), found[1].key());
 }

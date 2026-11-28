@@ -46,6 +46,7 @@ use crate::review::{MAX_DIFF_CHARS, ReviewRound};
 use crate::{IssueInput, LifecycleError, RunConfig};
 
 mod checkpoint;
+mod deprecations;
 mod drive;
 mod env;
 mod gating;

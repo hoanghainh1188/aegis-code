@@ -51,16 +51,28 @@ pub struct Deprecation {
     /// The compiler's code: `deprecated`, `CS0618`, `deprecation`.
     pub code: String,
     pub message: String,
+    /// Which of the same warnings in the file this is, from 0 in line
+    /// order: two calls of one API in one file have the same message.
+    pub occurrence: u32,
 }
 
 impl Deprecation {
     /// Stable across runs and lines: a deprecation that only moved keeps
-    /// its key. FNV-1a 64 of the path, code and message.
+    /// its key. FNV-1a 64 of the path, code, message and occurrence.
     pub fn key(&self) -> String {
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        for byte in [&self.path, "\0", &self.code, "\0", &self.message]
-            .iter()
-            .flat_map(|s| s.bytes())
+        let occurrence = self.occurrence.to_string();
+        for byte in [
+            self.path.as_str(),
+            "\0",
+            &self.code,
+            "\0",
+            &self.message,
+            "\0",
+            &occurrence,
+        ]
+        .iter()
+        .flat_map(|s| s.bytes())
         {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0100_0000_01b3);
@@ -89,6 +101,14 @@ pub fn read_deprecations(format: DeprecationOutput, output: &str, root: &Path) -
     .collect();
     found.sort_by(|a, b| (&a.path, a.line, &a.message).cmp(&(&b.path, b.line, &b.message)));
     found.dedup_by(|a, b| a.path == b.path && a.line == b.line && a.message == b.message);
+    let mut seen: std::collections::BTreeMap<(String, String, String), u32> = Default::default();
+    for d in &mut found {
+        let n = seen
+            .entry((d.path.clone(), d.code.clone(), d.message.clone()))
+            .or_insert(0);
+        d.occurrence = *n;
+        *n += 1;
+    }
     found
 }
 
@@ -163,6 +183,7 @@ fn cargo_json(output: &str) -> Vec<Deprecation> {
                 line: span.line_start,
                 code,
                 message: m.message,
+                occurrence: 0,
             })
         })
         .collect()
@@ -190,6 +211,7 @@ fn javac(output: &str) -> Vec<Deprecation> {
                 line,
                 code: c["code"].to_owned(),
                 message: c["msg"].to_owned(),
+                occurrence: 0,
             })
         })
         .collect()
@@ -209,6 +231,7 @@ fn kotlinc(output: &str) -> Vec<Deprecation> {
                 line: c["line"].parse().ok()?,
                 code: "deprecation".into(),
                 message: c["msg"].to_owned(),
+                occurrence: 0,
             })
         })
         .collect()
@@ -228,6 +251,7 @@ fn msbuild(output: &str) -> Vec<Deprecation> {
                 line: c["line"].parse().ok()?,
                 code: c["code"].to_owned(),
                 message: c["msg"].to_owned(),
+                occurrence: 0,
             })
         })
         .collect()
@@ -348,6 +372,7 @@ w: file:///work/repo/src/main/kotlin/Cart.kt:20:5 Parameter 'x' is never used";
             line: 12,
             code: "deprecated".into(),
             message: "use of deprecated function `old`".into(),
+            occurrence: 0,
         };
         let moved = Deprecation {
             line: 40,
@@ -357,8 +382,13 @@ w: file:///work/repo/src/main/kotlin/Cart.kt:20:5 Parameter 'x' is never used";
             path: "src/total.rs".into(),
             ..d.clone()
         };
+        let again = Deprecation {
+            occurrence: 1,
+            ..d.clone()
+        };
         assert_eq!(d.key(), moved.key());
         assert_ne!(d.key(), other.key());
+        assert_ne!(d.key(), again.key(), "a second call of it in the file");
         assert!(d.key().starts_with("deprecation:"));
         assert_eq!(d.key().len(), "deprecation:".len() + 16);
     }
