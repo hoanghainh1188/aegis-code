@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.20.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.19.0...v0.20.0) (2026-11-28)
+
+
+### Features
+
+* a deprecation job lists the base's deprecated calls and fixes them as one batch and PR ([#705](https://github.com/hoanghainh1188/aegis-code/issues/705), 2/3) ([#721](https://github.com/hoanghainh1188/aegis-code/issues/721)) ([b693bdd](https://github.com/hoanghainh1188/aegis-code/commit/b693bdd1a3669bc7abb3abf25ca9b47fbd55d2c4))
+* a feature's parts meet on its integration branch, then open one PR ([#678](https://github.com/hoanghainh1188/aegis-code/issues/678), 2/2) ([#696](https://github.com/hoanghainh1188/aegis-code/issues/696)) ([dacb899](https://github.com/hoanghainh1188/aegis-code/commit/dacb8991ee15c3073cf4dc8d0243ccce7252aec9))
+* a repo's deprecation batches run on its schedule, off hours, one at a time, new warnings only ([#705](https://github.com/hoanghainh1188/aegis-code/issues/705), 3/3) ([#722](https://github.com/hoanghainh1188/aegis-code/issues/722)) ([1bc8b0a](https://github.com/hoanghainh1188/aegis-code/commit/1bc8b0a19b8ef5493e9c8c6ecbe3d43160058bfe))
+* a spike's report opens a GitHub issue, and /aegis fix there or the job page's button queues its fix ([#706](https://github.com/hoanghainh1188/aegis-code/issues/706), 3/3) ([#719](https://github.com/hoanghainh1188/aegis-code/issues/719)) ([a6d8f6b](https://github.com/hoanghainh1188/aegis-code/commit/a6d8f6b726e7af673b8dce269d21c2080c9091fb))
+* a weekly pilot report on the dashboard, from the API and from `aegis report` ([#700](https://github.com/hoanghainh1188/aegis-code/issues/700)) ([#713](https://github.com/hoanghainh1188/aegis-code/issues/713)) ([d70378a](https://github.com/hoanghainh1188/aegis-code/commit/d70378a81dc21c8dd47f8c3d7b686c4f29014731))
+* acceptance-test mode and proposed dependencies in the gate ([#676](https://github.com/hoanghainh1188/aegis-code/issues/676)) ([#691](https://github.com/hoanghainh1188/aegis-code/issues/691)) ([571c050](https://github.com/hoanghainh1188/aegis-code/commit/571c050bd91d7fff53ec5623cba34a360418f0c2))
+* an approved feature's sub-jobs run as stacked PRs ([#678](https://github.com/hoanghainh1188/aegis-code/issues/678), 1/2) ([#695](https://github.com/hoanghainh1188/aegis-code/issues/695)) ([5e2e392](https://github.com/hoanghainh1188/aegis-code/commit/5e2e3921b3ba58f6cf8da80651a1f209c4ec8203))
+* APM error counts per type, the newest release, and error spikes against a baseline ([#706](https://github.com/hoanghainh1188/aegis-code/issues/706), 1/3) ([#717](https://github.com/hoanghainh1188/aegis-code/issues/717)) ([6b9f767](https://github.com/hoanghainh1188/aegis-code/commit/6b9f767a79e7e2733da18fa8cc887072e318125e))
+* checkpoint jobs after each model call and resume them on any worker ([#662](https://github.com/hoanghainh1188/aegis-code/issues/662)) ([#681](https://github.com/hoanghainh1188/aegis-code/issues/681)) ([e795e80](https://github.com/hoanghainh1188/aegis-code/commit/e795e802bdbca8602ed9dc272ea41f40f4460fdd))
+* CloudWatch Logs as an APM source, read through Logs Insights ([#704](https://github.com/hoanghainh1188/aegis-code/issues/704)) ([#716](https://github.com/hoanghainh1188/aegis-code/issues/716)) ([13fd2f9](https://github.com/hoanghainh1188/aegis-code/commit/13fd2f94647a2ca2918a8085ab52a9bed39d5a2d))
+* curate recalled memories: staleness, near-duplicates and "Mark obsolete" ([#658](https://github.com/hoanghainh1188/aegis-code/issues/658)) ([#668](https://github.com/hoanghainh1188/aegis-code/issues/668)) ([3af090b](https://github.com/hoanghainh1188/aegis-code/commit/3af090b820bea17c3205b69e667e35bd781a3dcf))
+* each language profile lists its deprecation warnings, read into one per call ([#705](https://github.com/hoanghainh1188/aegis-code/issues/705), 1/3) ([#720](https://github.com/hoanghainh1188/aegis-code/issues/720)) ([1a14e56](https://github.com/hoanghainh1188/aegis-code/commit/1a14e56e385b2c1b00e6fb95cabac89cca7b1ef5))
+* error spikes from the APM source become diagnosis jobs, deduped and capped per day ([#706](https://github.com/hoanghainh1188/aegis-code/issues/706), 2/3) ([#718](https://github.com/hoanghainh1188/aegis-code/issues/718)) ([fe3fd08](https://github.com/hoanghainh1188/aegis-code/commit/fe3fd081855bfa088fe41d68cf0456210ee29e3a))
+* feature budget and plan approval from the forge and dashboard ([#675](https://github.com/hoanghainh1188/aegis-code/issues/675), 2/2) ([#690](https://github.com/hoanghainh1188/aegis-code/issues/690)) ([de80533](https://github.com/hoanghainh1188/aegis-code/commit/de8053392423d2030a3665e7578278c6e1944bd6))
+* feature kind, awaiting approval and DAG sub-jobs in the store ([#675](https://github.com/hoanghainh1188/aegis-code/issues/675), 1/2) ([#689](https://github.com/hoanghainh1188/aegis-code/issues/689)) ([9b3846c](https://github.com/hoanghainh1188/aegis-code/commit/9b3846cfff9cfc0d224ac3e3162a2604ebdb1dd0))
+* give each job an execution pod from a pool, kept across worker failover ([#665](https://github.com/hoanghainh1188/aegis-code/issues/665), 2/2) ([#686](https://github.com/hoanghainh1188/aegis-code/issues/686)) ([047c2e2](https://github.com/hoanghainh1188/aegis-code/commit/047c2e296d2f94ac9a26c09da287da50261d9fd5))
+* grade a shadow job as the PR it would have opened, and show the rate ([#699](https://github.com/hoanghainh1188/aegis-code/issues/699), 2/3) ([#709](https://github.com/hoanghainh1188/aegis-code/issues/709)) ([a420656](https://github.com/hoanghainh1188/aegis-code/commit/a4206560a2c701c7678edbca586ce9d46c2ccf8e))
+* keep an approved feature's design as a business rule once merged ([#677](https://github.com/hoanghainh1188/aegis-code/issues/677), 3/3) ([#694](https://github.com/hoanghainh1188/aegis-code/issues/694)) ([948883c](https://github.com/hoanghainh1188/aegis-code/commit/948883cf051c06ffb7872bbbaaaf48c3b7486bd3))
+* keep the repo's caches in an S3 remote build cache ([#665](https://github.com/hoanghainh1188/aegis-code/issues/665), 1/2) ([#685](https://github.com/hoanghainh1188/aegis-code/issues/685)) ([62fc24c](https://github.com/hoanghainh1188/aegis-code/commit/62fc24cb2d8085ce031b15de5908632f6a89a5c7))
+* learn pitfalls and diagnoses from forge webhooks ([#657](https://github.com/hoanghainh1188/aegis-code/issues/657), 2/2) ([#688](https://github.com/hoanghainh1188/aegis-code/issues/688)) ([6b85e61](https://github.com/hoanghainh1188/aegis-code/commit/6b85e619671f0111fd4f7da746ed5e142074302b))
+* learn pitfalls from rejected PRs and confirmed diagnoses ([#657](https://github.com/hoanghainh1188/aegis-code/issues/657), 1/2) ([#687](https://github.com/hoanghainh1188/aegis-code/issues/687)) ([1b20eef](https://github.com/hoanghainh1188/aegis-code/commit/1b20eef51176a87dc791fd05afd612c597582cf9))
+* open a shadow job's PR from its patch, without the agent ([#699](https://github.com/hoanghainh1188/aegis-code/issues/699), 3/3) ([#712](https://github.com/hoanghainh1188/aegis-code/issues/712)) ([e2f6b5a](https://github.com/hoanghainh1188/aegis-code/commit/e2f6b5a3fd6dd82e8945b76b6ed01a552cea19c9))
+* revise a feature's plan, and approve it with a delivery mode ([#677](https://github.com/hoanghainh1188/aegis-code/issues/677), 2/3) ([#693](https://github.com/hoanghainh1188/aegis-code/issues/693)) ([9a6d3f8](https://github.com/hoanghainh1188/aegis-code/commit/9a6d3f88c4a2bae344b79084986cebdb634b4e06))
+* run a job's containers on a remote execution host ([#664](https://github.com/hoanghainh1188/aegis-code/issues/664), 2/2) ([#684](https://github.com/hoanghainh1188/aegis-code/issues/684)) ([9c2a53b](https://github.com/hoanghainh1188/aegis-code/commit/9c2a53b4d2e001d189127293c3aa8e06bb1e321d))
+* serve the ACI and the Docker proxy over mutual TLS ([#664](https://github.com/hoanghainh1188/aegis-code/issues/664), 1/2) ([#683](https://github.com/hoanghainh1188/aegis-code/issues/683)) ([222efaf](https://github.com/hoanghainh1188/aegis-code/commit/222efaffdf94cd526a537b3f433293ec39850a5a))
+* shadow mode, so a pilot repo's jobs run to the gate and write nothing ([#699](https://github.com/hoanghainh1188/aegis-code/issues/699), 1/3) ([#708](https://github.com/hoanghainh1188/aegis-code/issues/708)) ([1e03ccc](https://github.com/hoanghainh1188/aegis-code/commit/1e03ccc7aca1038008d1b571c51a13b67e09c7f5))
+* sync runbooks and business rules from the repo's main branch ([#660](https://github.com/hoanghainh1188/aegis-code/issues/660)) ([#666](https://github.com/hoanghainh1188/aegis-code/issues/666)) ([fcb941e](https://github.com/hoanghainh1188/aegis-code/commit/fcb941e5e573c03f058826cf3fd33544dd6e6ad7))
+* the feature lane's Architect phase posts a plan for approval ([#677](https://github.com/hoanghainh1188/aegis-code/issues/677), 1/3) ([#692](https://github.com/hoanghainh1188/aegis-code/issues/692)) ([20c7e64](https://github.com/hoanghainh1188/aegis-code/commit/20c7e640faa145bf8f298f6a863d7f164400c1aa))
+
+
+### Bug Fixes
+
+* Azure DevOps counts a writer reached through groups inside Contributors ([#703](https://github.com/hoanghainh1188/aegis-code/issues/703)) ([#715](https://github.com/hoanghainh1188/aegis-code/issues/715)) ([0a74dc0](https://github.com/hoanghainh1188/aegis-code/commit/0a74dc07737ba70a5c930fdcb747b5fe5c847312))
+* the pilot report shows an empty period's cost as $0.00 and MTTR as the AMS page does ([#700](https://github.com/hoanghainh1188/aegis-code/issues/700)) ([#714](https://github.com/hoanghainh1188/aegis-code/issues/714)) ([a2638e6](https://github.com/hoanghainh1188/aegis-code/commit/a2638e69b742f9678892e49cd5b018ce89b998c5))
+
+
+### Code Refactoring
+
+* reach a job's workspace through an ExecutionEnv boundary ([#663](https://github.com/hoanghainh1188/aegis-code/issues/663)) ([#682](https://github.com/hoanghainh1188/aegis-code/issues/682)) ([aeecf7f](https://github.com/hoanghainh1188/aegis-code/commit/aeecf7f793309aa13cbb9e47bf3b865f1495d298))
+
+
+### Documentation
+
+* add ADR 0019 for Spec-Driven Hierarchical Feature Lane ([#680](https://github.com/hoanghainh1188/aegis-code/issues/680)) ([893c80c](https://github.com/hoanghainh1188/aegis-code/commit/893c80c5995e95ea388f69d27f764e8d85ce59b5))
+* document Bitbucket and Azure DevOps forges ([#670](https://github.com/hoanghainh1188/aegis-code/issues/670)) ([220daf6](https://github.com/hoanghainh1188/aegis-code/commit/220daf61488b2cc50474e75b70034519dcb461cc))
+* document hybrid and semantic memory recall ([#672](https://github.com/hoanghainh1188/aegis-code/issues/672)) ([34d93d2](https://github.com/hoanghainh1188/aegis-code/commit/34d93d2d6d37681e044c27512618cb4908bcedd4))
+* document polyglot monorepo, Kotlin profile, and dashboard locales ([#671](https://github.com/hoanghainh1188/aegis-code/issues/671)) ([b712e3a](https://github.com/hoanghainh1188/aegis-code/commit/b712e3a3b0389949b3a2736556abab72a21b2c2a))
+* document web preflight onboarding, presets, and bundle SBOMs ([#673](https://github.com/hoanghainh1188/aegis-code/issues/673)) ([dbb7b75](https://github.com/hoanghainh1188/aegis-code/commit/dbb7b75465955e610d76682775a5f878fdf5dc20))
+* sync documentation index, README overview, and security controls ([#674](https://github.com/hoanghainh1188/aegis-code/issues/674)) ([4af9d7b](https://github.com/hoanghainh1188/aegis-code/commit/4af9d7bcb3c443799aa74d589c8098b62c67166e))
+* sync README and Platform Topology with 18 crates, Feature Lane, remote execution, and shadow mode ([#711](https://github.com/hoanghainh1188/aegis-code/issues/711)) ([8cf9dbb](https://github.com/hoanghainh1188/aegis-code/commit/8cf9dbbbee1e03297e3504cbfaaaecd5ecbfec62))
+
 ## [0.19.0](https://github.com/hoanghainh1188/aegis-code/compare/v0.18.0...v0.19.0) (2026-11-24)
 
 
